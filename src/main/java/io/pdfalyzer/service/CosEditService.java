@@ -40,15 +40,44 @@ public class CosEditService {
             }
 
             String finalKey = path.get(path.size() - 1);
-            COSBase newCosValue = createCosValue(request.getNewValue(), request.getValueType());
-
-            if (target instanceof COSDictionary) {
-                ((COSDictionary) target).setItem(COSName.getPDFName(finalKey), newCosValue);
-            } else if (target instanceof COSArray) {
-                int idx = Integer.parseInt(finalKey);
-                ((COSArray) target).set(idx, newCosValue);
+            String op = request.getOperation();
+            if (op == null || op.equals("update")) {
+                COSBase newCosValue = createCosValue(request.getNewValue(), request.getValueType());
+                if (target instanceof COSDictionary) {
+                    ((COSDictionary) target).setItem(COSName.getPDFName(finalKey), newCosValue);
+                } else if (target instanceof COSArray) {
+                    int idx = Integer.parseInt(finalKey);
+                    ((COSArray) target).set(idx, newCosValue);
+                } else {
+                    throw new IllegalArgumentException("Cannot set value on " + target.getClass().getSimpleName());
+                }
+            } else if (op.equals("add")) {
+                COSBase newCosValue = createCosValue(request.getNewValue(), request.getValueType());
+                if (target instanceof COSDictionary) {
+                    ((COSDictionary) target).setItem(COSName.getPDFName(finalKey), newCosValue);
+                } else if (target instanceof COSArray) {
+                    COSArray arr = (COSArray) target;
+                    int idx;
+                    try { idx = Integer.parseInt(finalKey); } catch (NumberFormatException e) { idx = -1; }
+                    if (idx < 0 || idx > arr.size()) {
+                        arr.add(newCosValue);
+                    } else {
+                        arr.add(idx, newCosValue);
+                    }
+                } else {
+                    throw new IllegalArgumentException("Cannot add value to " + target.getClass().getSimpleName());
+                }
+            } else if (op.equals("remove")) {
+                if (target instanceof COSDictionary) {
+                    ((COSDictionary) target).removeItem(COSName.getPDFName(finalKey));
+                } else if (target instanceof COSArray) {
+                    int idx = Integer.parseInt(finalKey);
+                    ((COSArray) target).remove(idx);
+                } else {
+                    throw new IllegalArgumentException("Cannot remove value from " + target.getClass().getSimpleName());
+                }
             } else {
-                throw new IllegalArgumentException("Cannot set value on " + target.getClass().getSimpleName());
+                throw new IllegalArgumentException("Unsupported operation: " + op);
             }
 
             ByteArrayOutputStream out = new ByteArrayOutputStream();

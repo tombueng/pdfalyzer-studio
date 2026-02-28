@@ -166,6 +166,10 @@ public class PdfStructureParser {
                             "fa-link", "#ffffff");
                     ref.setObjectNumber((int) key.getNumber());
                     ref.setGenerationNumber(key.getGeneration());
+                    // indicate which object is being referenced so UI can jump there
+                    ref.addProperty("refTarget", String.valueOf(key.getNumber()));
+                    // even an empty list is serialized to []
+                    ref.setKeyPath(keyPathToJson(currentKeyPath));
                     return ref;
                 }
 
@@ -187,6 +191,7 @@ public class PdfStructureParser {
                         visited, depth + 1, currentKeyPath, ctx);
                 node.setObjectNumber((int) key.getNumber());
                 node.setGenerationNumber(key.getGeneration());
+                node.setKeyPath(keyPathToJson(currentKeyPath));
 
                 // Cache the result
                 ctx.cache.put(key, node);
@@ -240,6 +245,7 @@ public class PdfStructureParser {
                     "COSArray", "fa-list", "#f1c40f");
             node.setCosType("COSArray");
             node.setNodeCategory("cos");
+            node.setKeyPath(keyPathToJson(currentKeyPath));
             for (int i = 0; i < arr.size(); i++) {
                 List<String> childPath = new ArrayList<>(currentKeyPath);
                 childPath.add(String.valueOf(i));
@@ -256,6 +262,7 @@ public class PdfStructureParser {
                     "COSStream", "fa-water", "#e74c3c");
             node.setCosType("COSStream");
             node.setNodeCategory("cos");
+            node.setKeyPath(keyPathToJson(currentKeyPath));
 
             for (Map.Entry<COSName, COSBase> entry : stream.entrySet()) {
                 String key = entry.getKey().getName();
@@ -305,6 +312,7 @@ public class PdfStructureParser {
                     "COSDictionary", "fa-th-list", "#00bcd4");
             node.setCosType("COSDictionary");
             node.setNodeCategory("cos");
+            node.setKeyPath(keyPathToJson(currentKeyPath));
 
             for (Map.Entry<COSName, COSBase> entry : dict.entrySet()) {
                 String key = entry.getKey().getName();

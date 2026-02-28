@@ -67,7 +67,7 @@ Upload a PDF via the navbar button, the splash screen button, or drag-and-drop o
 - Does not support password-protected/encrypted PDFs (PDFBox will throw an error)
 - Does not render PDFs server-side; all rendering is client-side via pdf.js
 - Does not support loading PDFs from URLs or cloud storage (upload only)
-- Fixed rendering scale of 1.5x (no zoom controls yet)
+- Adjustable rendering scale with manual zoom (Ctrl+wheel) and auto-fit modes
 
 ### 2. PDF Structure Tree
 
@@ -91,10 +91,11 @@ Document Catalog
 - Parses the complete PDF structure using PDFBox's COS-level API
 - Displays type-specific icons and colors for each node type
 - Shows metadata properties in a collapsible detail panel per node
-- Nodes are expandable/collapsible with smooth toggle animation
+- Nodes are expandable/collapsible with smooth toggle animation (circular reference nodes include a jump link that navigates to the original object)
 - Clicking a node with a bounding box (annotations, form fields) highlights the corresponding rectangle on the PDF page and scrolls the viewer to that page
 - Clicking a node associated with a page (fonts, images, resources) scrolls the viewer to that page
 - Handles cyclic references in the COS object graph safely
+- Dictionary/array entries in the tree can now be added or removed via inline forms; primitive values are editable inline (click pencil icon)
 
 **What it cannot do:**
 - Does not parse raw COS dictionary/array structures beyond the high-level objects (catalog, pages, fonts, images, annotations, forms, bookmarks)
@@ -231,6 +232,7 @@ Toggle edit mode with the pencil button in the navbar (or `Ctrl+E`).
 | Action | Button | Shortcut | Endpoint |
 |--------|--------|----------|----------|
 | Download PDF | Download icon in navbar | `Ctrl+S` | `GET /api/pdf/{id}/download` |
+| Download resource | click download icon next to tree node | n/a | `GET /api/resource/{id}/{obj}/{gen}` (attachment or inline) |
 | Export tree as JSON | Export icon in navbar | -- | `GET /api/tree/{id}/export` |
 | Export validation report | Button in Validation tab | -- | `GET /api/validate/{id}/export` |
 
@@ -354,7 +356,7 @@ src/test/java/io/pdfalyzer/
 2. **No encrypted PDF support** -- Password-protected PDFs will fail to parse
 3. **Memory-bound sessions** -- Large PDFs are held entirely in memory; no disk-based fallback
 4. **Single-user per session** -- Sessions are independent; no collaborative features
-5. **Fixed PDF scale** -- The viewer renders at 1.5x scale with no zoom controls
+5. **Zoomable PDF viewer** -- Use Ctrl+mousewheel to zoom in/out; click the expand-arrows button to toggle auto-fit width/height modes
 6. **CDN dependency** -- pdf.js is loaded from cdnjs.cloudflare.com; offline use requires bundling
 7. **No content stream parsing** -- Text, graphics operators, and inline images within content streams are not exposed in the tree
 8. **No full PDF/A conformance** -- Validation covers common issues but is not a complete PDF/A validator (consider VeraPDF for full conformance)
@@ -365,8 +367,7 @@ src/test/java/io/pdfalyzer/
 
 - Signature validation and certificate chain analysis
 - Full PDF/A, PDF/X, PDF/UA conformance via VeraPDF integration
-- Zoom controls and fit-to-width for the PDF viewer
-- Content stream parsing and text extraction display
+- Zoom controls and fit-to-width/fit-to-height for the PDF viewer (available)- Content stream parsing and text extraction display
 - Side-by-side PDF comparison / visual diff
 - Incremental update / revision viewer
 - Dark/light theme toggle

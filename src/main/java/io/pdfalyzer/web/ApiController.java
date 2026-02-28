@@ -4,6 +4,20 @@ import io.pdfalyzer.model.*;
 import io.pdfalyzer.service.*;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.cos.COSBase;
+import org.apache.pdfbox.cos.COSDocument;
+import org.apache.pdfbox.cos.COSObject;
+import org.apache.pdfbox.cos.COSObjectKey;
+import org.apache.pdfbox.cos.COSStream;
+import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageTree;
+import org.apache.pdfbox.pdmodel.PDResources;
+import org.apache.pdfbox.pdmodel.graphics.PDXObject;
+import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -168,6 +182,99 @@ public class ApiController {
             }
         }
         return ResponseEntity.ok(rawCos);
+    }
+
+    @GetMapping("/resource/{sessionId}/{objNum}/{genNum}")
+    public ResponseEntity<byte[]> getResource(
+            @PathVariable String sessionId,
+            @PathVariable int objNum,
+            @PathVariable int genNum,
+            @RequestParam(name = "inline", defaultValue = "false") boolean inline) throws IOException {
+        PdfSession session = pdfService.getSession(sessionId);
+        byte[] pdfBytes = session.getPdfBytes();
+        try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+            COSDocument cosDoc = doc.getDocument();
+            COSObjectKey key = new COSObjectKey(objNum, genNum);
+            COSObject cosObj = cosDoc.getObjectFromPool(key);
+            if (cosObj == null || cosObj.getObject() == null) {
+                return ResponseEntity.notFound().build();
+            }
+            COSBase base = cosObj.getObject();
+            if (!(base instanceof COSStream)) {
+                return ResponseEntity.badRequest().body(new byte[0]);
+            }
+            @SuppressWarnings("resource")
+            COSStream stream = (COSStream) base;
+            byte[] data;
+            String mediaType = "application/octet-stream";
+            String filename = "obj-" + objNum + "-" + genNum + ".bin";
+
+            // try to map this stream to a PDImageXObject (handles masks and raw samples)
+            PDImageXObject imageXobj = findImageForStream(stream, doc);
+            if (imageXobj != null) {
+                // render to PNG regardless of original encoding to ensure validity
+                BufferedImage bi = imageXobj.getImage();
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                ImageIO.write(bi, "png", baos);
+                data = baos.toByteArray();
+                mediaType = "image/png";
+                filename = "image-" + objNum + "-" + genNum + ".png";
+            } else {
+                // fallback to simple stream export
+                String subtype = stream.getNameAsString(org.apache.pdfbox.cos.COSName.SUBTYPE);
+                org.apache.pdfbox.cos.COSName filterName = stream.getCOSName(org.apache.pdfbox.cos.COSName.FILTER);
+                String filter = filterName != null ? filterName.getName() : null;
+                if ("Image".equals(subtype)) {
+                    if ("DCTDecode".equals(filter)) {
+                        mediaType = "image/jpeg";
+                        filename = "image-" + objNum + "-" + genNum + ".jpg";
+                    } else if ("JPXDecode".equals(filter)) {
+                        mediaType = "image/jpx";
+                        filename = "image-" + objNum + "-" + genNum + ".jp2";
+                    } else {
+                        mediaType = "image/png";
+                        filename = "image-" + objNum + "-" + genNum + ".png";
+                    }
+                }
+                try (java.io.InputStream is = stream.createInputStream()) {
+                    data = is.readAllBytes();
+                }
+            }
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.parseMediaType(mediaType));
+            headers.setContentLength(data.length);
+            if (inline) {
+                headers.set(HttpHeaders.CONTENT_DISPOSITION,
+                        "inline; filename=\"" + filename + "\"");
+            } else {
+                headers.set(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"" + filename + "\"");
+            }
+            return ResponseEntity.ok().headers(headers).body(data);
+        }
+    }
+
+    /**
+     * Walk pages/resources to locate an image object that uses or references the
+     * given COSStream.  If the stream is a mask of a larger image, this returns
+     * the parent image so clients always get the full picture.
+     */
+    private PDImageXObject findImageForStream(COSStream target, PDDocument doc) throws IOException {
+        for (PDPage page : doc.getPages()) {
+            PDResources res = page.getResources();
+            if (res == null) continue;
+            for (COSName name : res.getXObjectNames()) {
+                PDXObject xobj = res.getXObject(name);
+                if (xobj instanceof PDImageXObject) {
+                    PDImageXObject img = (PDImageXObject) xobj;
+                    COSStream s = img.getCOSObject();
+                    if (s == target) return img;
+                    if (img.getMask() != null && img.getMask().getCOSObject() == target) return img;
+                    if (img.getSoftMask() != null && img.getSoftMask().getCOSObject() == target) return img;
+                }
+            }
+        }
+        return null;
     }
 
     @PostMapping("/cos/{sessionId}/update")

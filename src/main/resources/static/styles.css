@@ -45,6 +45,11 @@ html, body {
     filter: drop-shadow(0 0 4px rgba(0, 212, 255, 0.4));
 }
 
+.navbar .btn.active {
+    background: var(--accent) !important;
+    color: #000 !important;
+}
+
 #searchInput {
     background: rgba(255,255,255,0.08);
     border: 1px solid var(--border);
@@ -524,7 +529,29 @@ html, body {
     box-shadow: 0 4px 16px rgba(0,0,0,0.4);
     animation: fadeIn 0.3s;
     max-width: 340px;
+    cursor: pointer;
 }
+.toast-msg.text-danger,
+.toast-msg.text-warning,
+.toast-msg.text-success,
+.toast-msg.text-info {
+    /* background remains constant, use icon/text for distinction */
+    background: var(--bg-card) !important;
+    border-color: transparent;
+}
+
+/* default toast text white for dark theme */
+.toast-msg { color: #fff; }
+
+/* color helpers for icon or custom spans */
+.toast-icon-success { color: var(--success); }
+.toast-icon-danger { color: var(--danger); }
+.toast-icon-warning { color: var(--warning); }
+.toast-icon-info { color: var(--accent); }
+.toast-text-success { color: var(--success); }
+.toast-text-danger { color: var(--danger); }
+.toast-text-warning { color: var(--warning); }
+.toast-text-info { color: var(--accent); }
 
 /* === COS Type Badges === */
 .cos-type-badge {
@@ -558,15 +585,35 @@ html, body {
     color: var(--accent);
     font-size: 11px;
     padding: 2px 4px;
-    transition: opacity 0.2s;
-    flex-shrink: 0;
 }
-
+.cos-add-btn, .cos-delete-btn, .resource-download-btn, .resource-open-btn {
+    margin-left: 6px;
+    cursor: pointer;
+    color: var(--accent);
+    opacity: 0;
+    font-size: 11px;
+    padding: 2px 4px;
+    transition: opacity 0.2s;
+}
+.tree-node-header:hover .cos-add-btn,
+.tree-node-header:hover .cos-delete-btn,
+.tree-node-header:hover .resource-download-btn,
+.tree-node-header:hover .resource-open-btn,
+.tree-node-header:hover .ref-jump-btn {
+    opacity: 0.6;
+}
+.tree-node-header:hover .cos-add-btn:hover,
+.tree-node-header:hover .cos-delete-btn:hover,
+.tree-node-header:hover .resource-download-btn:hover,
+.tree-node-header:hover .resource-open-btn:hover {
+    opacity: 1;
+}
 .tree-node-header:hover .cos-edit-btn { opacity: 0.7; }
 .cos-edit-btn:hover { opacity: 1 !important; }
 
 /* COS Inline Editor */
-.cos-inline-editor {
+.cos-inline-editor,
+.cos-add-editor {
     display: flex;
     align-items: center;
     gap: 4px;
@@ -575,6 +622,18 @@ html, body {
     background: rgba(0, 0, 0, 0.3);
     border-radius: 4px;
     border: 1px solid var(--accent);
+    animation: fadeIn 0.15s;
+}
+
+.cos-delete-confirm {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin: 3px 0 3px 38px;
+    padding: 4px 8px;
+    background: rgba(220, 53, 69, 0.1);
+    border-radius: 4px;
+    border: 1px solid var(--danger);
     animation: fadeIn 0.15s;
 }
 
