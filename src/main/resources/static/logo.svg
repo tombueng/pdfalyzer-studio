@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <!-- PDF Document -->
+  <rect x="12" y="6" width="30" height="40" rx="2" fill="#dc3545" opacity="0.9"/>
+  <rect x="16" y="12" width="22" height="2" rx="1" fill="#fff" opacity="0.6"/>
+  <rect x="16" y="18" width="18" height="2" rx="1" fill="#fff" opacity="0.5"/>
+  <rect x="16" y="24" width="20" height="2" rx="1" fill="#fff" opacity="0.4"/>
+  <rect x="16" y="30" width="14" height="2" rx="1" fill="#fff" opacity="0.3"/>
+  <text x="18" y="44" font-family="Arial,sans-serif" font-size="8" font-weight="bold" fill="#fff" opacity="0.7">PDF</text>
+  <!-- Magnifying Glass -->
+  <circle cx="42" cy="38" r="14" fill="none" stroke="#00d4ff" stroke-width="3" opacity="0.9"/>
+  <circle cx="42" cy="38" r="10" fill="#00d4ff" opacity="0.12"/>
+  <line x1="52" y1="48" x2="60" y2="56" stroke="#00d4ff" stroke-width="4" stroke-linecap="round" opacity="0.9"/>
+  <!-- Analysis Lines inside glass -->
+  <line x1="35" y1="34" x2="49" y2="34" stroke="#00d4ff" stroke-width="1.5" opacity="0.5"/>
+  <line x1="35" y1="38" x2="46" y2="38" stroke="#00d4ff" stroke-width="1.5" opacity="0.5"/>
+  <line x1="35" y1="42" x2="48" y2="42" stroke="#00d4ff" stroke-width="1.5" opacity="0.5"/>
+</svg>
