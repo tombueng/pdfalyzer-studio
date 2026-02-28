@@ -8,6 +8,8 @@ public class CosUpdateRequest {
     private List<String> keyPath;
     private String newValue;
     private String valueType;
+    // operation: "update" (default), "add" or "remove"
+    private String operation;
 
     public int getObjectNumber() { return objectNumber; }
     public void setObjectNumber(int objectNumber) { this.objectNumber = objectNumber; }
@@ -23,4 +25,7 @@ public class CosUpdateRequest {
 
     public String getValueType() { return valueType; }
     public void setValueType(String valueType) { this.valueType = valueType; }
+
+    public String getOperation() { return operation; }
+    public void setOperation(String operation) { this.operation = operation; }
 }

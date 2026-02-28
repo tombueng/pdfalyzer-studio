@@ -13,6 +13,9 @@ var PDFalyzer = (function ($) {
     var editFieldType = null;
     var pageViewports = [];
     var pageCanvases = [];
+    var currentScale = 1.5;
+    var autoZoomMode = 'off'; // 'off', 'width', 'height'
+    var basePageSize = { width: 0, height: 0 };
 
     // ===================== UTILITIES =====================
 
@@ -20,9 +23,20 @@ var PDFalyzer = (function ($) {
     function hideLoading() { $('#statusLoading').hide(); }
 
     function toast(msg, type) {
-        var $el = $('<div>', { 'class': 'toast-msg' + (type ? ' text-' + type : ''), text: msg });
+        var iconMap = {
+            success: 'fa-check-circle',
+            danger: 'fa-exclamation-circle',
+            warning: 'fa-exclamation-triangle',
+            info: 'fa-info-circle'
+        };
+        var iconClass = iconMap[type] || 'fa-info-circle';
+        var $icon = $('<i>', { 'class': 'fas ' + iconClass + ' toast-icon-' + type });
+        var $text = $('<span>', { text: msg, 'class': 'toast-text-' + type });
+        var $el = $('<div>', { 'class': 'toast-msg' + (type ? ' text-' + type : '') });
+        $el.append($icon).append(' ').append($text);
         $('#toastContainer').append($el);
-        setTimeout(function () { $el.remove(); }, 4000);
+        // persist until user clicks
+        $el.on('click', function () { $el.remove(); });
     }
 
     function apiFetch(url, opts) {
@@ -104,6 +118,7 @@ var PDFalyzer = (function ($) {
                     $('#editModeBtn').prop('disabled', false);
                     $('#downloadBtn').prop('disabled', false);
                     $('#exportTreeBtn').prop('disabled', false);
+                    $('#zoomModeBtn').prop('disabled', false);
 
                     Tree.render(treeData);
                     Viewer.loadPdf(sessionId);
@@ -178,42 +193,138 @@ var PDFalyzer = (function ($) {
                 });
                 $header.append($editBtn);
             }
+            // Circular reference jump icon
+            if (node.properties && node.properties.refTarget) {
+                var $refBtn = $('<span>', {
+                    'class': 'ref-jump-btn',
+                    title: 'Go to referenced object',
+                    html: '<i class="fas fa-link"></i>'
+                }).on('click', function (e) {
+                    e.stopPropagation();
+                    Tree.navigateToObject(parseInt(node.properties.refTarget), node.generationNumber);
+                });
+                $header.append($refBtn);
+            }
+
+            // Delete button for dictionary/array entries
+            if (node.name && (/^[\/]|^\[/.test(node.name))) {
+                var $delBtn = $('<span>', {
+                    'class': 'cos-delete-btn',
+                    title: 'Delete this entry',
+                    html: '<i class="fas fa-trash-alt"></i>'
+                }).on('click', function (e) {
+                    e.stopPropagation();
+                    CosEditor.remove(node, $header);
+                });
+                $header.append($delBtn);
+            }
+
+            // Add entry button for dictionaries/arrays
+            if (node.cosType === 'COSDictionary' || node.cosType === 'COSArray') {
+                var $addBtn = $('<span>', {
+                    'class': 'cos-add-btn',
+                    title: 'Add entry',
+                    html: '<i class="fas fa-plus"></i>'
+                }).on('click', function (e) {
+                    e.stopPropagation();
+                    CosEditor.addEntry(node, $header);
+                });
+                $header.append($addBtn);
+            }
+
+            // Resource download/open buttons (available for stream objects)
+            if (node.objectNumber >= 0 && node.cosType === 'COSStream') {
+                var urlBase = '/api/resource/' + sessionId + '/' + node.objectNumber + '/' + node.generationNumber;
+                var $dl = $('<span>', {
+                    'class': 'resource-download-btn',
+                    title: 'Download resource',
+                    html: '<i class="fas fa-download"></i>'
+                }).on('click', function (e) {
+                    e.stopPropagation();
+                    window.open(urlBase + '?inline=false', '_blank');
+                });
+                var $open = $('<span>', {
+                    'class': 'resource-open-btn',
+                    title: 'Open in new tab',
+                    html: '<i class="fas fa-external-link-alt"></i>'
+                }).on('click', function (e) {
+                    e.stopPropagation();
+                    window.open(urlBase + '?inline=true', '_blank');
+                });
+                $header.append($dl).append($open);
+            }
 
             $div.append($header);
 
-            // Properties panel
-            if (node.properties && Object.keys(node.properties).length > 0) {
+            // Properties panel (include additional info)
+            var hasProps = (node.properties && Object.keys(node.properties).length > 0);
+            if (hasProps || node.keyPath || node.objectNumber >= 0) {
                 var $propsDiv = $('<div>', { 'class': 'node-properties' })
                     .css('display', isExpanded ? 'block' : 'none');
-                $.each(node.properties, function (key, val) {
+                // key path if available
+                if (node.keyPath) {
                     $propsDiv.append(
                         $('<div>', { 'class': 'prop-row' })
-                            .append($('<span>', { 'class': 'prop-key', text: key }))
-                            .append($('<span>', { 'class': 'prop-val', text: val }))
+                            .append($('<span>', { 'class': 'prop-key', text: 'Key Path' }))
+                            .append($('<span>', { 'class': 'prop-val', text: node.keyPath }))
                     );
-                });
+                }
+                // object info
+                if (node.objectNumber >= 0) {
+                    var objInfo = node.objectNumber + '/' + node.generationNumber;
+                    $propsDiv.append(
+                        $('<div>', { 'class': 'prop-row' })
+                            .append($('<span>', { 'class': 'prop-key', text: 'Object' }))
+                            .append($('<span>', { 'class': 'prop-val', text: objInfo }))
+                    );
+                }
+                if (hasProps) {
+                    $.each(node.properties, function (key, val) {
+                        $propsDiv.append(
+                            $('<div>', { 'class': 'prop-row' })
+                                .append($('<span>', { 'class': 'prop-key', text: key }))
+                                .append($('<span>', { 'class': 'prop-val', text: val }))
+                        );
+                    });
+                }
                 $div.append($propsDiv);
             }
 
-            // Children
+            // Children (render lazily)
             if (hasChildren) {
                 var $childrenDiv = $('<div>', { 'class': 'tree-children' })
-                    .css('display', isExpanded ? 'block' : 'none');
-                for (var i = 0; i < node.children.length; i++) {
-                    $childrenDiv.append(Tree.buildNodeEl(node.children[i], false));
+                    .css('display', isExpanded ? 'block' : 'none')
+                    .data('children-rendered', isExpanded);
+                if (isExpanded) {
+                    for (var i = 0; i < node.children.length; i++) {
+                        $childrenDiv.append(Tree.buildNodeEl(node.children[i], false));
+                    }
                 }
                 $div.append($childrenDiv);
 
                 // Toggle click
-                $toggle.on('click', (function ($cd, $pd, $tg) {
+                $toggle.on('click', (function ($cd, $pd, $tg, node) {
                     return function (e) {
                         e.stopPropagation();
                         var showing = $cd.css('display') !== 'none';
+                        if (showing) {
+                            // collapsing: remove children to free DOM
+                            $cd.empty();
+                            $cd.data('children-rendered', false);
+                        } else {
+                            // expanding: build if not already done
+                            if (!$cd.data('children-rendered')) {
+                                for (var i = 0; i < node.children.length; i++) {
+                                    $cd.append(Tree.buildNodeEl(node.children[i], false));
+                                }
+                                $cd.data('children-rendered', true);
+                            }
+                        }
                         $cd.css('display', showing ? 'none' : 'block');
                         if ($pd.length) $pd.css('display', showing ? 'none' : 'block');
                         $tg.toggleClass('expanded');
                     };
-                })($childrenDiv, $div.children('.node-properties'), $toggle));
+                })($childrenDiv, $div.children('.node-properties'), $toggle, node));
             }
 
             // Click to select
@@ -230,6 +341,9 @@ var PDFalyzer = (function ($) {
 
             $('.tree-node').each(function () {
                 if ($(this).data('node-id') === node.id) {
+                    // expand all parents so the node is visible
+                    $(this).parents('.tree-children').show();
+                    $(this).parents('.tree-node').children('.tree-toggle').addClass('expanded');
                     $(this).children('.tree-node-header').addClass('selected');
                     this.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
                     return false;
@@ -289,6 +403,28 @@ var PDFalyzer = (function ($) {
             }
             return results;
         },
+        navigateToObject: function (objNum, genNum) {
+            if (!treeData) return;
+            var found = null;
+            // depth-first search
+            function dfs(n) {
+                if (found) return;
+                if (n.objectNumber === objNum && n.generationNumber === genNum) {
+                    found = n;
+                    return;
+                }
+                if (n.children) {
+                    n.children.forEach(dfs);
+                }
+            }
+            dfs(treeData);
+            if (found) {
+                Tree.render(treeData);
+                Tree.selectNode(found);
+            } else {
+                toast('Referenced object not found', 'warning');
+            }
+        },
 
         escapeHtml: function (text) {
             return $('<div>').text(text).html();
@@ -307,23 +443,64 @@ var PDFalyzer = (function ($) {
 
             pdfjsLib.getDocument(url).promise.then(function (pdf) {
                 pdfDoc = pdf;
-                var renderChain = Promise.resolve();
-                for (var i = 1; i <= pdf.numPages; i++) {
-                    renderChain = renderChain.then((function (pageNum) {
-                        return function () {
-                            return Viewer.renderPage(pageNum);
-                        };
-                    })(i));
-                }
-                return renderChain;
+                // capture base size from first page at scale=1
+                pdf.getPage(1).then(function(p){
+                    var vp = p.getViewport({ scale: 1 });
+                    basePageSize.width = vp.width;
+                    basePageSize.height = vp.height;
+                });
+                Viewer.renderAllPages();
             }).catch(function (err) {
                 toast('Failed to render PDF: ' + err.message, 'danger');
             });
         },
+        renderAllPages: function() {
+            if (!pdfDoc) return;
+            var renderChain = Promise.resolve();
+            $('#pdfViewer').empty();
+            for (var i = 1; i <= pdfDoc.numPages; i++) {
+                renderChain = renderChain.then((function (pageNum) {
+                    return function () {
+                        return Viewer.renderPage(pageNum);
+                    };
+                })(i));
+            }
+            return renderChain;
+        },
+        setScale: function(scale) {
+            if (scale <= 0) return;
+            currentScale = scale;
+            autoZoomMode = 'off';
+            Viewer.renderAllPages();
+            // update zoom button state if available
+            if (typeof Zoom !== 'undefined' && Zoom.updateButton) Zoom.updateButton();
+        },
+        fitWidth: function() {
+            if (!basePageSize.width) return;
+            var avail = $('#pdfPane').width() - 40; // padding
+            var scale = avail / basePageSize.width;
+            currentScale = scale;
+            autoZoomMode = 'width';
+            Viewer.renderAllPages();
+            if (typeof Zoom !== 'undefined' && Zoom.updateButton) Zoom.updateButton();
+        },
+        fitHeight: function() {
+            if (!basePageSize.height) return;
+            var avail = $('#pdfPane').height() - 40;
+            var scale = avail / basePageSize.height;
+            currentScale = scale;
+            autoZoomMode = 'height';
+            Viewer.renderAllPages();
+            if (typeof Zoom !== 'undefined' && Zoom.updateButton) Zoom.updateButton();
+        },
+        applyAutoZoom: function() {
+            if (autoZoomMode === 'width') Viewer.fitWidth();
+            else if (autoZoomMode === 'height') Viewer.fitHeight();
+        },
 
         renderPage: function (pageNum) {
             return pdfDoc.getPage(pageNum).then(function (page) {
-                var scale = 1.5;
+                var scale = currentScale;
                 var viewport = page.getViewport({ scale: scale });
                 pageViewports[pageNum - 1] = viewport;
 
@@ -788,6 +965,142 @@ var PDFalyzer = (function ($) {
             });
         },
 
+        addEntry: function(node, $headerEl) {
+            // inline form instead of browser prompts
+            if (!sessionId || !node.keyPath) {
+                toast('Cannot add entry: key path unavailable', 'warning');
+                return;
+            }
+            // remove any existing add or edit widgets
+            $('.cos-inline-editor, .cos-add-editor').remove();
+
+            var path = JSON.parse(node.keyPath);
+            var isArray = node.cosType === 'COSArray';
+
+            var $form = $('<div>', { 'class': 'cos-add-editor' });
+            var $keyInput = $('<input>', {
+                'class': 'cos-edit-input',
+                type: isArray ? 'number' : 'text',
+                placeholder: isArray ? 'index (blank=append)' : 'new key'
+            });
+            if (isArray) $keyInput.attr('min', '0');
+            $form.append($keyInput);
+
+            var $typeSelect = $('<select>', { 'class': 'cos-edit-input' });
+            var types = ['boolean', 'integer', 'float', 'name', 'string', 'hex-string'];
+            types.forEach(function(t) {
+                var v = 'COS' + t.charAt(0).toUpperCase() + t.slice(1);
+                $typeSelect.append($('<option>', { value: v, text: t }));
+            });
+            $form.append($typeSelect);
+
+            var $valueInput = $('<input>', { 'class': 'cos-edit-input', type: 'text', placeholder: 'value' });
+            $form.append($valueInput);
+
+            var $saveBtn = $('<button>', {
+                'class': 'cos-edit-save',
+                title: 'Add',
+                html: '<i class="fas fa-check"></i>'
+            }).on('click', function () {
+                var key = $keyInput.val();
+                if (!isArray && (!key || key.trim().length === 0)) {
+                    toast('Key cannot be empty', 'warning');
+                    return;
+                }
+                var type = $typeSelect.val();
+                var val = $valueInput.val();
+                var k = key; // keep as string; empty string will trigger append on backend
+                var body = {
+                    objectNumber: node.objectNumber,
+                    generationNumber: node.generationNumber || 0,
+                    keyPath: path.concat([k]),
+                    newValue: val,
+                    valueType: type,
+                    operation: 'add'
+                };
+                apiFetch('/api/cos/' + sessionId + '/update', {
+                    method: 'POST',
+                    contentType: 'application/json',
+                    data: JSON.stringify(body)
+                })
+                    .done(function (data) {
+                        treeData = data.tree;
+                        Tree.render(treeData);
+                        Viewer.loadPdf(sessionId);
+                        toast('Entry added', 'success');
+                    })
+                    .fail(function () {
+                        toast('Add failed', 'danger');
+                    });
+                $form.remove();
+            });
+            var $cancelBtn = $('<button>', {
+                'class': 'cos-edit-cancel',
+                title: 'Cancel',
+                html: '<i class="fas fa-times"></i>'
+            }).on('click', function () {
+                $form.remove();
+            });
+            $form.append($saveBtn, $cancelBtn);
+
+            // insert form after header element
+            if ($headerEl && $headerEl.length) {
+                $headerEl.after($form);
+            } else {
+                $('.tree-node-header').last().after($form);
+            }
+            $keyInput.trigger('focus');
+        },
+        remove: function(node, $headerEl) {
+            if (!sessionId || node.objectNumber === undefined || node.objectNumber < 0) {
+                toast('Cannot delete: object reference not available', 'warning');
+                return;
+            }
+            var keyPath;
+            try { keyPath = JSON.parse(node.keyPath); }
+            catch (e) { toast('Cannot delete: no key path', 'warning'); return; }
+            if (!keyPath || keyPath.length === 0) {
+                toast('Cannot delete: empty key path', 'warning');
+                return;
+            }
+            // inline confirmation box
+            $('.cos-inline-editor, .cos-add-editor, .cos-delete-confirm').remove();
+            var $confirm = $('<div>', { 'class': 'cos-delete-confirm' });
+            $confirm.text('Delete ' + node.name + '? ');
+            var $yes = $('<button>', { 'class': 'btn btn-sm btn-danger me-1', text: 'Yes' })
+                .on('click', function () {
+                    var body = {
+                        objectNumber: node.objectNumber,
+                        generationNumber: node.generationNumber || 0,
+                        keyPath: keyPath,
+                        operation: 'remove'
+                    };
+                    apiFetch('/api/cos/' + sessionId + '/update', {
+                        method: 'POST',
+                        contentType: 'application/json',
+                        data: JSON.stringify(body)
+                    })
+                        .done(function (data) {
+                            treeData = data.tree;
+                            Tree.render(treeData);
+                            Viewer.loadPdf(sessionId);
+                            toast('Entry removed', 'success');
+                        })
+                        .fail(function () {
+                            toast('Delete failed', 'danger');
+                        });
+                    $confirm.remove();
+                });
+            var $no = $('<button>', { 'class': 'btn btn-sm btn-secondary', text: 'No' })
+                .on('click', function () { $confirm.remove(); });
+            $confirm.append($yes, $no);
+            if ($headerEl && $headerEl.length) {
+                $headerEl.after($confirm);
+            } else {
+                $('.tree-node-header').last().after($confirm);
+            }
+        },
+
         save: function (node, newValue, $editorEl) {
             if (!sessionId || node.objectNumber === undefined || node.objectNumber < 0) {
                 toast('Cannot edit: object reference not available', 'warning');
@@ -808,7 +1121,8 @@ var PDFalyzer = (function ($) {
                 generationNumber: node.generationNumber || 0,
                 keyPath: keyPath,
                 newValue: newValue,
-                valueType: node.cosType
+                valueType: node.cosType,
+                operation: 'update'
             };
 
             apiFetch('/api/cos/' + sessionId + '/update', {
@@ -906,6 +1220,58 @@ var PDFalyzer = (function ($) {
         }
     };
 
+    // ===================== ZOOM HANDLING =====================
+
+    var Zoom = {
+        init: function() {
+            var $btn = $('#zoomModeBtn');
+            $btn.on('click', function () {
+                // cycle: off -> width -> height -> off
+                if (autoZoomMode === 'off') {
+                    Viewer.fitWidth();
+                } else if (autoZoomMode === 'width') {
+                    Viewer.fitHeight();
+                } else {
+                    Viewer.setScale(currentScale); // this will turn auto off
+                }
+            });
+
+            // ctrl/cmd + wheel for manual zoom
+            $('#pdfPane').on('wheel', function (e) {
+                var ev = e.originalEvent;
+                if (ev.ctrlKey || ev.metaKey) {
+                    e.preventDefault();
+                    var delta = ev.deltaY;
+                    var factor = delta > 0 ? 0.9 : 1.1;
+                    Viewer.setScale(currentScale * factor);
+                }
+            });
+
+            // reapply auto zoom when container size changes
+            $(window).on('resize', function () {
+                Viewer.applyAutoZoom();
+            });
+
+            // initialize icon/tooltip state
+            Zoom.updateButton();
+        },
+        updateButton: function() {
+            var $btn = $('#zoomModeBtn');
+            if (!$btn.length) return;
+            var icons = {
+                off: 'fa-expand-arrows-alt',
+                width: 'fa-arrows-alt-h',
+                height: 'fa-arrows-alt-v'
+            };
+            var title = 'Toggle auto zoom mode';
+            if (autoZoomMode === 'width') title = 'Auto zoom: fit width';
+            else if (autoZoomMode === 'height') title = 'Auto zoom: fit height';
+            $btn.attr('title', title);
+            $btn.find('i').attr('class', 'fas ' + icons[autoZoomMode]);
+            $btn.toggleClass('active', autoZoomMode !== 'off');
+        }
+    };
+
     // ===================== DIVIDER RESIZE =====================
 
     var Divider = {
@@ -929,6 +1295,8 @@ var PDFalyzer = (function ($) {
                     dragging = false;
                     $('#divider').removeClass('dragging');
                     $('body').css({ cursor: '', 'user-select': '' });
+                    // after user finishes resizing, re-evaluate auto zoom
+                    Viewer.applyAutoZoom();
                 }
             });
         }
@@ -944,6 +1312,7 @@ var PDFalyzer = (function ($) {
         Divider.init();
         Keyboard.init();
         Export.init();
+        Zoom.init();
     }
 
     $(init);
