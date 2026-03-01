@@ -122,7 +122,7 @@
     </div>
 
     <div class="modal fade" id="fieldCreateModal" tabindex="-1" aria-labelledby="fieldCreateLabel" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered field-create-modal">
+        <div class="modal-dialog modal-dialog-centered field-config-modal field-create-modal">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title" id="fieldCreateLabel"><i class="fas fa-plus-square me-2"></i>Add Field</h5>
@@ -131,19 +131,19 @@
                 <div class="modal-body">
                     <div class="mb-3 text-muted" style="font-size:12px;">Set field identity and adjust options before queueing the change.</div>
                     <div class="row g-2">
-                        <div class="col-6 field-create-block">
+                        <div class="col-6 field-config-block field-create-block">
                             <label class="form-label form-label-sm"><i class="fas fa-tag me-1"></i>Type</label>
                             <input class="form-control form-control-sm" id="createFieldType" readonly />
                         </div>
-                        <div class="col-6 field-create-block">
+                        <div class="col-6 field-config-block field-create-block">
                             <label class="form-label form-label-sm"><i class="fas fa-file-alt me-1"></i>Page</label>
                             <input class="form-control form-control-sm" id="createFieldPage" readonly />
                         </div>
-                        <div class="col-12 field-create-block">
+                        <div class="col-12 field-config-block field-create-block">
                             <label class="form-label form-label-sm"><i class="fas fa-fingerprint me-1"></i>Field ID</label>
                             <input class="form-control form-control-sm" id="createFieldId" placeholder="field_id" />
                         </div>
-                        <div class="col-12 field-create-block">
+                        <div class="col-12 field-config-block field-create-block">
                             <label class="form-label form-label-sm"><i class="fas fa-code me-1"></i>Options JSON</label>
                             <textarea class="form-control form-control-sm" id="createFieldOptions" rows="6"></textarea>
                         </div>
@@ -158,7 +158,7 @@
     </div>
 
         <div class="modal fade" id="fieldOptionsModal" tabindex="-1" aria-labelledby="fieldOptionsLabel" aria-hidden="true">
-            <div class="modal-dialog modal-dialog-centered field-options-modal">
+            <div class="modal-dialog modal-dialog-centered field-config-modal field-options-modal">
                 <div class="modal-content">
                     <div class="modal-header">
                         <h5 class="modal-title" id="fieldOptionsLabel"><i class="fas fa-sliders-h me-2"></i>Field Options</h5>
@@ -168,7 +168,7 @@
                         <div class="mb-2 text-muted" id="fieldOptionsSelectionInfo" style="font-size:12px;"></div>
                         <div class="mb-3 text-muted" id="fieldOptionsScopeHint" style="font-size:12px;"></div>
                         <div class="row g-2">
-                            <div class="col-6 field-option-block" id="optRequiredBlock">
+                            <div class="col-6 field-config-block field-option-block" id="optRequiredBlock">
                                 <label class="form-label form-label-sm"><i class="fas fa-asterisk me-1"></i>Required</label>
                                 <div class="field-option-radios" data-option="required">
                                     <div class="form-check form-check-sm tri-keep">
@@ -185,7 +185,7 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="col-6 field-option-block" id="optReadonlyBlock">
+                            <div class="col-6 field-config-block field-option-block" id="optReadonlyBlock">
                                 <label class="form-label form-label-sm"><i class="fas fa-lock me-1"></i>Read only</label>
                                 <div class="field-option-radios" data-option="readonly">
                                     <div class="form-check form-check-sm tri-keep">
@@ -202,7 +202,7 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="col-6 field-option-block" id="optMultilineBlock">
+                            <div class="col-6 field-config-block field-option-block" id="optMultilineBlock">
                                 <label class="form-label form-label-sm"><i class="fas fa-align-left me-1"></i>Multiline</label>
                                 <div class="field-option-radios" data-option="multiline">
                                     <div class="form-check form-check-sm tri-keep">
@@ -219,7 +219,7 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="col-6 field-option-block" id="optEditableBlock">
+                            <div class="col-6 field-config-block field-option-block" id="optEditableBlock">
                                 <label class="form-label form-label-sm"><i class="fas fa-pen me-1"></i>Editable (combo)</label>
                                 <div class="field-option-radios" data-option="editable">
                                     <div class="form-check form-check-sm tri-keep">
@@ -236,7 +236,7 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="col-6 field-option-block" id="optCheckedBlock">
+                            <div class="col-6 field-config-block field-option-block" id="optCheckedBlock">
                                 <label class="form-label form-label-sm"><i class="fas fa-check-square me-1"></i>Checked (checkbox)</label>
                                 <div class="field-option-radios" data-option="checked">
                                     <div class="form-check form-check-sm tri-keep">
@@ -253,15 +253,15 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="col-12 field-option-block" id="optDefaultValueBlock">
+                            <div class="col-12 field-config-block field-option-block" id="optDefaultValueBlock">
                                 <label class="form-label form-label-sm"><i class="fas fa-i-cursor me-1"></i>Default value (single field)</label>
                                 <input class="form-control form-control-sm" id="optDefaultValue" placeholder="leave empty to keep" />
                             </div>
-                            <div class="col-12 field-option-block" id="optChoicesBlock">
+                            <div class="col-12 field-config-block field-option-block" id="optChoicesBlock">
                                 <label class="form-label form-label-sm"><i class="fas fa-list me-1"></i>Choices comma-separated (single combo/list)</label>
                                 <input class="form-control form-control-sm" id="optChoices" placeholder="A,B,C" />
                             </div>
-                            <div class="col-12 field-option-block" id="optJavascriptBlock">
+                            <div class="col-12 field-config-block field-option-block" id="optJavascriptBlock">
                                 <label class="form-label form-label-sm"><i class="fab fa-js me-1"></i>JavaScript validation (single field)</label>
                                 <textarea class="form-control form-control-sm" id="optJavascript" rows="5" placeholder="if (event.value) { ... }"></textarea>
                             </div>
