@@ -135,11 +135,53 @@ public class PdfEditService {
         widget.setPage(page);
         widget.setPrinted(true);
 
-        // Create appearance
+        // Create appearances for both checked and unchecked states
         PDAppearanceDictionary appearances = new PDAppearanceDictionary();
-        PDAppearanceStream normalAppearance = new PDAppearanceStream(doc);
-        normalAppearance.setBBox(new PDRectangle(rect.getWidth(), rect.getHeight()));
-        appearances.setNormalAppearance(normalAppearance);
+        
+        // Unchecked appearance (empty box)
+        PDAppearanceStream offAppearance = new PDAppearanceStream(doc);
+        offAppearance.setBBox(new PDRectangle(rect.getWidth(), rect.getHeight()));
+        offAppearance.setResources(acroForm.getDefaultResources());
+        try (PDPageContentStream cs = new PDPageContentStream(doc, offAppearance)) {
+            cs.setStrokingColor(0f);
+            cs.setLineWidth(1f);
+            cs.addRect(0.5f, 0.5f, Math.max(1f, rect.getWidth() - 1f), Math.max(1f, rect.getHeight() - 1f));
+            cs.stroke();
+        }
+        
+        // Checked appearance (box with large checkmark)
+        PDAppearanceStream onAppearance = new PDAppearanceStream(doc);
+        onAppearance.setBBox(new PDRectangle(rect.getWidth(), rect.getHeight()));
+        onAppearance.setResources(acroForm.getDefaultResources());
+        try (PDPageContentStream cs = new PDPageContentStream(doc, onAppearance)) {
+            // Draw box border
+            cs.setStrokingColor(0f);
+            cs.setLineWidth(1f);
+            cs.addRect(0.5f, 0.5f, Math.max(1f, rect.getWidth() - 1f), Math.max(1f, rect.getHeight() - 1f));
+            cs.stroke();
+            
+            // Draw large checkmark that fills the box
+            cs.setLineWidth(Math.max(2f, rect.getWidth() * 0.1f));
+            
+            float w = rect.getWidth();
+            float h = rect.getHeight();
+            float margin = Math.min(w, h) * 0.15f;
+            
+            // Draw checkmark with two lines
+            cs.moveTo(margin, h * 0.45f);
+            cs.lineTo(w * 0.4f, margin);
+            cs.stroke();
+            
+            cs.moveTo(w * 0.4f, margin);
+            cs.lineTo(w - margin, h - margin);
+            cs.stroke();
+        }
+        
+        // Set up appearance dictionary with named appearances
+        org.apache.pdfbox.cos.COSDictionary normalAppDic = new org.apache.pdfbox.cos.COSDictionary();
+        normalAppDic.setItem(org.apache.pdfbox.cos.COSName.getPDFName("Off"), offAppearance.getCOSObject());
+        normalAppDic.setItem(org.apache.pdfbox.cos.COSName.getPDFName("Yes"), onAppearance.getCOSObject());
+        appearances.getCOSObject().setItem(org.apache.pdfbox.cos.COSName.N, normalAppDic);
         widget.setAppearance(appearances);
 
         page.getAnnotations().add(widget);
