@@ -121,7 +121,7 @@ PDFalyzer.Viewer = (function ($, P) {
     }
 
     function handleClick(e, pageIndex) {
-        if (P.state.editMode) return;
+        if (P.state.editMode && P.state.editFieldType) return;
         if (!P.state.treeData || !P.state.pageViewports[pageIndex]) return;
         var canvas = P.state.pageCanvases[pageIndex];
         if (!canvas) return;
@@ -131,7 +131,16 @@ PDFalyzer.Viewer = (function ($, P) {
         var pdfX  = (e.clientX - rect.left) / scale;
         var pdfY  = (vp.height - (e.clientY - rect.top)) / scale;
         var match = findNodeAtPoint(P.state.treeData, pageIndex, pdfX, pdfY);
-        if (match) P.Tree.selectNode(match);
+        if (!match) return;
+
+        if (P.state.editMode && match.nodeCategory === 'field' &&
+                P.EditMode && P.EditMode.selectFieldFromViewer) {
+            var additive = !!(e.ctrlKey || e.metaKey || e.shiftKey);
+            P.EditMode.selectFieldFromViewer(match, additive);
+            return;
+        }
+
+        P.Tree.selectNode(match);
     }
 
     function findNodeAtPoint(node, pageIndex, x, y) {

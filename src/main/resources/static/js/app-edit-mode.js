@@ -414,6 +414,22 @@ PDFalyzer.EditMode = (function ($, P) {
         refreshSelectionButtons();
     }
 
+    function selectFieldFromViewer(fieldNode, additive) {
+        if (!fieldNode || !fieldNode.properties) return;
+        var fullName = fieldNode.properties.FullName;
+        if (!fullName) return;
+
+        if (additive) {
+            toggleFieldSelection(fullName);
+        } else {
+            P.state.selectedFieldNames = [fullName];
+        }
+
+        renderFieldHandlesForAllPages();
+        P.Tree.selectNode(fieldNode);
+        refreshSelectionButtons();
+    }
+
     function findFieldNodeByName(fullName) {
         var found = null;
         function walk(node) {
@@ -534,7 +550,7 @@ PDFalyzer.EditMode = (function ($, P) {
             if (data && data.tree) {
                 P.state.treeData = data.tree;
                 P.Tree.render(P.state.treeData);
-                P.Viewer.loadPdf(P.state.sessionId);
+                renderFieldHandlesForAllPages();
             }
             var modalEl = document.getElementById('fieldOptionsModal');
             var modal = bootstrap.Modal.getInstance(modalEl);
@@ -638,6 +654,7 @@ PDFalyzer.EditMode = (function ($, P) {
         init: init,
         startDraw: startDraw,
         deleteField: deleteField,
+        selectFieldFromViewer: selectFieldFromViewer,
         setFieldValue: setFieldValue,
         renderFieldHandles: renderFieldHandles,
         resetPending: resetPending,
