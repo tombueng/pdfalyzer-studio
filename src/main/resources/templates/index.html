@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>PDFalyzer</title>
+    <title>PDFalyzer Studio</title>
     <link rel="icon" type="image/svg+xml" href="/logo.svg" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootswatch@5.3.2/dist/cyborg/bootstrap.min.css" />
     <link rel="stylesheet" th:href="@{/webjars/font-awesome/6.4.0/css/all.min.css}" />
@@ -17,7 +17,7 @@
         <div class="container-fluid d-flex align-items-center">
             <a class="navbar-brand d-flex align-items-center" href="#">
                 <img src="/logo.svg" alt="logo" width="28" height="28" class="me-2" />
-                <span>PDFalyzer</span>
+                <span>PDFalyzer Studio</span>
             </a>
             <div class="d-flex align-items-center gap-2">
                 <input id="searchInput" type="text" class="form-control form-control-sm"
@@ -59,7 +59,7 @@
         <div id="pdfPane">
             <div id="dropOverlay"><i class="fas fa-cloud-upload-alt me-2"></i> Drop PDF here</div>
             <div id="uploadSplash">
-                <img src="/logo.svg" alt="PDFalyzer" />
+                <img src="/logo.svg" alt="PDFalyzer Studio" />
                 <p>Upload or drop a PDF to get started</p>
                 <label class="btn btn-accent">
                     <i class="fas fa-file-pdf me-1"></i> Choose PDF
@@ -278,7 +278,7 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <script th:src="@{/webjars/jquery/3.7.1/jquery.min.js}"></script>
     <script th:src="@{/webjars/bootstrap/5.3.0/js/bootstrap.bundle.min.js}"></script>
-    <!-- PDFalyzer modules (order matters: state must be first) -->
+    <!-- PDFalyzer Studio modules (order matters: state must be first) -->
     <script th:src="@{/js/app-state.js}"></script>
     <script th:src="@{/js/app-utils.js}"></script>
     <script th:src="@{/js/app-resource.js}"></script>

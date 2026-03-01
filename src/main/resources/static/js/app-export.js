@@ -1,5 +1,5 @@
 /**
- * PDFalyzer – export (download PDF, export tree JSON).
+ * PDFalyzer Studio – export (download PDF, export tree JSON).
  */
 PDFalyzer.Export = (function ($, P) {
     'use strict';

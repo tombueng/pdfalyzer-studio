@@ -8,7 +8,7 @@
     <version>0.1.0-SNAPSHOT</version>
     <packaging>jar</packaging>
 
-    <name>PDFalyzer UI</name>
+    <name>PDFalyzer Studio</name>
     <description>Web application for inspecting PDF files</description>
 
     <properties>

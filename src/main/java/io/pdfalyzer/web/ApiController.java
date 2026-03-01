@@ -205,7 +205,7 @@ public class ApiController {
 
     private String buildValidationReport(PdfSession session, List<ValidationIssue> issues) {
         StringBuilder sb = new StringBuilder();
-        sb.append("PDFalyzer Validation Report\n==========================\n");
+        sb.append("PDFalyzer Studio Validation Report\n==========================\n");
         sb.append("File: ").append(session.getFilename()).append("\n");
         sb.append("Pages: ").append(session.getPageCount()).append("\n");
         sb.append("Issues found: ").append(issues.size()).append("\n\n");

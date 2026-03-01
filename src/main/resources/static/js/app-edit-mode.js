@@ -1,5 +1,5 @@
 /**
- * PDFalyzer – PDF form field edit mode (draw new fields on the viewer).
+ * PDFalyzer Studio – PDF form field edit mode (draw new fields on the viewer).
  */
 PDFalyzer.EditMode = (function ($, P) {
     'use strict';

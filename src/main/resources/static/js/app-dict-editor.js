@@ -1,5 +1,5 @@
 /**
- * PDFalyzer – dictionary type metadata and entry-add validation.
+ * PDFalyzer Studio – dictionary type metadata and entry-add validation.
  */
 PDFalyzer.DictEditor = (function () {
     'use strict';

@@ -1,5 +1,5 @@
 /**
- * PDFalyzer – tab switching and per-tab content loading.
+ * PDFalyzer Studio – tab switching and per-tab content loading.
  */
 PDFalyzer.Tabs = (function ($, P) {
     'use strict';
