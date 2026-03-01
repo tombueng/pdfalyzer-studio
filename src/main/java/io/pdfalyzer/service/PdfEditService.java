@@ -481,6 +481,39 @@ public class PdfEditService {
                 if (!value.isBlank()) field.setValue(value);
             }
         }
+
+        if (options.containsKey("javascript")) {
+            Object jsObj = options.get("javascript");
+            setValidationJavaScript(field, jsObj == null ? "" : jsObj.toString());
+        }
+    }
+
+    private void setValidationJavaScript(PDField field, String script) {
+        COSDictionary fieldDictionary = field.getCOSObject();
+        COSBase aaBase = fieldDictionary.getDictionaryObject(COSName.AA);
+        COSDictionary additionalActions = aaBase instanceof COSDictionary
+                ? (COSDictionary) aaBase
+                : null;
+
+        if (script == null || script.isBlank()) {
+            if (additionalActions != null) {
+                additionalActions.removeItem(COSName.V);
+                if (additionalActions.size() == 0) {
+                    fieldDictionary.removeItem(COSName.AA);
+                }
+            }
+            return;
+        }
+
+        if (additionalActions == null) {
+            additionalActions = new COSDictionary();
+            fieldDictionary.setItem(COSName.AA, additionalActions);
+        }
+
+        COSDictionary validateAction = new COSDictionary();
+        validateAction.setName(COSName.S, "JavaScript");
+        validateAction.setString(COSName.JS, script);
+        additionalActions.setItem(COSName.V, validateAction);
     }
 
     private Boolean parseTriState(Object value) {

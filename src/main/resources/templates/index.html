@@ -157,62 +157,112 @@
     </div>
 
         <div class="modal fade" id="fieldOptionsModal" tabindex="-1" aria-labelledby="fieldOptionsLabel" aria-hidden="true">
-            <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-dialog modal-dialog-centered field-options-modal">
                 <div class="modal-content">
                     <div class="modal-header">
-                        <h5 class="modal-title" id="fieldOptionsLabel">Field Options</h5>
+                        <h5 class="modal-title" id="fieldOptionsLabel"><i class="fas fa-sliders-h me-2"></i>Field Options</h5>
                         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                     </div>
                     <div class="modal-body">
                         <div class="mb-2 text-muted" id="fieldOptionsSelectionInfo" style="font-size:12px;"></div>
+                        <div class="mb-3 text-muted" id="fieldOptionsScopeHint" style="font-size:12px;"></div>
                         <div class="row g-2">
-                            <div class="col-6">
-                                <label class="form-label form-label-sm">Required</label>
-                                <select class="form-select form-select-sm" id="optRequired">
-                                    <option value="keep">(keep/mixed)</option>
-                                    <option value="true">true</option>
-                                    <option value="false">false</option>
-                                </select>
+                            <div class="col-6 field-option-block" id="optRequiredBlock">
+                                <label class="form-label form-label-sm"><i class="fas fa-asterisk me-1"></i>Required</label>
+                                <div class="field-option-radios" data-option="required">
+                                    <div class="form-check form-check-sm tri-keep">
+                                        <input class="form-check-input" type="radio" name="optRequired" id="optRequiredKeep" value="keep">
+                                        <label class="form-check-label" for="optRequiredKeep">Keep current value</label>
+                                    </div>
+                                    <div class="form-check form-check-sm">
+                                        <input class="form-check-input" type="radio" name="optRequired" id="optRequiredTrue" value="true">
+                                        <label class="form-check-label" for="optRequiredTrue">True</label>
+                                    </div>
+                                    <div class="form-check form-check-sm">
+                                        <input class="form-check-input" type="radio" name="optRequired" id="optRequiredFalse" value="false">
+                                        <label class="form-check-label" for="optRequiredFalse">False</label>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="col-6">
-                                <label class="form-label form-label-sm">ReadOnly</label>
-                                <select class="form-select form-select-sm" id="optReadonly">
-                                    <option value="keep">(keep/mixed)</option>
-                                    <option value="true">true</option>
-                                    <option value="false">false</option>
-                                </select>
+                            <div class="col-6 field-option-block" id="optReadonlyBlock">
+                                <label class="form-label form-label-sm"><i class="fas fa-lock me-1"></i>Read only</label>
+                                <div class="field-option-radios" data-option="readonly">
+                                    <div class="form-check form-check-sm tri-keep">
+                                        <input class="form-check-input" type="radio" name="optReadonly" id="optReadonlyKeep" value="keep">
+                                        <label class="form-check-label" for="optReadonlyKeep">Keep current value</label>
+                                    </div>
+                                    <div class="form-check form-check-sm">
+                                        <input class="form-check-input" type="radio" name="optReadonly" id="optReadonlyTrue" value="true">
+                                        <label class="form-check-label" for="optReadonlyTrue">True</label>
+                                    </div>
+                                    <div class="form-check form-check-sm">
+                                        <input class="form-check-input" type="radio" name="optReadonly" id="optReadonlyFalse" value="false">
+                                        <label class="form-check-label" for="optReadonlyFalse">False</label>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="col-6">
-                                <label class="form-label form-label-sm">Multiline</label>
-                                <select class="form-select form-select-sm" id="optMultiline">
-                                    <option value="keep">(keep/mixed)</option>
-                                    <option value="true">true</option>
-                                    <option value="false">false</option>
-                                </select>
+                            <div class="col-6 field-option-block" id="optMultilineBlock">
+                                <label class="form-label form-label-sm"><i class="fas fa-align-left me-1"></i>Multiline</label>
+                                <div class="field-option-radios" data-option="multiline">
+                                    <div class="form-check form-check-sm tri-keep">
+                                        <input class="form-check-input" type="radio" name="optMultiline" id="optMultilineKeep" value="keep">
+                                        <label class="form-check-label" for="optMultilineKeep">Keep current value</label>
+                                    </div>
+                                    <div class="form-check form-check-sm">
+                                        <input class="form-check-input" type="radio" name="optMultiline" id="optMultilineTrue" value="true">
+                                        <label class="form-check-label" for="optMultilineTrue">True</label>
+                                    </div>
+                                    <div class="form-check form-check-sm">
+                                        <input class="form-check-input" type="radio" name="optMultiline" id="optMultilineFalse" value="false">
+                                        <label class="form-check-label" for="optMultilineFalse">False</label>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="col-6">
-                                <label class="form-label form-label-sm">Editable (combo)</label>
-                                <select class="form-select form-select-sm" id="optEditable">
-                                    <option value="keep">(keep/mixed)</option>
-                                    <option value="true">true</option>
-                                    <option value="false">false</option>
-                                </select>
+                            <div class="col-6 field-option-block" id="optEditableBlock">
+                                <label class="form-label form-label-sm"><i class="fas fa-pen me-1"></i>Editable (combo)</label>
+                                <div class="field-option-radios" data-option="editable">
+                                    <div class="form-check form-check-sm tri-keep">
+                                        <input class="form-check-input" type="radio" name="optEditable" id="optEditableKeep" value="keep">
+                                        <label class="form-check-label" for="optEditableKeep">Keep current value</label>
+                                    </div>
+                                    <div class="form-check form-check-sm">
+                                        <input class="form-check-input" type="radio" name="optEditable" id="optEditableTrue" value="true">
+                                        <label class="form-check-label" for="optEditableTrue">True</label>
+                                    </div>
+                                    <div class="form-check form-check-sm">
+                                        <input class="form-check-input" type="radio" name="optEditable" id="optEditableFalse" value="false">
+                                        <label class="form-check-label" for="optEditableFalse">False</label>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="col-6">
-                                <label class="form-label form-label-sm">Checked (checkbox)</label>
-                                <select class="form-select form-select-sm" id="optChecked">
-                                    <option value="keep">(keep/mixed)</option>
-                                    <option value="true">true</option>
-                                    <option value="false">false</option>
-                                </select>
+                            <div class="col-6 field-option-block" id="optCheckedBlock">
+                                <label class="form-label form-label-sm"><i class="fas fa-check-square me-1"></i>Checked (checkbox)</label>
+                                <div class="field-option-radios" data-option="checked">
+                                    <div class="form-check form-check-sm tri-keep">
+                                        <input class="form-check-input" type="radio" name="optChecked" id="optCheckedKeep" value="keep">
+                                        <label class="form-check-label" for="optCheckedKeep">Keep current value</label>
+                                    </div>
+                                    <div class="form-check form-check-sm">
+                                        <input class="form-check-input" type="radio" name="optChecked" id="optCheckedTrue" value="true">
+                                        <label class="form-check-label" for="optCheckedTrue">True</label>
+                                    </div>
+                                    <div class="form-check form-check-sm">
+                                        <input class="form-check-input" type="radio" name="optChecked" id="optCheckedFalse" value="false">
+                                        <label class="form-check-label" for="optCheckedFalse">False</label>
+                                    </div>
+                                </div>
                             </div>
-                            <div class="col-12">
-                                <label class="form-label form-label-sm">Default value (single-select)</label>
+                            <div class="col-12 field-option-block" id="optDefaultValueBlock">
+                                <label class="form-label form-label-sm"><i class="fas fa-i-cursor me-1"></i>Default value (single field)</label>
                                 <input class="form-control form-control-sm" id="optDefaultValue" placeholder="leave empty to keep" />
                             </div>
-                            <div class="col-12">
-                                <label class="form-label form-label-sm">Choices comma-separated (single combo/list)</label>
+                            <div class="col-12 field-option-block" id="optChoicesBlock">
+                                <label class="form-label form-label-sm"><i class="fas fa-list me-1"></i>Choices comma-separated (single combo/list)</label>
                                 <input class="form-control form-control-sm" id="optChoices" placeholder="A,B,C" />
+                            </div>
+                            <div class="col-12 field-option-block" id="optJavascriptBlock">
+                                <label class="form-label form-label-sm"><i class="fab fa-js me-1"></i>JavaScript validation (single field)</label>
+                                <textarea class="form-control form-control-sm" id="optJavascript" rows="5" placeholder="if (event.value) { ... }"></textarea>
                             </div>
                         </div>
                     </div>
