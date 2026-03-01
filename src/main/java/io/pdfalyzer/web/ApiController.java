@@ -12,7 +12,12 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -60,6 +65,38 @@ public class ApiController {
         result.put("pageCount", session.getPageCount());
         result.put("tree", session.getTreeRoot());
         return ResponseEntity.ok(result);
+    }
+
+    @GetMapping("/sample/latest")
+    public ResponseEntity<byte[]> getLatestSamplePdf() throws IOException {
+        Path sourceFile = Paths.get("src", "main", "resources", "test.pdf")
+                .toAbsolutePath().normalize();
+
+        byte[] data = null;
+        if (Files.exists(sourceFile) && Files.isRegularFile(sourceFile)) {
+            data = Files.readAllBytes(sourceFile);
+        } else {
+            try (InputStream in = getClass().getResourceAsStream("/test.pdf")) {
+                if (in != null) {
+                    ByteArrayOutputStream out = new ByteArrayOutputStream();
+                    in.transferTo(out);
+                    data = out.toByteArray();
+                }
+            }
+        }
+
+        if (data == null || data.length == 0) {
+            return ResponseEntity.notFound().build();
+        }
+
+        return ResponseEntity.ok()
+                .contentType(MediaType.APPLICATION_PDF)
+                .header(HttpHeaders.CACHE_CONTROL, "no-store, no-cache, must-revalidate, max-age=0")
+                .header("Pragma", "no-cache")
+                .header("Expires", "0")
+                .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"test.pdf\"")
+                .contentLength(data.length)
+                .body(data);
     }
 
     @GetMapping("/tree/{sessionId}")
@@ -120,6 +157,22 @@ public class ApiController {
         return ResponseEntity.ok(fontInspectorService.getFontUsageAreas(
                 pdfService.getSessionPdfBytes(sessionId), objNum, genNum));
     }
+
+        @GetMapping("/fonts/{sessionId}/diagnostics")
+        public ResponseEntity<FontDiagnostics> getFontDiagnostics(
+            @PathVariable("sessionId") String sessionId) throws IOException {
+        return ResponseEntity.ok(fontInspectorService.analyzeFontIssues(
+            pdfService.getSessionPdfBytes(sessionId)));
+        }
+
+        @GetMapping("/fonts/{sessionId}/diagnostics/{objNum}/{genNum}")
+        public ResponseEntity<FontDiagnostics.FontDiagnosticsDetail> getFontDiagnosticsDetail(
+            @PathVariable("sessionId") String sessionId,
+            @PathVariable("objNum") int objNum,
+            @PathVariable("genNum") int genNum) throws IOException {
+        return ResponseEntity.ok(fontInspectorService.analyzeFontIssueDetail(
+            pdfService.getSessionPdfBytes(sessionId), objNum, genNum));
+        }
 
     @GetMapping("/fonts/{sessionId}/extract/{objNum}/{genNum}")
     public ResponseEntity<byte[]> extractFont(@PathVariable("sessionId") String sessionId,

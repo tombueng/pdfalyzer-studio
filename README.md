@@ -23,6 +23,36 @@ Open `http://localhost:8080`.
 mvn clean verify
 ```
 
+## Licensing and Release Compliance
+
+- Project license: [LICENSE](LICENSE) (Apache-2.0).
+- Project notice file: [NOTICE](NOTICE).
+- Dependency license audit source: `licenses/generated/THIRD-PARTY.txt`.
+- Generated dependency license texts: `licenses/texts/`.
+- Manual fallback texts for intermittent download failures: `licenses/manual/`.
+- Dual-license elections: `licenses/compliance/dual-license-elections.md`.
+- CC-BY attribution: `licenses/attributions/font-awesome-cc-by-3.0.txt`.
+
+### What is included in packaged artifacts
+
+During build, Maven copies the entire root `licenses/` folder into the application artifact under:
+
+- `META-INF/license/**`
+- `META-INF/resources/license/**` (web-accessible)
+- `META-INF/LICENSE`
+- `META-INF/NOTICE`
+
+Web overview page:
+- `/license` (lists all bundled documents with links)
+
+### Release command (must run for every release)
+
+```bash
+mvn clean verify
+```
+
+This regenerates third-party notices and license texts from the current dependency graph, ensuring the release artifact is updated with current compliance data.
+
 ## Tech Stack (Current)
 
 | Area | Technology |

@@ -76,6 +76,7 @@ PDFalyzer.EditMode = (function ($, P) {
         $('#editToolbar').addClass('active');
         P.state.editMode = true;
         P.state.selectedFieldNames = [];
+        P.state.selectedImageNodeIds = [];
         if (!P.state.pendingFieldDeletes) P.state.pendingFieldDeletes = {};
         updatePlaceModeCursor();
 
@@ -260,8 +261,7 @@ PDFalyzer.EditMode = (function ($, P) {
         P.state.pendingFieldRects = [];
         P.state.pendingFieldOptions = [];
         pendingFieldOptionOverrides = {};
-        if (P.state.treeData) P.Tree.render(P.state.treeData);
-        P.Viewer.loadPdf(P.state.sessionId);
+        if (P.state.treeData) P.Utils.refreshAfterMutation(P.state.treeData);
         refreshSelectionButtons();
         updateSaveButton();
         P.Utils.toast('Form changes saved', 'success');
@@ -273,6 +273,7 @@ PDFalyzer.EditMode = (function ($, P) {
         P.state.pendingFieldOptions = [];
         pendingFieldOptionOverrides = {};
         P.state.selectedFieldNames = [];
+        P.state.selectedImageNodeIds = [];
         lastAddedFieldTemplate = null;
         updatePlaceModeCursor();
         refreshSelectionButtons();
@@ -571,8 +572,32 @@ PDFalyzer.EditMode = (function ($, P) {
             var pendingRequired = fieldNode.options ? fieldNode.options.required : null;
             return isTruthyFlag(pendingRequired);
         }
+
+        var fullName = fieldNode.properties && fieldNode.properties.FullName;
+        if (fullName && pendingFieldOptionOverrides[fullName] &&
+            Object.prototype.hasOwnProperty.call(pendingFieldOptionOverrides[fullName], 'required')) {
+            return isTruthyFlag(pendingFieldOptionOverrides[fullName].required);
+        }
+
         var props = fieldNode.properties || {};
         return isTruthyFlag(props.Required) || isTruthyFlag(props.required);
+    }
+
+    function isFieldReadOnly(fieldNode) {
+        if (!fieldNode) return false;
+        if (fieldNode.pending) {
+            var pendingReadOnly = fieldNode.options ? fieldNode.options.readonly : null;
+            return isTruthyFlag(pendingReadOnly);
+        }
+
+        var fullName = fieldNode.properties && fieldNode.properties.FullName;
+        if (fullName && pendingFieldOptionOverrides[fullName] &&
+            Object.prototype.hasOwnProperty.call(pendingFieldOptionOverrides[fullName], 'readonly')) {
+            return isTruthyFlag(pendingFieldOptionOverrides[fullName].readonly);
+        }
+
+        var props = fieldNode.properties || {};
+        return isTruthyFlag(props.ReadOnly) || isTruthyFlag(props.readonly);
     }
 
     function renderFieldHandles(pageIndex, wrapperEl) {
@@ -603,6 +628,13 @@ PDFalyzer.EditMode = (function ($, P) {
             if (isFieldRequired(fieldNode)) {
                 $handle.addClass('required');
             }
+            if (isFieldReadOnly(fieldNode)) {
+                $handle.addClass('readonly');
+                $handle.append($('<span>', {
+                    'class': 'form-field-readonly-badge',
+                    html: '<i class="fas fa-lock"></i>'
+                }));
+            }
             if ((P.state.selectedFieldNames || []).indexOf(fullName) >= 0) {
                 $handle.addClass('selected');
             }
@@ -623,6 +655,7 @@ PDFalyzer.EditMode = (function ($, P) {
             }).on('click', function(e) {
                 e.stopPropagation();
                 P.state.selectedFieldNames = [fullName];
+                P.state.selectedImageNodeIds = [];
                 renderFieldHandlesForAllPages();
                 openOptionsPopup();
             });
@@ -693,7 +726,9 @@ PDFalyzer.EditMode = (function ($, P) {
             e.stopPropagation();
             if (!fullName) return;
             P.state.selectedFieldNames = [fullName];
+            P.state.selectedImageNodeIds = [];
             syncHandleSelectionClasses();
+            syncTreeSelectionForField(fullName);
             refreshSelectionButtons();
             openOptionsPopup();
         });
@@ -711,7 +746,9 @@ PDFalyzer.EditMode = (function ($, P) {
                 e.preventDefault();
                 e.stopPropagation();
                 P.state.selectedFieldNames = [fullName];
+                P.state.selectedImageNodeIds = [];
                 syncHandleSelectionClasses();
+                syncTreeSelectionForField(fullName);
                 refreshSelectionButtons();
                 openOptionsPopup();
                 return;
@@ -728,6 +765,8 @@ PDFalyzer.EditMode = (function ($, P) {
                     var selectedNames = P.state.selectedFieldNames || [];
                     if (!(selectedNames.length > 1 && selectedNames.indexOf(name) >= 0)) {
                         P.state.selectedFieldNames = [name];
+                        P.state.selectedImageNodeIds = [];
+                        syncTreeSelectionForField(name);
                     }
                 }
                 refreshSelectionButtons();
@@ -933,6 +972,7 @@ PDFalyzer.EditMode = (function ($, P) {
         if (idx >= 0) P.state.selectedFieldNames.splice(idx, 1);
         else P.state.selectedFieldNames.push(fieldName);
         syncHandleSelectionClasses();
+        syncTreeSelectionForField(fieldName);
         refreshSelectionButtons();
     }
 
@@ -945,7 +985,9 @@ PDFalyzer.EditMode = (function ($, P) {
             toggleFieldSelection(fullName);
         } else {
             P.state.selectedFieldNames = [fullName];
+            P.state.selectedImageNodeIds = [];
             syncHandleSelectionClasses();
+            syncTreeSelectionForField(fullName);
         }
 
         renderFieldHandlesForAllPages();
@@ -1017,6 +1059,13 @@ PDFalyzer.EditMode = (function ($, P) {
             return true;
         });
         return match;
+    }
+
+    function syncTreeSelectionForField(fieldName) {
+        if (!fieldName || !P.Tree || !P.Tree.selectNode) return;
+        var node = findFieldNodeByName(fieldName);
+        if (!node) return;
+        P.Tree.selectNode(node, false, true, true);
     }
 
     function syncHandleSelectionClasses() {

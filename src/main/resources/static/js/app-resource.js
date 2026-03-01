@@ -73,9 +73,7 @@ PDFalyzer.Resource = (function ($, P) {
                     })
                 })
                 .done(function (data) {
-                    P.state.treeData = data.tree;
-                    P.Tree.render(P.state.treeData);
-                    P.Viewer.loadPdf(P.state.sessionId);
+                    P.Utils.refreshAfterMutation(data.tree);
                     P.Utils.toast(resourceType.charAt(0).toUpperCase() +
                                   resourceType.slice(1) + ' deleted', 'success');
                 })

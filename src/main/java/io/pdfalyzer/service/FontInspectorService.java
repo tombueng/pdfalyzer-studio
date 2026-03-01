@@ -1,5 +1,6 @@
 package io.pdfalyzer.service;
 
+import io.pdfalyzer.model.FontDiagnostics;
 import io.pdfalyzer.model.FontInfo;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.*;
@@ -38,6 +39,71 @@ public class FontInspectorService {
             if (pageIndex < 0 || pageIndex >= doc.getNumberOfPages())
                 throw new IllegalArgumentException("Invalid page index: " + pageIndex);
             return analyzePageFontsInternal(doc.getPage(pageIndex), pageIndex);
+        }
+    }
+
+    public FontDiagnostics analyzeFontIssues(byte[] pdfBytes) throws IOException {
+        FontDiagnostics diagnostics = new FontDiagnostics();
+        try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+            Map<COSBase, COSObjectKey> objectKeyIndex = buildObjectKeyIndex(doc);
+            Map<String, FontRefAggregate> fonts = collectAllFonts(doc, objectKeyIndex);
+            Map<String, UsageStats> usage = collectUsageByFont(doc, null, objectKeyIndex);
+
+            List<FontDiagnostics.FontDiagnosticsEntry> entries = new ArrayList<>();
+            int withIssues = 0;
+            int withMissingGlyphs = 0;
+            int withEncodingProblems = 0;
+
+            for (Map.Entry<String, FontRefAggregate> aggregateEntry : fonts.entrySet()) {
+                String key = aggregateEntry.getKey();
+                FontRefAggregate aggregate = aggregateEntry.getValue();
+                UsageStats stats = usage.getOrDefault(key, new UsageStats());
+                FontDiagnostics.FontDiagnosticsEntry entry = buildDiagnosticsEntry(aggregate, stats);
+
+                if (!entry.getIssues().isEmpty()) withIssues++;
+                if (entry.getUnencodableUsedChars() > 0) withMissingGlyphs++;
+                if (entry.getUnmappedUsedCodes() > 0) withEncodingProblems++;
+
+                entries.add(entry);
+            }
+
+            entries.sort((a, b) -> {
+                int issueCmp = Integer.compare(b.getIssues().size(), a.getIssues().size());
+                if (issueCmp != 0) return issueCmp;
+                int missingCmp = Integer.compare(b.getUnmappedUsedCodes(), a.getUnmappedUsedCodes());
+                if (missingCmp != 0) return missingCmp;
+                return String.valueOf(a.getFontName()).compareToIgnoreCase(String.valueOf(b.getFontName()));
+            });
+
+            diagnostics.setFonts(entries);
+            diagnostics.setTotalFonts(entries.size());
+            diagnostics.setFontsWithIssues(withIssues);
+            diagnostics.setFontsWithMissingGlyphs(withMissingGlyphs);
+            diagnostics.setFontsWithEncodingProblems(withEncodingProblems);
+        }
+        return diagnostics;
+    }
+
+    public FontDiagnostics.FontDiagnosticsDetail analyzeFontIssueDetail(byte[] pdfBytes, int objNum, int genNum) throws IOException {
+        try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+            Map<COSBase, COSObjectKey> objectKeyIndex = buildObjectKeyIndex(doc);
+            Map<String, FontRefAggregate> fonts = collectAllFonts(doc, objectKeyIndex);
+            String targetKey = objNum + ":" + genNum;
+            FontRefAggregate aggregate = fonts.get(targetKey);
+            if (aggregate == null) {
+                throw new IllegalArgumentException("Font object not found: " + objNum + " " + genNum);
+            }
+
+            Map<String, UsageStats> usage = collectUsageByFont(doc, targetKey, objectKeyIndex);
+            UsageStats stats = usage.getOrDefault(targetKey, new UsageStats());
+
+            FontDiagnostics.FontDiagnosticsDetail detail = new FontDiagnostics.FontDiagnosticsDetail();
+            detail.setFont(buildDiagnosticsEntry(aggregate, stats));
+            detail.setEncoding(buildEncodingDiagnostics(aggregate.font));
+            detail.setFontDictionary(buildFontDictionary(aggregate.font));
+            detail.setUsedCharacterIssues(buildUsedCharacterIssues(stats));
+            detail.setGlyphMappings(buildGlyphMappings(aggregate.font, stats));
+            return detail;
         }
     }
 
@@ -247,6 +313,390 @@ public class FontInspectorService {
             }
         } catch (Exception e) {
             log.debug("Could not inspect XObject resources on page {}", pageIndex, e);
+        }
+    }
+
+    private Map<COSBase, COSObjectKey> buildObjectKeyIndex(PDDocument doc) {
+        Map<COSBase, COSObjectKey> index = new IdentityHashMap<>();
+        try {
+            COSDocument cosDocument = doc.getDocument();
+            Map<COSObjectKey, Long> xref = cosDocument.getXrefTable();
+            for (COSObjectKey key : xref.keySet()) {
+                COSObject object = cosDocument.getObjectFromPool(key);
+                if (object == null) continue;
+                COSBase base = object.getObject();
+                if (base != null) index.put(base, key);
+            }
+        } catch (Exception e) {
+            log.debug("Could not build COS object-key index", e);
+        }
+        return index;
+    }
+
+    private Map<String, FontRefAggregate> collectAllFonts(PDDocument doc, Map<COSBase, COSObjectKey> objectKeyIndex) {
+        Map<String, FontRefAggregate> fonts = new LinkedHashMap<>();
+        for (int i = 0; i < doc.getNumberOfPages(); i++) {
+            Set<COSBase> visitedResources = Collections.newSetFromMap(new IdentityHashMap<>());
+            collectFontsRecursive(doc.getPage(i).getResources(), i, "Page", fonts, visitedResources, objectKeyIndex);
+        }
+        return fonts;
+    }
+
+    private void collectFontsRecursive(PDResources resources,
+                                       int pageIndex,
+                                       String context,
+                                       Map<String, FontRefAggregate> out,
+                                       Set<COSBase> visitedResources,
+                                       Map<COSBase, COSObjectKey> objectKeyIndex) {
+        if (resources == null) return;
+        COSDictionary resCos = resources.getCOSObject();
+        if (resCos != null && !visitedResources.add(resCos)) return;
+
+        for (COSName fontName : resources.getFontNames()) {
+            try {
+                PDFont font = resources.getFont(fontName);
+                COSObjectKey key = null;
+                try {
+                    key = font.getCOSObject().getKey();
+                } catch (Exception ignored) {
+                }
+                if (key == null && font.getCOSObject() != null) {
+                    key = objectKeyIndex.get(font.getCOSObject());
+                }
+                final COSObjectKey capturedKey = key;
+                String refKey = fontKey(key, font, pageIndex, fontName.getName(), context);
+                FontRefAggregate aggregate = out.computeIfAbsent(refKey, k -> new FontRefAggregate(font, capturedKey));
+                aggregate.pages.add(pageIndex);
+                aggregate.contexts.add(context);
+                aggregate.objectIds.add(fontName.getName());
+            } catch (Exception e) {
+                log.debug("Could not collect font {} on page {}", fontName.getName(), pageIndex, e);
+            }
+        }
+
+        try {
+            for (COSName xObjName : resources.getXObjectNames()) {
+                PDXObject xObj = resources.getXObject(xObjName);
+                if (xObj instanceof PDFormXObject) {
+                    PDFormXObject form = (PDFormXObject) xObj;
+                    collectFontsRecursive(form.getResources(), pageIndex,
+                            "XObject " + xObjName.getName(), out, visitedResources, objectKeyIndex);
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Could not inspect nested resources on page {}", pageIndex, e);
+        }
+    }
+
+    private Map<String, UsageStats> collectUsageByFont(PDDocument doc,
+                                                       String onlyFontKey,
+                                                       Map<COSBase, COSObjectKey> objectKeyIndex) throws IOException {
+        Map<String, UsageStats> usageByFont = new LinkedHashMap<>();
+        PDFTextStripper stripper = new PDFTextStripper() {
+            @Override
+            protected void processTextPosition(TextPosition text) {
+                PDFont font = text.getFont();
+                if (font == null) {
+                    super.processTextPosition(text);
+                    return;
+                }
+
+                COSObjectKey key = null;
+                try {
+                    key = font.getCOSObject().getKey();
+                } catch (Exception ignored) {
+                }
+                if (key == null && font.getCOSObject() != null) {
+                    key = objectKeyIndex.get(font.getCOSObject());
+                }
+                String refKey = fontKey(key, font, getCurrentPageNo() - 1, "", "");
+                if (onlyFontKey != null && !onlyFontKey.equals(refKey)) {
+                    super.processTextPosition(text);
+                    return;
+                }
+
+                UsageStats usage = usageByFont.computeIfAbsent(refKey, k -> new UsageStats());
+                usage.pages.add(getCurrentPageNo() - 1);
+                usage.glyphCount++;
+
+                int[] codes = text.getCharacterCodes();
+                if (codes != null) {
+                    for (int code : codes) {
+                        usage.usedCodes.merge(code, 1, Integer::sum);
+                    }
+                }
+
+                String unicode = text.getUnicode();
+                if (unicode == null || unicode.isEmpty()) {
+                    usage.positionsWithoutUnicode++;
+                } else {
+                    for (int offset = 0; offset < unicode.length(); ) {
+                        int cp = unicode.codePointAt(offset);
+                        String ch = new String(Character.toChars(cp));
+                        usage.usedChars.merge(ch, 1, Integer::sum);
+                        offset += Character.charCount(cp);
+                    }
+                }
+
+                super.processTextPosition(text);
+            }
+        };
+        stripper.getText(doc);
+        return usageByFont;
+    }
+
+    private FontDiagnostics.FontDiagnosticsEntry buildDiagnosticsEntry(FontRefAggregate aggregate, UsageStats stats) {
+        FontDiagnostics.FontDiagnosticsEntry entry = new FontDiagnostics.FontDiagnosticsEntry();
+        PDFont font = aggregate.font;
+
+        entry.setFontName(safeFontName(font));
+        entry.setFontType(font.getClass().getSimpleName().replace("PD", ""));
+        entry.setEmbedded(font.isEmbedded());
+        entry.setSubset(isSubset(font));
+        entry.setEncoding(readEncoding(font));
+        if (aggregate.key != null) {
+            entry.setObjectNumber((int) aggregate.key.getNumber());
+            entry.setGenerationNumber((int) aggregate.key.getGeneration());
+        }
+        entry.setGlyphCount(stats.glyphCount);
+        entry.setDistinctUsedCodes(stats.usedCodes.size());
+
+        int mappedUsedCodes = 0;
+        int unmappedUsedCodes = 0;
+        for (int code : stats.usedCodes.keySet()) {
+            String unicode = safeToUnicode(font, code);
+            if (unicode == null || unicode.isEmpty()) unmappedUsedCodes++;
+            else mappedUsedCodes++;
+        }
+        entry.setMappedUsedCodes(mappedUsedCodes);
+        entry.setUnmappedUsedCodes(unmappedUsedCodes);
+
+        int unencodableChars = 0;
+        List<String> unencodableSamples = new ArrayList<>();
+        for (String character : stats.usedChars.keySet()) {
+            if (!canEncode(font, character)) {
+                unencodableChars += 1;
+                if (unencodableSamples.size() < 6) {
+                    unencodableSamples.add(character + " (" + unicodeHex(character) + ")");
+                }
+            }
+        }
+        entry.setUnencodableUsedChars(unencodableChars);
+
+        List<Integer> pages = new ArrayList<>(new TreeSet<>(aggregate.pages));
+        List<String> contexts = new ArrayList<>(new TreeSet<>(aggregate.contexts));
+        entry.setPagesUsed(pages);
+        entry.setUsageContexts(contexts);
+
+        if (!font.isEmbedded()) {
+            entry.getIssues().add("Font is not embedded");
+            entry.setFixSuggestion("Embed this font or replace with an embedded subset to avoid platform-dependent rendering.");
+        }
+        if (font instanceof PDType3Font) {
+            entry.getIssues().add("Type3 font can cause inconsistent rendering");
+            if (entry.getFixSuggestion() == null) {
+                entry.setFixSuggestion("Prefer embedded TrueType/OpenType fonts for better compatibility.");
+            }
+        }
+        if (entry.getUnmappedUsedCodes() > 0) {
+            entry.getIssues().add("Used character codes are missing Unicode mappings: " + entry.getUnmappedUsedCodes());
+            if (entry.getFixSuggestion() == null) {
+                entry.setFixSuggestion("Add or repair ToUnicode CMap for this font.");
+            }
+        }
+        if (entry.getUnencodableUsedChars() > 0) {
+            entry.getIssues().add("Used text contains characters not encodable by this font: " + entry.getUnencodableUsedChars());
+            if (entry.getFixSuggestion() == null) {
+                entry.setFixSuggestion("Use a font that covers all required glyphs or split text across fallback fonts.");
+            }
+        }
+        if (stats.positionsWithoutUnicode > 0) {
+            entry.getIssues().add("Text positions without Unicode output: " + stats.positionsWithoutUnicode);
+            if (entry.getFixSuggestion() == null) {
+                entry.setFixSuggestion("Verify Encoding and ToUnicode entries for this font.");
+            }
+        }
+
+        return entry;
+    }
+
+    private FontDiagnostics.EncodingDiagnostics buildEncodingDiagnostics(PDFont font) {
+        FontDiagnostics.EncodingDiagnostics encoding = new FontDiagnostics.EncodingDiagnostics();
+        COSDictionary dict = font.getCOSObject();
+        encoding.setHasToUnicode(dict.containsKey(COSName.TO_UNICODE));
+        encoding.setEncodingObject(summarizeCos(dict.getDictionaryObject(COSName.ENCODING)));
+        encoding.setToUnicodeObject(summarizeCos(dict.getDictionaryObject(COSName.TO_UNICODE)));
+        encoding.setSubtype(safeName(dict.getCOSName(COSName.SUBTYPE)));
+        encoding.setBaseFont(safeName(dict.getCOSName(COSName.BASE_FONT)));
+
+        COSBase descendants = dict.getDictionaryObject(COSName.DESCENDANT_FONTS);
+        if (descendants instanceof COSArray && ((COSArray) descendants).size() > 0) {
+            encoding.setDescendantFont(summarizeCos(((COSArray) descendants).getObject(0)));
+        }
+        return encoding;
+    }
+
+    private Map<String, String> buildFontDictionary(PDFont font) {
+        Map<String, String> dictionary = new LinkedHashMap<>();
+        COSDictionary dict = font.getCOSObject();
+        if (dict == null) return dictionary;
+
+        List<COSName> names = new ArrayList<>(dict.keySet());
+        names.sort(Comparator.comparing(COSName::getName));
+        for (COSName name : names) {
+            dictionary.put(name.getName(), summarizeCos(dict.getDictionaryObject(name)));
+        }
+        return dictionary;
+    }
+
+    private List<FontDiagnostics.UsedCharacterIssue> buildUsedCharacterIssues(UsageStats stats) {
+        List<FontDiagnostics.UsedCharacterIssue> issues = new ArrayList<>();
+        for (Map.Entry<String, Integer> entry : stats.usedChars.entrySet()) {
+            String ch = entry.getKey();
+            if (ch == null || ch.isEmpty()) continue;
+            FontDiagnostics.UsedCharacterIssue issue = new FontDiagnostics.UsedCharacterIssue();
+            issue.setCharacter(ch);
+            issue.setUnicodeHex(unicodeHex(ch));
+            issue.setCount(entry.getValue());
+            issue.setIssue("Character is used in extracted text; inspect glyph coverage and encoding mapping.");
+            issues.add(issue);
+        }
+        issues.sort((a, b) -> Integer.compare(b.getCount(), a.getCount()));
+        return issues;
+    }
+
+    private List<FontDiagnostics.GlyphMapping> buildGlyphMappings(PDFont font, UsageStats stats) {
+        Map<Integer, FontDiagnostics.GlyphMapping> mappings = new LinkedHashMap<>();
+
+        int maxCode = (font instanceof PDType0Font) ? 65535 : 255;
+        for (int code = 0; code <= maxCode; code++) {
+            String unicode = safeToUnicode(font, code);
+            int usedCount = stats.usedCodes.getOrDefault(code, 0);
+            if ((unicode == null || unicode.isEmpty()) && usedCount == 0) continue;
+
+            FontDiagnostics.GlyphMapping mapping = new FontDiagnostics.GlyphMapping();
+            mapping.setCode(code);
+            mapping.setUnicode(unicode);
+            mapping.setUnicodeHex(unicodeHex(unicode));
+            mapping.setUsedCount(usedCount);
+            mapping.setMapped(unicode != null && !unicode.isEmpty());
+            mapping.setWidth(safeWidth(font, code));
+            mappings.put(code, mapping);
+        }
+
+        for (Map.Entry<Integer, Integer> used : stats.usedCodes.entrySet()) {
+            if (mappings.containsKey(used.getKey())) continue;
+            FontDiagnostics.GlyphMapping mapping = new FontDiagnostics.GlyphMapping();
+            mapping.setCode(used.getKey());
+            mapping.setUnicode(null);
+            mapping.setUnicodeHex("");
+            mapping.setUsedCount(used.getValue());
+            mapping.setMapped(false);
+            mapping.setWidth(safeWidth(font, used.getKey()));
+            mappings.put(used.getKey(), mapping);
+        }
+
+        List<FontDiagnostics.GlyphMapping> list = new ArrayList<>(mappings.values());
+        list.sort(Comparator.comparingInt(FontDiagnostics.GlyphMapping::getCode));
+        return list;
+    }
+
+    private String safeToUnicode(PDFont font, int code) {
+        try {
+            return font.toUnicode(code);
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private Integer safeWidth(PDFont font, int code) {
+        try {
+            return Math.round(font.getWidth(code));
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private String summarizeCos(COSBase base) {
+        if (base == null) return "";
+        String text = base.toString();
+        if (text == null) return "";
+        if (text.length() > 220) text = text.substring(0, 220) + "…";
+        return base.getClass().getSimpleName() + " " + text;
+    }
+
+    private String safeName(COSName name) {
+        return name == null ? "" : name.getName();
+    }
+
+    private String safeFontName(PDFont font) {
+        try {
+            String name = font.getName();
+            return name == null ? "(unknown)" : name;
+        } catch (Exception ignored) {
+            return "(unknown)";
+        }
+    }
+
+    private boolean isSubset(PDFont font) {
+        String name = safeFontName(font);
+        return name.length() > 7 && name.charAt(6) == '+';
+    }
+
+    private String readEncoding(PDFont font) {
+        try {
+            COSBase encoding = font.getCOSObject().getDictionaryObject(COSName.ENCODING);
+            return encoding == null ? "" : encoding.toString();
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
+    private boolean canEncode(PDFont font, String character) {
+        if (character == null || character.isEmpty()) return true;
+        try {
+            font.encode(character);
+            return true;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private String unicodeHex(String text) {
+        if (text == null || text.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        for (int offset = 0; offset < text.length(); ) {
+            int cp = text.codePointAt(offset);
+            if (sb.length() > 0) sb.append(' ');
+            sb.append(String.format("U+%04X", cp));
+            offset += Character.charCount(cp);
+        }
+        return sb.toString();
+    }
+
+    private String fontKey(COSObjectKey key, PDFont font, int pageIndex, String objectId, String context) {
+        if (key != null) return key.getNumber() + ":" + key.getGeneration();
+        return "direct:" + System.identityHashCode(font) + ":" + pageIndex + ":" + objectId + ":" + context;
+    }
+
+    private static class UsageStats {
+        private int glyphCount;
+        private int positionsWithoutUnicode;
+        private final Map<Integer, Integer> usedCodes = new LinkedHashMap<>();
+        private final Map<String, Integer> usedChars = new LinkedHashMap<>();
+        private final Set<Integer> pages = new LinkedHashSet<>();
+    }
+
+    private static class FontRefAggregate {
+        private final PDFont font;
+        private final COSObjectKey key;
+        private final Set<Integer> pages = new LinkedHashSet<>();
+        private final Set<String> contexts = new LinkedHashSet<>();
+        private final Set<String> objectIds = new LinkedHashSet<>();
+
+        private FontRefAggregate(PDFont font, COSObjectKey key) {
+            this.font = font;
+            this.key = key;
         }
     }
 

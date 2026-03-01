@@ -75,9 +75,7 @@ PDFalyzer.CosEditor = (function ($, P) {
             })
         })
         .done(function (data) {
-            P.state.treeData = data.tree;
-            P.Tree.render(P.state.treeData);
-            P.Viewer.loadPdf(P.state.sessionId);
+            P.Utils.refreshAfterMutation(data.tree);
             P.Utils.toast('Value updated successfully', 'success');
         })
         .fail(function () { P.Utils.toast('Edit failed', 'danger'); })
@@ -144,9 +142,7 @@ PDFalyzer.CosEditor = (function ($, P) {
                     })
                 })
                 .done(function (data) {
-                    P.state.treeData = data.tree;
-                    P.Tree.render(P.state.treeData);
-                    P.Viewer.loadPdf(P.state.sessionId);
+                    P.Utils.refreshAfterMutation(data.tree);
                     P.Utils.toast('Entry added', 'success');
                 })
                 .fail(function () { P.Utils.toast('Add failed', 'danger'); });
@@ -206,9 +202,7 @@ PDFalyzer.CosEditor = (function ($, P) {
                     })
                 })
                 .done(function (data) {
-                    P.state.treeData = data.tree;
-                    P.Tree.render(P.state.treeData);
-                    P.Viewer.loadPdf(P.state.sessionId);
+                    P.Utils.refreshAfterMutation(data.tree);
                     P.Utils.toast('Entry removed', 'success');
                 })
                 .fail(function () { P.Utils.toast('Delete failed', 'danger'); });
