@@ -200,18 +200,21 @@ PDFalyzer.Tree = (function ($, P) {
                 node.objectNumber >= 0) {
             var resourceUrl = '/api/resource/' + P.state.sessionId + '/' +
                               node.objectNumber + '/' + (node.generationNumber || 0);
+            if (node.keyPath) {
+                resourceUrl += '?keyPath=' + encodeURIComponent(node.keyPath);
+            }
             $('<button>', { 'class': 'resource-open-btn', title: 'Preview resource',
                              html: '<i class="fas fa-eye"></i>' })
                 .on('click', function (e) {
                     e.stopPropagation();
-                    P.Resource.preview(resourceUrl + '?inline=true');
+                    P.Resource.preview(resourceUrl + (node.keyPath ? '&inline=true' : '?inline=true'));
                 })
                 .appendTo($header);
             $('<button>', { 'class': 'resource-download-btn', title: 'Download resource',
                              html: '<i class="fas fa-download"></i>' })
                 .on('click', function (e) {
                     e.stopPropagation();
-                    window.open(resourceUrl, '_blank');
+                    window.open(resourceUrl + (node.keyPath ? '&inline=false' : '?inline=false'), '_blank');
                 })
                 .appendTo($header);
             if (node.nodeCategory === 'image' && node.keyPath) {
