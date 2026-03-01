@@ -2,7 +2,7 @@ package io.pdfalyzer.service;
 
 import io.pdfalyzer.model.FormFieldRequest;
 import org.apache.pdfbox.Loader;
-import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.cos.*;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDResources;
@@ -180,5 +180,122 @@ public class PdfEditService {
 
         page.getAnnotations().add(widget);
         acroForm.getFields().add(field);
+    }
+
+    /**
+     * Delete a form field (and its widgets) from the document.
+     *
+     * @param pdfBytes  current PDF bytes
+     * @param fieldName fully-qualified field name to remove
+     * @return updated PDF bytes
+     */
+    public byte[] deleteFormField(byte[] pdfBytes, String fieldName) throws IOException {
+        try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+            PDAcroForm acroForm = doc.getDocumentCatalog().getAcroForm();
+            if (acroForm == null) throw new IllegalArgumentException("No AcroForm in document");
+
+            PDField target = findField(acroForm.getFields(), fieldName);
+            if (target == null) throw new IllegalArgumentException("Field not found: " + fieldName);
+
+            // Remove widget annotations from their pages (use COS identity comparison)
+            for (org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationWidget widget
+                    : target.getWidgets()) {
+                COSDictionary widgetCos = widget.getCOSObject();
+                // Try page reference from widget
+                PDPage page = widget.getPage();
+                if (page == null) {
+                    // Fallback: scan all pages
+                    for (PDPage p : doc.getPages()) {
+                        for (org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotation a
+                                : p.getAnnotations()) {
+                            if (a.getCOSObject() == widgetCos) { page = p; break; }
+                        }
+                        if (page != null) break;
+                    }
+                }
+                if (page != null) {
+                    final PDPage finalPage = page;
+                    java.util.List<org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotation>
+                            annots = finalPage.getAnnotations();
+                    annots.removeIf(a -> a.getCOSObject() == widgetCos);
+                    finalPage.setAnnotations(annots);
+                }
+            }
+
+            // Remove from AcroForm fields via direct COS array manipulation for reliability
+            COSName fieldsKey = COSName.FIELDS;
+            COSDictionary parentCos = target.getParent() != null
+                    ? target.getParent().getCOSObject()
+                    : acroForm.getCOSObject();
+            COSName childKey = target.getParent() != null
+                    ? COSName.getPDFName("Kids")
+                    : COSName.FIELDS;
+            COSBase arr = parentCos.getDictionaryObject(childKey);
+            if (arr instanceof COSArray) {
+                COSArray cosArr = (COSArray) arr;
+                COSDictionary targetCos = target.getCOSObject();
+                for (int i = cosArr.size() - 1; i >= 0; i--) {
+                    COSBase item = cosArr.getObject(i);
+                    if (item == targetCos) { cosArr.remove(i); break; }
+                }
+            }
+
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            doc.save(out);
+            log.info("Deleted form field '{}'", fieldName);
+            return out.toByteArray();
+        }
+    }
+
+    /**
+     * Set the value of a form field.
+     */
+    public byte[] setFormFieldValue(byte[] pdfBytes, String fieldName, String value) throws IOException {
+        try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+            PDAcroForm acroForm = doc.getDocumentCatalog().getAcroForm();
+            if (acroForm == null) throw new IllegalArgumentException("No AcroForm in document");
+            PDField target = findField(acroForm.getFields(), fieldName);
+            if (target == null) throw new IllegalArgumentException("Field not found: " + fieldName);
+            target.setValue(value);
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            doc.save(out);
+            log.info("Set field '{}' value to '{}'", fieldName, value);
+            return out.toByteArray();
+        }
+    }
+
+    /**
+     * Update the list of choices for a combo-box / list-box field.
+     */
+    public byte[] setComboChoices(byte[] pdfBytes, String fieldName,
+                                   java.util.List<String> choices) throws IOException {
+        try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+            PDAcroForm acroForm = doc.getDocumentCatalog().getAcroForm();
+            if (acroForm == null) throw new IllegalArgumentException("No AcroForm in document");
+            PDField target = findField(acroForm.getFields(), fieldName);
+            if (!(target instanceof PDComboBox) && !(target instanceof PDListBox)) {
+                throw new IllegalArgumentException("Field is not a combo/list box: " + fieldName);
+            }
+            if (target instanceof PDComboBox) ((PDComboBox) target).setOptions(choices);
+            else ((PDListBox) target).setOptions(choices);
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            doc.save(out);
+            log.info("Updated choices for field '{}': {}", fieldName, choices);
+            return out.toByteArray();
+        }
+    }
+
+    private PDField findField(java.util.List<PDField> fields, String name) {
+        for (PDField f : fields) {
+            if (name.equals(f.getFullyQualifiedName())) return f;
+            if (name.equals(f.getPartialName())) return f;
+            if (f instanceof org.apache.pdfbox.pdmodel.interactive.form.PDNonTerminalField) {
+                PDField found = findField(
+                        ((org.apache.pdfbox.pdmodel.interactive.form.PDNonTerminalField) f).getChildren(),
+                        name);
+                if (found != null) return found;
+            }
+        }
+        return null;
     }
 }

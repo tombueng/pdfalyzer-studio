@@ -1,0 +1,236 @@
+/* === Tree Pane === */
+#treePane {
+    width: 420px;
+    min-width: 250px;
+    max-width: 60vw;
+    background: var(--bg-panel);
+    display: flex;
+    flex-direction: column;
+    border-left: 1px solid var(--border);
+    overflow: hidden;
+}
+
+/* Tabs */
+.tree-tabs {
+    display: flex;
+    background: rgba(0,0,0,0.2);
+    border-bottom: 1px solid var(--border);
+    overflow-x: auto;
+    flex-shrink: 0;
+}
+
+.tree-tabs .tab-btn {
+    padding: 8px 14px;
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    border-bottom: 2px solid transparent;
+    transition: all 0.2s;
+}
+
+.tree-tabs .tab-btn:hover {
+    color: var(--text);
+    background: rgba(255,255,255,0.04);
+}
+
+.tree-tabs .tab-btn.active {
+    color: var(--accent);
+    border-bottom-color: var(--accent);
+}
+
+/* Tree Content */
+#treeContent {
+    flex: 1;
+    overflow: auto;
+    padding: 8px;
+}
+
+/* Tree Nodes */
+.tree-node { margin-left: 0; }
+.tree-node .tree-children { margin-left: 16px; }
+
+.tree-node-header {
+    display: flex;
+    align-items: center;
+    padding: 3px 6px;
+    border-radius: 4px;
+    cursor: pointer;
+    gap: 6px;
+    font-size: 13px;
+    transition: background 0.15s;
+    user-select: none;
+    flex-wrap: wrap;
+}
+
+.tree-node-header:hover {
+    background: rgba(255,255,255,0.06);
+}
+
+.tree-node-header.selected {
+    background: var(--accent-dim);
+    outline: 1px solid rgba(0, 212, 255, 0.3);
+}
+
+.tree-toggle {
+    width: 16px;
+    font-size: 10px;
+    color: var(--text-muted);
+    text-align: center;
+    flex-shrink: 0;
+    transition: transform 0.2s;
+}
+
+.tree-toggle.expanded { transform: rotate(90deg); }
+
+.tree-icon {
+    font-size: 13px;
+    width: 18px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.tree-label {
+    flex: 0 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.tree-label mark {
+    background: var(--warning);
+    color: #000;
+    padding: 0 2px;
+    border-radius: 2px;
+}
+
+/* Properties panel */
+.node-properties {
+    margin: 2px 0 4px 38px;
+    font-size: 11px;
+    background: rgba(0,0,0,0.2);
+    border-radius: 4px;
+    padding: 6px 10px;
+    border-left: 2px solid var(--accent);
+}
+
+.node-properties .prop-row {
+    display: flex;
+    gap: 8px;
+    padding: 1px 0;
+}
+
+.node-properties .prop-key {
+    color: var(--accent);
+    min-width: 80px;
+    flex-shrink: 0;
+}
+
+.node-properties .prop-val {
+    color: var(--text);
+    word-break: break-all;
+}
+
+/* === Font Table === */
+.font-table {
+    width: 100%;
+    font-size: 12px;
+    border-collapse: collapse;
+}
+
+.font-table th {
+    background: rgba(0,0,0,0.3);
+    padding: 6px 10px;
+    text-align: left;
+    color: var(--accent);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+}
+
+.font-table td {
+    padding: 5px 10px;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+
+.font-table tr:hover td { background: rgba(255,255,255,0.03); }
+
+/* === Validation Results === */
+.validation-issue {
+    padding: 8px 12px;
+    border-radius: 6px;
+    margin-bottom: 6px;
+    font-size: 12px;
+    border-left: 3px solid;
+}
+
+.validation-issue.error {
+    background: rgba(220, 53, 69, 0.1);
+    border-left-color: var(--danger);
+}
+
+.validation-issue.warning {
+    background: rgba(255, 193, 7, 0.1);
+    border-left-color: var(--warning);
+}
+
+.validation-issue.info {
+    background: rgba(0, 212, 255, 0.08);
+    border-left-color: var(--accent);
+}
+
+.validation-issue .issue-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 3px;
+}
+
+.validation-issue .issue-rule {
+    font-family: monospace;
+    opacity: 0.7;
+    font-size: 11px;
+}
+
+.validation-issue .issue-spec {
+    font-size: 10px;
+    color: var(--text-muted);
+}
+
+/* === Status Bar === */
+#statusBar {
+    height: 28px;
+    background: rgba(15, 52, 96, 0.9);
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 12px;
+    font-size: 11px;
+    color: var(--text-muted);
+    gap: 16px;
+    flex-shrink: 0;
+}
+
+#statusBar .status-item i { margin-right: 4px; }
+
+/* === Skeleton Loader === */
+.skeleton {
+    position: relative;
+    overflow: hidden;
+}
+
+.skeleton::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.04) 50%, transparent 100%);
+    animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+
