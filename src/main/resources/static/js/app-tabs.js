@@ -249,19 +249,20 @@ PDFalyzer.Tabs = (function ($, P) {
         var statement = validationReport ? (validationReport.getAttribute('statement') || '') : '';
 
         var html = header +
+            '<style id="verapdfInlineStyle">' + getVeraPdfReportCss() + '</style>' +
             '<div style="padding:8px;">' +
             '<div class="card mb-2"><div class="card-body py-2">' +
             '<div class="d-flex flex-wrap gap-2 align-items-center">' +
-            '<span class="badge bg-danger">Failed rules: ' + failedRules.length + '</span>' +
-            '<span class="badge bg-success">Passed rules: ' + passedRules.length + '</span>' +
-            '<span class="badge bg-danger-subtle text-danger">Failed checks: ' + (isNaN(totalFailedChecks) ? 0 : totalFailedChecks) + '</span>' +
-            '<span class="badge bg-success-subtle text-success">Passed checks: ' + (isNaN(totalPassedChecks) ? 0 : totalPassedChecks) + '</span>' +
+            '<button class="badge bg-danger border-0 verapdf-jump-badge verapdf-badge-failed" data-target="#verapdfFailedRules" style="cursor:pointer;">Failed rules: ' + failedRules.length + '</button>' +
+            '<button class="badge bg-success border-0 verapdf-jump-badge verapdf-badge-passed" data-target="#verapdfPassedRules" style="cursor:pointer;">Passed rules: ' + passedRules.length + '</button>' +
+            '<button class="badge bg-danger-subtle text-danger border-0 verapdf-jump-badge verapdf-badge-failed" data-target="#verapdfFailedRules" style="cursor:pointer;">Failed checks: ' + (isNaN(totalFailedChecks) ? 0 : totalFailedChecks) + '</button>' +
+            '<button class="badge bg-success-subtle text-success border-0 verapdf-jump-badge verapdf-badge-passed" data-target="#verapdfPassedRules" style="cursor:pointer;">Passed checks: ' + (isNaN(totalPassedChecks) ? 0 : totalPassedChecks) + '</button>' +
             '</div>' +
             (profileName ? '<div class="text-muted mt-2" style="font-size:12px;">Profile: ' + P.Utils.escapeHtml(profileName) + '</div>' : '') +
             (statement ? '<div class="mt-1">' + P.Utils.escapeHtml(statement) + '</div>' : '') +
             '</div></div>';
 
-        html += '<div class="card mb-2"><div class="card-header py-2"><strong class="text-danger">Failed rules</strong></div><div class="card-body py-2">';
+        html += '<div class="card mb-2" id="verapdfFailedRules"><div class="card-header py-2"><strong class="text-danger verapdf-section-title verapdf-section-failed">Failed rules</strong></div><div class="card-body py-2">';
         if (!failedRules.length) {
             html += '<div class="text-success">No failed rules.</div>';
         } else {
@@ -271,7 +272,7 @@ PDFalyzer.Tabs = (function ($, P) {
         }
         html += '</div></div>';
 
-        html += '<details><summary class="text-muted" style="cursor:pointer;">Show passed rules (' + passedRules.length + ')</summary>' +
+        html += '<details id="verapdfPassedRules"><summary class="text-muted verapdf-section-title verapdf-section-passed" style="cursor:pointer;">Show passed rules (' + passedRules.length + ')</summary>' +
             '<div class="card mt-2"><div class="card-body py-2">';
         if (!passedRules.length) {
             html += '<div class="text-muted">No passed rules.</div>';
@@ -287,7 +288,27 @@ PDFalyzer.Tabs = (function ($, P) {
 
         html += '</div>';
         $('#treeContent').html(html);
+        bindVeraPdfSummaryJumps();
         setVeraPdfExportContent(wrapHtmlDocument('veraPDF Detailed Report', html), 'veraPDF Detailed Report');
+    }
+
+    function bindVeraPdfSummaryJumps() {
+        $('#treeContent').find('.verapdf-jump-badge').off('click').on('click', function (e) {
+            e.preventDefault();
+            var selector = $(this).attr('data-target');
+            if (!selector) return;
+            var $target = $('#treeContent').find(selector).first();
+            if (!$target.length) return;
+
+            if ($target.is('details') && !$target.prop('open')) {
+                $target.prop('open', true);
+            }
+
+            var element = $target[0];
+            if (element && element.scrollIntoView) {
+                element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        });
     }
 
     function buildRuleHtml(ruleEl, failed) {
@@ -303,19 +324,18 @@ PDFalyzer.Tabs = (function ($, P) {
 
         var checks = Array.from(ruleEl.querySelectorAll('check, failedCheck, passedCheck, assertion'));
 
-        var ruleContainerClass = failed ? 'border-danger bg-dark text-light' : 'border-success-subtle';
-        var metaTextClass = failed ? 'text-light' : 'text-muted';
-        var html = '<div class="border rounded p-2 mb-2 ' + ruleContainerClass + '">' +
+        var borderColor = failed ? '#b02a37' : '#146c43';
+        var html = '<div class="rounded p-2 mb-2 verapdf-rule-box ' + (failed ? 'verapdf-rule-failed' : 'verapdf-rule-passed') + '" style="background:#161a1f;color:#eef2f6;border:3px solid ' + borderColor + ';">' +
             '<div class="d-flex flex-wrap align-items-center gap-2 mb-1">' +
-            '<span class="badge ' + (failed ? 'bg-danger' : 'bg-success') + '">' + P.Utils.escapeHtml(status || (failed ? 'failed' : 'passed')) + '</span>' +
+            '<span class="badge verapdf-status-badge ' + (failed ? 'bg-danger' : 'bg-success') + '">' + P.Utils.escapeHtml(status || (failed ? 'failed' : 'passed')) + '</span>' +
             (clause ? '<span class="badge bg-secondary">Clause ' + P.Utils.escapeHtml(clause) + '</span>' : '') +
             (testNumber ? '<span class="badge bg-secondary">Test ' + P.Utils.escapeHtml(testNumber) + '</span>' : '') +
-            '<span class="badge bg-dark">Checks ' + P.Utils.escapeHtml(failedChecks) + ' failed / ' + P.Utils.escapeHtml(passedChecks) + ' passed</span>' +
+            '<span class="badge ' + (failed ? 'bg-danger' : 'bg-success') + '">Checks ' + P.Utils.escapeHtml(failedChecks) + ' failed / ' + P.Utils.escapeHtml(passedChecks) + ' passed</span>' +
+            (objNode ? '<span class="badge bg-dark">Object: ' + P.Utils.escapeHtml(objNode.textContent || '') + '</span>' : '') +
             '</div>' +
-            (spec ? '<div class="' + metaTextClass + '" style="font-size:12px;">' + P.Utils.escapeHtml(spec) + '</div>' : '') +
+            (spec ? '<div style="font-size:12px;color:#d7dee6;">' + P.Utils.escapeHtml(spec) + '</div>' : '') +
             (descNode ? '<div class="mt-1">' + P.Utils.escapeHtml(descNode.textContent || '') + '</div>' : '') +
-            (objNode ? '<div class="' + metaTextClass + '" style="font-size:12px;">Object: ' + P.Utils.escapeHtml(objNode.textContent || '') + '</div>' : '') +
-            (testNode ? '<div class="mt-1"><code class="' + (failed ? 'text-warning' : '') + '">' + P.Utils.escapeHtml(testNode.textContent || '') + '</code></div>' : '');
+            (testNode ? '<div class="mt-1"><span class="text-muted" style="font-size:12px;">Check:</span> <code style="color:#eef2f6;background:#0f1115;">' + P.Utils.escapeHtml(testNode.textContent || '') + '</code></div>' : '');
 
         if (checks.length) {
             html += '<details class="mt-1"><summary style="cursor:pointer;">Check details (' + checks.length + ')</summary>' +
@@ -323,7 +343,7 @@ PDFalyzer.Tabs = (function ($, P) {
             checks.forEach(function (checkEl) {
                 var text = (checkEl.textContent || '').trim();
                 if (text) {
-                    html += '<div class="small border-start ps-2 mb-1">' + P.Utils.escapeHtml(text) + '</div>';
+                    html += '<div class="small border-start ps-2 mb-1 verapdf-check-detail" style="border-color:#4b5563 !important;color:#e6ebf1;font-size:10px;line-height:1.35;">' + P.Utils.escapeHtml(text) + '</div>';
                 }
             });
             html += '</div></details>';
@@ -384,22 +404,41 @@ PDFalyzer.Tabs = (function ($, P) {
             var parser = new DOMParser();
             var doc = parser.parseFromString(source, 'text/html');
 
+            Array.from(doc.querySelectorAll('#exportVeraPdfHtmlBtn, #exportVeraPdfPdfBtn')).forEach(function (btn) {
+                btn.remove();
+            });
+
             if (expandAllDetails) {
                 Array.from(doc.querySelectorAll('details')).forEach(function (d) {
                     d.setAttribute('open', 'open');
+                });
+
+                Array.from(doc.querySelectorAll('button.verapdf-jump-badge')).forEach(function (btn) {
+                    var span = doc.createElement('span');
+                    span.className = btn.className;
+                    span.innerHTML = btn.innerHTML;
+                    span.setAttribute('style', (btn.getAttribute('style') || '') + ';display:inline-block;');
+                    btn.parentNode.replaceChild(span, btn);
                 });
             }
 
             var style = doc.createElement('style');
             style.textContent = '' +
-                '.card{padding:0 !important; margin-bottom:14px !important;}' +
-                '.card-header{padding:14px 16px !important;}' +
-                '.card-body{padding:16px !important;}' +
-                '.border.rounded{padding:14px !important; margin-bottom:12px !important;}' +
-                'pre{padding:14px !important;}' +
+                '.card{padding:0 !important; margin-bottom:20px !important;}' +
+                '.card-header{padding:18px 20px !important;}' +
+                '.card-body{padding:20px !important;}' +
+                '.verapdf-rule-box{padding:18px !important; margin-bottom:16px !important; border-width:3px !important; border-style:solid !important; border-radius:10px !important;}' +
+                'pre{padding:18px !important;}' +
                 'code{padding:2px 4px; border-radius:4px;}' +
-                'details{margin-top:10px !important; margin-bottom:10px !important;}' +
-                'details > summary{padding:6px 0 !important;}';
+                'details{margin-top:14px !important; margin-bottom:14px !important;}' +
+                'details > summary{padding:8px 0 !important;}' +
+                '.badge{border:2px solid transparent !important;}' +
+                '.bg-danger{background:#b02a37 !important;color:#fff !important;border-color:#b02a37 !important;}' +
+                '.bg-success{background:#146c43 !important;color:#fff !important;border-color:#146c43 !important;}' +
+                '.bg-secondary{background:#495057 !important;color:#fff !important;border-color:#495057 !important;}' +
+                '.bg-dark{background:#212529 !important;color:#fff !important;border-color:#212529 !important;}' +
+                getVeraPdfReportCss() +
+                '@media print{*{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;} body{background:#111 !important;color:#e9ecef !important;}}';
 
             if (doc.head) {
                 doc.head.appendChild(style);
@@ -424,8 +463,20 @@ PDFalyzer.Tabs = (function ($, P) {
 
     function wrapHtmlDocument(title, bodyHtml) {
         return '<!doctype html><html><head><meta charset="utf-8"><title>' + P.Utils.escapeHtml(title) + '</title>' +
-            '<style>body{font-family:Segoe UI,Arial,sans-serif;background:#111;color:#e9ecef;margin:0;padding:20px;} .card{border:1px solid #444;border-radius:10px;background:#1c1f24;margin-bottom:14px;} .card-body,.card-header{padding:16px;} .badge{display:inline-block;padding:5px 10px;border-radius:6px;font-size:12px;margin-right:6px;} .bg-danger{background:#b02a37;color:#fff;} .bg-success{background:#146c43;color:#fff;} .bg-secondary{background:#495057;color:#fff;} .bg-dark{background:#212529;color:#fff;} .text-muted{color:#cfd4da;} .border{border:1px solid #444;} .rounded{border-radius:8px;} pre,code{font-family:Consolas,monospace;} pre{background:#0f1115;padding:14px;border-radius:6px;border:1px solid #333;} code{padding:2px 4px;border-radius:4px;} details{margin-top:10px;margin-bottom:10px;} details>summary{cursor:pointer;padding:6px 0;}</style>' +
+            '<style>body{font-family:Segoe UI,Arial,sans-serif;background:#111;color:#e9ecef;margin:0;padding:24px;} .card{border:1px solid #444;border-radius:10px;background:#1c1f24;margin-bottom:20px;} .card-body,.card-header{padding:20px;} .badge{display:inline-block;padding:6px 12px;border-radius:6px;font-size:12px;margin-right:6px;border:2px solid transparent;} .bg-danger{background:#b02a37;color:#fff;border-color:#b02a37;} .bg-success{background:#146c43;color:#fff;border-color:#146c43;} .bg-secondary{background:#495057;color:#fff;border-color:#495057;} .bg-dark{background:#212529;color:#fff;border-color:#212529;} .text-muted{color:#cfd4da;} .border{border:1px solid #444;} .rounded{border-radius:8px;} pre,code{font-family:Consolas,monospace;} pre{background:#0f1115;padding:18px;border-radius:6px;border:1px solid #333;} code{padding:2px 4px;border-radius:4px;} details{margin-top:14px;margin-bottom:14px;} details>summary{cursor:pointer;padding:8px 0;} .verapdf-rule-box{background:#161a1f !important;color:#eef2f6 !important;border-width:3px !important;padding:18px !important;margin-bottom:16px !important;} ' + getVeraPdfReportCss() + ' @media print{*{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;} body{background:#111 !important;color:#e9ecef !important;}}</style>' +
             '</head><body><h2 style="margin-top:0;">' + P.Utils.escapeHtml(title) + '</h2>' + bodyHtml + '</body></html>';
+    }
+
+    function getVeraPdfReportCss() {
+        return '.verapdf-section-title{font-weight:600;}'+
+            '.verapdf-section-failed::before{content:"⚠ "; color:#dc3545;}'+
+            '.verapdf-section-passed::before{content:"✓ "; color:#28a745;}'+
+            '.verapdf-status-badge::before{margin-right:4px;}'+
+            '.verapdf-rule-failed .verapdf-status-badge::before{content:"⚠";}'+
+            '.verapdf-rule-passed .verapdf-status-badge::before{content:"✓";}'+
+            '.verapdf-badge-failed::before{content:"⚠ ";}'+
+            '.verapdf-badge-passed::before{content:"✓ ";}'+
+            '.verapdf-check-detail{font-size:10px !important;line-height:1.35 !important;}';
     }
 
     function renderValidation(issues) {
