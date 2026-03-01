@@ -10,10 +10,34 @@ PDFalyzer.EditMode = (function ($, P) {
     var targetPage = -1;
     var pendingCreatePayload = null;
     var lastAddedFieldTemplate = null;
+    var pendingFieldOptionOverrides = {};
 
     var FIELD_CONFIG_DIALOGS = {
         create: { modalId: 'fieldCreateModal' },
         options: { modalId: 'fieldOptionsModal' }
+    };
+
+    var CREATE_BOOL_GROUPS = {
+        required: { inputName: 'createRequired', blockSelector: '#createRequiredBlock' },
+        readonly: { inputName: 'createReadonly', blockSelector: '#createReadonlyBlock' },
+        multiline: { inputName: 'createMultiline', blockSelector: '#createMultilineBlock' },
+        editable: { inputName: 'createEditable', blockSelector: '#createEditableBlock' },
+        checked: { inputName: 'createChecked', blockSelector: '#createCheckedBlock' }
+    };
+
+    var JS_PRESET_DIALOGS = {
+        create: {
+            presetSelect: '#createJsPreset',
+            paramsContainer: '#createJsPresetParams',
+            applyButton: '#createJsPresetApplyBtn',
+            scriptTarget: '#createJavascript'
+        },
+        options: {
+            presetSelect: '#optJsPreset',
+            paramsContainer: '#optJsPresetParams',
+            applyButton: '#optJsPresetApplyBtn',
+            scriptTarget: '#optJavascript'
+        }
     };
 
     function hasSession() {
@@ -36,6 +60,9 @@ PDFalyzer.EditMode = (function ($, P) {
     function hideFieldConfigModal(mode) {
         var modalEl = getFieldConfigDialogEl(mode);
         if (!modalEl) return;
+        if (document.activeElement && modalEl.contains(document.activeElement)) {
+            document.activeElement.blur();
+        }
         var modal = bootstrap.Modal.getInstance(modalEl);
         if (modal) modal.hide();
     }
@@ -68,6 +95,8 @@ PDFalyzer.EditMode = (function ($, P) {
         $('#formOptionsBtn').on('click', openOptionsPopup);
         $('#applyFieldOptionsBtn').on('click', applyOptionsFromModal);
         $('#applyCreateFieldBtn').on('click', applyCreateFieldFromModal);
+        bindJsPresetControls('create');
+        bindJsPresetControls('options');
         $('#fieldCreateModal').on('hidden.bs.modal', function () {
             pendingCreatePayload = null;
         });
@@ -77,8 +106,8 @@ PDFalyzer.EditMode = (function ($, P) {
         drawing    = true;
         targetPage = pageIndex;
         var rect   = wrapper.getBoundingClientRect();
-        startX     = e.clientX - rect.left;
-        startY     = e.clientY - rect.top;
+        startX     = clamp(e.clientX - rect.left, 0, rect.width);
+        startY     = clamp(e.clientY - rect.top, 0, rect.height);
 
         $drawRect = $('<div>', { 'class': 'draw-rect' })
             .css({ left: startX + 'px', top: startY + 'px' })
@@ -86,7 +115,8 @@ PDFalyzer.EditMode = (function ($, P) {
 
         var moveHandler = function (ev) {
             if (!drawing) return;
-            var cx = ev.clientX - rect.left, cy = ev.clientY - rect.top;
+            var cx = clamp(ev.clientX - rect.left, 0, rect.width);
+            var cy = clamp(ev.clientY - rect.top, 0, rect.height);
             $drawRect.css({
                 left:   Math.min(startX, cx) + 'px',
                 top:    Math.min(startY, cy) + 'px',
@@ -98,7 +128,8 @@ PDFalyzer.EditMode = (function ($, P) {
         var upHandler = function (ev) {
             drawing = false;
             $(document).off('mousemove', moveHandler).off('mouseup', upHandler);
-            var cx = ev.clientX - rect.left, cy = ev.clientY - rect.top;
+            var cx = clamp(ev.clientX - rect.left, 0, rect.width);
+            var cy = clamp(ev.clientY - rect.top, 0, rect.height);
             var x = Math.min(startX, cx), y = Math.min(startY, cy);
             var w = Math.abs(cx - startX), h = Math.abs(cy - startY);
             if ($drawRect) $drawRect.remove();
@@ -228,6 +259,7 @@ PDFalyzer.EditMode = (function ($, P) {
         P.state.pendingFormAdds = [];
         P.state.pendingFieldRects = [];
         P.state.pendingFieldOptions = [];
+        pendingFieldOptionOverrides = {};
         if (P.state.treeData) P.Tree.render(P.state.treeData);
         P.Viewer.loadPdf(P.state.sessionId);
         refreshSelectionButtons();
@@ -239,6 +271,7 @@ PDFalyzer.EditMode = (function ($, P) {
         P.state.pendingFormAdds = [];
         P.state.pendingFieldRects = [];
         P.state.pendingFieldOptions = [];
+        pendingFieldOptionOverrides = {};
         P.state.selectedFieldNames = [];
         lastAddedFieldTemplate = null;
         updatePlaceModeCursor();
@@ -384,7 +417,29 @@ PDFalyzer.EditMode = (function ($, P) {
         $('#createFieldType').val(fieldType);
         $('#createFieldPage').val(String(pageIndex + 1));
         $('#createFieldId').val(suggestNextFieldId(fieldType));
-        $('#createFieldOptions').val(JSON.stringify(pendingCreatePayload.options, null, 2));
+
+        var createEntry = { kind: 'pending', pendingField: { fieldType: fieldType } };
+        var visibleKeys = computeVisibleOptionKeys([createEntry]);
+
+        Object.keys(CREATE_BOOL_GROUPS).forEach(function (optionName) {
+            var def = CREATE_BOOL_GROUPS[optionName];
+            setFieldConfigBlockVisible(def.blockSelector, !!visibleKeys[optionName]);
+            if (visibleKeys[optionName]) {
+                setCreateBooleanControlValue(optionName, !!pendingCreatePayload.options[optionName]);
+            }
+        });
+
+        setFieldConfigBlockVisible('#createDefaultValueBlock', !!visibleKeys.defaultValue);
+        setFieldConfigBlockVisible('#createChoicesBlock', !!visibleKeys.choices);
+        setFieldConfigBlockVisible('#createJavascriptBlock', !!visibleKeys.javascript);
+
+        $('#createDefaultValue').val(pendingCreatePayload.options.defaultValue || '');
+        var createChoices = pendingCreatePayload.options.choices;
+        $('#createChoices').val(Array.isArray(createChoices) ? createChoices.join(',') : (createChoices || ''));
+        $('#createJavascript').val(pendingCreatePayload.options.javascript || '');
+
+        $('#fieldCreateScopeHint').text('Showing options relevant for this ' + String(fieldType).toLowerCase() + ' field.');
+        initializeJsPresetUi('create');
 
         showFieldConfigModal('create');
     }
@@ -398,14 +453,28 @@ PDFalyzer.EditMode = (function ($, P) {
             return;
         }
 
-        var options = pendingCreatePayload.options;
-        var optionsJson = ($('#createFieldOptions').val() || '').trim();
-        if (optionsJson) {
-            try {
-                options = JSON.parse(optionsJson);
-            } catch (err) {
-                P.Utils.toast('Invalid options JSON, using defaults', 'warning');
-            }
+        var options = cloneObject(pendingCreatePayload.options || {});
+
+        Object.keys(CREATE_BOOL_GROUPS).forEach(function (key) {
+            var def = CREATE_BOOL_GROUPS[key];
+            if (!isFieldConfigBlockVisible(def.blockSelector)) return;
+            options[key] = getCreateBooleanControlValue(key);
+        });
+
+        if (isFieldConfigBlockVisible('#createDefaultValueBlock')) {
+            options.defaultValue = $('#createDefaultValue').val() || '';
+        }
+
+        if (isFieldConfigBlockVisible('#createChoicesBlock')) {
+            var rawChoices = $('#createChoices').val() || '';
+            options.choices = rawChoices
+                .split(',')
+                .map(function (v) { return v.trim(); })
+                .filter(function (v) { return v.length > 0; });
+        }
+
+        if (isFieldConfigBlockVisible('#createJavascriptBlock')) {
+            options.javascript = $('#createJavascript').val() || '';
         }
 
         var queuedField = {
@@ -577,14 +646,37 @@ PDFalyzer.EditMode = (function ($, P) {
                     e.stopPropagation();
                     undoFieldDelete(fullName);
                 });
-                $handle.addClass('removed').append($undoBtn).appendTo(wrapperEl);
+                var $undoActions = $('<div>', { 'class': 'field-handle-actions' }).append($undoBtn);
+                $handle.addClass('removed').append($undoActions).appendTo(wrapperEl);
+                updateActionButtonsSide($handle, wrapperEl);
             } else {
                 var $resize = $('<div>', { 'class': 'form-field-resize' });
-                $handle.append($optBtn, $delBtn, $resize).appendTo(wrapperEl);
+                var $actions = $('<div>', { 'class': 'field-handle-actions' }).append($optBtn, $delBtn);
+                $handle.append($actions, $resize).appendTo(wrapperEl);
+                updateActionButtonsSide($handle, wrapperEl);
                 bindDragResize($handle, $resize, fieldNode, viewport);
             }
         });
         refreshSelectionButtons();
+    }
+
+    function updateActionButtonsSide($handle, wrapperEl) {
+        if (!$handle || !$handle.length || !wrapperEl) return;
+        var $actions = $handle.find('.field-handle-actions').first();
+        if (!$actions.length) return;
+
+        $actions.removeClass('side-left');
+
+        var handleLeft = parseFloat($handle.css('left')) || 0;
+        var handleWidth = $handle.outerWidth() || 0;
+        var actionsWidth = $actions.outerWidth() || 0;
+        var gap = 6;
+        var wrapperWidth = wrapperEl.clientWidth || 0;
+
+        var rightEdgeWithActions = handleLeft + handleWidth + gap + actionsWidth;
+        if (rightEdgeWithActions > wrapperWidth) {
+            $actions.addClass('side-left');
+        }
     }
 
     function bindDragResize($handle, $resize, fieldNode, viewport) {
@@ -593,6 +685,18 @@ PDFalyzer.EditMode = (function ($, P) {
         var start = {};
         var moveHandler = null;
         var upHandler = null;
+        var fullName = fieldNode && fieldNode.properties ? fieldNode.properties.FullName : null;
+
+        $handle.on('dblclick', function (e) {
+            if ($(e.target).closest('.form-field-resize, .field-handle-btn').length) return;
+            e.preventDefault();
+            e.stopPropagation();
+            if (!fullName) return;
+            P.state.selectedFieldNames = [fullName];
+            syncHandleSelectionClasses();
+            refreshSelectionButtons();
+            openOptionsPopup();
+        });
 
         function detachDragHandlers() {
             if (moveHandler) $(document).off('mousemove', moveHandler);
@@ -603,6 +707,15 @@ PDFalyzer.EditMode = (function ($, P) {
 
         $handle.on('mousedown', function (e) {
             if ($(e.target).closest('.form-field-resize, .field-handle-btn').length) return;
+            if (e.detail >= 2 && fullName) {
+                e.preventDefault();
+                e.stopPropagation();
+                P.state.selectedFieldNames = [fullName];
+                syncHandleSelectionClasses();
+                refreshSelectionButtons();
+                openOptionsPopup();
+                return;
+            }
             e.preventDefault();
             e.stopPropagation();
             detachDragHandlers();
@@ -671,14 +784,33 @@ PDFalyzer.EditMode = (function ($, P) {
                     var dy = ev.clientY - start.y;
                     if (start.dragTargets && start.dragTargets.length) {
                         start.dragTargets.forEach(function (target) {
-                            target.$el.css({ left: (target.left + dx) + 'px', top: (target.top + dy) + 'px' });
+                            var targetWrapper = target.$el.parent()[0];
+                            var targetWidth = target.$el.outerWidth() || 0;
+                            var targetHeight = target.$el.outerHeight() || 0;
+                            var maxLeft = Math.max(0, (targetWrapper ? targetWrapper.clientWidth : 0) - targetWidth);
+                            var maxTop = Math.max(0, (targetWrapper ? targetWrapper.clientHeight : 0) - targetHeight);
+                            var nextLeft = clamp(target.left + dx, 0, maxLeft);
+                            var nextTop = clamp(target.top + dy, 0, maxTop);
+                            target.$el.css({ left: nextLeft + 'px', top: nextTop + 'px' });
                         });
                     } else {
-                        $handle.css({ left: (start.left + dx) + 'px', top: (start.top + dy) + 'px' });
+                        var wrapperEl = $handle.parent()[0];
+                        var handleWidth = $handle.outerWidth() || 0;
+                        var handleHeight = $handle.outerHeight() || 0;
+                        var maxLeftSingle = Math.max(0, (wrapperEl ? wrapperEl.clientWidth : 0) - handleWidth);
+                        var maxTopSingle = Math.max(0, (wrapperEl ? wrapperEl.clientHeight : 0) - handleHeight);
+                        var clampedLeft = clamp(start.left + dx, 0, maxLeftSingle);
+                        var clampedTop = clamp(start.top + dy, 0, maxTopSingle);
+                        $handle.css({ left: clampedLeft + 'px', top: clampedTop + 'px' });
                     }
                 } else if (resizing) {
-                    var rw = Math.max(20, start.width + (ev.clientX - start.x));
-                    var rh = Math.max(14, start.height + (ev.clientY - start.y));
+                    var wrapperEl = $handle.parent()[0];
+                    var leftNow = parseFloat($handle.css('left')) || 0;
+                    var topNow = parseFloat($handle.css('top')) || 0;
+                    var maxW = Math.max(20, (wrapperEl ? wrapperEl.clientWidth : 0) - leftNow);
+                    var maxH = Math.max(14, (wrapperEl ? wrapperEl.clientHeight : 0) - topNow);
+                    var rw = clamp(start.width + (ev.clientX - start.x), 20, maxW);
+                    var rh = clamp(start.height + (ev.clientY - start.y), 14, maxH);
                     $handle.css({ width: rw + 'px', height: rh + 'px' });
                 }
             };
@@ -699,8 +831,10 @@ PDFalyzer.EditMode = (function ($, P) {
 
                     targets.forEach(function (target) {
                         if (!target.viewport || !target.rect) return;
-                        var pdfDx = dx / target.viewport.scale;
-                        var pdfDy = -dy / target.viewport.scale;
+                        var targetLeft = parseFloat(target.$el.css('left')) || 0;
+                        var targetTop = parseFloat(target.$el.css('top')) || 0;
+                        var pdfDx = (targetLeft - target.left) / target.viewport.scale;
+                        var pdfDy = -(targetTop - target.top) / target.viewport.scale;
                         queueRectChange(
                             target.fieldName,
                             target.rect.x + pdfDx,
@@ -752,8 +886,13 @@ PDFalyzer.EditMode = (function ($, P) {
             };
             moveHandler = function (ev) {
                 if (!resizing) return;
-                var rw = Math.max(20, start.width + (ev.clientX - start.x));
-                var rh = Math.max(14, start.height + (ev.clientY - start.y));
+                var wrapperEl = $handle.parent()[0];
+                var leftNow = parseFloat($handle.css('left')) || 0;
+                var topNow = parseFloat($handle.css('top')) || 0;
+                var maxW = Math.max(20, (wrapperEl ? wrapperEl.clientWidth : 0) - leftNow);
+                var maxH = Math.max(14, (wrapperEl ? wrapperEl.clientHeight : 0) - topNow);
+                var rw = clamp(start.width + (ev.clientX - start.x), 20, maxW);
+                var rh = clamp(start.height + (ev.clientY - start.y), 14, maxH);
                 $handle.css({ width: rw + 'px', height: rh + 'px' });
             };
 
@@ -991,6 +1130,22 @@ PDFalyzer.EditMode = (function ($, P) {
         $target.prop('checked', true);
     }
 
+    function setCreateBooleanControlValue(optionName, boolValue) {
+        var group = CREATE_BOOL_GROUPS[optionName];
+        if (!group) return;
+        var $inputs = $('input[name="' + group.inputName + '"]');
+        if (!$inputs.length) return;
+        $inputs.prop('checked', false);
+        $inputs.filter('[value="' + (boolValue ? 'true' : 'false') + '"]').prop('checked', true);
+    }
+
+    function getCreateBooleanControlValue(optionName) {
+        var group = CREATE_BOOL_GROUPS[optionName];
+        if (!group) return false;
+        var value = $('input[name="' + group.inputName + '"]:checked').val();
+        return value === 'true';
+    }
+
     function getTriStateControlValue(optionName) {
         var group = TRI_STATE_GROUPS[optionName];
         if (!group) return 'keep';
@@ -1058,6 +1213,8 @@ PDFalyzer.EditMode = (function ($, P) {
         $('#optChoices').val(Array.isArray(choicesVal) ? choicesVal.join(',') : (choicesVal || ''));
         $('#optJavascript').val(canEditJavascript ? (readOptionValue(single, 'javascript') || '') : '');
 
+        initializeJsPresetUi('options');
+
         $('#optDefaultValue').prop('disabled', !canEditSingleValue);
         $('#optChoices').prop('disabled', !canEditChoices);
         $('#optJavascript').prop('disabled', !canEditJavascript);
@@ -1065,6 +1222,182 @@ PDFalyzer.EditMode = (function ($, P) {
         updateFieldOptionsScopeHint(single, selectedEntries, visibleKeys);
 
         showFieldConfigModal('options');
+    }
+
+    function getJsPresetDefinitions() {
+        return {
+            custom: { title: 'Custom script', fields: [] },
+            length: {
+                title: 'Length (min/max)',
+                fields: [
+                    { key: 'min', label: 'Min length', type: 'number', placeholder: '0' },
+                    { key: 'max', label: 'Max length', type: 'number', placeholder: '100' }
+                ]
+            },
+            number: {
+                title: 'Number (min/max)',
+                fields: [
+                    { key: 'min', label: 'Min number', type: 'number', placeholder: '0' },
+                    { key: 'max', label: 'Max number', type: 'number', placeholder: '100' }
+                ]
+            },
+            date: {
+                title: 'Date (format)',
+                fields: [
+                    {
+                        key: 'format',
+                        label: 'Date format',
+                        type: 'select',
+                        options: [
+                            { value: 'yyyy-mm-dd', label: 'YYYY-MM-DD' },
+                            { value: 'dd.mm.yyyy', label: 'DD.MM.YYYY' },
+                            { value: 'mm/dd/yyyy', label: 'MM/DD/YYYY' }
+                        ]
+                    }
+                ]
+            }
+        };
+    }
+
+    function renderJsPresetParams(mode) {
+        var def = JS_PRESET_DIALOGS[mode];
+        if (!def) return;
+        var $select = $(def.presetSelect);
+        var $container = $(def.paramsContainer);
+        if (!$select.length || !$container.length) return;
+
+        var presetKey = $select.val() || 'custom';
+        var presetDef = getJsPresetDefinitions()[presetKey] || getJsPresetDefinitions().custom;
+        $container.empty();
+
+        if (!presetDef.fields || !presetDef.fields.length) {
+            $container.append('<div class="text-muted" style="font-size:12px;">Use the text area for custom validation JavaScript.</div>');
+            return;
+        }
+
+        var html = '';
+        presetDef.fields.forEach(function (field) {
+            var inputId = mode + 'JsPreset_' + field.key;
+            html += '<div class="mb-2">';
+            html += '<label class="form-label form-label-sm" for="' + inputId + '">' + field.label + '</label>';
+            if (field.type === 'select') {
+                html += '<select class="form-select form-select-sm" id="' + inputId + '">';
+                (field.options || []).forEach(function (opt) {
+                    html += '<option value="' + opt.value + '">' + opt.label + '</option>';
+                });
+                html += '</select>';
+            } else {
+                html += '<input class="form-control form-control-sm" id="' + inputId + '" type="' + (field.type || 'text') + '" placeholder="' + (field.placeholder || '') + '">';
+            }
+            html += '</div>';
+        });
+        $container.html(html);
+    }
+
+    function collectJsPresetParams(mode) {
+        var def = JS_PRESET_DIALOGS[mode];
+        if (!def) return {};
+        var presetKey = $(def.presetSelect).val() || 'custom';
+        var presetDef = getJsPresetDefinitions()[presetKey] || getJsPresetDefinitions().custom;
+        var params = {};
+        (presetDef.fields || []).forEach(function (field) {
+            var inputId = '#' + mode + 'JsPreset_' + field.key;
+            params[field.key] = $(inputId).val();
+        });
+        return params;
+    }
+
+    function buildPresetScript(presetKey, params) {
+        if (presetKey === 'length') {
+            var minLen = params.min !== '' && params.min !== undefined ? Number(params.min) : null;
+            var maxLen = params.max !== '' && params.max !== undefined ? Number(params.max) : null;
+            var checks = [];
+            if (!isNaN(minLen) && minLen !== null) checks.push('len < ' + minLen);
+            if (!isNaN(maxLen) && maxLen !== null) checks.push('len > ' + maxLen);
+            if (!checks.length) return '';
+            return [
+                'if (event.value !== null && event.value !== undefined && event.value !== "") {',
+                '    var len = String(event.value).length;',
+                '    if (' + checks.join(' || ') + ') {',
+                '        app.alert("Invalid length.");',
+                '        event.rc = false;',
+                '    }',
+                '}'
+            ].join('\n');
+        }
+
+        if (presetKey === 'number') {
+            var minNum = params.min !== '' && params.min !== undefined ? Number(params.min) : null;
+            var maxNum = params.max !== '' && params.max !== undefined ? Number(params.max) : null;
+            var numChecks = [];
+            if (!isNaN(minNum) && minNum !== null) numChecks.push('num < ' + minNum);
+            if (!isNaN(maxNum) && maxNum !== null) numChecks.push('num > ' + maxNum);
+            return [
+                'if (event.value !== null && event.value !== undefined && event.value !== "") {',
+                '    var num = Number(event.value);',
+                '    if (isNaN(num)' + (numChecks.length ? ' || ' + numChecks.join(' || ') : '') + ') {',
+                '        app.alert("Please enter a valid number' + (numChecks.length ? ' in range' : '') + '.");',
+                '        event.rc = false;',
+                '    }',
+                '}'
+            ].join('\n');
+        }
+
+        if (presetKey === 'date') {
+            var format = params.format || 'yyyy-mm-dd';
+            var regex = '/^\\d{4}-\\d{2}-\\d{2}$/';
+            var label = 'YYYY-MM-DD';
+            if (format === 'dd.mm.yyyy') {
+                regex = '/^\\d{2}\\.\\d{2}\\.\\d{4}$/';
+                label = 'DD.MM.YYYY';
+            } else if (format === 'mm/dd/yyyy') {
+                regex = '/^\\d{2}\\/\\d{2}\\/\\d{4}$/';
+                label = 'MM/DD/YYYY';
+            }
+            return [
+                'if (event.value !== null && event.value !== undefined && event.value !== "") {',
+                '    var pattern = ' + regex + ';',
+                '    if (!pattern.test(String(event.value))) {',
+                '        app.alert("Please enter date as ' + label + '.");',
+                '        event.rc = false;',
+                '    }',
+                '}'
+            ].join('\n');
+        }
+
+        return '';
+    }
+
+    function applyJsPresetToDialog(mode) {
+        var def = JS_PRESET_DIALOGS[mode];
+        if (!def) return;
+        var presetKey = $(def.presetSelect).val() || 'custom';
+        if (presetKey === 'custom') return;
+        var script = buildPresetScript(presetKey, collectJsPresetParams(mode));
+        if (!script) {
+            P.Utils.toast('Please fill preset values first', 'warning');
+            return;
+        }
+        $(def.scriptTarget).val(script);
+        P.Utils.toast('Validation preset inserted', 'info');
+    }
+
+    function bindJsPresetControls(mode) {
+        var def = JS_PRESET_DIALOGS[mode];
+        if (!def) return;
+        $(def.presetSelect).on('change', function () {
+            renderJsPresetParams(mode);
+        });
+        $(def.applyButton).on('click', function () {
+            applyJsPresetToDialog(mode);
+        });
+    }
+
+    function initializeJsPresetUi(mode) {
+        var def = JS_PRESET_DIALOGS[mode];
+        if (!def) return;
+        $(def.presetSelect).val('custom');
+        renderJsPresetParams(mode);
     }
 
     function resolveTriState(entries, optionName) {
@@ -1102,11 +1435,34 @@ PDFalyzer.EditMode = (function ($, P) {
             if (pendingOptions[optionName] !== undefined) return pendingOptions[optionName];
             return null;
         }
+        if (entry.kind === 'persisted' && entry.name && pendingFieldOptionOverrides[entry.name]) {
+            var overrideOptions = pendingFieldOptionOverrides[entry.name];
+            if (overrideOptions[optionName] !== undefined) return overrideOptions[optionName];
+        }
         var propertyName = mapPropertyName(optionName);
         if (entry.node && entry.node.properties && entry.node.properties[propertyName] !== undefined) {
             return entry.node.properties[propertyName];
         }
         return null;
+    }
+
+    function applyOptionOverridesToPersistedSelection(fieldNames, options) {
+        if (!fieldNames || !fieldNames.length || !options) return;
+        fieldNames.forEach(function (fieldName) {
+            if (!fieldName) return;
+            if (!pendingFieldOptionOverrides[fieldName]) pendingFieldOptionOverrides[fieldName] = {};
+            var target = pendingFieldOptionOverrides[fieldName];
+
+            ['required', 'readonly', 'multiline', 'editable', 'checked'].forEach(function (key) {
+                if (options[key] !== null && options[key] !== undefined) {
+                    target[key] = options[key];
+                }
+            });
+
+            if (options.defaultValue !== undefined) target.defaultValue = options.defaultValue;
+            if (options.choices !== undefined) target.choices = cloneObject(options.choices);
+            if (options.javascript !== undefined) target.javascript = options.javascript;
+        });
     }
 
     function getSelectedFieldEntries() {
@@ -1219,12 +1575,19 @@ PDFalyzer.EditMode = (function ($, P) {
 
         if (!P.state.pendingFieldOptions) P.state.pendingFieldOptions = [];
         P.state.pendingFieldOptions.push({ fieldNames: persistedNames.slice(), options: cloneObject(options) });
+        applyOptionOverridesToPersistedSelection(persistedNames, options);
         finishLocalOptionsApply(pendingNames.length
             ? 'Field options queued (saved + pending fields)'
             : 'Field options queued. Click Save to persist.');
     }
 
     function queueRectChange(fieldName, x, y, width, height) {
+        var bounded = clampPdfRectForField(fieldName, x, y, width, height);
+        x = bounded.x;
+        y = bounded.y;
+        width = bounded.width;
+        height = bounded.height;
+
         var pendingField = findPendingFormAdd(fieldName);
         if (pendingField) {
             pendingField.x = x;
@@ -1242,6 +1605,32 @@ PDFalyzer.EditMode = (function ($, P) {
         } else {
             P.state.pendingFieldRects.push(payload);
         }
+    }
+
+    function clamp(value, min, max) {
+        if (max < min) return min;
+        return Math.max(min, Math.min(max, value));
+    }
+
+    function clampPdfRectForField(fieldName, x, y, width, height) {
+        var rectInfo = getCurrentFieldRectByName(fieldName);
+        if (!rectInfo) {
+            return { x: x, y: y, width: width, height: height };
+        }
+        var vp = P.state.pageViewports[rectInfo.pageIndex];
+        if (!vp || !vp.scale) {
+            return { x: x, y: y, width: width, height: height };
+        }
+
+        var pageWidthPdf = vp.width / vp.scale;
+        var pageHeightPdf = vp.height / vp.scale;
+
+        var safeW = clamp(width, 1, pageWidthPdf);
+        var safeH = clamp(height, 1, pageHeightPdf);
+        var safeX = clamp(x, 0, Math.max(0, pageWidthPdf - safeW));
+        var safeY = clamp(y, 0, Math.max(0, pageHeightPdf - safeH));
+
+        return { x: safeX, y: safeY, width: safeW, height: safeH };
     }
 
     /**

@@ -10,7 +10,7 @@ public class FormFieldRequest {
     private double y;
     private double width;
     private double height;
-    private Map<String, String> options;
+    private Map<String, Object> options;
 
     public FormFieldRequest() {}
 
@@ -35,6 +35,6 @@ public class FormFieldRequest {
     public double getHeight() { return height; }
     public void setHeight(double height) { this.height = height; }
 
-    public Map<String, String> getOptions() { return options; }
-    public void setOptions(Map<String, String> options) { this.options = options; }
+    public Map<String, Object> getOptions() { return options; }
+    public void setOptions(Map<String, Object> options) { this.options = options; }
 }
