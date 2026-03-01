@@ -8,6 +8,8 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootswatch@5.3.2/dist/cyborg/bootstrap.min.css" />
     <link rel="stylesheet" th:href="@{/webjars/font-awesome/6.4.0/css/all.min.css}" />
     <link rel="stylesheet" th:href="@{/styles.css}" />
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
     <style>
         body {
             background: var(--bg-dark);
@@ -90,6 +92,90 @@
             font-size: 13px;
             margin-bottom: 14px;
         }
+        .group-title {
+            margin: 0;
+            color: var(--accent);
+            font-weight: 600;
+            font-size: 14px;
+            text-transform: lowercase;
+        }
+        .doc-actions {
+            white-space: nowrap;
+            width: 1%;
+        }
+        .doc-actions .btn {
+            padding: 2px 8px;
+            font-size: 11px;
+        }
+        .license-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(5, 10, 20, 0.75);
+            z-index: 2500;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 18px;
+        }
+        .license-modal.active {
+            display: flex;
+        }
+        .license-modal-card {
+            width: min(1100px, 96vw);
+            height: min(86vh, 820px);
+            background: rgba(15, 52, 96, 0.96);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 18px 48px rgba(0, 0, 0, 0.5);
+        }
+        .license-modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 10px 14px;
+            border-bottom: 1px solid var(--border);
+        }
+        .license-modal-title {
+            color: var(--text);
+            font-size: 14px;
+            margin: 0;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            word-break: break-all;
+        }
+        .license-modal-body {
+            flex: 1;
+            overflow: auto;
+            padding: 14px;
+            background: rgba(8, 18, 36, 0.5);
+        }
+        .license-modal-body pre {
+            margin: 0;
+            white-space: pre-wrap;
+            word-break: break-word;
+            color: var(--text);
+            font-size: 12px;
+        }
+        .license-modal-body a {
+            color: var(--accent);
+        }
+        .rendered-markup {
+            color: var(--text);
+            font-size: 13px;
+        }
+        .rendered-markup code,
+        .rendered-markup pre {
+            background: rgba(0, 0, 0, 0.35);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 2px 6px;
+        }
+        .rendered-markup pre {
+            padding: 10px;
+            overflow: auto;
+        }
     </style>
 </head>
 <body>
@@ -111,13 +197,20 @@
                 <tr>
                     <th class="ps-3">Document</th>
                     <th>Path</th>
+                    <th class="text-end pe-3">Actions</th>
                 </tr>
                 </thead>
                 <tbody>
                 <tr th:if="${#lists.isEmpty(documents)}">
-                    <td colspan="2" class="ps-3 text-muted">No license documents found in bundled resources.</td>
+                    <td colspan="3" class="ps-3 text-muted">No license documents found in bundled resources.</td>
                 </tr>
-                <tr th:each="doc : ${documents}">
+                <th:block th:each="entry : ${groupedDocuments}">
+                <tr>
+                    <td colspan="3" class="ps-3 py-2">
+                        <span class="group-title" th:text="${entry.key}"></span>
+                    </td>
+                </tr>
+                <tr th:each="doc : ${entry.value}">
                     <td class="ps-3">
                         <a class="doc-link" th:href="${doc.href}" target="_blank" rel="noopener">
                             <i class="fas fa-file-alt"></i>
@@ -125,11 +218,114 @@
                         </a>
                     </td>
                     <td><span class="doc-path" th:text="${doc.href}"></span></td>
+                    <td class="text-end pe-3 doc-actions">
+                        <button type="button" class="btn btn-outline-accent btn-sm preview-btn"
+                                th:attr="data-href=${doc.href},data-name=${doc.displayPath},data-ext=${doc.extension}">
+                            <i class="fas fa-eye me-1"></i>Preview
+                        </button>
+                        <a class="btn btn-outline-accent btn-sm" th:href="${doc.href}" th:attr="download=${#strings.substringAfterLast(doc.displayPath, '/')}" target="_blank" rel="noopener">
+                            <i class="fas fa-download me-1"></i>Download
+                        </a>
+                    </td>
                 </tr>
+                </th:block>
                 </tbody>
             </table>
         </div>
     </div>
 </div>
+
+<div id="licenseModal" class="license-modal" aria-hidden="true">
+    <div class="license-modal-card" role="dialog" aria-modal="true" aria-labelledby="licenseModalTitle">
+        <div class="license-modal-header">
+            <h2 id="licenseModalTitle" class="license-modal-title">Document preview</h2>
+            <div class="d-flex gap-2">
+                <a id="licenseModalDownload" class="btn btn-outline-accent btn-sm" href="#" download>
+                    <i class="fas fa-download me-1"></i>Download
+                </a>
+                <button id="licenseModalClose" type="button" class="btn btn-outline-accent btn-sm">
+                    <i class="fas fa-times me-1"></i>Close
+                </button>
+            </div>
+        </div>
+        <div id="licenseModalBody" class="license-modal-body"></div>
+    </div>
+</div>
+
+<script>
+    (function () {
+        const modal = document.getElementById('licenseModal');
+        const modalBody = document.getElementById('licenseModalBody');
+        const modalTitle = document.getElementById('licenseModalTitle');
+        const modalDownload = document.getElementById('licenseModalDownload');
+        const modalClose = document.getElementById('licenseModalClose');
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function renderDoc(content, ext) {
+            const normalizedExt = (ext || '').toLowerCase();
+            if (normalizedExt === 'md' || normalizedExt === 'markdown') {
+                const rendered = window.marked ? window.marked.parse(content) : '<pre>' + escapeHtml(content) + '</pre>';
+                const clean = window.DOMPurify ? window.DOMPurify.sanitize(rendered) : rendered;
+                modalBody.innerHTML = '<div class="rendered-markup">' + clean + '</div>';
+                return;
+            }
+            if (normalizedExt === 'html' || normalizedExt === 'htm') {
+                const cleanHtml = window.DOMPurify ? window.DOMPurify.sanitize(content) : escapeHtml(content);
+                modalBody.innerHTML = '<div class="rendered-markup">' + cleanHtml + '</div>';
+                return;
+            }
+            modalBody.innerHTML = '<pre>' + escapeHtml(content) + '</pre>';
+        }
+
+        async function openPreview(href, displayName, ext) {
+            modalTitle.textContent = displayName;
+            modalDownload.href = href;
+            modalDownload.setAttribute('download', displayName.split('/').pop());
+            modalBody.innerHTML = '<div class="text-muted">Loading...</div>';
+            modal.classList.add('active');
+            modal.setAttribute('aria-hidden', 'false');
+
+            try {
+                const response = await fetch(href, { cache: 'no-store' });
+                if (!response.ok) {
+                    throw new Error('HTTP ' + response.status);
+                }
+                const content = await response.text();
+                renderDoc(content, ext);
+            } catch (error) {
+                modalBody.innerHTML = '<pre>Could not load document: ' + escapeHtml(String(error)) + '</pre>';
+            }
+        }
+
+        function closePreview() {
+            modal.classList.remove('active');
+            modal.setAttribute('aria-hidden', 'true');
+            modalBody.innerHTML = '';
+        }
+
+        document.querySelectorAll('.preview-btn').forEach(function (button) {
+            button.addEventListener('click', function () {
+                openPreview(button.dataset.href, button.dataset.name, button.dataset.ext);
+            });
+        });
+
+        modalClose.addEventListener('click', closePreview);
+        modal.addEventListener('click', function (event) {
+            if (event.target === modal) {
+                closePreview();
+            }
+        });
+        document.addEventListener('keydown', function (event) {
+            if (event.key === 'Escape' && modal.classList.contains('active')) {
+                closePreview();
+            }
+        });
+    })();
+</script>
 </body>
 </html>

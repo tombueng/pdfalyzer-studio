@@ -4,8 +4,11 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
 import org.springframework.core.io.Resource;
@@ -49,12 +52,47 @@ public class LicenseController {
 
         List<LicenseDoc> documents = new ArrayList<>();
         for (String relativePath : docPaths) {
-            documents.add(new LicenseDoc(decodePathForDisplay(relativePath), "/license/" + relativePath));
+            String displayPath = decodePathForDisplay(relativePath);
+            documents.add(new LicenseDoc(
+                displayPath,
+                "/license/" + relativePath,
+                categoryOf(displayPath),
+                extensionOf(displayPath)
+            ));
         }
-        documents.sort(Comparator.comparing(LicenseDoc::displayPath));
+        documents.sort(Comparator
+            .comparing(LicenseDoc::category)
+            .thenComparing(LicenseDoc::displayPath));
+
+        Map<String, List<LicenseDoc>> groupedDocuments = new LinkedHashMap<>();
+        for (LicenseDoc doc : documents) {
+            groupedDocuments.computeIfAbsent(doc.category(), ignored -> new ArrayList<>()).add(doc);
+        }
 
         model.addAttribute("documents", documents);
+        model.addAttribute("groupedDocuments", groupedDocuments);
         return "license-overview";
+    }
+
+    private String categoryOf(String displayPath) {
+        int slash = displayPath.indexOf('/');
+        if (slash < 0) {
+            return "root";
+        }
+        return displayPath.substring(0, slash);
+    }
+
+    private String extensionOf(String displayPath) {
+        String fileName = displayPath;
+        int slash = displayPath.lastIndexOf('/');
+        if (slash >= 0 && slash < displayPath.length() - 1) {
+            fileName = displayPath.substring(slash + 1);
+        }
+        int dot = fileName.lastIndexOf('.');
+        if (dot < 0 || dot == fileName.length() - 1) {
+            return "";
+        }
+        return fileName.substring(dot + 1).toLowerCase(Locale.ROOT);
     }
 
     private String decodePathForDisplay(String relativePath) {
@@ -66,5 +104,5 @@ public class LicenseController {
         }
     }
 
-    public record LicenseDoc(String displayPath, String href) {}
+    public record LicenseDoc(String displayPath, String href, String category, String extension) {}
 }

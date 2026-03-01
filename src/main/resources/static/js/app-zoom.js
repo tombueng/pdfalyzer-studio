@@ -4,6 +4,28 @@
 PDFalyzer.Zoom = (function ($, P) {
     'use strict';
 
+    var pendingWheelScale = null;
+    var wheelZoomScheduled = false;
+
+    function clampScale(scale) {
+        return Math.max(0.1, Math.min(8, scale));
+    }
+
+    function scheduleWheelZoom(scale) {
+        pendingWheelScale = clampScale(scale);
+        if (wheelZoomScheduled) return;
+
+        wheelZoomScheduled = true;
+        window.requestAnimationFrame(function () {
+            wheelZoomScheduled = false;
+            var next = pendingWheelScale;
+            pendingWheelScale = null;
+            if (typeof next === 'number' && P.Viewer && P.Viewer.setScale) {
+                P.Viewer.setScale(next);
+            }
+        });
+    }
+
     function init() {
         $('#zoomModeBtn').on('click', function () {
             if (P.state.autoZoomMode === 'off')    P.Viewer.fitWidth();
@@ -15,7 +37,8 @@ PDFalyzer.Zoom = (function ($, P) {
             var ev = e.originalEvent;
             if (ev.ctrlKey || ev.metaKey) {
                 e.preventDefault();
-                P.Viewer.setScale(P.state.currentScale * (ev.deltaY > 0 ? 0.9 : 1.1));
+                var baseScale = pendingWheelScale || P.state.currentScale;
+                scheduleWheelZoom(baseScale * (ev.deltaY > 0 ? 0.9 : 1.1));
             }
         });
 
