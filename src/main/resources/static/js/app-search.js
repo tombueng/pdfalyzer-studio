@@ -1,5 +1,5 @@
 /**
- * PDFalyzer – tree search.
+ * PDFalyzer Studio – tree search.
  */
 PDFalyzer.Search = (function ($, P) {
     'use strict';

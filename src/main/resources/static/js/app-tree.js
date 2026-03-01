@@ -1,5 +1,5 @@
 /**
- * PDFalyzer – Tree rendering (structural and search results).
+ * PDFalyzer Studio – Tree rendering (structural and search results).
  */
 PDFalyzer.Tree = (function ($, P) {
     'use strict';

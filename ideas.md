@@ -1,4 +1,4 @@
-# PDFalyzer UI – Feature Ideas
+# PDFalyzer Studio – Feature Ideas
 
 This file is intentionally forward-looking and creative. It mixes quick wins and bigger bets.
 

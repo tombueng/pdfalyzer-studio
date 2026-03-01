@@ -1,5 +1,5 @@
 /**
- * PDFalyzer – horizontal divider drag-resize between PDF pane and tree pane.
+ * PDFalyzer Studio – horizontal divider drag-resize between PDF pane and tree pane.
  */
 PDFalyzer.Divider = (function ($, P) {
     'use strict';

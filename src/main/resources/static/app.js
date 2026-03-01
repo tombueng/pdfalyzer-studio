@@ -1,5 +1,5 @@
 /**
- * PDFalyzer – main entry point.
+ * PDFalyzer Studio – main entry point.
  *
  * All logic is in the /js/ sub-modules.  This file only wires them together
  * and calls init once jQuery's document-ready fires.

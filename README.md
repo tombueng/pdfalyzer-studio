@@ -1,6 +1,6 @@
-# PDFalyzer UI
+# PDFalyzer Studio
 
-PDFalyzer UI is a Spring Boot web application for inspecting, validating, and editing PDF internals through an interactive browser UI.
+PDFalyzer Studio is a Spring Boot web application for inspecting, validating, and editing PDF internals through an interactive browser UI.
 
 ## Quick Start
 

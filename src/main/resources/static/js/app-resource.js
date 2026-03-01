@@ -1,5 +1,5 @@
 /**
- * PDFalyzer – resource preview, download and attachment handling.
+ * PDFalyzer Studio – resource preview, download and attachment handling.
  */
 PDFalyzer.Resource = (function ($, P) {
     'use strict';
