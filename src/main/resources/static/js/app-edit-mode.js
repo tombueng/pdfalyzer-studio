@@ -156,8 +156,11 @@ PDFalyzer.EditMode = (function ($, P) {
     function savePendingChanges() {
         if (!hasSession()) return;
         if (!P.state.pendingFieldOptions) P.state.pendingFieldOptions = [];
-        if (!P.state.pendingFormAdds.length && !P.state.pendingFieldRects.length && !P.state.pendingFieldOptions.length) {
-            P.Utils.toast('No pending form changes', 'info');
+        if (!P.state.pendingCosChanges) P.state.pendingCosChanges = [];
+
+        if (!P.state.pendingFormAdds.length && !P.state.pendingFieldRects.length &&
+            !P.state.pendingFieldOptions.length && !P.state.pendingCosChanges.length) {
+            P.Utils.toast('No pending changes', 'info');
             return;
         }
 
@@ -178,7 +181,11 @@ PDFalyzer.EditMode = (function ($, P) {
                     P.state.treeData = data.tree;
                 }
                 applyPendingRectUpdates(function () {
-                    applyPendingOptionUpdates();
+                    applyPendingOptionUpdates(function () {
+                        applyPendingCosUpdates(function (cosResult) {
+                            finalizeSave(cosResult);
+                        });
+                    });
                 });
             })
             .fail(function () {
@@ -222,16 +229,17 @@ PDFalyzer.EditMode = (function ($, P) {
         next();
     }
 
-    function applyPendingOptionUpdates() {
+    function applyPendingOptionUpdates(onDone) {
+        var done = typeof onDone === 'function' ? onDone : finalizeSave;
         if (!P.state.pendingFieldOptions || !P.state.pendingFieldOptions.length) {
-            finalizeSave();
+            done();
             return;
         }
 
         var queue = P.state.pendingFieldOptions.slice();
         function next() {
             if (!queue.length) {
-                finalizeSave();
+                done();
                 return;
             }
 
@@ -256,7 +264,66 @@ PDFalyzer.EditMode = (function ($, P) {
         next();
     }
 
-    function finalizeSave() {
+    function extractApiError(xhr) {
+        if (!xhr) return 'Unknown error';
+        if (xhr.responseJSON && xhr.responseJSON.error) return xhr.responseJSON.error;
+        if (xhr.responseText) return xhr.responseText;
+        if (xhr.statusText) return xhr.statusText;
+        return 'Unknown error';
+    }
+
+    function applyPendingCosUpdates(onDone) {
+        var done = typeof onDone === 'function' ? onDone : function () {};
+        if (!P.state.pendingCosChanges || !P.state.pendingCosChanges.length) {
+            done({ total: 0, successes: [], failures: [] });
+            return;
+        }
+
+        var queue = P.state.pendingCosChanges.slice();
+        var successes = [];
+        var failures = [];
+
+        function next() {
+            if (!queue.length) {
+                P.state.pendingCosChanges = failures.map(function (f) {
+                    return f.item;
+                });
+                done({
+                    total: successes.length + failures.length,
+                    successes: successes,
+                    failures: failures
+                });
+                return;
+            }
+
+            var item = queue.shift();
+            if (!item || !item.request) {
+                failures.push({ item: item, error: 'Invalid pending COS entry' });
+                next();
+                return;
+            }
+
+            P.Utils.apiFetch('/api/cos/' + P.state.sessionId + '/update', {
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify(item.request)
+            }).done(function (data) {
+                if (data && data.tree) P.state.treeData = data.tree;
+                if (item && item.lastError) delete item.lastError;
+                successes.push(item);
+                next();
+            }).fail(function (xhr) {
+                var errorText = extractApiError(xhr);
+                if (item) item.lastError = errorText;
+                failures.push({ item: item, error: errorText });
+                next();
+            });
+        }
+
+        next();
+    }
+
+    function finalizeSave(cosResult) {
         P.state.pendingFormAdds = [];
         P.state.pendingFieldRects = [];
         P.state.pendingFieldOptions = [];
@@ -264,6 +331,24 @@ PDFalyzer.EditMode = (function ($, P) {
         if (P.state.treeData) P.Utils.refreshAfterMutation(P.state.treeData);
         refreshSelectionButtons();
         updateSaveButton();
+
+        if (cosResult && cosResult.total > 0) {
+            if (cosResult.failures.length === 0) {
+                P.Utils.toast('All pending changes saved', 'success');
+            } else {
+                P.Utils.toast(
+                    'Save completed: ' + cosResult.successes.length + ' succeeded, ' +
+                    cosResult.failures.length + ' failed',
+                    'warning'
+                );
+                cosResult.failures.forEach(function (failure) {
+                    var summary = (failure.item && failure.item.summary) ? failure.item.summary : 'COS change';
+                    P.Utils.toast('Failed: ' + summary + ' — ' + (failure.error || 'Unknown error'), 'danger');
+                });
+            }
+            return;
+        }
+
         P.Utils.toast('Form changes saved', 'success');
     }
 
@@ -271,6 +356,7 @@ PDFalyzer.EditMode = (function ($, P) {
         P.state.pendingFormAdds = [];
         P.state.pendingFieldRects = [];
         P.state.pendingFieldOptions = [];
+        P.state.pendingCosChanges = [];
         pendingFieldOptionOverrides = {};
         P.state.selectedFieldNames = [];
         P.state.selectedImageNodeIds = [];
@@ -282,10 +368,32 @@ PDFalyzer.EditMode = (function ($, P) {
 
     function updateSaveButton() {
         if (!P.state.pendingFieldOptions) P.state.pendingFieldOptions = [];
+        if (!P.state.pendingCosChanges) P.state.pendingCosChanges = [];
         var hasPending = P.state.pendingFormAdds.length > 0 ||
             P.state.pendingFieldRects.length > 0 ||
-            P.state.pendingFieldOptions.length > 0;
+            P.state.pendingFieldOptions.length > 0 ||
+            P.state.pendingCosChanges.length > 0;
         $('#formSaveBtn').prop('disabled', !hasPending || !hasSession());
+        updateFailedCosBadge();
+        if (P.Tree && P.Tree.refreshPendingPanel) {
+            P.Tree.refreshPendingPanel();
+        }
+    }
+
+    function updateFailedCosBadge() {
+        var pendingCos = P.state.pendingCosChanges || [];
+        var failedCount = pendingCos.filter(function (item) {
+            return !!(item && item.lastError);
+        }).length;
+
+        var $badge = $('#formSaveFailedBadge');
+        if (!$badge.length) return;
+
+        if (failedCount > 0) {
+            $badge.text(String(failedCount)).removeClass('d-none');
+        } else {
+            $badge.addClass('d-none').text('0');
+        }
     }
 
     function refreshSelectionButtons() {

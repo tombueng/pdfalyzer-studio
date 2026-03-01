@@ -4,6 +4,37 @@
 PDFalyzer.CosEditor = (function ($, P) {
     'use strict';
 
+    function ensurePendingCosChanges() {
+        if (!P.state.pendingCosChanges) P.state.pendingCosChanges = [];
+    }
+
+    function parseKeyPath(node) {
+        try { return JSON.parse(node.keyPath); }
+        catch (e) { return null; }
+    }
+
+    function resolveTargetScope(node) {
+        if (!node || !node.id) return null;
+        return String(node.id).indexOf('docinfo') === 0 ? 'docinfo' : null;
+    }
+
+    function buildPathText(path) {
+        if (!path || !path.length) return '(root)';
+        return '/' + path.join('/');
+    }
+
+    function queuePendingCosChange(change) {
+        ensurePendingCosChanges();
+        P.state.pendingCosChanges.push(change);
+
+        if (P.EditMode && P.EditMode.updateSaveButton) {
+            P.EditMode.updateSaveButton();
+        }
+        if (P.Tree && P.Tree.refreshPendingPanel) {
+            P.Tree.refreshPendingPanel();
+        }
+    }
+
     // ======================== SHOW EDIT WIDGET ========================
 
     function show(node, $headerEl) {
@@ -52,34 +83,32 @@ PDFalyzer.CosEditor = (function ($, P) {
     // ======================== SAVE VALUE ========================
 
     function save(node, newValue, $editorEl) {
-        if (!P.state.sessionId || node.objectNumber === undefined || node.objectNumber < 0) {
-            P.Utils.toast('Cannot edit: object reference not available', 'warning');
+        if (!P.state.sessionId) {
+            P.Utils.toast('Cannot edit: session not available', 'warning');
             return;
         }
-        var keyPath;
-        try { keyPath = JSON.parse(node.keyPath); }
-        catch (e) { P.Utils.toast('Cannot edit: no key path', 'warning'); return; }
+        var keyPath = parseKeyPath(node);
+        if (!keyPath) { P.Utils.toast('Cannot edit: no key path', 'warning'); return; }
         if (!keyPath || keyPath.length === 0) {
             P.Utils.toast('Cannot edit: empty key path', 'warning');
             return;
         }
-        P.Utils.apiFetch('/api/cos/' + P.state.sessionId + '/update', {
-            method: 'POST', contentType: 'application/json',
-            data: JSON.stringify({
-                objectNumber: node.objectNumber,
+        queuePendingCosChange({
+            operation: 'update',
+            summary: 'Update ' + buildPathText(keyPath),
+            request: {
+                objectNumber: (node.objectNumber === undefined || node.objectNumber === null) ? -1 : node.objectNumber,
                 generationNumber: node.generationNumber || 0,
                 keyPath: keyPath,
                 newValue: newValue,
                 valueType: node.cosType,
-                operation: 'update'
-            })
-        })
-        .done(function (data) {
-            P.Utils.refreshAfterMutation(data.tree);
-            P.Utils.toast('Value updated successfully', 'success');
-        })
-        .fail(function () { P.Utils.toast('Edit failed', 'danger'); })
-        .always(function () { $editorEl.remove(); });
+                operation: 'update',
+                targetScope: resolveTargetScope(node)
+            }
+        });
+
+        P.Utils.toast('COS change queued. Click Save to persist to PDF.', 'info');
+        $editorEl.remove();
     }
 
     // ======================== ADD ENTRY ========================
@@ -90,7 +119,11 @@ PDFalyzer.CosEditor = (function ($, P) {
             return;
         }
         $('.cos-inline-editor, .cos-add-editor').remove();
-        var path    = JSON.parse(node.keyPath);
+        var path = parseKeyPath(node);
+        if (!path) {
+            P.Utils.toast('Cannot add entry: key path unavailable', 'warning');
+            return;
+        }
         var isArray = node.cosType === 'COSArray';
         var $form   = $('<div>', { 'class': 'cos-add-editor' });
 
@@ -130,22 +163,21 @@ PDFalyzer.CosEditor = (function ($, P) {
                 }
                 var type = $typeSelect.val();
                 var val  = (type === 'COSDictionary' || type === 'COSArray') ? '' : $valueInput.val();
-                P.Utils.apiFetch('/api/cos/' + P.state.sessionId + '/update', {
-                    method: 'POST', contentType: 'application/json',
-                    data: JSON.stringify({
-                        objectNumber: node.objectNumber,
+                var targetPath = path.concat([key]);
+                queuePendingCosChange({
+                    operation: 'add',
+                    summary: 'Add ' + buildPathText(targetPath),
+                    request: {
+                        objectNumber: (node.objectNumber === undefined || node.objectNumber === null) ? -1 : node.objectNumber,
                         generationNumber: node.generationNumber || 0,
-                        keyPath: path.concat([key]),
+                        keyPath: targetPath,
                         newValue: val,
                         valueType: type,
-                        operation: 'add'
-                    })
-                })
-                .done(function (data) {
-                    P.Utils.refreshAfterMutation(data.tree);
-                    P.Utils.toast('Entry added', 'success');
-                })
-                .fail(function () { P.Utils.toast('Add failed', 'danger'); });
+                        operation: 'add',
+                        targetScope: resolveTargetScope(node)
+                    }
+                });
+                P.Utils.toast('COS change queued. Click Save to persist to PDF.', 'info');
                 $form.remove();
             });
         var $cancelBtn = $('<button>', { 'class': 'cos-edit-cancel', title: 'Cancel',
@@ -160,13 +192,12 @@ PDFalyzer.CosEditor = (function ($, P) {
     // ======================== REMOVE ENTRY ========================
 
     function remove(node, $headerEl) {
-        if (!P.state.sessionId || node.objectNumber === undefined || node.objectNumber < 0) {
-            P.Utils.toast('Cannot delete: object reference not available', 'warning');
+        if (!P.state.sessionId) {
+            P.Utils.toast('Cannot delete: session not available', 'warning');
             return;
         }
-        var keyPath;
-        try { keyPath = JSON.parse(node.keyPath); }
-        catch (e) { P.Utils.toast('Cannot delete: no key path', 'warning'); return; }
+        var keyPath = parseKeyPath(node);
+        if (!keyPath) { P.Utils.toast('Cannot delete: no key path', 'warning'); return; }
         if (!keyPath || keyPath.length === 0) {
             P.Utils.toast('Cannot delete: empty key path', 'warning');
             return;
@@ -192,20 +223,18 @@ PDFalyzer.CosEditor = (function ($, P) {
         var $confirm = $('<div>', { 'class': 'cos-delete-confirm' }).text(confirmText + ' ');
         $('<button>', { 'class': 'btn btn-sm btn-danger me-1', text: 'Yes' })
             .on('click', function () {
-                P.Utils.apiFetch('/api/cos/' + P.state.sessionId + '/update', {
-                    method: 'POST', contentType: 'application/json',
-                    data: JSON.stringify({
-                        objectNumber: node.objectNumber,
+                queuePendingCosChange({
+                    operation: 'remove',
+                    summary: 'Remove ' + buildPathText(keyPath),
+                    request: {
+                        objectNumber: (node.objectNumber === undefined || node.objectNumber === null) ? -1 : node.objectNumber,
                         generationNumber: node.generationNumber || 0,
                         keyPath: keyPath,
-                        operation: 'remove'
-                    })
-                })
-                .done(function (data) {
-                    P.Utils.refreshAfterMutation(data.tree);
-                    P.Utils.toast('Entry removed', 'success');
-                })
-                .fail(function () { P.Utils.toast('Delete failed', 'danger'); });
+                        operation: 'remove',
+                        targetScope: resolveTargetScope(node)
+                    }
+                });
+                P.Utils.toast('COS change queued. Click Save to persist to PDF.', 'info');
                 $confirm.remove();
             })
             .appendTo($confirm);

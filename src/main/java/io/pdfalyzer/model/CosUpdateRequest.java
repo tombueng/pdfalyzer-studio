@@ -10,6 +10,8 @@ public class CosUpdateRequest {
     private String valueType;
     // operation: "update" (default), "add" or "remove"
     private String operation;
+    // optional target scope (e.g., "docinfo") for roots without indirect object ref
+    private String targetScope;
 
     public int getObjectNumber() { return objectNumber; }
     public void setObjectNumber(int objectNumber) { this.objectNumber = objectNumber; }
@@ -28,4 +30,7 @@ public class CosUpdateRequest {
 
     public String getOperation() { return operation; }
     public void setOperation(String operation) { this.operation = operation; }
+
+    public String getTargetScope() { return targetScope; }
+    public void setTargetScope(String targetScope) { this.targetScope = targetScope; }
 }
