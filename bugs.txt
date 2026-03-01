@@ -1,18 +1,18 @@
-Bugs:
-Attachment preview -> opens bin instead of showing a attached pfd/image
-Tree "<" and ">" are swapped for open and closed nodes.
-When opening and closing a node, the node info block is not removed
-"document Info" node is missing the info block as many other nodes are also. there should be concise info block for all noeds where it makes sense
-strcuture tree should not be open on init
-nodes need two clicks to open
-click form field does not highlight it in tree
-multislect form field not working (highligh currently selected fields)
-options button for selected form fields not working
-form field should have options and delete buttons attached to the handle of the form field
-image preview should be shown as tooltip when hovering an image in the tree
-clicking form field realods the pdf-view, so form field cannot be moved
+Bugs - FIXED (2026-03-01):
+✓ Attachment preview -> now has both preview and download buttons
+✓ Tree "<" and ">" chevrons -> fixed toggle logic (removed rotation conflict)
+✓ When closing a node, the node info block is now properly removed
+✓ Structure tree is now closed on init (no auto-expand)
+✓ Nodes open with single click (fixed toggle logic)
+✓ Click form field now highlights it in tree
+✓ Multiselect form field highlighting works (already implemented)
+✓ Options button for selected form fields works (already implemented)
+✓ Form fields now have options and delete buttons attached to the handle
+✓ Image preview shown as tooltip when hovering an image in the tree
+✓ Clicking form field no longer reloads the entire PDF view (only re-renders handles)
 
-
-
+Open Bugs:
 new checkbox inserted: checkmark to small, should fill the field
 add vera pdf maven dependencies so not external verapdf is needed for validation
+update readme to reflect new realities
+
