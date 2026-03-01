@@ -170,6 +170,7 @@ PDFalyzer.Tabs = (function ($, P) {
         var report = result.report || '';
         var reportFormat = (result.reportFormat || '').toLowerCase();
         var looksLikeHtml = report.indexOf('<html') !== -1 || report.indexOf('<!DOCTYPE html') !== -1;
+        var looksLikeXml = /^\s*<\?xml|^\s*<report[\s>]/i.test(report);
         var header = '<div class="mb-2" style="padding:8px;">' +
             '<span class="badge ' + (success ? 'bg-success' : 'bg-secondary') + ' me-2">' +
             (success ? 'PASS' : 'CHECK') + '</span>' +
@@ -186,6 +187,11 @@ PDFalyzer.Tabs = (function ($, P) {
             return;
         }
 
+        if (report && (reportFormat === 'xml' || reportFormat === 'mrr' || looksLikeXml)) {
+            renderVeraPdfXmlReport(header, report);
+            return;
+        }
+
         $('#treeContent').html(
             header +
             '<div style="padding:8px;">' +
@@ -193,6 +199,117 @@ PDFalyzer.Tabs = (function ($, P) {
             P.Utils.escapeHtml(report || 'No report output') +
             '</pre></div>'
         );
+    }
+
+    function renderVeraPdfXmlReport(header, xmlReport) {
+        var parser = new DOMParser();
+        var doc = parser.parseFromString(xmlReport, 'application/xml');
+        if (doc.getElementsByTagName('parsererror').length) {
+            $('#treeContent').html(
+                header +
+                '<div style="padding:8px;">' +
+                '<pre style="white-space:pre-wrap;max-height:520px;overflow:auto;">' +
+                P.Utils.escapeHtml(xmlReport) +
+                '</pre></div>'
+            );
+            return;
+        }
+
+        var validationReport = doc.querySelector('jobs > job > validationReport');
+        var details = validationReport ? validationReport.querySelector('details') : null;
+        var rules = details ? Array.from(details.querySelectorAll('rule')) : [];
+        var failedRules = rules.filter(function (r) {
+            return String(r.getAttribute('status') || '').toLowerCase() !== 'passed';
+        });
+        var passedRules = rules.filter(function (r) {
+            return String(r.getAttribute('status') || '').toLowerCase() === 'passed';
+        });
+
+        var totalFailedChecks = details ? parseInt(details.getAttribute('failedChecks') || '0', 10) : 0;
+        var totalPassedChecks = details ? parseInt(details.getAttribute('passedChecks') || '0', 10) : 0;
+        var profileName = validationReport ? (validationReport.getAttribute('profileName') || '') : '';
+        var statement = validationReport ? (validationReport.getAttribute('statement') || '') : '';
+
+        var html = header +
+            '<div style="padding:8px;">' +
+            '<div class="card mb-2"><div class="card-body py-2">' +
+            '<div class="d-flex flex-wrap gap-2 align-items-center">' +
+            '<span class="badge bg-danger">Failed rules: ' + failedRules.length + '</span>' +
+            '<span class="badge bg-success">Passed rules: ' + passedRules.length + '</span>' +
+            '<span class="badge bg-danger-subtle text-danger">Failed checks: ' + (isNaN(totalFailedChecks) ? 0 : totalFailedChecks) + '</span>' +
+            '<span class="badge bg-success-subtle text-success">Passed checks: ' + (isNaN(totalPassedChecks) ? 0 : totalPassedChecks) + '</span>' +
+            '</div>' +
+            (profileName ? '<div class="text-muted mt-2" style="font-size:12px;">Profile: ' + P.Utils.escapeHtml(profileName) + '</div>' : '') +
+            (statement ? '<div class="mt-1">' + P.Utils.escapeHtml(statement) + '</div>' : '') +
+            '</div></div>';
+
+        html += '<div class="card mb-2"><div class="card-header py-2"><strong class="text-danger">Failed rules</strong></div><div class="card-body py-2">';
+        if (!failedRules.length) {
+            html += '<div class="text-success">No failed rules.</div>';
+        } else {
+            failedRules.forEach(function (rule) {
+                html += buildRuleHtml(rule, true);
+            });
+        }
+        html += '</div></div>';
+
+        html += '<details><summary class="text-muted" style="cursor:pointer;">Show passed rules (' + passedRules.length + ')</summary>' +
+            '<div class="card mt-2"><div class="card-body py-2">';
+        if (!passedRules.length) {
+            html += '<div class="text-muted">No passed rules.</div>';
+        } else {
+            passedRules.forEach(function (rule) {
+                html += buildRuleHtml(rule, false);
+            });
+        }
+        html += '</div></div></details>';
+
+        html += '<details class="mt-2"><summary class="text-muted" style="cursor:pointer;">Show raw XML</summary>' +
+            '<pre style="white-space:pre-wrap;max-height:240px;overflow:auto;" class="mt-2">' + P.Utils.escapeHtml(xmlReport) + '</pre></details>';
+
+        html += '</div>';
+        $('#treeContent').html(html);
+    }
+
+    function buildRuleHtml(ruleEl, failed) {
+        var spec = ruleEl.getAttribute('specification') || '';
+        var clause = ruleEl.getAttribute('clause') || '';
+        var testNumber = ruleEl.getAttribute('testNumber') || '';
+        var status = ruleEl.getAttribute('status') || '';
+        var passedChecks = ruleEl.getAttribute('passedChecks') || '0';
+        var failedChecks = ruleEl.getAttribute('failedChecks') || '0';
+        var descNode = ruleEl.querySelector('description');
+        var objNode = ruleEl.querySelector('object');
+        var testNode = ruleEl.querySelector('test');
+
+        var checks = Array.from(ruleEl.querySelectorAll('check, failedCheck, passedCheck, assertion'));
+
+        var html = '<div class="border rounded p-2 mb-2 ' + (failed ? 'border-danger-subtle bg-danger-subtle' : 'border-success-subtle') + '">' +
+            '<div class="d-flex flex-wrap align-items-center gap-2 mb-1">' +
+            '<span class="badge ' + (failed ? 'bg-danger' : 'bg-success') + '">' + P.Utils.escapeHtml(status || (failed ? 'failed' : 'passed')) + '</span>' +
+            (clause ? '<span class="badge bg-secondary">Clause ' + P.Utils.escapeHtml(clause) + '</span>' : '') +
+            (testNumber ? '<span class="badge bg-secondary">Test ' + P.Utils.escapeHtml(testNumber) + '</span>' : '') +
+            '<span class="badge bg-dark">Checks ' + P.Utils.escapeHtml(failedChecks) + ' failed / ' + P.Utils.escapeHtml(passedChecks) + ' passed</span>' +
+            '</div>' +
+            (spec ? '<div class="text-muted" style="font-size:12px;">' + P.Utils.escapeHtml(spec) + '</div>' : '') +
+            (descNode ? '<div class="mt-1">' + P.Utils.escapeHtml(descNode.textContent || '') + '</div>' : '') +
+            (objNode ? '<div class="text-muted" style="font-size:12px;">Object: ' + P.Utils.escapeHtml(objNode.textContent || '') + '</div>' : '') +
+            (testNode ? '<div class="mt-1"><code>' + P.Utils.escapeHtml(testNode.textContent || '') + '</code></div>' : '');
+
+        if (checks.length) {
+            html += '<details class="mt-1"><summary style="cursor:pointer;">Check details (' + checks.length + ')</summary>' +
+                '<div class="mt-1">';
+            checks.forEach(function (checkEl) {
+                var text = (checkEl.textContent || '').trim();
+                if (text) {
+                    html += '<div class="small border-start ps-2 mb-1">' + P.Utils.escapeHtml(text) + '</div>';
+                }
+            });
+            html += '</div></details>';
+        }
+
+        html += '</div>';
+        return html;
     }
 
     function renderValidation(issues) {
