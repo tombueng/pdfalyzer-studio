@@ -8,6 +8,7 @@ PDFalyzer.EditMode = (function ($, P) {
     var startX   = 0, startY = 0;
     var $drawRect = null;
     var targetPage = -1;
+    var pendingCreatePayload = null;
 
     function hasSession() {
         return !!P.state.sessionId;
@@ -30,36 +31,16 @@ PDFalyzer.EditMode = (function ($, P) {
 
             var pageIndex = 0;
             var rect = computeNextLineRect(pageIndex, P.state.editFieldType);
-            var fieldName = prompt('Field name:', P.state.editFieldType + '_' + Date.now());
-            if (!fieldName) return;
-
-            var options = getDefaultOptions(P.state.editFieldType);
-            var optionsJson = prompt('Field options JSON:', JSON.stringify(options));
-            if (optionsJson) {
-                try {
-                    options = JSON.parse(optionsJson);
-                } catch (e) {
-                    P.Utils.toast('Invalid options JSON, using defaults', 'warning');
-                }
-            }
-
-            P.state.pendingFormAdds.push({
-                fieldType: P.state.editFieldType,
-                fieldName: fieldName,
-                pageIndex: pageIndex,
-                x: rect.x,
-                y: rect.y,
-                width: rect.width,
-                height: rect.height,
-                options: options
-            });
-            updateSaveButton();
-            P.Utils.toast('Field queued. Click Save to persist changes.', 'info');
+            openCreateFieldDialog(P.state.editFieldType, pageIndex, rect);
         });
 
         $('#formSaveBtn').on('click', savePendingChanges);
         $('#formOptionsBtn').on('click', openOptionsPopup);
         $('#applyFieldOptionsBtn').on('click', applyOptionsFromModal);
+        $('#applyCreateFieldBtn').on('click', applyCreateFieldFromModal);
+        $('#fieldCreateModal').on('hidden.bs.modal', function () {
+            pendingCreatePayload = null;
+        });
     }
 
     function startDraw(e, pageIndex, wrapper) {
@@ -99,32 +80,12 @@ PDFalyzer.EditMode = (function ($, P) {
             var pdfY  = (vp.height - y - h) / scale;
             var pdfW  = w / scale;
             var pdfH  = h / scale;
-
-            var fieldName = prompt('Field name:', P.state.editFieldType + '_' + Date.now());
-            if (!fieldName) return;
-
-            var options = getDefaultOptions(P.state.editFieldType);
-            var optionsJson = prompt('Field options JSON:', JSON.stringify(options));
-            if (optionsJson) {
-                try {
-                    options = JSON.parse(optionsJson);
-                } catch (err) {
-                    P.Utils.toast('Invalid options JSON, using defaults', 'warning');
-                }
-            }
-
-            P.state.pendingFormAdds.push({
-                fieldType: P.state.editFieldType,
-                fieldName: fieldName,
-                pageIndex: pageIndex,
+            openCreateFieldDialog(P.state.editFieldType, pageIndex, {
                 x: pdfX,
                 y: pdfY,
                 width: pdfW,
-                height: pdfH,
-                options: options
+                height: pdfH
             });
-            updateSaveButton();
-            P.Utils.toast('Field queued. Click Save to persist changes.', 'info');
         };
 
         $(document).on('mousemove', moveHandler).on('mouseup', upHandler);
@@ -230,6 +191,66 @@ PDFalyzer.EditMode = (function ($, P) {
         if (fieldType === 'radio') return { required: false, readonly: false };
         if (fieldType === 'signature') return { required: true, readonly: false };
         return {};
+    }
+
+    function openCreateFieldDialog(fieldType, pageIndex, rect) {
+        if (!fieldType || !rect) return;
+        pendingCreatePayload = {
+            fieldType: fieldType,
+            pageIndex: pageIndex,
+            x: rect.x,
+            y: rect.y,
+            width: rect.width,
+            height: rect.height,
+            options: getDefaultOptions(fieldType)
+        };
+
+        $('#createFieldType').val(fieldType);
+        $('#createFieldPage').val(String(pageIndex + 1));
+        $('#createFieldId').val(fieldType + '_' + Date.now());
+        $('#createFieldOptions').val(JSON.stringify(pendingCreatePayload.options, null, 2));
+
+        var modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('fieldCreateModal'));
+        modal.show();
+    }
+
+    function applyCreateFieldFromModal() {
+        if (!pendingCreatePayload) return;
+
+        var fieldId = ($('#createFieldId').val() || '').trim();
+        if (!fieldId) {
+            P.Utils.toast('Field ID is required', 'warning');
+            return;
+        }
+
+        var options = pendingCreatePayload.options;
+        var optionsJson = ($('#createFieldOptions').val() || '').trim();
+        if (optionsJson) {
+            try {
+                options = JSON.parse(optionsJson);
+            } catch (err) {
+                P.Utils.toast('Invalid options JSON, using defaults', 'warning');
+            }
+        }
+
+        P.state.pendingFormAdds.push({
+            fieldType: pendingCreatePayload.fieldType,
+            fieldName: fieldId,
+            pageIndex: pendingCreatePayload.pageIndex,
+            x: pendingCreatePayload.x,
+            y: pendingCreatePayload.y,
+            width: pendingCreatePayload.width,
+            height: pendingCreatePayload.height,
+            options: options
+        });
+        pendingCreatePayload = null;
+
+        var modalEl = document.getElementById('fieldCreateModal');
+        var modal = bootstrap.Modal.getInstance(modalEl);
+        if (modal) modal.hide();
+
+        updateSaveButton();
+        P.Utils.toast('Field queued. Click Save to persist changes.', 'info');
     }
 
     function computeNextLineRect(pageIndex, fieldType) {
@@ -350,8 +371,8 @@ PDFalyzer.EditMode = (function ($, P) {
                 renderFieldHandlesForAllPages();
                 
                 // Highlight the field in the tree
-                var fieldNode = findFieldNodeByName(name);
-                if (fieldNode) P.Tree.selectNode(fieldNode);
+                var treeFieldNode = findFieldNodeByName(name);
+                if (treeFieldNode) P.Tree.selectNode(treeFieldNode);
             }
 
             dragging = true;
@@ -401,7 +422,10 @@ PDFalyzer.EditMode = (function ($, P) {
             var pdfW = width / scale;
             var pdfH = height / scale;
 
-            queueRectChange(fieldNode.properties.FullName, pdfX, pdfY, pdfW, pdfH);
+            var fullName = fieldNode && fieldNode.properties ? fieldNode.properties.FullName : null;
+            if (fullName) {
+                queueRectChange(fullName, pdfX, pdfY, pdfW, pdfH);
+            }
             updateSaveButton();
         });
     }

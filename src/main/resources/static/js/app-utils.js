@@ -43,6 +43,31 @@ PDFalyzer.Utils = (function ($) {
         return $('<div>').text(text).html();
     }
 
+    function reportClientError(payload) {
+        if (!payload) return;
+        var body = JSON.stringify(payload);
+
+        try {
+            if (navigator && typeof navigator.sendBeacon === 'function') {
+                var blob = new Blob([body], { type: 'application/json' });
+                navigator.sendBeacon('/api/client-errors', blob);
+                return;
+            }
+        } catch (ignored) {
+        }
+
+        try {
+            $.ajax({
+                url: '/api/client-errors',
+                method: 'POST',
+                contentType: 'application/json',
+                data: body
+            });
+        } catch (ignored2) {
+        }
+    }
+
     return { showLoading: showLoading, hideLoading: hideLoading,
-             toast: toast, apiFetch: apiFetch, escapeHtml: escapeHtml };
+             toast: toast, apiFetch: apiFetch, escapeHtml: escapeHtml,
+             reportClientError: reportClientError };
 })(jQuery);

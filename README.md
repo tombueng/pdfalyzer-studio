@@ -202,7 +202,7 @@ Toggle edit mode with the pencil button in the navbar (or `Ctrl+E`).
 1. Click the edit button to enter edit mode
 2. Select a field type from the toolbar (Text, Checkbox, Combo, Radio, Signature)
 3. Draw a rectangle on the PDF page where you want the field
-4. Enter a field name when prompted
+4. Fill in field details in the Add Field dialog (Field ID + options JSON)
 5. The PDF is modified server-side, re-rendered, and the tree refreshed
 
 **Supported field types:**
@@ -216,16 +216,15 @@ Toggle edit mode with the pencil button in the navbar (or `Ctrl+E`).
 - Creates proper PDF form fields using PDFBox's PDAcroForm API
 - Sets up default resources (Helvetica font) if no AcroForm exists
 - Generates appearance streams for visibility in PDF viewers
-- Validates field name, page index, and dimensions before creation
+- Validates field ID, page index, and dimensions before creation
+- Uses an in-app modal dialog (not browser prompt) for field creation
+- Supports field options editing for selected existing fields via the Options dialog
 - Downloads the modified PDF via the download button
 
 **What it cannot do:**
-- Cannot edit or delete existing form fields
-- Cannot modify field properties after creation
 - Cannot add non-form annotations (stamps, highlights, comments)
 - Cannot edit page content (text, images, graphics)
 - Cannot set up actual digital signatures (only creates the field placeholder)
-- Combo box choices must be configured via the API directly (no UI for options)
 
 ### 9. Export & Download
 
@@ -259,6 +258,7 @@ The download feature is especially useful after editing: add form fields, then d
 - **Status bar** -- Shows filename, page count, session status, and loading indicator
 - **Responsive layout** -- Stacks vertically on screens under 768px
 - **Custom SVG logo** -- Magnifying glass over PDF document
+- **Client JS error capture** -- Browser runtime errors are captured and sent to backend logs via `/api/client-errors`
 
 ---
 
@@ -277,7 +277,9 @@ All API endpoints are under `/api/`. Responses are JSON unless otherwise noted.
 | GET | `/api/fonts/{sessionId}` | Analyze all fonts | -- | `FontInfo[]` |
 | GET | `/api/fonts/{sessionId}/page/{n}` | Analyze fonts on page N | -- | `FontInfo[]` |
 | GET | `/api/validate/{sessionId}` | Run validation | -- | `ValidationIssue[]` |
+| GET | `/api/validate/{sessionId}/verapdf` | Run embedded veraPDF validation | -- | `{available, success, report, reportFormat, ...}` |
 | GET | `/api/validate/{sessionId}/export` | Download validation report | -- | `text/plain` (attachment) |
+| POST | `/api/client-errors` | Log client-side JavaScript errors | JSON payload from browser | `{logged: true}` |
 | POST | `/api/edit/{sessionId}/add-field` | Add a form field | `FormFieldRequest` (JSON) | `{sessionId, pageCount, tree}` |
 
 ### Error Responses

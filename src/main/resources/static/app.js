@@ -26,7 +26,67 @@
     'use strict';
     var P = PDFalyzer;
 
+    function installClientErrorCapture() {
+        if (window.__pdfalyzerErrorCaptureInstalled) return;
+        window.__pdfalyzerErrorCaptureInstalled = true;
+        window.__pdfalyzerJsErrors = [];
+
+        var lastFingerprint = null;
+        var lastTimestamp = 0;
+
+        function normalizeValue(value) {
+            if (value === null || value === undefined) return '';
+            return String(value);
+        }
+
+        function pushClientError(kind, message, source, line, column, stack) {
+            var payload = {
+                timestamp: new Date().toISOString(),
+                kind: normalizeValue(kind || 'error'),
+                message: normalizeValue(message || '(unknown error)'),
+                source: normalizeValue(source || ''),
+                line: normalizeValue(line || ''),
+                column: normalizeValue(column || ''),
+                stack: normalizeValue(stack || '')
+            };
+
+            var fingerprint = [payload.kind, payload.message, payload.source, payload.line, payload.column].join('|');
+            var now = Date.now();
+            if (fingerprint === lastFingerprint && (now - lastTimestamp) < 250) return;
+            lastFingerprint = fingerprint;
+            lastTimestamp = now;
+
+            window.__pdfalyzerJsErrors.push(payload);
+            if (window.__pdfalyzerJsErrors.length > 200) {
+                window.__pdfalyzerJsErrors.shift();
+            }
+
+            if (P.Utils && P.Utils.reportClientError) {
+                P.Utils.reportClientError(payload);
+            }
+        }
+
+        window.addEventListener('error', function (event) {
+            pushClientError(
+                'error',
+                event && event.message,
+                event && event.filename,
+                event && event.lineno,
+                event && event.colno,
+                event && event.error && event.error.stack
+            );
+        });
+
+        window.addEventListener('unhandledrejection', function (event) {
+            var reason = event ? event.reason : null;
+            var message = reason && reason.message ? reason.message : reason;
+            var stack = reason && reason.stack ? reason.stack : '';
+            pushClientError('unhandledrejection', message, '', '', '', stack);
+        });
+    }
+
     $(function () {
+        installClientErrorCapture();
         P.Upload.init();
         P.Search.init();
         P.Tabs.init();

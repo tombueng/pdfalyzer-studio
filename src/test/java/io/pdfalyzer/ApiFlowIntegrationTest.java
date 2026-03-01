@@ -18,6 +18,7 @@ import org.springframework.util.StreamUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import java.io.IOException;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -55,6 +56,59 @@ class ApiFlowIntegrationTest {
         assertEquals(HttpStatus.NOT_FOUND, pdfResp.getStatusCode(),
                 "Unknown sessions should be 404, not 400");
     }
+
+        @Test
+        void uploadThenRunVeraPdfValidationDoesNotReturnReleaseDetailsUnmarshalError() throws IOException {
+        ResponseEntity<Map<String, Object>> uploadResp = uploadTestPdf();
+        assertEquals(HttpStatus.OK, uploadResp.getStatusCode());
+        assertNotNull(uploadResp.getBody());
+
+        Object sid = uploadResp.getBody().get("sessionId");
+        assertNotNull(sid, "upload response must contain sessionId");
+
+        ResponseEntity<Map<String, Object>> validateResp = restTemplate.exchange(
+            "/api/validate/{sessionId}/verapdf",
+            HttpMethod.GET,
+            null,
+            new ParameterizedTypeReference<Map<String, Object>>() {},
+            sid
+        );
+
+        assertEquals(HttpStatus.OK, validateResp.getStatusCode());
+        assertNotNull(validateResp.getBody());
+        String report = String.valueOf(validateResp.getBody().getOrDefault("report", ""));
+        assertFalse(report.contains("Unmarshalling exception when streaming releaseDetails"),
+            "veraPDF report should not include releaseDetails unmarshalling failure");
+        assertTrue(validateResp.getBody().containsKey("reportFormat"),
+            "veraPDF response should include report format");
+        }
+
+        @Test
+        void clientErrorsEndpointAcceptsBrowserErrorPayload() {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("timestamp", "2026-03-01T00:00:00Z");
+        payload.put("kind", "error");
+        payload.put("message", "Synthetic test error");
+        payload.put("source", "app-edit-mode.js");
+        payload.put("line", "342");
+        payload.put("column", "34");
+        payload.put("stack", "TypeError: synthetic");
+
+        HttpEntity<Map<String, Object>> request = new HttpEntity<>(payload, headers);
+        ResponseEntity<Map<String, Object>> response = restTemplate.exchange(
+            "/api/client-errors",
+            HttpMethod.POST,
+            request,
+            new ParameterizedTypeReference<Map<String, Object>>() {}
+        );
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertEquals(Boolean.TRUE, response.getBody().get("logged"));
+        }
 
     private ResponseEntity<Map<String, Object>> uploadTestPdf() throws IOException {
         byte[] pdfBytes;
