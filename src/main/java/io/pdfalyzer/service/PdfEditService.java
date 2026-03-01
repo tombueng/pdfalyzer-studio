@@ -20,6 +20,7 @@ import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -114,15 +115,7 @@ public class PdfEditService {
 
         page.getAnnotations().add(widget);
         acroForm.getFields().add(field);
-
-        applyCommonFieldOptions(field, request.getOptions());
-        if (request.getOptions() != null && "true".equalsIgnoreCase(request.getOptions().get("multiline"))) {
-            field.setMultiline(true);
-        }
-        String defaultValue = request.getOptions() != null ? request.getOptions().get("defaultValue") : null;
-        if (defaultValue != null) {
-            field.setValue(defaultValue);
-        }
+        applyOptionsToField(field, request.getOptions());
     }
 
     private void addCheckboxField(PDDocument doc, PDAcroForm acroForm, PDPage page,
@@ -186,25 +179,13 @@ public class PdfEditService {
 
         page.getAnnotations().add(widget);
         acroForm.getFields().add(field);
-        applyCommonFieldOptions(field, request.getOptions());
-        if (request.getOptions() != null && "true".equalsIgnoreCase(request.getOptions().get("checked"))) {
-            field.check();
-        }
+        applyOptionsToField(field, request.getOptions());
     }
 
     private void addComboField(PDDocument doc, PDAcroForm acroForm, PDPage page,
                                 PDRectangle rect, FormFieldRequest request) throws IOException {
         PDComboBox field = new PDComboBox(acroForm);
         field.setPartialName(request.getFieldName());
-
-        if (request.getOptions() != null && request.getOptions().containsKey("choices")) {
-            String[] choices = request.getOptions().get("choices").split(",");
-            java.util.List<String> choiceList = java.util.Arrays.asList(choices);
-            field.setOptions(choiceList);
-        }
-        if (request.getOptions() != null && "true".equalsIgnoreCase(request.getOptions().get("editable"))) {
-            field.setEdit(true);
-        }
 
         PDAnnotationWidget widget = field.getWidgets().get(0);
         widget.setRectangle(rect);
@@ -213,11 +194,7 @@ public class PdfEditService {
 
         page.getAnnotations().add(widget);
         acroForm.getFields().add(field);
-        applyCommonFieldOptions(field, request.getOptions());
-        if (request.getOptions() != null && request.getOptions().containsKey("defaultValue")) {
-            String dv = request.getOptions().get("defaultValue");
-            if (dv != null && !dv.isBlank()) field.setValue(dv);
-        }
+        applyOptionsToField(field, request.getOptions());
     }
 
     private void addRadioField(PDDocument doc, PDAcroForm acroForm, PDPage page,
@@ -239,7 +216,7 @@ public class PdfEditService {
 
         page.getAnnotations().add(widget);
         acroForm.getFields().add(field);
-        applyCommonFieldOptions(field, request.getOptions());
+        applyOptionsToField(field, request.getOptions());
         field.setExportValues(java.util.Collections.singletonList("On"));
         field.setValue("Off");
     }
@@ -274,7 +251,7 @@ public class PdfEditService {
 
         page.getAnnotations().add(widget);
         acroForm.getFields().add(field);
-        applyCommonFieldOptions(field, request.getOptions());
+        applyOptionsToField(field, request.getOptions());
     }
 
     /**
@@ -425,6 +402,10 @@ public class PdfEditService {
     }
 
     private void applyOptionsToField(PDField field, Map<String, Object> options) throws IOException {
+        if (options == null || options.isEmpty()) {
+            return;
+        }
+
         Boolean required = parseTriState(options.get("required"));
         if (required != null) field.setRequired(required);
 
@@ -441,28 +422,14 @@ public class PdfEditService {
             PDComboBox comboBox = (PDComboBox) field;
             Boolean editable = parseTriState(options.get("editable"));
             if (editable != null) comboBox.setEdit(editable);
-            Object choicesObj = options.get("choices");
-            if (choicesObj instanceof List<?>) {
-                List<?> rawChoices = (List<?>) choicesObj;
-                java.util.List<String> choices = rawChoices.stream()
-                        .filter(v -> v != null && !v.toString().isBlank())
-                        .map(Object::toString)
-                        .toList();
-                if (!choices.isEmpty()) comboBox.setOptions(choices);
-            }
+            List<String> choices = parseChoiceList(options.get("choices"));
+            if (!choices.isEmpty()) comboBox.setOptions(choices);
         }
 
         if (field instanceof PDListBox) {
             PDListBox listBox = (PDListBox) field;
-            Object choicesObj = options.get("choices");
-            if (choicesObj instanceof List<?>) {
-                List<?> rawChoices = (List<?>) choicesObj;
-                java.util.List<String> choices = rawChoices.stream()
-                        .filter(v -> v != null && !v.toString().isBlank())
-                        .map(Object::toString)
-                        .toList();
-                if (!choices.isEmpty()) listBox.setOptions(choices);
-            }
+            List<String> choices = parseChoiceList(options.get("choices"));
+            if (!choices.isEmpty()) listBox.setOptions(choices);
         }
 
         if (field instanceof PDCheckBox) {
@@ -526,10 +493,30 @@ public class PdfEditService {
         return null;
     }
 
-    private void applyCommonFieldOptions(PDField field, Map<String, String> options) {
-        if (options == null || options.isEmpty()) return;
-        if ("true".equalsIgnoreCase(options.get("required"))) field.setRequired(true);
-        if ("true".equalsIgnoreCase(options.get("readonly"))) field.setReadOnly(true);
+    private List<String> parseChoiceList(Object rawValue) {
+        List<String> out = new ArrayList<>();
+        if (rawValue == null) {
+            return out;
+        }
+        if (rawValue instanceof List<?>) {
+            List<?> rawChoices = (List<?>) rawValue;
+            for (Object rawChoice : rawChoices) {
+                if (rawChoice == null) continue;
+                String choice = rawChoice.toString().trim();
+                if (!choice.isBlank()) out.add(choice);
+            }
+            return out;
+        }
+        String csv = rawValue.toString();
+        if (csv.isBlank()) {
+            return out;
+        }
+        String[] parts = csv.split(",");
+        for (String part : parts) {
+            String choice = part == null ? "" : part.trim();
+            if (!choice.isBlank()) out.add(choice);
+        }
+        return out;
     }
 
     private PDField findField(java.util.List<PDField> fields, String name) {

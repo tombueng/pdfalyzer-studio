@@ -316,6 +316,39 @@ public class RefactorAndFeatureTest {
     }
 
     @Test
+    void addFormFieldWithJavascriptPersistsValidationScript() throws IOException {
+        byte[] pdf = createSimplePdf(1);
+        FormFieldRequest req = new FormFieldRequest();
+        req.setFieldType("text");
+        req.setFieldName("jsField");
+        req.setPageIndex(0);
+        req.setX(80);
+        req.setY(620);
+        req.setWidth(180);
+        req.setHeight(20);
+
+        Map<String, Object> options = new HashMap<>();
+        options.put("javascript", "if (event.value && event.value.length < 3) { app.alert('Too short'); event.rc = false; }");
+        req.setOptions(options);
+
+        byte[] modified = editService.addFormField(pdf, req);
+        PdfSession session = pdfService.uploadAndParse("jsField.pdf", modified);
+        PdfNode acroForm = findByCategory(session.getTreeRoot(), "acroform");
+        assertNotNull(acroForm);
+
+        PdfNode jsFieldNode = acroForm.getChildren().stream()
+                .filter(n -> n.getName() != null && n.getName().contains("jsField"))
+                .findFirst()
+                .orElse(null);
+
+        assertNotNull(jsFieldNode, "jsField should exist in AcroForm tree");
+        assertNotNull(jsFieldNode.getProperties(), "jsField should expose properties");
+        assertTrue(jsFieldNode.getProperties().containsKey("JavaScript"), "JavaScript property should be present");
+        assertTrue(String.valueOf(jsFieldNode.getProperties().get("JavaScript")).contains("Too short"),
+                "Persisted JavaScript should contain validation script text");
+    }
+
+    @Test
     void addSignatureAndRadioFieldsAppearInAcroFormTree() throws IOException {
         byte[] pdf = createSimplePdf(1);
 
