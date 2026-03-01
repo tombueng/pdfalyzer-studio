@@ -259,9 +259,9 @@
                         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                     </div>
                     <div class="modal-body">
-                        <div class="mb-2 text-muted" id="fieldOptionsSelectionInfo" style="font-size:12px;"></div>
-                        <div class="mb-3 text-muted" id="fieldOptionsScopeHint" style="font-size:12px;"></div>
-                        <div class="row g-2">
+                        <div class="field-options-meta field-options-meta-primary" id="fieldOptionsSelectionInfo"></div>
+                        <div class="field-options-meta mb-3" id="fieldOptionsScopeHint"></div>
+                        <div class="row g-3 field-options-grid">
                             <div class="col-6 field-config-block field-option-block" id="optRequiredBlock">
                                 <label class="form-label form-label-sm"><i class="fas fa-asterisk me-1"></i>Required</label>
                                 <div class="field-option-radios" data-option="required">
@@ -356,24 +356,38 @@
                                 <input class="form-control form-control-sm" id="optChoices" placeholder="A,B,C" />
                             </div>
                             <div class="col-12 field-config-block field-option-block" id="optJavascriptBlock">
-                                <label class="form-label form-label-sm"><i class="fab fa-js me-1"></i>JavaScript validation (single field)</label>
-                                <div class="row g-2 mb-2">
-                                    <div class="col-7">
-                                        <select class="form-select form-select-sm" id="optJsPreset">
-                                            <option value="custom">Custom script</option>
-                                            <option value="length">Length (min/max)</option>
-                                            <option value="number">Number (min/max)</option>
-                                            <option value="date">Date (format)</option>
-                                        </select>
-                                    </div>
-                                    <div class="col-5 d-grid">
-                                        <button type="button" class="btn btn-outline-accent btn-sm" id="optJsPresetApplyBtn">
-                                            <i class="fas fa-magic me-1"></i>Insert preset
-                                        </button>
-                                    </div>
+                                <div class="field-option-section-header">
+                                    <label class="form-label form-label-sm"><i class="fab fa-js me-1"></i>JavaScript validation (single field)</label>
+                                    <button type="button"
+                                            class="btn btn-link btn-sm field-option-collapse-toggle collapsed"
+                                            id="optJavascriptToggle"
+                                            data-bs-toggle="collapse"
+                                            data-bs-target="#optJavascriptCollapse"
+                                            aria-expanded="false"
+                                            aria-controls="optJavascriptCollapse">
+                                        <span class="field-option-collapse-text">Show</span>
+                                        <i class="fas fa-chevron-down ms-1"></i>
+                                    </button>
                                 </div>
-                                <div class="field-js-preset-params mb-2" id="optJsPresetParams"></div>
-                                <textarea class="form-control form-control-sm" id="optJavascript" rows="5" placeholder="if (event.value) { ... }"></textarea>
+                                <div class="collapse" id="optJavascriptCollapse">
+                                    <div class="row g-2 mb-2">
+                                        <div class="col-7">
+                                            <select class="form-select form-select-sm" id="optJsPreset">
+                                                <option value="custom">Custom script</option>
+                                                <option value="length">Length (min/max)</option>
+                                                <option value="number">Number (min/max)</option>
+                                                <option value="date">Date (format)</option>
+                                            </select>
+                                        </div>
+                                        <div class="col-5 d-grid">
+                                            <button type="button" class="btn btn-outline-accent btn-sm" id="optJsPresetApplyBtn">
+                                                <i class="fas fa-magic me-1"></i>Insert preset
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="field-js-preset-params mb-2" id="optJsPresetParams"></div>
+                                    <textarea class="form-control form-control-sm" id="optJavascript" rows="5" placeholder="if (event.value) { ... }"></textarea>
+                                </div>
                             </div>
                         </div>
                     </div>

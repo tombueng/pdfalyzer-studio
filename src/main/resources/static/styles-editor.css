@@ -296,6 +296,68 @@
     font-size: 1rem;
 }
 
+.field-options-modal {
+    max-width: min(1180px, 96vw);
+}
+
+.field-options-modal .modal-body {
+    padding: 14px 18px 18px;
+}
+
+.field-options-meta {
+    color: var(--text-muted);
+    font-size: 11px;
+    line-height: 1.35;
+}
+
+.field-options-meta-primary {
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.field-options-grid {
+    row-gap: 10px;
+}
+
+.field-options-modal .field-config-block {
+    padding: 10px 12px;
+}
+
+.field-option-section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.field-option-section-header .form-label {
+    margin-bottom: 0;
+}
+
+.field-option-collapse-toggle {
+    padding: 0;
+    font-size: 11px;
+    line-height: 1.1;
+    text-decoration: none;
+    color: var(--accent);
+}
+
+.field-option-collapse-toggle:hover,
+.field-option-collapse-toggle:focus {
+    color: var(--accent);
+    text-decoration: none;
+}
+
+.field-option-collapse-toggle i {
+    transition: transform 0.2s ease;
+}
+
+.field-option-collapse-toggle[aria-expanded="true"] i {
+    transform: rotate(180deg);
+}
+
 .field-config-block {
     border: 1px solid rgba(0, 212, 255, 0.22);
     border-radius: 8px;

@@ -98,9 +98,38 @@ PDFalyzer.EditMode = (function ($, P) {
         $('#applyCreateFieldBtn').on('click', applyCreateFieldFromModal);
         bindJsPresetControls('create');
         bindJsPresetControls('options');
+        $('#optJavascriptCollapse').on('shown.bs.collapse hidden.bs.collapse', syncOptionsJavascriptToggleState);
         $('#fieldCreateModal').on('hidden.bs.modal', function () {
             pendingCreatePayload = null;
         });
+    }
+
+    function syncOptionsJavascriptToggleState() {
+        var $collapse = $('#optJavascriptCollapse');
+        var $toggle = $('#optJavascriptToggle');
+        if (!$collapse.length || !$toggle.length) return;
+        var expanded = $collapse.hasClass('show');
+        $toggle.attr('aria-expanded', expanded ? 'true' : 'false');
+        $toggle.toggleClass('collapsed', !expanded);
+        $toggle.find('.field-option-collapse-text').text(expanded ? 'Hide' : 'Show');
+    }
+
+    function setOptionsJavascriptSectionExpanded(canEditJavascript, scriptValue) {
+        var collapseEl = document.getElementById('optJavascriptCollapse');
+        if (!collapseEl) return;
+        var collapse = bootstrap.Collapse.getOrCreateInstance(collapseEl, { toggle: false });
+        if (!canEditJavascript) {
+            collapse.hide();
+            syncOptionsJavascriptToggleState();
+            return;
+        }
+        var hasScript = !!String(scriptValue || '').trim();
+        if (hasScript) {
+            collapse.show();
+        } else {
+            collapse.hide();
+        }
+        syncOptionsJavascriptToggleState();
     }
 
     function startDraw(e, pageIndex, wrapper) {
@@ -1368,13 +1397,16 @@ PDFalyzer.EditMode = (function ($, P) {
         $('#optDefaultValue').val(canEditSingleValue ? (readOptionValue(single, 'defaultValue') || readOptionValue(single, 'value') || '') : '');
         var choicesVal = canEditChoices ? readOptionValue(single, 'choices') : null;
         $('#optChoices').val(Array.isArray(choicesVal) ? choicesVal.join(',') : (choicesVal || ''));
-        $('#optJavascript').val(canEditJavascript ? (readOptionValue(single, 'javascript') || '') : '');
+        var javascriptValue = canEditJavascript ? (readOptionValue(single, 'javascript') || '') : '';
+        $('#optJavascript').val(javascriptValue);
 
         initializeJsPresetUi('options');
 
         $('#optDefaultValue').prop('disabled', !canEditSingleValue);
         $('#optChoices').prop('disabled', !canEditChoices);
         $('#optJavascript').prop('disabled', !canEditJavascript);
+
+        setOptionsJavascriptSectionExpanded(canEditJavascript, javascriptValue);
 
         updateFieldOptionsScopeHint(single, selectedEntries, visibleKeys);
 
