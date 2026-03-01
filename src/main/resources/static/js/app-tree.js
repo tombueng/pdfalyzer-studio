@@ -50,6 +50,11 @@ PDFalyzer.Tree = (function ($, P) {
         }
         applySelectionClasses();
         var $el = $('.tree-node[data-node-id="' + node.id + '"]');
+        if (!$el.length && node.nodeCategory === 'field' && P.state.treeData) {
+            renderSubtree(P.state.treeData, 'field');
+            $el = $('.tree-node[data-node-id="' + node.id + '"]');
+        }
+        applySelectionClasses();
         expandToNode(node);
         if ($el.length) {
             $el[0].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
