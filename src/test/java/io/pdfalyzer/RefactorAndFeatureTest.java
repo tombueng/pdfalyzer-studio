@@ -36,7 +36,7 @@ public class RefactorAndFeatureTest {
     @BeforeEach
     void setUp() {
         cosBuilder      = new CosNodeBuilder();
-        semanticBuilder = new SemanticTreeBuilder(cosBuilder);
+        semanticBuilder = new SemanticTreeBuilder(cosBuilder, new PageResourceBuilder(cosBuilder));
         parser          = new PdfStructureParser(semanticBuilder, cosBuilder);
         pdfService      = new PdfService(new SessionService(), parser);
         editService     = new PdfEditService();
