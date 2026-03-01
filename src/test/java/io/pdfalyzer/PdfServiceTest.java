@@ -27,12 +27,9 @@ import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.pdmodel.PDResources;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.apache.pdfbox.pdmodel.graphics.image.LosslessFactory;
-import org.apache.pdfbox.pdmodel.common.PDStream;
-import org.apache.pdfbox.pdmodel.graphics.form.PDFormXObject;
 import java.awt.Graphics2D;
 import java.awt.Color;
 import java.awt.AlphaComposite;
-import javax.imageio.ImageIO;
 
 import static org.junit.jupiter.api.Assertions.*;
 
