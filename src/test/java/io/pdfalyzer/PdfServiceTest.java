@@ -29,9 +29,12 @@ import org.apache.pdfbox.cos.COSObject;
 import org.apache.pdfbox.cos.COSObjectKey;
 import org.apache.pdfbox.cos.COSStream;
 import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.pdmodel.PDResources;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.apache.pdfbox.pdmodel.graphics.image.LosslessFactory;
+import org.apache.pdfbox.pdmodel.common.PDStream;
+import org.apache.pdfbox.pdmodel.graphics.form.PDFormXObject;
 import java.awt.Graphics2D;
 import java.awt.Color;
 import java.awt.AlphaComposite;
@@ -225,6 +228,76 @@ public class PdfServiceTest {
         // basic header check for PNG/JPEG
         assertTrue(body.length > 8);
         assertTrue((body[0] & 0xFF) == 0x89 || (body[0] & 0xFF) == 0xFF);
+    }
+
+    @Test
+    void resourceEndpointWithXmlStreamReturnsXml() throws IOException {
+        byte[] pdfBytes;
+        try (PDDocument doc = new PDDocument()) {
+            PDPage page = new PDPage();
+            doc.addPage(page);
+            // create a stand‑alone COSStream with XML subtype and put some content
+            COSStream raw = doc.getDocument().createCOSStream();
+            raw.setName(COSName.SUBTYPE, "XML");
+            try (java.io.OutputStream os = raw.createOutputStream()) {
+                os.write("<root>hello</root>".getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
+            // attach to catalog so parser will see it when traversing dictionaries
+            COSDictionary cat = doc.getDocumentCatalog().getCOSObject();
+            cat.setItem(COSName.getPDFName("MyXML"), raw);
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            doc.save(out);
+            pdfBytes = out.toByteArray();
+        }
+        PdfSession session = pdfService.uploadAndParse("xml.pdf", pdfBytes);
+        // search semantic tree for XML subtype stream
+        int objNum = -1, genNum = -1;
+        LinkedList<PdfNode> queue = new LinkedList<>();
+        queue.add(session.getTreeRoot());
+        while (!queue.isEmpty() && objNum < 0) {
+            PdfNode n = queue.removeFirst();
+            if ("COSStream".equals(n.getCosType()) && n.getObjectNumber() >= 0) {
+                for (PdfNode child : n.getChildren()) {
+                    if ("/Subtype".equals(child.getName()) && "XML".equalsIgnoreCase(child.getRawValue())) {
+                        objNum = n.getObjectNumber();
+                        genNum = n.getGenerationNumber();
+                        break;
+                    }
+                }
+                if (objNum >= 0) break;
+            }
+            queue.addAll(n.getChildren());
+        }
+        // fallback to scanning COS document directly if semantic tree missed it
+        if (objNum < 0) {
+            try (PDDocument doc2 = Loader.loadPDF(pdfBytes)) {
+                COSDocument cosDoc = doc2.getDocument();
+                for (COSObjectKey key : cosDoc.getXrefTable().keySet()) {
+                    COSObject cosObj = cosDoc.getObjectFromPool(key);
+                    if (cosObj != null && cosObj.getObject() instanceof COSStream) {
+                        COSStream stream = (COSStream) cosObj.getObject();
+                        COSName subtypeName = stream.getCOSName(COSName.SUBTYPE);
+                        if (subtypeName != null && "XML".equalsIgnoreCase(subtypeName.getName())) {
+                            objNum = (int) key.getNumber();
+                            genNum = key.getGeneration();
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        assertTrue(objNum >= 0, "expected xml stream node");
+
+        ApiController ctrl = new ApiController(pdfService,
+                new FontInspectorService(), new ValidationService(),
+                new PdfEditService(), new CosEditService(), new PdfStructureParser());
+        ResponseEntity<byte[]> resp = ctrl.getResource(session.getId(),
+                objNum, genNum, true);
+        assertEquals("application/xml", resp.getHeaders().getContentType().toString());
+        byte[] body = resp.getBody();
+        assertNotNull(body);
+        String text = new String(body, java.nio.charset.StandardCharsets.UTF_8);
+        assertTrue(text.contains("<root>"));
     }
 
     @Test

@@ -135,6 +135,51 @@ var PDFalyzer = (function ($) {
         }
     };
 
+    // ===================== RESOURCE PREVIEW =====================
+
+    var Resource = {
+        preview: function(url) {
+            // fetch as blob to inspect headers
+            showLoading();
+            fetch(url)
+                .then(function(resp) {
+                    hideLoading();
+                    var ct = resp.headers.get('content-type') || '';
+                    return resp.blob().then(function(blob) { return {ct: ct, blob: blob}; });
+                })
+                .then(function(r) {
+                    var ct = r.ct.toLowerCase();
+                    var $body = $('#resourcePreviewBody');
+                    $body.empty();
+                    if (ct.startsWith('image/')) {
+                        var urlObj = URL.createObjectURL(r.blob);
+                        var $img = $('<img>', { src: urlObj, css: { 'max-width': '100%', 'height': 'auto' } });
+                        $body.append($img);
+                        $('#resourcePreviewLabel').text('Image Preview');
+                    } else if (ct.indexOf('xml') !== -1 || ct.indexOf('json') !== -1 || ct.startsWith('text/')) {
+                        var reader = new FileReader();
+                        reader.onload = function(evt) {
+                            var text = evt.target.result;
+                            var $pre = $('<pre>').text(text).css({'max-height': '400px', 'overflow': 'auto', 'background': '#1e1e1e', 'padding': '10px', 'border-radius': '4px', 'color': '#d4d4d4'});
+                            $body.append($pre);
+                        };
+                        reader.readAsText(r.blob);
+                        $('#resourcePreviewLabel').text('Text Preview');
+                    } else {
+                        // fallback to new tab for unknown types
+                        window.open(url, '_blank');
+                        return;
+                    }
+                    var modal = new bootstrap.Modal(document.getElementById('resourcePreviewModal'));
+                    modal.show();
+                })
+                .catch(function(err) {
+                    hideLoading();
+                    toast('Could not preview resource', 'danger');
+                });
+        }
+    };
+
     // ===================== TREE =====================
 
     var Tree = {
@@ -208,15 +253,30 @@ var PDFalyzer = (function ($) {
 
             // Delete button for dictionary/array entries
             if (node.name && (/^[\/]|^\[/.test(node.name))) {
+                var isDict = node.cosType === 'COSDictionary' || node.cosType === 'COSStream';
                 var $delBtn = $('<span>', {
                     'class': 'cos-delete-btn',
-                    title: 'Delete this entry',
+                    title: isDict ? 'Delete entire dictionary' : 'Delete this entry',
                     html: '<i class="fas fa-trash-alt"></i>'
                 }).on('click', function (e) {
                     e.stopPropagation();
                     CosEditor.remove(node, $header);
                 });
                 $header.append($delBtn);
+            }
+
+            // Info button for dictionaries/arrays showing type and allowed operations
+            if (node.cosType === 'COSDictionary' || node.cosType === 'COSArray') {
+                var dictType = (node.properties && node.properties.Type) ? node.properties.Type : 'Generic Dictionary';
+                var $infoBtn = $('<span>', {
+                    'class': 'cos-info-btn',
+                    title: 'Dictionary type: ' + dictType,
+                    html: '<i class="fas fa-info-circle"></i>'
+                }).on('click', function (e) {
+                    e.stopPropagation();
+                    DictEditor.showInfo(node);
+                });
+                $header.append($infoBtn);
             }
 
             // Add entry button for dictionaries/arrays
@@ -245,11 +305,11 @@ var PDFalyzer = (function ($) {
                 });
                 var $open = $('<span>', {
                     'class': 'resource-open-btn',
-                    title: 'Open in new tab',
-                    html: '<i class="fas fa-external-link-alt"></i>'
+                    title: 'Preview',
+                    html: '<i class="fas fa-eye"></i>'
                 }).on('click', function (e) {
                     e.stopPropagation();
-                    window.open(urlBase + '?inline=true', '_blank');
+                    Resource.preview(urlBase + '?inline=true');
                 });
                 $header.append($dl).append($open);
             }
@@ -652,12 +712,6 @@ var PDFalyzer = (function ($) {
                 case 'forms':
                     Tree.renderSubtree(treeData, 'acroform');
                     break;
-                case 'bookmarks':
-                    Tree.renderSubtree(treeData, 'bookmarks');
-                    break;
-                case 'pages':
-                    Tree.renderSubtree(treeData, 'pages');
-                    break;
                 case 'fonts':
                     Tabs.loadFonts();
                     break;
@@ -666,6 +720,9 @@ var PDFalyzer = (function ($) {
                     break;
                 case 'rawcos':
                     Tabs.loadRawCos();
+                    break;
+                case 'bookmarks':
+                    Tree.renderSubtree(treeData, 'bookmarks');
                     break;
             }
         },
@@ -1007,6 +1064,16 @@ var PDFalyzer = (function ($) {
                     toast('Key cannot be empty', 'warning');
                     return;
                 }
+                
+                // Validate using DictEditor
+                if (!isArray) {
+                    var validation = DictEditor.validateAddEntry(node, key);
+                    if (!validation.valid) {
+                        toast(validation.message, 'warning');
+                        return;
+                    }
+                }
+                
                 var type = $typeSelect.val();
                 var val = $valueInput.val();
                 var k = key; // keep as string; empty string will trigger append on backend
@@ -1140,6 +1207,147 @@ var PDFalyzer = (function ($) {
                     toast('Edit failed', 'danger');
                 })
                 .always(function () { $editorEl.remove(); });
+        }
+    };
+
+    // ===================== DICT EDITOR (Type-aware dictionary management) =====================
+
+    var DictEditor = {
+        // PDFs dictionary type definitions and allowed/common keys
+        dictTypeInfo: {
+            'Catalog': {
+                description: 'PDF Document Catalog (root)',
+                required: ['Type', 'Pages'],
+                common: ['Pages', 'Outlines', 'StructTreeRoot', 'Lang', 'Threads', 'AcroForm', 'Resources']
+            },
+            'Pages': {
+                description: 'Pages tree node',
+                required: ['Type', 'Count', 'Kids'],
+                common: ['Kids', 'Count', 'Parent', 'MediaBox', 'Resources']
+            },
+            'Page': {
+                description: 'Individual page',
+                required: ['Type', 'Parent', 'MediaBox'],
+                common: ['MediaBox', 'Contents', 'Resources', 'Parent', 'Rotate', 'CropBox', 'BleedBox', 'TrimBox', 'ArtBox']
+            },
+            'AcroForm': {
+                description: 'Interactive form (AcroForm)',
+                required: ['Fields'],
+                common: ['Fields', 'SigFlags', 'NeedAppearances', 'DA', 'Resources', 'XFA']
+            },
+            'Font': {
+                description: 'Font descriptor',
+                required: ['Type', 'Subtype', 'BaseFont'],
+                common: ['BaseFont', 'Subtype', 'Encoding', 'FirstChar', 'LastChar', 'Widths', 'FontDescriptor', 'ToUnicode']
+            },
+            'XObject': {
+                description: 'External object (image, form, etc.)',
+                required: ['Type', 'Subtype'],
+                common: ['Subtype', 'Width', 'Height', 'ColorSpace', 'BitsPerComponent', 'Filter']
+            },
+            'Outlines': {
+                description: 'Document outline (bookmarks)',
+                required: ['Type'],
+                common: ['First', 'Last', 'Count']
+            },
+            'GenericDictionary': {
+                description: 'Generic PDF Dictionary',
+                common: []
+            }
+        },
+
+        // Detect dictionary type from node properties
+        detectDictType: function(node) {
+            if (!node.properties) return 'GenericDictionary';
+            var type = node.properties.Type;
+            var subtype = node.properties.Subtype;
+            
+            // Map to known types
+            if (type === 'Catalog') return 'Catalog';
+            if (type === 'Pages') return 'Pages';
+            if (type === 'Page') return 'Page';
+            if (type === 'Font') return 'Font';
+            if (type === 'XObject') return 'XObject';
+            if (type === 'Outlines') return 'Outlines';
+            if (node.name === '/AcroForm' || type === 'AcroForm') return 'AcroForm';
+            
+            return 'GenericDictionary';
+        },
+
+        // Get info about a dictionary type
+        getDictTypeInfo: function(dictType) {
+            return DictEditor.dictTypeInfo[dictType] || DictEditor.dictTypeInfo['GenericDictionary'];
+        },
+
+        // Show info popup about dictionary
+        showInfo: function(node) {
+            $('.cos-dict-info').remove();
+            
+            var dictType = DictEditor.detectDictType(node);
+            var info = DictEditor.getDictTypeInfo(dictType);
+            
+            var $infoDiv = $('<div>', { 'class': 'cos-dict-info' });
+            var $title = $('<div>', { 'class': 'dict-info-title' });
+            $title.append($('<strong>', { text: 'Type: ' + dictType }));
+            $title.append($('<br>'));
+            $title.append($('<em>', { text: info.description }));
+            $infoDiv.append($title);
+            
+            if (info.required && info.required.length > 0) {
+                var $reqDiv = $('<div>', { 'class': 'dict-info-section' });
+                $reqDiv.append($('<strong>', { text: 'Required Keys:' }));
+                var $reqList = $('<ul>');
+                info.required.forEach(function(key) {
+                    $reqList.append($('<li>', { text: key }));
+                });
+                $reqDiv.append($reqList);
+                $infoDiv.append($reqDiv);
+            }
+            
+            if (info.common && info.common.length > 0) {
+                var $commonDiv = $('<div>', { 'class': 'dict-info-section' });
+                $commonDiv.append($('<strong>', { text: 'Common Keys:' }));
+                var $commonList = $('<ul>');
+                info.common.forEach(function(key) {
+                    $commonList.append($('<li>', { text: key }));
+                });
+                $commonDiv.append($commonList);
+                $infoDiv.append($commonDiv);
+            }
+            
+            var $closeBtn = $('<button>', {
+                'class': 'btn btn-sm btn-secondary',
+                text: 'Close'
+            }).on('click', function() {
+                $infoDiv.remove();
+            });
+            $infoDiv.append($closeBtn);
+            
+            // Find and append after the tree node
+            $('.tree-node[data-node-id="' + node.id + '"]').append($infoDiv);
+        },
+
+        // Validate adding a new entry to a dictionary
+        validateAddEntry: function(parentNode, newKey) {
+            var dictType = DictEditor.detectDictType(parentNode);
+            var info = DictEditor.getDictTypeInfo(dictType);
+            
+            // Basic validation
+            if (!newKey || newKey.trim().length === 0) {
+                return { valid: false, message: 'Key cannot be empty' };
+            }
+            
+            // Check for duplicate keys
+            if (parentNode.children) {
+                var exists = parentNode.children.some(function(child) {
+                    return child.name === '/' + newKey || child.name === newKey;
+                });
+                if (exists) {
+                    return { valid: false, message: 'Key "' + newKey + '" already exists' };
+                }
+            }
+            
+            return { valid: true, message: 'Key is valid for this dictionary type' };
         }
     };
 

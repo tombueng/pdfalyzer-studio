@@ -224,7 +224,11 @@ public class ApiController {
                 String subtype = stream.getNameAsString(org.apache.pdfbox.cos.COSName.SUBTYPE);
                 org.apache.pdfbox.cos.COSName filterName = stream.getCOSName(org.apache.pdfbox.cos.COSName.FILTER);
                 String filter = filterName != null ? filterName.getName() : null;
-                if ("Image".equals(subtype)) {
+                if ("XML".equalsIgnoreCase(subtype)) {
+                    // deliver raw xml with proper media type
+                    mediaType = "application/xml";
+                    filename = "stream-" + objNum + "-" + genNum + ".xml";
+                } else if ("Image".equals(subtype)) {
                     if ("DCTDecode".equals(filter)) {
                         mediaType = "image/jpeg";
                         filename = "image-" + objNum + "-" + genNum + ".jpg";

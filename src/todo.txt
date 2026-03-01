@@ -1,0 +1,47 @@
+
+Structural view:
+	for dictionaries in the structural view one should not only be able to edit entries, 
+	but also delete them or add new ones (offer support according to what type of dict 
+	this is and what is allowed/usefull in this dict)
+	Dictionary items in the tree should have more information 
+	circular references should still be expandable and viewable in the ui!
+	Error message in UI disappear to fast (let them stay and user must click them to remove) and red text und dark background not readable.
+	All resources shall have a working "download" button (send good filename) and "open in tab" button (send correct mediatype and filename). 
+	click on links is no jumping anywhere
+	attachments handling (new tab) is missing
+	remove the "pages" tab
+	image-nodes shall have the view, download and delete buttons, not only the smask 
+	click on bookmark should jump to bookmark in the pdf viewer
+	
+	
+	
+
+
+form field editor
+	Insert field seem to be "incomplete",may the widget or appearance is missing? signature are not shown in adobe, test fields are, checkbox/radio is visible but not clickable/changeable.
+	Must be able to modify/delete all existing form fields
+	editor mode always active, remove button and move editor toolbar into top menubar. 
+	adding new fields should not auto save and reload. add a "save" button instead.
+	All form-fields should have an "options" popup with all possible settings for this field. (Button in toolbar when a field is selected
+	or multiple fields (via ctrl clicks) are selected)
+	on multiselect, options popup controls become three way controls for boolean (leave as is, turn allon turn all of), changing
+	other options sets modified value on all controls (ad "override" checkbox to all values in multiselect case).
+	Existing Form fields shall have a handle to move or resize them. 
+	When adding a field it will apear to the last field ("next line") same size as previous field, 
+	and then the user can change options on it (via button on the handle rect) or drag it around, resize it, change value, etc.
+	Field value must be changeable in the tree
+	Combo box choices must be configurable via the UI
+
+Font:
+	shall display the actual character map or glyph table in full detail 
+	help functions to find potential rendering issues, explain them and allow to fix them if possible.
+	shall detect specific missing glyphs (would require rendering each character)
+	shall visualize font usage areas on the page
+	must detect Fonts used in XObject Form content 
+	option to extract complete font to filename
+	
+	
+Validation:
+	Should also offer VeraPDF Report (inlude Verapdf in application)
+	
+
