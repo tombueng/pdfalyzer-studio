@@ -344,7 +344,8 @@ PDFalyzer.Tabs = (function ($, P) {
                 P.Utils.toast('No veraPDF report available to export', 'warning');
                 return;
             }
-            var blob = new Blob([veraPdfExportHtml], { type: 'text/html;charset=utf-8' });
+            var htmlForExport = normalizeExportPadding(veraPdfExportHtml, false);
+            var blob = new Blob([htmlForExport], { type: 'text/html;charset=utf-8' });
             var url = URL.createObjectURL(blob);
             var a = document.createElement('a');
             a.href = url;
@@ -360,13 +361,14 @@ PDFalyzer.Tabs = (function ($, P) {
                 P.Utils.toast('No veraPDF report available to export', 'warning');
                 return;
             }
+            var htmlForPdf = normalizeExportPadding(veraPdfExportHtml, true);
             var printWin = window.open('', '_blank');
             if (!printWin) {
                 P.Utils.toast('Popup blocked. Allow popups to export PDF.', 'warning');
                 return;
             }
             printWin.document.open();
-            printWin.document.write(veraPdfExportHtml);
+            printWin.document.write(htmlForPdf);
             printWin.document.close();
             setTimeout(function () {
                 printWin.focus();
@@ -375,9 +377,54 @@ PDFalyzer.Tabs = (function ($, P) {
         });
     }
 
+    function normalizeExportPadding(html, expandAllDetails) {
+        var source = html || '';
+        if (!source) return source;
+        try {
+            var parser = new DOMParser();
+            var doc = parser.parseFromString(source, 'text/html');
+
+            if (expandAllDetails) {
+                Array.from(doc.querySelectorAll('details')).forEach(function (d) {
+                    d.setAttribute('open', 'open');
+                });
+            }
+
+            var style = doc.createElement('style');
+            style.textContent = '' +
+                '.card{padding:0 !important; margin-bottom:14px !important;}' +
+                '.card-header{padding:14px 16px !important;}' +
+                '.card-body{padding:16px !important;}' +
+                '.border.rounded{padding:14px !important; margin-bottom:12px !important;}' +
+                'pre{padding:14px !important;}' +
+                'code{padding:2px 4px; border-radius:4px;}' +
+                'details{margin-top:10px !important; margin-bottom:10px !important;}' +
+                'details > summary{padding:6px 0 !important;}';
+
+            if (doc.head) {
+                doc.head.appendChild(style);
+            } else {
+                var head = doc.createElement('head');
+                head.appendChild(style);
+                if (doc.documentElement.firstChild) {
+                    doc.documentElement.insertBefore(head, doc.documentElement.firstChild);
+                } else {
+                    doc.documentElement.appendChild(head);
+                }
+            }
+
+            return '<!doctype html>' + doc.documentElement.outerHTML;
+        } catch (e) {
+            if (expandAllDetails) {
+                return source.replace(/<details(\s|>)/gi, '<details open$1');
+            }
+            return source;
+        }
+    }
+
     function wrapHtmlDocument(title, bodyHtml) {
         return '<!doctype html><html><head><meta charset="utf-8"><title>' + P.Utils.escapeHtml(title) + '</title>' +
-            '<style>body{font-family:Segoe UI,Arial,sans-serif;background:#111;color:#e9ecef;margin:0;padding:16px;} .card{border:1px solid #444;border-radius:8px;background:#1c1f24;margin-bottom:10px;} .card-body,.card-header{padding:10px;} .badge{display:inline-block;padding:4px 8px;border-radius:6px;font-size:12px;margin-right:6px;} .bg-danger{background:#b02a37;color:#fff;} .bg-success{background:#146c43;color:#fff;} .bg-secondary{background:#495057;color:#fff;} .bg-dark{background:#212529;color:#fff;} .text-muted{color:#cfd4da;} .border{border:1px solid #444;} .rounded{border-radius:8px;} pre,code{font-family:Consolas,monospace;} pre{background:#0f1115;padding:10px;border-radius:6px;border:1px solid #333;} details>summary{cursor:pointer;}</style>' +
+            '<style>body{font-family:Segoe UI,Arial,sans-serif;background:#111;color:#e9ecef;margin:0;padding:20px;} .card{border:1px solid #444;border-radius:10px;background:#1c1f24;margin-bottom:14px;} .card-body,.card-header{padding:16px;} .badge{display:inline-block;padding:5px 10px;border-radius:6px;font-size:12px;margin-right:6px;} .bg-danger{background:#b02a37;color:#fff;} .bg-success{background:#146c43;color:#fff;} .bg-secondary{background:#495057;color:#fff;} .bg-dark{background:#212529;color:#fff;} .text-muted{color:#cfd4da;} .border{border:1px solid #444;} .rounded{border-radius:8px;} pre,code{font-family:Consolas,monospace;} pre{background:#0f1115;padding:14px;border-radius:6px;border:1px solid #333;} code{padding:2px 4px;border-radius:4px;} details{margin-top:10px;margin-bottom:10px;} details>summary{cursor:pointer;padding:6px 0;}</style>' +
             '</head><body><h2 style="margin-top:0;">' + P.Utils.escapeHtml(title) + '</h2>' + bodyHtml + '</body></html>';
     }
 
