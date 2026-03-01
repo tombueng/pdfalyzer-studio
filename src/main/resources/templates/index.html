@@ -122,28 +122,29 @@
     </div>
 
     <div class="modal fade" id="fieldCreateModal" tabindex="-1" aria-labelledby="fieldCreateLabel" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-dialog modal-dialog-centered field-create-modal">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title" id="fieldCreateLabel">Add Field</h5>
+                    <h5 class="modal-title" id="fieldCreateLabel"><i class="fas fa-plus-square me-2"></i>Add Field</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                 </div>
                 <div class="modal-body">
+                    <div class="mb-3 text-muted" style="font-size:12px;">Set field identity and adjust options before queueing the change.</div>
                     <div class="row g-2">
-                        <div class="col-6">
-                            <label class="form-label form-label-sm">Type</label>
+                        <div class="col-6 field-create-block">
+                            <label class="form-label form-label-sm"><i class="fas fa-tag me-1"></i>Type</label>
                             <input class="form-control form-control-sm" id="createFieldType" readonly />
                         </div>
-                        <div class="col-6">
-                            <label class="form-label form-label-sm">Page</label>
+                        <div class="col-6 field-create-block">
+                            <label class="form-label form-label-sm"><i class="fas fa-file-alt me-1"></i>Page</label>
                             <input class="form-control form-control-sm" id="createFieldPage" readonly />
                         </div>
-                        <div class="col-12">
-                            <label class="form-label form-label-sm">Field ID</label>
+                        <div class="col-12 field-create-block">
+                            <label class="form-label form-label-sm"><i class="fas fa-fingerprint me-1"></i>Field ID</label>
                             <input class="form-control form-control-sm" id="createFieldId" placeholder="field_id" />
                         </div>
-                        <div class="col-12">
-                            <label class="form-label form-label-sm">Options JSON</label>
+                        <div class="col-12 field-create-block">
+                            <label class="form-label form-label-sm"><i class="fas fa-code me-1"></i>Options JSON</label>
                             <textarea class="form-control form-control-sm" id="createFieldOptions" rows="6"></textarea>
                         </div>
                     </div>
