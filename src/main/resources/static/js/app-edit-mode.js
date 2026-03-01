@@ -11,8 +11,33 @@ PDFalyzer.EditMode = (function ($, P) {
     var pendingCreatePayload = null;
     var lastAddedFieldTemplate = null;
 
+    var FIELD_CONFIG_DIALOGS = {
+        create: { modalId: 'fieldCreateModal' },
+        options: { modalId: 'fieldOptionsModal' }
+    };
+
     function hasSession() {
         return !!P.state.sessionId;
+    }
+
+    function getFieldConfigDialogEl(mode) {
+        var def = FIELD_CONFIG_DIALOGS[mode];
+        if (!def) return null;
+        return document.getElementById(def.modalId);
+    }
+
+    function showFieldConfigModal(mode) {
+        var modalEl = getFieldConfigDialogEl(mode);
+        if (!modalEl) return;
+        var modal = bootstrap.Modal.getOrCreateInstance(modalEl);
+        modal.show();
+    }
+
+    function hideFieldConfigModal(mode) {
+        var modalEl = getFieldConfigDialogEl(mode);
+        if (!modalEl) return;
+        var modal = bootstrap.Modal.getInstance(modalEl);
+        if (modal) modal.hide();
     }
 
     function updatePlaceModeCursor() {
@@ -361,8 +386,7 @@ PDFalyzer.EditMode = (function ($, P) {
         $('#createFieldId').val(suggestNextFieldId(fieldType));
         $('#createFieldOptions').val(JSON.stringify(pendingCreatePayload.options, null, 2));
 
-        var modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('fieldCreateModal'));
-        modal.show();
+        showFieldConfigModal('create');
     }
 
     function applyCreateFieldFromModal() {
@@ -401,9 +425,7 @@ PDFalyzer.EditMode = (function ($, P) {
         };
         pendingCreatePayload = null;
 
-        var modalEl = document.getElementById('fieldCreateModal');
-        var modal = bootstrap.Modal.getInstance(modalEl);
-        if (modal) modal.hide();
+        hideFieldConfigModal('create');
 
         renderFieldHandlesForAllPages();
         if (P.Tabs && P.Tabs.switchTab && P.state.currentTab) {
@@ -945,11 +967,11 @@ PDFalyzer.EditMode = (function ($, P) {
         return visible || {};
     }
 
-    function setBlockVisible(selector, isVisible) {
+    function setFieldConfigBlockVisible(selector, isVisible) {
         $(selector).toggleClass('field-option-hidden', !isVisible);
     }
 
-    function isBlockVisible(selector) {
+    function isFieldConfigBlockVisible(selector) {
         return !$(selector).hasClass('field-option-hidden');
     }
 
@@ -1017,7 +1039,7 @@ PDFalyzer.EditMode = (function ($, P) {
 
         Object.keys(TRI_STATE_GROUPS).forEach(function (optionName) {
             var group = TRI_STATE_GROUPS[optionName];
-            setBlockVisible(group.blockSelector, !!visibleKeys[optionName]);
+            setFieldConfigBlockVisible(group.blockSelector, !!visibleKeys[optionName]);
             if (visibleKeys[optionName]) {
                 setTriStateControlValue(optionName, resolveTriState(selectedEntries, optionName), showKeepOption);
             }
@@ -1027,9 +1049,9 @@ PDFalyzer.EditMode = (function ($, P) {
         var canEditChoices = !!single && !!visibleKeys.choices;
         var canEditJavascript = !!single && !!visibleKeys.javascript;
 
-        setBlockVisible('#optDefaultValueBlock', canEditSingleValue);
-        setBlockVisible('#optChoicesBlock', canEditChoices);
-        setBlockVisible('#optJavascriptBlock', canEditJavascript);
+        setFieldConfigBlockVisible('#optDefaultValueBlock', canEditSingleValue);
+        setFieldConfigBlockVisible('#optChoicesBlock', canEditChoices);
+        setFieldConfigBlockVisible('#optJavascriptBlock', canEditJavascript);
 
         $('#optDefaultValue').val(canEditSingleValue ? (readOptionValue(single, 'defaultValue') || readOptionValue(single, 'value') || '') : '');
         var choicesVal = canEditChoices ? readOptionValue(single, 'choices') : null;
@@ -1042,8 +1064,7 @@ PDFalyzer.EditMode = (function ($, P) {
 
         updateFieldOptionsScopeHint(single, selectedEntries, visibleKeys);
 
-        var modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('fieldOptionsModal'));
-        modal.show();
+        showFieldConfigModal('options');
     }
 
     function resolveTriState(entries, optionName) {
@@ -1126,34 +1147,34 @@ PDFalyzer.EditMode = (function ($, P) {
         if (!fieldNames.length) return;
 
         var options = {};
-        if (isBlockVisible('#optRequiredBlock')) {
+        if (isFieldConfigBlockVisible('#optRequiredBlock')) {
             options.required = parseTriStateValue(getTriStateControlValue('required'));
         }
-        if (isBlockVisible('#optReadonlyBlock')) {
+        if (isFieldConfigBlockVisible('#optReadonlyBlock')) {
             options.readonly = parseTriStateValue(getTriStateControlValue('readonly'));
         }
-        if (isBlockVisible('#optMultilineBlock')) {
+        if (isFieldConfigBlockVisible('#optMultilineBlock')) {
             options.multiline = parseTriStateValue(getTriStateControlValue('multiline'));
         }
-        if (isBlockVisible('#optEditableBlock')) {
+        if (isFieldConfigBlockVisible('#optEditableBlock')) {
             options.editable = parseTriStateValue(getTriStateControlValue('editable'));
         }
-        if (isBlockVisible('#optCheckedBlock')) {
+        if (isFieldConfigBlockVisible('#optCheckedBlock')) {
             options.checked = parseTriStateValue(getTriStateControlValue('checked'));
         }
 
-        if (isBlockVisible('#optDefaultValueBlock') && !$('#optDefaultValue').prop('disabled')) {
+        if (isFieldConfigBlockVisible('#optDefaultValueBlock') && !$('#optDefaultValue').prop('disabled')) {
             var defaultValue = $('#optDefaultValue').val();
             if (defaultValue) options.defaultValue = defaultValue;
         }
-        if (isBlockVisible('#optChoicesBlock') && !$('#optChoices').prop('disabled')) {
+        if (isFieldConfigBlockVisible('#optChoicesBlock') && !$('#optChoices').prop('disabled')) {
             var choicesRaw = $('#optChoices').val();
             if (choicesRaw) {
                 options.choices = choicesRaw.split(',').map(function (v) { return v.trim(); })
                     .filter(function (v) { return v.length > 0; });
             }
         }
-        if (isBlockVisible('#optJavascriptBlock') && !$('#optJavascript').prop('disabled')) {
+        if (isFieldConfigBlockVisible('#optJavascriptBlock') && !$('#optJavascript').prop('disabled')) {
             options.javascript = $('#optJavascript').val() || '';
         }
 
@@ -1187,9 +1208,7 @@ PDFalyzer.EditMode = (function ($, P) {
             }
             renderFieldHandlesForAllPages();
             updateSaveButton();
-            var modalEl = document.getElementById('fieldOptionsModal');
-            var modal = bootstrap.Modal.getInstance(modalEl);
-            if (modal) modal.hide();
+            hideFieldConfigModal('options');
             P.Utils.toast(toastMessage, 'success');
         };
 
