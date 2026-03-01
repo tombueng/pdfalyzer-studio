@@ -1,5 +1,5 @@
 /**
- * PDFalyzer – PDF file upload and drag-and-drop.
+ * PDFalyzer Studio – PDF file upload and drag-and-drop.
  */
 PDFalyzer.Upload = (function ($, P) {
     'use strict';

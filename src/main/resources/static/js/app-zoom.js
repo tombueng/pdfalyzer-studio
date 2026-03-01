@@ -1,5 +1,5 @@
 /**
- * PDFalyzer – zoom controls and auto-zoom modes.
+ * PDFalyzer Studio – zoom controls and auto-zoom modes.
  */
 PDFalyzer.Zoom = (function ($, P) {
     'use strict';

@@ -1,5 +1,5 @@
 /**
- * PDFalyzer – utility functions (toast, apiFetch, loading indicator).
+ * PDFalyzer Studio – utility functions (toast, apiFetch, loading indicator).
  */
 PDFalyzer.Utils = (function ($) {
     'use strict';

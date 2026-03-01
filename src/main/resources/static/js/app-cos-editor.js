@@ -1,5 +1,5 @@
 /**
- * PDFalyzer – COS attribute inline editor (edit / add-entry / delete).
+ * PDFalyzer Studio – COS attribute inline editor (edit / add-entry / delete).
  */
 PDFalyzer.CosEditor = (function ($, P) {
     'use strict';

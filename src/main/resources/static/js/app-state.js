@@ -1,5 +1,5 @@
 /**
- * PDFalyzer – shared application state.
+ * PDFalyzer Studio – shared application state.
  * MUST be loaded before all other modules.
  */
 var PDFalyzer = (function () {

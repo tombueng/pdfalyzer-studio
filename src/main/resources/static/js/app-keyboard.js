@@ -1,5 +1,5 @@
 /**
- * PDFalyzer – keyboard shortcuts.
+ * PDFalyzer Studio – keyboard shortcuts.
  */
 PDFalyzer.Keyboard = (function ($, P) {
     'use strict';

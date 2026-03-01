@@ -1,5 +1,5 @@
 /**
- * PDFalyzer – PDF viewer (PDF.js rendering, highlight, zoom).
+ * PDFalyzer Studio – PDF viewer (PDF.js rendering, highlight, zoom).
  */
 PDFalyzer.Viewer = (function ($, P) {
     'use strict';
