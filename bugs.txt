@@ -11,3 +11,8 @@ options button for selected form fields not working
 form field should have options and delete buttons attached to the handle of the form field
 image preview should be shown as tooltip when hovering an image in the tree
 clicking form field realods the pdf-view, so form field cannot be moved
+
+
+
+new checkbox inserted: checkmark to small, should fill the field
+add vera pdf maven dependencies so not external verapdf is needed for validation

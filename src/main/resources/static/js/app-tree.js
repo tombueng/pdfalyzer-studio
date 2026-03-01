@@ -131,31 +131,28 @@ PDFalyzer.Tree = (function ($, P) {
         $header.on('click', function (e) {
             if ($(e.target).closest('button, a').length) return;
             if (hasChildren) {
+                var isExpanding = $toggle.find('i').hasClass('fa-chevron-right');
                 $toggle.find('i').toggleClass('fa-chevron-right fa-chevron-down');
-                $toggle.toggleClass('expanded');
                 $childrenEl.toggle();
-                if (!$childrenEl.children().length) {
-                    node.children.forEach(function (c) {
-                        $childrenEl.append(buildNodeEl(c, depth + 1));
-                    });
+                
+                if (isExpanding) {
+                    // Expanding - render children if not already done
+                    if (!$childrenEl.children().length) {
+                        node.children.forEach(function (c) {
+                            $childrenEl.append(buildNodeEl(c, depth + 1));
+                        });
+                    }
+                } else {
+                    // Collapsing - remove properties panel
+                    $header.siblings('.node-properties').remove();
                 }
             }
             selectNode(node);
         });
 
-        // Children container (lazy)
-        var $childrenEl = $('<div>', { 'class': 'tree-children' });
+        // Children container (lazy, initially hidden)
+        var $childrenEl = $('<div>', { 'class': 'tree-children', css: { display: 'none' } });
         $wrapper.append($childrenEl);
-
-        // Auto-expand first two levels
-        if (depth < 2 && hasChildren) {
-            $toggle.find('i').toggleClass('fa-chevron-right fa-chevron-down');
-            $toggle.addClass('expanded');
-            $childrenEl.show();
-            node.children.forEach(function (c) {
-                $childrenEl.append(buildNodeEl(c, depth + 1));
-            });
-        }
 
         return $wrapper;
     }
@@ -203,13 +200,32 @@ PDFalyzer.Tree = (function ($, P) {
             if (node.keyPath) {
                 resourceUrl += '?keyPath=' + encodeURIComponent(node.keyPath);
             }
-            $('<button>', { 'class': 'resource-open-btn', title: 'Preview resource',
+            var $previewBtn = $('<button>', { 'class': 'resource-open-btn', title: 'Preview resource',
                              html: '<i class="fas fa-eye"></i>' })
                 .on('click', function (e) {
                     e.stopPropagation();
                     P.Resource.preview(resourceUrl + (node.keyPath ? '&inline=true' : '?inline=true'));
                 })
                 .appendTo($header);
+            
+            // Add image hover tooltip preview
+            if (node.nodeCategory === 'image') {
+                $header.on('mouseenter', function() {
+                    if ($('.image-tooltip-preview').length) return;
+                    var $tooltip = $('<div>', { 'class': 'image-tooltip-preview' });
+                    var $img = $('<img>', { src: resourceUrl + (node.keyPath ? '&inline=true' : '?inline=true') });
+                    $tooltip.append($img).appendTo('body');
+                    
+                    var updatePos = function(ev) {
+                        $tooltip.css({ left: (ev.pageX + 15) + 'px', top: (ev.pageY + 15) + 'px' });
+                    };
+                    $(document).on('mousemove.imgtooltip', updatePos);
+                }).on('mouseleave', function() {
+                    $('.image-tooltip-preview').remove();
+                    $(document).off('mousemove.imgtooltip');
+                });
+            }
+            
             $('<button>', { 'class': 'resource-download-btn', title: 'Download resource',
                              html: '<i class="fas fa-download"></i>' })
                 .on('click', function (e) {
@@ -228,8 +244,17 @@ PDFalyzer.Tree = (function ($, P) {
             }
         }
 
-        // Attachment download button
+        // Attachment preview and download buttons
         if (node.nodeCategory === 'attachment' && node.properties && node.properties.FileName) {
+            var attachUrl = '/api/attachment/' + P.state.sessionId + '/' + 
+                           encodeURIComponent(node.properties.FileName);
+            $('<button>', { 'class': 'resource-open-btn', title: 'Preview attachment',
+                             html: '<i class="fas fa-eye"></i>' })
+                .on('click', function (e) {
+                    e.stopPropagation();
+                    P.Resource.preview(attachUrl + '?inline=true');
+                })
+                .appendTo($header);
             $('<button>', { 'class': 'resource-download-btn', title: 'Download attachment',
                              html: '<i class="fas fa-download"></i>' })
                 .on('click', function (e) {

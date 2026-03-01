@@ -1,0 +1,15 @@
+Bugs - FIXED (2026-03-01):
+✓ Attachment preview -> now has both preview and download buttons
+✓ Tree "<" and ">" chevrons -> fixed toggle logic (removed rotation conflict)
+✓ When closing a node, the node info block is now properly removed
+✓ Structure tree is now closed on init (no auto-expand)
+✓ Nodes open with single click (fixed toggle logic)
+✓ Click form field now highlights it in tree
+✓ Multiselect form field highlighting works (already implemented)
+✓ Options button for selected form fields works (already implemented)
+✓ Form fields now have options and delete buttons attached to the handle
+✓ Image preview shown as tooltip when hovering an image in the tree
+✓ Clicking form field no longer reloads the entire PDF view (only re-renders handles)
+
+Remaining (data-related, not UI bugs):
+- "document Info" node missing info block - this depends on backend data structure
