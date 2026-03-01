@@ -342,13 +342,28 @@ public class UIRenderingTest {
             "    const afterNames = Array.isArray(P.state.selectedFieldNames) ? P.state.selectedFieldNames : [];" +
             "    const pdfToTreeState = afterNames.indexOf(secondName) >= 0;" +
             "    const pdfToTreeTree = !!secondHeader && (secondHeader.classList.contains('field-selected') || secondHeader.classList.contains('selected'));" +
+            "    firstHeader.dispatchEvent(new MouseEvent('click', { bubbles:true }));" +
+            "    if (secondHeader) {" +
+            "      secondHeader.dispatchEvent(new MouseEvent('click', { bubbles:true, ctrlKey:true }));" +
+            "    }" +
+            "    const namesAfterCtrl = Array.isArray(P.state.selectedFieldNames) ? P.state.selectedFieldNames : [];" +
+            "    const ctrlMultiState = namesAfterCtrl.indexOf(firstName) >= 0 && namesAfterCtrl.indexOf(secondName) >= 0;" +
+            "    const firstHandleAfterCtrl = document.querySelector('.form-field-handle[data-field-name=\"' + firstName + '\"]');" +
+            "    const secondHandleAfterCtrl = document.querySelector('.form-field-handle[data-field-name=\"' + secondName + '\"]');" +
+            "    const ctrlMultiHandle = !!firstHandleAfterCtrl && !!secondHandleAfterCtrl &&" +
+            "      firstHandleAfterCtrl.classList.contains('selected') && secondHandleAfterCtrl.classList.contains('selected');" +
+            "    const ctrlMultiTree = !!secondHeader &&" +
+            "      firstHeader.classList.contains('field-selected') && secondHeader.classList.contains('field-selected');" +
             "    done({" +
-            "      ok: treeToPdfState && treeToPdfHandle && treeToPdfTree && pdfToTreeState && pdfToTreeTree," +
+            "      ok: treeToPdfState && treeToPdfHandle && treeToPdfTree && pdfToTreeState && pdfToTreeTree && ctrlMultiState && ctrlMultiHandle && ctrlMultiTree," +
             "      treeToPdfState: treeToPdfState," +
             "      treeToPdfHandle: treeToPdfHandle," +
             "      treeToPdfTree: treeToPdfTree," +
             "      pdfToTreeState: pdfToTreeState," +
             "      pdfToTreeTree: pdfToTreeTree," +
+            "      ctrlMultiState: ctrlMultiState," +
+            "      ctrlMultiHandle: ctrlMultiHandle," +
+            "      ctrlMultiTree: ctrlMultiTree," +
             "      firstName: firstName," +
             "      secondName: secondName" +
             "    });" +
@@ -360,6 +375,93 @@ public class UIRenderingTest {
         @SuppressWarnings("unchecked")
         Map<String, Object> map = (Map<String, Object>) result;
         assertEquals(Boolean.TRUE, map.get("ok"), "Field selection sync must work both directions: " + map);
+    }
+
+    @Test
+    public void testPdfViewClickAndCtrlClickSelectsFieldsInTreeAndHandles() {
+        if (driver == null) {
+            System.out.println("Skipping testPdfViewClickAndCtrlClickSelectsFieldsInTreeAndHandles - ChromeDriver not available");
+            return;
+        }
+
+        driver.get(baseUrl);
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
+        wait.until(ExpectedConditions.or(
+            ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
+            ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
+        ));
+        wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(".form-field-handle[data-field-name]")));
+
+        driver.manage().timeouts().scriptTimeout(Duration.ofSeconds(40));
+        Object result = ((JavascriptExecutor) driver).executeAsyncScript(
+            "const done = arguments[arguments.length - 1];" +
+            "const P = window.PDFalyzer;" +
+            "if(!P || !P.state || !P.state.treeData){ done({ok:false,msg:'no-state'}); return; }" +
+            "if(!P.state.pageCanvases || !P.state.pageCanvases.length){ done({ok:false,msg:'no-canvases'}); return; }" +
+            "const fields = [];" +
+            "(function walk(n){" +
+            "  if(!n) return;" +
+            "  if(n.nodeCategory==='field' && n.properties && n.properties.FullName && Array.isArray(n.boundingBox) && n.boundingBox.length===4 && n.pageIndex>=0){" +
+            "    fields.push(n);" +
+            "  }" +
+            "  if(n.children) n.children.forEach(walk);" +
+            "})(P.state.treeData);" +
+            "if(fields.length < 2){ done({ok:false,msg:'not-enough-fields',count:fields.length}); return; }" +
+            "const first = fields[0];" +
+            "const second = fields[1];" +
+            "function clickField(field, withCtrl){" +
+            "  const pageIndex = field.pageIndex;" +
+            "  const canvas = P.state.pageCanvases[pageIndex];" +
+            "  const vp = P.state.pageViewports[pageIndex];" +
+            "  if(!canvas || !vp) return false;" +
+            "  const bb = field.boundingBox;" +
+            "  const centerX = bb[0] + bb[2] / 2;" +
+            "  const centerY = bb[1] + bb[3] / 2;" +
+            "  const rect = canvas.getBoundingClientRect();" +
+            "  const clientX = rect.left + (centerX * vp.scale);" +
+            "  const clientY = rect.top + (vp.height - (centerY * vp.scale));" +
+            "  const ev = new MouseEvent('click', {" +
+            "    bubbles: true," +
+            "    cancelable: true," +
+            "    clientX: clientX," +
+            "    clientY: clientY," +
+            "    ctrlKey: !!withCtrl" +
+            "  });" +
+            "  canvas.dispatchEvent(ev);" +
+            "  return true;" +
+            "}" +
+            "if(!clickField(first, false)){ done({ok:false,msg:'first-click-failed'}); return; }" +
+            "setTimeout(function(){" +
+            "  const namesAfterFirst = Array.isArray(P.state.selectedFieldNames) ? P.state.selectedFieldNames.slice() : [];" +
+            "  const firstName = first.properties.FullName;" +
+            "  const firstOnlySelected = namesAfterFirst.length === 1 && namesAfterFirst.indexOf(firstName) >= 0;" +
+            "  if(!clickField(second, true)){ done({ok:false,msg:'second-click-failed'}); return; }" +
+            "  setTimeout(function(){" +
+            "    const secondName = second.properties.FullName;" +
+            "    const names = Array.isArray(P.state.selectedFieldNames) ? P.state.selectedFieldNames : [];" +
+            "    const hasBoth = names.indexOf(firstName) >= 0 && names.indexOf(secondName) >= 0;" +
+            "    const h1 = document.querySelector('.form-field-handle[data-field-name=\"' + firstName + '\"]');" +
+            "    const h2 = document.querySelector('.form-field-handle[data-field-name=\"' + secondName + '\"]');" +
+            "    const handlesSelected = !!h1 && !!h2 && h1.classList.contains('selected') && h2.classList.contains('selected');" +
+            "    const t1 = document.querySelector('.tree-node-header[data-field-name=\"' + firstName + '\"]');" +
+            "    const t2 = document.querySelector('.tree-node-header[data-field-name=\"' + secondName + '\"]');" +
+            "    const treeSelected = !!t1 && !!t2 && t1.classList.contains('field-selected') && t2.classList.contains('field-selected');" +
+            "    done({" +
+            "      ok: firstOnlySelected && hasBoth && handlesSelected && treeSelected," +
+            "      firstOnlySelected:firstOnlySelected," +
+            "      hasBoth:hasBoth," +
+            "      handlesSelected:handlesSelected," +
+            "      treeSelected:treeSelected," +
+            "      names:names" +
+            "    });" +
+            "  }, 100);" +
+            "}, 100);"
+        );
+
+        assertTrue(result instanceof Map, "Expected script result map");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> map = (Map<String, Object>) result;
+        assertEquals(Boolean.TRUE, map.get("ok"), "PDF click/Ctrl-click field selection sync failed: " + map);
     }
 
         @Test
