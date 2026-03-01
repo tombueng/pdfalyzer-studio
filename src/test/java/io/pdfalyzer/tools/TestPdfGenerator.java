@@ -7,6 +7,7 @@ import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.io.IOUtils;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDDocumentCatalog;
+import org.apache.pdfbox.pdmodel.PDDocumentInformation;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
@@ -72,8 +73,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.GregorianCalendar;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -141,6 +145,7 @@ public class TestPdfGenerator {
             renderPage3LinksAndAttachments(doc, page3, page2, zipAttachment, pdfAttachment, xlsAttachment);
             renderPage4Forms(doc, page4);
             addBookmarks(doc, page1, page2, page3, page4);
+            applyDocumentMetadata(doc);
 
             doc.save(outputPdf.toFile());
         }
@@ -366,6 +371,75 @@ public class TestPdfGenerator {
         destination.setPage(page);
         item.setDestination(destination);
         return item;
+    }
+
+    private static void applyDocumentMetadata(PDDocument doc) throws IOException {
+        ZonedDateTime now = ZonedDateTime.now();
+        String nowIso = now.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+
+        PDDocumentInformation info = new PDDocumentInformation();
+        info.setTitle("PDFalyzer Test PDF");
+        info.setAuthor("PDFalyzer");
+        info.setCreator("TestPdfGenerator");
+        info.setProducer("Apache PDFBox");
+        info.setSubject("Feature-rich sample PDF for UI and parser validation");
+        info.setKeywords("pdfalyzer,test,sample,images,fonts,forms,attachments,metadata,xmp");
+        info.setCreationDate(GregorianCalendar.from(now));
+        info.setModificationDate(GregorianCalendar.from(now));
+        info.setCustomMetadataValue("GeneratorVersion", "1.0");
+        info.setCustomMetadataValue("SampleType", "UI-Regression-Fixture");
+        doc.setDocumentInformation(info);
+
+        PDDocumentCatalog catalog = doc.getDocumentCatalog();
+        catalog.setLanguage("en-US");
+        PDMarkInfo markInfo = new PDMarkInfo();
+        markInfo.setMarked(true);
+        catalog.setMarkInfo(markInfo);
+
+        String xmp = buildXmpPacket(nowIso, info.getTitle(), info.getCreator(), info.getSubject(), info.getKeywords());
+        PDMetadata metadata = new PDMetadata(doc);
+        try (OutputStream os = metadata.createOutputStream()) {
+            os.write(xmp.getBytes(StandardCharsets.UTF_8));
+        }
+        catalog.setMetadata(metadata);
+    }
+
+    private static String buildXmpPacket(String isoDate, String title, String creator, String subject, String keywords) {
+        String safeTitle = xmlEscape(title);
+        String safeCreator = xmlEscape(creator);
+        String safeSubject = xmlEscape(subject);
+        String safeKeywords = xmlEscape(keywords);
+
+        return "<?xpacket begin=\"\uFEFF\" id=\"W5M0MpCehiHzreSzNTczkc9d\"?>\n"
+                + "<x:xmpmeta xmlns:x=\"adobe:ns:meta/\">\n"
+                + "  <rdf:RDF xmlns:rdf=\"http://www.w3.org/1999/02/22-rdf-syntax-ns#\">\n"
+                + "    <rdf:Description rdf:about=\"\"\n"
+                + "      xmlns:dc=\"http://purl.org/dc/elements/1.1/\"\n"
+                + "      xmlns:xmp=\"http://ns.adobe.com/xap/1.0/\"\n"
+                + "      xmlns:pdf=\"http://ns.adobe.com/pdf/1.3/\">\n"
+                + "      <dc:title><rdf:Alt><rdf:li xml:lang=\"x-default\">" + safeTitle + "</rdf:li></rdf:Alt></dc:title>\n"
+                + "      <dc:creator><rdf:Seq><rdf:li>" + safeCreator + "</rdf:li></rdf:Seq></dc:creator>\n"
+                + "      <dc:description><rdf:Alt><rdf:li xml:lang=\"x-default\">" + safeSubject + "</rdf:li></rdf:Alt></dc:description>\n"
+                + "      <pdf:Keywords>" + safeKeywords + "</pdf:Keywords>\n"
+                + "      <xmp:CreateDate>" + isoDate + "</xmp:CreateDate>\n"
+                + "      <xmp:ModifyDate>" + isoDate + "</xmp:ModifyDate>\n"
+                + "      <xmp:CreatorTool>TestPdfGenerator</xmp:CreatorTool>\n"
+                + "    </rdf:Description>\n"
+                + "  </rdf:RDF>\n"
+                + "</x:xmpmeta>\n"
+                + "<?xpacket end=\"w\"?>";
+    }
+
+    private static String xmlEscape(String value) {
+        if (value == null) {
+            return "";
+        }
+        return value
+                .replace("&", "&amp;")
+                .replace("<", "&lt;")
+                .replace(">", "&gt;")
+                .replace("\"", "&quot;")
+                .replace("'", "&apos;");
     }
 
     private static void addExternalLink(PDPage page, float x, float y, float width, float height, String uri) throws IOException {
