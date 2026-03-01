@@ -43,7 +43,8 @@ public class PdfServiceTest {
 
     private static PdfStructureParser createParser() {
         CosNodeBuilder cosBuilder = new CosNodeBuilder();
-        SemanticTreeBuilder semanticBuilder = new SemanticTreeBuilder(cosBuilder);
+        PageResourceBuilder pageResourceBuilder = new PageResourceBuilder(cosBuilder);
+        SemanticTreeBuilder semanticBuilder = new SemanticTreeBuilder(cosBuilder, pageResourceBuilder);
         return new PdfStructureParser(semanticBuilder, cosBuilder);
     }
 
