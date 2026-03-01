@@ -59,25 +59,25 @@ public class ApiController {
     }
 
     @GetMapping("/tree/{sessionId}")
-    public ResponseEntity<PdfNode> getTree(@PathVariable String sessionId) {
+    public ResponseEntity<PdfNode> getTree(@PathVariable("sessionId") String sessionId) {
         return ResponseEntity.ok(pdfService.getTree(sessionId));
     }
 
     @GetMapping("/tree/{sessionId}/search")
-    public ResponseEntity<List<PdfNode>> searchTree(@PathVariable String sessionId,
-                                                     @RequestParam String q) {
+    public ResponseEntity<List<PdfNode>> searchTree(@PathVariable("sessionId") String sessionId,
+                                                     @RequestParam("q") String q) {
         return ResponseEntity.ok(pdfService.searchTree(sessionId, q));
     }
 
     @GetMapping("/pdf/{sessionId}")
-    public ResponseEntity<byte[]> getPdfBytes(@PathVariable String sessionId) {
+    public ResponseEntity<byte[]> getPdfBytes(@PathVariable("sessionId") String sessionId) {
         byte[] bytes = pdfService.getSessionPdfBytes(sessionId);
         return ResponseEntity.ok().contentType(MediaType.APPLICATION_PDF)
                 .contentLength(bytes.length).body(bytes);
     }
 
     @GetMapping("/pdf/{sessionId}/download")
-    public ResponseEntity<byte[]> downloadPdf(@PathVariable String sessionId) {
+    public ResponseEntity<byte[]> downloadPdf(@PathVariable("sessionId") String sessionId) {
         PdfSession session = pdfService.getSession(sessionId);
         byte[] bytes = session.getPdfBytes();
         return ResponseEntity.ok().contentType(MediaType.APPLICATION_PDF)
@@ -87,40 +87,40 @@ public class ApiController {
     }
 
     @GetMapping("/fonts/{sessionId}")
-    public ResponseEntity<List<FontInfo>> getFonts(@PathVariable String sessionId) throws IOException {
+    public ResponseEntity<List<FontInfo>> getFonts(@PathVariable("sessionId") String sessionId) throws IOException {
         return ResponseEntity.ok(fontInspectorService.analyzeFonts(
                 pdfService.getSessionPdfBytes(sessionId)));
     }
 
     @GetMapping("/fonts/{sessionId}/page/{pageNum}")
-    public ResponseEntity<List<FontInfo>> getPageFonts(@PathVariable String sessionId,
-                                                        @PathVariable int pageNum) throws IOException {
+    public ResponseEntity<List<FontInfo>> getPageFonts(@PathVariable("sessionId") String sessionId,
+                                                        @PathVariable("pageNum") int pageNum) throws IOException {
         return ResponseEntity.ok(fontInspectorService.analyzePageFonts(
                 pdfService.getSessionPdfBytes(sessionId), pageNum));
     }
 
     @GetMapping("/fonts/{sessionId}/charmap/{pageNum}/{fontObjectId}")
     public ResponseEntity<Map<String, String>> getCharMap(
-            @PathVariable String sessionId,
-            @PathVariable int pageNum,
-            @PathVariable String fontObjectId) throws IOException {
+            @PathVariable("sessionId") String sessionId,
+            @PathVariable("pageNum") int pageNum,
+            @PathVariable("fontObjectId") String fontObjectId) throws IOException {
         return ResponseEntity.ok(fontInspectorService.getCharacterMap(
                 pdfService.getSessionPdfBytes(sessionId), pageNum, fontObjectId));
     }
 
     @GetMapping("/fonts/{sessionId}/usage/{objNum}/{genNum}")
     public ResponseEntity<List<Map<String, Object>>> getFontUsage(
-            @PathVariable String sessionId,
-            @PathVariable int objNum,
-            @PathVariable int genNum) throws IOException {
+            @PathVariable("sessionId") String sessionId,
+            @PathVariable("objNum") int objNum,
+            @PathVariable("genNum") int genNum) throws IOException {
         return ResponseEntity.ok(fontInspectorService.getFontUsageAreas(
                 pdfService.getSessionPdfBytes(sessionId), objNum, genNum));
     }
 
     @GetMapping("/fonts/{sessionId}/extract/{objNum}/{genNum}")
-    public ResponseEntity<byte[]> extractFont(@PathVariable String sessionId,
-                                               @PathVariable int objNum,
-                                               @PathVariable int genNum) throws IOException {
+    public ResponseEntity<byte[]> extractFont(@PathVariable("sessionId") String sessionId,
+                                               @PathVariable("objNum") int objNum,
+                                               @PathVariable("genNum") int genNum) throws IOException {
         byte[] data = fontInspectorService.extractFontFile(
                 pdfService.getSessionPdfBytes(sessionId), objNum, genNum);
         if (data == null) return ResponseEntity.notFound().build();
@@ -132,20 +132,20 @@ public class ApiController {
     }
 
     @GetMapping("/validate/{sessionId}")
-    public ResponseEntity<List<ValidationIssue>> validate(@PathVariable String sessionId)
+    public ResponseEntity<List<ValidationIssue>> validate(@PathVariable("sessionId") String sessionId)
             throws IOException {
         return ResponseEntity.ok(validationService.validate(
                 pdfService.getSessionPdfBytes(sessionId)));
     }
 
     @GetMapping("/validate/{sessionId}/verapdf")
-    public ResponseEntity<Map<String, Object>> validateWithVeraPdf(@PathVariable String sessionId)
+    public ResponseEntity<Map<String, Object>> validateWithVeraPdf(@PathVariable("sessionId") String sessionId)
             throws IOException {
         return ResponseEntity.ok(veraPdfService.validate(pdfService.getSessionPdfBytes(sessionId)));
     }
 
     @GetMapping("/validate/{sessionId}/export")
-    public ResponseEntity<byte[]> exportValidationReport(@PathVariable String sessionId)
+    public ResponseEntity<byte[]> exportValidationReport(@PathVariable("sessionId") String sessionId)
             throws IOException {
         byte[] bytes = pdfService.getSessionPdfBytes(sessionId);
         List<ValidationIssue> issues = validationService.validate(bytes);
@@ -159,14 +159,14 @@ public class ApiController {
     }
 
     @GetMapping("/tree/{sessionId}/export")
-    public ResponseEntity<PdfNode> exportTree(@PathVariable String sessionId) {
+    public ResponseEntity<PdfNode> exportTree(@PathVariable("sessionId") String sessionId) {
         return ResponseEntity.ok()
                 .header(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"tree-export.json\"")
                 .body(pdfService.getTree(sessionId));
     }
 
     @GetMapping("/tree/{sessionId}/raw-cos")
-    public ResponseEntity<PdfNode> getRawCosTree(@PathVariable String sessionId) throws IOException {
+    public ResponseEntity<PdfNode> getRawCosTree(@PathVariable("sessionId") String sessionId) throws IOException {
         PdfSession session = pdfService.getSession(sessionId);
         PdfNode rawCos = session.getRawCosTree();
         if (rawCos == null) {
