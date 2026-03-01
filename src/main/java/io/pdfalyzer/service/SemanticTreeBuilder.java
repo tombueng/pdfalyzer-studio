@@ -266,6 +266,16 @@ public class SemanticTreeBuilder {
         node.addProperty("ReadOnly", String.valueOf(field.isReadOnly()));
         node.addProperty("Required", String.valueOf(field.isRequired()));
         if (!field.getWidgets().isEmpty()) {
+            try {
+                if (field.getWidgets().get(0).getPage() != null) {
+                    int pageIdx = ctx.doc.getPages().indexOf(field.getWidgets().get(0).getPage());
+                    if (pageIdx >= 0) {
+                        node.setPageIndex(pageIdx);
+                    }
+                }
+            } catch (Exception e) {
+                log.debug("Could not resolve page index for field {}", field.getFullyQualifiedName(), e);
+            }
             PDRectangle rect = field.getWidgets().get(0).getRectangle();
             if (rect != null) {
                 node.setBoundingBox(new double[]{

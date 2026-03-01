@@ -19,6 +19,8 @@ import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
+import java.util.List;
+import java.util.Map;
 
 @Service
 public class PdfEditService {
@@ -37,6 +39,7 @@ public class PdfEditService {
                 acroForm.setDefaultResources(resources);
                 acroForm.setDefaultAppearance("/Helv 10 Tf 0 g");
             }
+            acroForm.setNeedAppearances(true);
 
             if (request.getFieldName() == null || request.getFieldName().isBlank()) {
                 throw new IllegalArgumentException("Field name is required");
@@ -78,6 +81,17 @@ public class PdfEditService {
         }
     }
 
+    public byte[] addFormFields(byte[] pdfBytes, List<FormFieldRequest> requests) throws IOException {
+        if (requests == null || requests.isEmpty()) {
+            return pdfBytes;
+        }
+        byte[] current = pdfBytes;
+        for (FormFieldRequest request : requests) {
+            current = addFormField(current, request);
+        }
+        return current;
+    }
+
     private void addTextField(PDDocument doc, PDAcroForm acroForm, PDPage page,
                               PDRectangle rect, FormFieldRequest request) throws IOException {
         PDTextField field = new PDTextField(acroForm);
@@ -100,6 +114,10 @@ public class PdfEditService {
         page.getAnnotations().add(widget);
         acroForm.getFields().add(field);
 
+        applyCommonFieldOptions(field, request.getOptions());
+        if (request.getOptions() != null && "true".equalsIgnoreCase(request.getOptions().get("multiline"))) {
+            field.setMultiline(true);
+        }
         String defaultValue = request.getOptions() != null ? request.getOptions().get("defaultValue") : null;
         if (defaultValue != null) {
             field.setValue(defaultValue);
@@ -125,6 +143,10 @@ public class PdfEditService {
 
         page.getAnnotations().add(widget);
         acroForm.getFields().add(field);
+        applyCommonFieldOptions(field, request.getOptions());
+        if (request.getOptions() != null && "true".equalsIgnoreCase(request.getOptions().get("checked"))) {
+            field.check();
+        }
     }
 
     private void addComboField(PDDocument doc, PDAcroForm acroForm, PDPage page,
@@ -137,6 +159,9 @@ public class PdfEditService {
             java.util.List<String> choiceList = java.util.Arrays.asList(choices);
             field.setOptions(choiceList);
         }
+        if (request.getOptions() != null && "true".equalsIgnoreCase(request.getOptions().get("editable"))) {
+            field.setEdit(true);
+        }
 
         PDAnnotationWidget widget = field.getWidgets().get(0);
         widget.setRectangle(rect);
@@ -145,6 +170,11 @@ public class PdfEditService {
 
         page.getAnnotations().add(widget);
         acroForm.getFields().add(field);
+        applyCommonFieldOptions(field, request.getOptions());
+        if (request.getOptions() != null && request.getOptions().containsKey("defaultValue")) {
+            String dv = request.getOptions().get("defaultValue");
+            if (dv != null && !dv.isBlank()) field.setValue(dv);
+        }
     }
 
     private void addRadioField(PDDocument doc, PDAcroForm acroForm, PDPage page,
@@ -166,6 +196,9 @@ public class PdfEditService {
         field.setWidgets(java.util.Collections.singletonList(widget));
         page.getAnnotations().add(widget);
         acroForm.getFields().add(field);
+        applyCommonFieldOptions(field, request.getOptions());
+        field.setExportValues(java.util.Collections.singletonList("On"));
+        field.setValue("On");
     }
 
     private void addSignatureField(PDDocument doc, PDAcroForm acroForm, PDPage page,
@@ -178,8 +211,15 @@ public class PdfEditService {
         widget.setPage(page);
         widget.setPrinted(true);
 
+        PDAppearanceDictionary appearances = new PDAppearanceDictionary();
+        PDAppearanceStream normalAppearance = new PDAppearanceStream(doc);
+        normalAppearance.setBBox(new PDRectangle(rect.getWidth(), rect.getHeight()));
+        appearances.setNormalAppearance(normalAppearance);
+        widget.setAppearance(appearances);
+
         page.getAnnotations().add(widget);
         acroForm.getFields().add(field);
+        applyCommonFieldOptions(field, request.getOptions());
     }
 
     /**
@@ -283,6 +323,33 @@ public class PdfEditService {
             log.info("Updated choices for field '{}': {}", fieldName, choices);
             return out.toByteArray();
         }
+    }
+
+    public byte[] updateFieldRect(byte[] pdfBytes, String fieldName,
+                                   double x, double y, double width, double height) throws IOException {
+        try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+            PDAcroForm acroForm = doc.getDocumentCatalog().getAcroForm();
+            if (acroForm == null) throw new IllegalArgumentException("No AcroForm in document");
+            PDField target = findField(acroForm.getFields(), fieldName);
+            if (target == null) throw new IllegalArgumentException("Field not found: " + fieldName);
+            if (target.getWidgets().isEmpty()) throw new IllegalArgumentException("Field has no widget: " + fieldName);
+
+            PDRectangle rect = new PDRectangle((float) x, (float) y, (float) width, (float) height);
+            for (PDAnnotationWidget widget : target.getWidgets()) {
+                widget.setRectangle(rect);
+            }
+
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            doc.save(out);
+            log.info("Updated rectangle for field '{}' to [{}, {}, {}, {}]", fieldName, x, y, width, height);
+            return out.toByteArray();
+        }
+    }
+
+    private void applyCommonFieldOptions(PDField field, Map<String, String> options) {
+        if (options == null || options.isEmpty()) return;
+        if ("true".equalsIgnoreCase(options.get("required"))) field.setRequired(true);
+        if ("true".equalsIgnoreCase(options.get("readonly"))) field.setReadOnly(true);
     }
 
     private PDField findField(java.util.List<PDField> fields, String name) {
