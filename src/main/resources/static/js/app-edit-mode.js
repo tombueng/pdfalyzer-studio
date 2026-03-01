@@ -297,6 +297,53 @@ PDFalyzer.EditMode = (function ($, P) {
         return null;
     }
 
+    function getFieldIdPrefix(fieldType) {
+        var normalized = (fieldType || '').toLowerCase();
+        if (normalized === 'text') return 'text';
+        if (normalized === 'combo') return 'combo';
+        if (normalized === 'checkbox') return 'check';
+        if (normalized === 'radio') return 'radio';
+        if (normalized === 'signature') return 'sign';
+        return 'field';
+    }
+
+    function collectUsedFieldIds() {
+        var used = Object.create(null);
+
+        function markUsed(name) {
+            if (!name) return;
+            used[String(name)] = true;
+        }
+
+        function walk(node) {
+            if (!node) return;
+            if (node.nodeCategory === 'field' && node.properties && node.properties.FullName) {
+                markUsed(node.properties.FullName);
+            }
+            if (node.children && node.children.length) {
+                node.children.forEach(walk);
+            }
+        }
+
+        walk(P.state.treeData);
+
+        (P.state.pendingFormAdds || []).forEach(function (pendingAdd) {
+            if (pendingAdd && pendingAdd.fieldName) markUsed(pendingAdd.fieldName);
+        });
+
+        return used;
+    }
+
+    function suggestNextFieldId(fieldType) {
+        var prefix = getFieldIdPrefix(fieldType);
+        var used = collectUsedFieldIds();
+        var index = 1;
+        while (used[prefix + index]) {
+            index += 1;
+        }
+        return prefix + index;
+    }
+
     function openCreateFieldDialog(fieldType, pageIndex, rect) {
         if (!fieldType || !rect) return;
         pendingCreatePayload = {
@@ -311,7 +358,7 @@ PDFalyzer.EditMode = (function ($, P) {
 
         $('#createFieldType').val(fieldType);
         $('#createFieldPage').val(String(pageIndex + 1));
-        $('#createFieldId').val(fieldType + '_' + Date.now());
+        $('#createFieldId').val(suggestNextFieldId(fieldType));
         $('#createFieldOptions').val(JSON.stringify(pendingCreatePayload.options, null, 2));
 
         var modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('fieldCreateModal'));
