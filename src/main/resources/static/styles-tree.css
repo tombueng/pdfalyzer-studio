@@ -74,6 +74,15 @@
     outline: 1px solid rgba(0, 212, 255, 0.3);
 }
 
+.tree-node-header.field-selected {
+    background: rgba(255, 193, 7, 0.12);
+    outline: 1px solid rgba(255, 193, 7, 0.35);
+}
+
+.tree-node-header.selected.field-selected {
+    background: linear-gradient(90deg, var(--accent-dim) 0%, rgba(255, 193, 7, 0.12) 100%);
+}
+
 .tree-toggle {
     width: 16px;
     font-size: 10px;

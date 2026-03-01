@@ -426,7 +426,12 @@ PDFalyzer.EditMode = (function ($, P) {
         }
 
         renderFieldHandlesForAllPages();
-        P.Tree.selectNode(fieldNode);
+        P.Tree.selectNode(fieldNode, additive, true);
+        refreshSelectionButtons();
+    }
+
+    function refreshFieldSelectionHighlights() {
+        renderFieldHandlesForAllPages();
         refreshSelectionButtons();
     }
 
@@ -655,6 +660,7 @@ PDFalyzer.EditMode = (function ($, P) {
         startDraw: startDraw,
         deleteField: deleteField,
         selectFieldFromViewer: selectFieldFromViewer,
+        refreshFieldSelectionHighlights: refreshFieldSelectionHighlights,
         setFieldValue: setFieldValue,
         renderFieldHandles: renderFieldHandles,
         resetPending: resetPending,

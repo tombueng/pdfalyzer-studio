@@ -168,10 +168,24 @@ PDFalyzer.Tabs = (function ($, P) {
         var available = !!result.available;
         var success = !!result.success;
         var report = result.report || '';
+        var reportFormat = (result.reportFormat || '').toLowerCase();
+        var looksLikeHtml = report.indexOf('<html') !== -1 || report.indexOf('<!DOCTYPE html') !== -1;
         var header = '<div class="mb-2" style="padding:8px;">' +
             '<span class="badge ' + (success ? 'bg-success' : 'bg-secondary') + ' me-2">' +
             (success ? 'PASS' : 'CHECK') + '</span>' +
             '<span class="text-muted">veraPDF ' + (available ? 'result' : 'not available') + '</span></div>';
+
+        if (report && (reportFormat === 'html' || looksLikeHtml)) {
+            $('#treeContent').html(
+                header +
+                '<div style="padding:8px;">' +
+                '<iframe title="veraPDF Report" style="width:100%;height:520px;border:1px solid var(--border);border-radius:4px;background:#fff;"></iframe>' +
+                '</div>'
+            );
+            $('#treeContent iframe')[0].srcdoc = report;
+            return;
+        }
+
         $('#treeContent').html(
             header +
             '<div style="padding:8px;">' +
