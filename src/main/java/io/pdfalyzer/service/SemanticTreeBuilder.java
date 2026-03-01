@@ -10,8 +10,14 @@ import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotation;
 import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDDocumentOutline;
 import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineItem;
 import org.apache.pdfbox.pdmodel.interactive.form.PDAcroForm;
+import org.apache.pdfbox.pdmodel.interactive.form.PDCheckBox;
+import org.apache.pdfbox.pdmodel.interactive.form.PDComboBox;
 import org.apache.pdfbox.pdmodel.interactive.form.PDField;
+import org.apache.pdfbox.pdmodel.interactive.form.PDListBox;
 import org.apache.pdfbox.pdmodel.interactive.form.PDNonTerminalField;
+import org.apache.pdfbox.pdmodel.interactive.form.PDRadioButton;
+import org.apache.pdfbox.pdmodel.interactive.form.PDSignatureField;
+import org.apache.pdfbox.pdmodel.interactive.form.PDTextField;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
@@ -265,6 +271,29 @@ public class SemanticTreeBuilder {
             node.addProperty("Value", field.getValueAsString());
         node.addProperty("ReadOnly", String.valueOf(field.isReadOnly()));
         node.addProperty("Required", String.valueOf(field.isRequired()));
+        node.addProperty("FieldSubType", detectFieldSubType(field));
+
+        if (field instanceof PDTextField textField) {
+            node.addProperty("Multiline", String.valueOf(textField.isMultiline()));
+        }
+        if (field instanceof PDComboBox comboBox) {
+            node.addProperty("Editable", String.valueOf(comboBox.isEdit()));
+        }
+        if (field instanceof PDCheckBox) {
+            String current = field.getValueAsString();
+            boolean checked = current != null && !current.isBlank() && !"Off".equalsIgnoreCase(current);
+            node.addProperty("Checked", String.valueOf(checked));
+        }
+        if (field instanceof PDComboBox || field instanceof PDListBox) {
+            String options = extractChoiceOptions(field);
+            if (options != null && !options.isBlank()) {
+                node.addProperty("Options", options);
+            }
+        }
+        String jsValidation = extractValidationJavaScript(field);
+        if (jsValidation != null && !jsValidation.isBlank()) {
+            node.addProperty("JavaScript", jsValidation);
+        }
         if (!field.getWidgets().isEmpty()) {
             try {
                 if (field.getWidgets().get(0).getPage() != null) {
@@ -295,6 +324,46 @@ public class SemanticTreeBuilder {
             log.debug("Error attaching COS to field {}", field.getFullyQualifiedName(), e);
         }
         return node;
+    }
+
+    private String detectFieldSubType(PDField field) {
+        if (field instanceof PDTextField) return "text";
+        if (field instanceof PDCheckBox) return "checkbox";
+        if (field instanceof PDRadioButton) return "radio";
+        if (field instanceof PDComboBox) return "combo";
+        if (field instanceof PDListBox) return "list";
+        if (field instanceof PDSignatureField) return "signature";
+        return "unknown";
+    }
+
+    private String extractChoiceOptions(PDField field) {
+        COSBase optBase = field.getCOSObject().getDictionaryObject(COSName.OPT);
+        if (!(optBase instanceof COSArray optArray)) return null;
+        List<String> values = new ArrayList<>();
+        for (int i = 0; i < optArray.size(); i++) {
+            COSBase item = optArray.getObject(i);
+            if (item instanceof COSString cosString) {
+                values.add(cosString.getString());
+                continue;
+            }
+            if (item instanceof COSArray pair && pair.size() > 0) {
+                COSBase first = pair.getObject(0);
+                COSBase second = pair.size() > 1 ? pair.getObject(1) : null;
+                if (second instanceof COSString display) values.add(display.getString());
+                else if (first instanceof COSString export) values.add(export.getString());
+            }
+        }
+        return values.isEmpty() ? null : String.join(",", values);
+    }
+
+    private String extractValidationJavaScript(PDField field) {
+        COSBase aaBase = field.getCOSObject().getDictionaryObject(COSName.AA);
+        if (!(aaBase instanceof COSDictionary aaDict)) return null;
+        COSBase validateBase = aaDict.getDictionaryObject(COSName.V);
+        if (!(validateBase instanceof COSDictionary validateDict)) return null;
+        String subtype = validateDict.getNameAsString(COSName.S);
+        if (!"JavaScript".equals(subtype)) return null;
+        return validateDict.getString(COSName.JS);
     }
 
     private String getFieldIcon(String fieldType) {

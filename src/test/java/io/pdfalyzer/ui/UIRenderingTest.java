@@ -225,6 +225,28 @@ public class UIRenderingTest {
         ));
         addTextBtn.click();
 
+        wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector("#pdfViewer .pdf-page-wrapper canvas")));
+
+        driver.manage().timeouts().scriptTimeout(Duration.ofSeconds(30));
+        Object drawResult = ((JavascriptExecutor) driver).executeAsyncScript(
+            "const done = arguments[arguments.length - 1];" +
+            "const canvas = document.querySelector('#pdfViewer .pdf-page-wrapper canvas');" +
+            "if(!canvas){ done({ok:false,msg:'missing-first-canvas'}); return; }" +
+            "const rect = canvas.getBoundingClientRect();" +
+            "const startX = rect.left + 40;" +
+            "const startY = rect.top + 40;" +
+            "const endX = startX + 90;" +
+            "const endY = startY + 35;" +
+            "canvas.dispatchEvent(new MouseEvent('mousedown', { bubbles:true, cancelable:true, clientX:startX, clientY:startY }));" +
+            "document.dispatchEvent(new MouseEvent('mousemove', { bubbles:true, cancelable:true, clientX:endX, clientY:endY }));" +
+            "document.dispatchEvent(new MouseEvent('mouseup', { bubbles:true, cancelable:true, clientX:endX, clientY:endY }));" +
+            "setTimeout(function(){ done({ok:true}); }, 120);"
+        );
+        assertTrue(drawResult instanceof Map, "Expected draw result map");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> drawMap = (Map<String, Object>) drawResult;
+        assertEquals(Boolean.TRUE, drawMap.get("ok"), "Failed to draw placement rectangle for add-field modal test");
+
         wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("fieldCreateModal")));
         Object promptCalls = ((JavascriptExecutor) driver).executeScript("return window.__promptCalls;");
         assertTrue(promptCalls instanceof Number);
@@ -554,6 +576,217 @@ public class UIRenderingTest {
         @SuppressWarnings("unchecked")
         Map<String, Object> map = (Map<String, Object>) result;
         assertEquals(Boolean.TRUE, map.get("ok"), "PDF click/Ctrl-click field selection sync failed: " + map);
+    }
+
+    @Test
+    public void testPdfViewMultiselectKeepsAllHandlesHighlighted() {
+        if (driver == null) {
+            System.out.println("Skipping testPdfViewMultiselectKeepsAllHandlesHighlighted - ChromeDriver not available");
+            return;
+        }
+
+        driver.get(baseUrl);
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
+        wait.until(ExpectedConditions.or(
+            ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
+            ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
+        ));
+        wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(".form-field-handle[data-field-name]")));
+
+        driver.manage().timeouts().scriptTimeout(Duration.ofSeconds(40));
+        Object result = ((JavascriptExecutor) driver).executeAsyncScript(
+            "const done = arguments[arguments.length - 1];" +
+            "const P = window.PDFalyzer;" +
+            "if(!P || !P.state || !P.state.treeData){ done({ok:false,msg:'no-state'}); return; }" +
+            "const fields = [];" +
+            "(function walk(n){" +
+            "  if(!n) return;" +
+            "  if(n.nodeCategory==='field' && n.properties && n.properties.FullName && Array.isArray(n.boundingBox) && n.boundingBox.length===4 && n.pageIndex>=0){ fields.push(n); }" +
+            "  if(n.children) n.children.forEach(walk);" +
+            "})(P.state.treeData);" +
+            "if(fields.length < 2){ done({ok:false,msg:'not-enough-fields',count:fields.length}); return; }" +
+            "function clickField(field, withCtrl){" +
+            "  const pageIndex = field.pageIndex;" +
+            "  const canvas = P.state.pageCanvases[pageIndex];" +
+            "  const vp = P.state.pageViewports[pageIndex];" +
+            "  if(!canvas || !vp) return false;" +
+            "  const bb = field.boundingBox;" +
+            "  const centerX = bb[0] + bb[2] / 2;" +
+            "  const centerY = bb[1] + bb[3] / 2;" +
+            "  const rect = canvas.getBoundingClientRect();" +
+            "  const clientX = rect.left + (centerX * vp.scale);" +
+            "  const clientY = rect.top + (vp.height - (centerY * vp.scale));" +
+            "  const ev = new MouseEvent('click', { bubbles:true, cancelable:true, clientX:clientX, clientY:clientY, ctrlKey:!!withCtrl });" +
+            "  canvas.dispatchEvent(ev);" +
+            "  return true;" +
+            "}" +
+            "const first = fields[0];" +
+            "const second = fields[1];" +
+            "if(!clickField(first, false)){ done({ok:false,msg:'first-click-failed'}); return; }" +
+            "setTimeout(function(){" +
+            "  if(!clickField(second, true)){ done({ok:false,msg:'second-click-failed'}); return; }" +
+            "  setTimeout(function(){" +
+            "    const firstName = first.properties.FullName;" +
+            "    const secondName = second.properties.FullName;" +
+            "    const selectedNames = Array.isArray(P.state.selectedFieldNames) ? P.state.selectedFieldNames : [];" +
+            "    const firstHandles = document.querySelectorAll('.form-field-handle[data-field-name=\"' + firstName + '\"]');" +
+            "    const secondHandles = document.querySelectorAll('.form-field-handle[data-field-name=\"' + secondName + '\"]');" +
+            "    const firstSelected = firstHandles.length===1 && firstHandles[0].classList.contains('selected');" +
+            "    const secondSelected = secondHandles.length===1 && secondHandles[0].classList.contains('selected');" +
+            "    const hasBothInState = selectedNames.indexOf(firstName)>=0 && selectedNames.indexOf(secondName)>=0;" +
+            "    done({" +
+            "      ok: hasBothInState && firstSelected && secondSelected," +
+            "      hasBothInState: hasBothInState," +
+            "      firstSelected: firstSelected," +
+            "      secondSelected: secondSelected," +
+            "      selectedNames: selectedNames" +
+            "    });" +
+            "  }, 120);" +
+            "}, 120);"
+        );
+
+        assertTrue(result instanceof Map, "Expected script result map");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> map = (Map<String, Object>) result;
+        assertEquals(Boolean.TRUE, map.get("ok"), "Multi-select PDF highlight must show all selected handles: " + map);
+    }
+
+    @Test
+    public void testMovingSelectedFieldsEnablesSaveAndAvoidsGhostHandles() {
+        if (driver == null) {
+            System.out.println("Skipping testMovingSelectedFieldsEnablesSaveAndAvoidsGhostHandles - ChromeDriver not available");
+            return;
+        }
+
+        driver.get(baseUrl);
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
+        wait.until(ExpectedConditions.or(
+            ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
+            ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
+        ));
+        wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(".form-field-handle[data-field-name]")));
+
+        driver.manage().timeouts().scriptTimeout(Duration.ofSeconds(40));
+        Object result = ((JavascriptExecutor) driver).executeAsyncScript(
+            "const done = arguments[arguments.length - 1];" +
+            "const P = window.PDFalyzer;" +
+            "if(!P || !P.state || !P.state.treeData){ done({ok:false,msg:'no-state'}); return; }" +
+            "const fields = [];" +
+            "(function walk(n){" +
+            "  if(!n) return;" +
+            "  if(n.nodeCategory==='field' && n.properties && n.properties.FullName && Array.isArray(n.boundingBox) && n.boundingBox.length===4 && n.pageIndex>=0){ fields.push(n); }" +
+            "  if(n.children) n.children.forEach(walk);" +
+            "})(P.state.treeData);" +
+            "if(fields.length < 2){ done({ok:false,msg:'not-enough-fields',count:fields.length}); return; }" +
+            "function clickField(field, withCtrl){" +
+            "  const pageIndex = field.pageIndex;" +
+            "  const canvas = P.state.pageCanvases[pageIndex];" +
+            "  const vp = P.state.pageViewports[pageIndex];" +
+            "  if(!canvas || !vp) return false;" +
+            "  const bb = field.boundingBox;" +
+            "  const centerX = bb[0] + bb[2] / 2;" +
+            "  const centerY = bb[1] + bb[3] / 2;" +
+            "  const rect = canvas.getBoundingClientRect();" +
+            "  const clientX = rect.left + (centerX * vp.scale);" +
+            "  const clientY = rect.top + (vp.height - (centerY * vp.scale));" +
+            "  const ev = new MouseEvent('click', { bubbles:true, cancelable:true, clientX:clientX, clientY:clientY, ctrlKey:!!withCtrl });" +
+            "  canvas.dispatchEvent(ev);" +
+            "  return true;" +
+            "}" +
+            "const first = fields[0];" +
+            "const second = fields[1];" +
+            "if(!clickField(first, false)){ done({ok:false,msg:'first-click-failed'}); return; }" +
+            "setTimeout(function(){" +
+            "  if(!clickField(second, true)){ done({ok:false,msg:'second-click-failed'}); return; }" +
+            "  setTimeout(function(){" +
+            "    const firstName = first.properties.FullName;" +
+            "    const secondName = second.properties.FullName;" +
+            "    const h1 = document.querySelector('.form-field-handle[data-field-name=\"' + firstName + '\"]');" +
+            "    if(!h1){ done({ok:false,msg:'missing-primary-handle'}); return; }" +
+            "    const beforeTop = parseFloat(h1.style.top || '0');" +
+            "    const beforeLeft = parseFloat(h1.style.left || '0');" +
+            "    const r = h1.getBoundingClientRect();" +
+            "    h1.dispatchEvent(new MouseEvent('mousedown', { bubbles:true, cancelable:true, clientX:r.left + (r.width/2), clientY:r.top + (r.height/2) }));" +
+            "    document.dispatchEvent(new MouseEvent('mousemove', { bubbles:true, cancelable:true, clientX:r.left + (r.width/2) + 24, clientY:r.top + (r.height/2) + 12 }));" +
+            "    document.dispatchEvent(new MouseEvent('mouseup', { bubbles:true, cancelable:true, clientX:r.left + (r.width/2) + 24, clientY:r.top + (r.height/2) + 12 }));" +
+            "    setTimeout(function(){" +
+            "      const saveBtn = document.getElementById('formSaveBtn');" +
+            "      const saveEnabled = !!saveBtn && !saveBtn.disabled;" +
+            "      const pendingCount = Array.isArray(P.state.pendingFieldRects) ? P.state.pendingFieldRects.length : 0;" +
+            "      const movedFirst = document.querySelectorAll('.form-field-handle[data-field-name=\"' + firstName + '\"]');" +
+            "      const movedSecond = document.querySelectorAll('.form-field-handle[data-field-name=\"' + secondName + '\"]');" +
+            "      const duplicatesOk = movedFirst.length === 1 && movedSecond.length === 1;" +
+            "      const movedNow = movedFirst.length===1 && (parseFloat(movedFirst[0].style.left||'0') !== beforeLeft || parseFloat(movedFirst[0].style.top||'0') !== beforeTop);" +
+            "      done({" +
+            "        ok: saveEnabled && pendingCount > 0 && duplicatesOk && movedNow," +
+            "        saveEnabled: saveEnabled," +
+            "        pendingCount: pendingCount," +
+            "        duplicatesOk: duplicatesOk," +
+            "        movedNow: movedNow," +
+            "        movedFirstCount: movedFirst.length," +
+            "        movedSecondCount: movedSecond.length" +
+            "      });" +
+            "    }, 140);" +
+            "  }, 120);" +
+            "}, 120);"
+        );
+
+        assertTrue(result instanceof Map, "Expected script result map");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> map = (Map<String, Object>) result;
+        assertEquals(Boolean.TRUE, map.get("ok"), "Move must enable save and avoid stale duplicate handles: " + map);
+    }
+
+    @Test
+    public void testFieldOptionsApplyEnablesSaveButton() {
+        if (driver == null) {
+            System.out.println("Skipping testFieldOptionsApplyEnablesSaveButton - ChromeDriver not available");
+            return;
+        }
+
+        driver.get(baseUrl);
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
+        wait.until(ExpectedConditions.or(
+            ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
+            ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
+        ));
+        wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(".form-field-handle[data-field-name]")));
+
+        driver.manage().timeouts().scriptTimeout(Duration.ofSeconds(40));
+        Object result = ((JavascriptExecutor) driver).executeAsyncScript(
+            "const done = arguments[arguments.length - 1];" +
+            "const P = window.PDFalyzer;" +
+            "if(!P || !P.state){ done({ok:false,msg:'no-state'}); return; }" +
+            "const handle = document.querySelector('.form-field-handle[data-field-name]');" +
+            "if(!handle){ done({ok:false,msg:'no-handle'}); return; }" +
+            "const fieldName = handle.getAttribute('data-field-name');" +
+            "if(!fieldName){ done({ok:false,msg:'no-field-name'}); return; }" +
+            "P.state.selectedFieldNames = [fieldName];" +
+            "const btn = document.getElementById('formOptionsBtn');" +
+            "if(!btn){ done({ok:false,msg:'no-options-btn'}); return; }" +
+            "btn.click();" +
+            "setTimeout(function(){" +
+            "  const optReq = document.getElementById('optRequiredTrue');" +
+            "  const applyBtn = document.getElementById('applyFieldOptionsBtn');" +
+            "  const reqBlock = document.getElementById('optRequiredBlock');" +
+            "  if(!optReq || !applyBtn || !reqBlock){ done({ok:false,msg:'options-controls-missing'}); return; }" +
+            "  const blockVisible = !reqBlock.classList.contains('field-option-hidden');" +
+            "  if(!blockVisible){ done({ok:false,msg:'required-block-hidden'}); return; }" +
+            "  optReq.click();" +
+            "  applyBtn.click();" +
+            "  setTimeout(function(){" +
+            "    const saveBtn = document.getElementById('formSaveBtn');" +
+            "    const saveEnabled = !!saveBtn && !saveBtn.disabled;" +
+            "    const pendingOpts = Array.isArray(P.state.pendingFieldOptions) ? P.state.pendingFieldOptions.length : 0;" +
+            "    done({ ok: saveEnabled && pendingOpts > 0, saveEnabled: saveEnabled, pendingOpts: pendingOpts });" +
+            "  }, 180);" +
+            "}, 140);"
+        );
+
+        assertTrue(result instanceof Map, "Expected script result map");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> map = (Map<String, Object>) result;
+        assertEquals(Boolean.TRUE, map.get("ok"), "Applying field options must enable Save button: " + map);
     }
 
         @Test
