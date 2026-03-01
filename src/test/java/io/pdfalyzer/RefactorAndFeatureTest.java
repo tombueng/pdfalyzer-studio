@@ -297,6 +297,30 @@ public class RefactorAndFeatureTest {
         assertEquals(2, readonlyCount);
     }
 
+    @Test
+    void addSignatureAndRadioFieldsAppearInAcroFormTree() throws IOException {
+        byte[] pdf = createSimplePdf(1);
+
+        FormFieldRequest sig = new FormFieldRequest();
+        sig.setFieldType("signature");
+        sig.setFieldName("sigA");
+        sig.setPageIndex(0);
+        sig.setX(60); sig.setY(620); sig.setWidth(180); sig.setHeight(28);
+
+        FormFieldRequest radio = new FormFieldRequest();
+        radio.setFieldType("radio");
+        radio.setFieldName("radioA");
+        radio.setPageIndex(0);
+        radio.setX(60); radio.setY(580); radio.setWidth(16); radio.setHeight(16);
+
+        byte[] modified = editService.addFormFields(pdf, Arrays.asList(sig, radio));
+        PdfSession session = pdfService.uploadAndParse("sig-radio.pdf", modified);
+        PdfNode acroForm = findByCategory(session.getTreeRoot(), "acroform");
+        assertNotNull(acroForm);
+        assertTrue(acroForm.getChildren().stream().anyMatch(n -> n.getName() != null && n.getName().contains("sigA")));
+        assertTrue(acroForm.getChildren().stream().anyMatch(n -> n.getName() != null && n.getName().contains("radioA")));
+    }
+
     // ======================== COS EDIT (end-to-end) ========================
 
     @Test
