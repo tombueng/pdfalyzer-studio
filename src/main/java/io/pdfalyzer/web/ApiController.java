@@ -28,15 +28,18 @@ public class ApiController {
     private final FontInspectorService fontInspectorService;
     private final ValidationService validationService;
     private final PdfStructureParser structureParser;
+    private final VeraPdfService veraPdfService;
 
     public ApiController(PdfService pdfService,
                          FontInspectorService fontInspectorService,
                          ValidationService validationService,
-                         PdfStructureParser structureParser) {
+                         PdfStructureParser structureParser,
+                         VeraPdfService veraPdfService) {
         this.pdfService = pdfService;
         this.fontInspectorService = fontInspectorService;
         this.validationService = validationService;
         this.structureParser = structureParser;
+        this.veraPdfService = veraPdfService;
     }
 
     @PostMapping("/upload")
@@ -105,6 +108,15 @@ public class ApiController {
                 pdfService.getSessionPdfBytes(sessionId), pageNum, fontObjectId));
     }
 
+    @GetMapping("/fonts/{sessionId}/usage/{objNum}/{genNum}")
+    public ResponseEntity<List<Map<String, Object>>> getFontUsage(
+            @PathVariable String sessionId,
+            @PathVariable int objNum,
+            @PathVariable int genNum) throws IOException {
+        return ResponseEntity.ok(fontInspectorService.getFontUsageAreas(
+                pdfService.getSessionPdfBytes(sessionId), objNum, genNum));
+    }
+
     @GetMapping("/fonts/{sessionId}/extract/{objNum}/{genNum}")
     public ResponseEntity<byte[]> extractFont(@PathVariable String sessionId,
                                                @PathVariable int objNum,
@@ -124,6 +136,12 @@ public class ApiController {
             throws IOException {
         return ResponseEntity.ok(validationService.validate(
                 pdfService.getSessionPdfBytes(sessionId)));
+    }
+
+    @GetMapping("/validate/{sessionId}/verapdf")
+    public ResponseEntity<Map<String, Object>> validateWithVeraPdf(@PathVariable String sessionId)
+            throws IOException {
+        return ResponseEntity.ok(veraPdfService.validate(pdfService.getSessionPdfBytes(sessionId)));
     }
 
     @GetMapping("/validate/{sessionId}/export")
