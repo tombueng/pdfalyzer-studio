@@ -42,10 +42,13 @@ PDFalyzer.Upload = (function ($, P) {
             $('#statusPages').html('<i class="fas fa-copy"></i> ' + data.pageCount + ' pages');
             $('#statusSession').html('<i class="fas fa-clock"></i> Session active');
             $('#searchInput').prop('disabled', false);
-            $('#editModeBtn').prop('disabled', false);
             $('#downloadBtn').prop('disabled', false);
             $('#exportTreeBtn').prop('disabled', false);
             $('#zoomModeBtn').prop('disabled', false);
+            $('#formSaveBtn').prop('disabled', true);
+            if (P.EditMode && P.EditMode.resetPending) {
+                P.EditMode.resetPending();
+            }
             P.Tree.render(P.state.treeData);
             P.Viewer.loadPdf(P.state.sessionId);
             P.Utils.toast('PDF loaded: ' + data.filename + ' (' + data.pageCount + ' pages)', 'success');

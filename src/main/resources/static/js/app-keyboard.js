@@ -24,17 +24,13 @@ PDFalyzer.Keyboard = (function ($, P) {
             }
             if ((e.ctrlKey || e.metaKey) && e.key === 'e') {
                 e.preventDefault();
-                if (P.state.sessionId) $('#editModeBtn').trigger('click');
+                if (P.state.sessionId) $('.edit-field-btn').first().trigger('click');
             }
             if (e.key === 'Escape') {
-                if (P.state.editMode) {
-                    $('#editModeBtn').trigger('click');
-                } else {
-                    var $s2 = $('#searchInput');
-                    if ($s2.is(':focus')) {
-                        $s2.val('').trigger('blur');
-                        if (P.state.treeData) P.Tree.render(P.state.treeData);
-                    }
+                var $s2 = $('#searchInput');
+                if ($s2.is(':focus')) {
+                    $s2.val('').trigger('blur');
+                    if (P.state.treeData) P.Tree.render(P.state.treeData);
                 }
             }
             if (e.key >= '1' && e.key <= '7' && !e.ctrlKey && !e.metaKey && !e.altKey) {

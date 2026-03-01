@@ -7,6 +7,7 @@ import io.pdfalyzer.web.ResourceApiController;
 import org.apache.pdfbox.cos.*;
 import org.apache.pdfbox.pdmodel.*;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationWidget;
 import org.apache.pdfbox.pdmodel.interactive.form.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -132,13 +133,13 @@ public class RefactorAndFeatureTest {
             PDTextField field = new PDTextField(acroForm);
             field.setPartialName("deleteMe");
             field.setDefaultAppearance("/Helv 10 Tf 0 g");
-            var widget = field.getWidgets().get(0);
+            PDAnnotationWidget widget = field.getWidgets().get(0);
             widget.setRectangle(new PDRectangle(50, 50, 200, 30));
             widget.setPage(page);
             widget.setPrinted(true);
             page.getAnnotations().add(widget);
             acroForm.getFields().add(field);
-            var out = new ByteArrayOutputStream();
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
             doc.save(out);
             pdf = out.toByteArray();
         }
@@ -166,12 +167,12 @@ public class RefactorAndFeatureTest {
             PDTextField field = new PDTextField(acroForm);
             field.setPartialName("valueField");
             field.setDefaultAppearance("/Helv 10 Tf 0 g");
-            var widget = field.getWidgets().get(0);
+            PDAnnotationWidget widget = field.getWidgets().get(0);
             widget.setRectangle(new PDRectangle(50, 50, 200, 30));
             widget.setPage(page);
             page.getAnnotations().add(widget);
             acroForm.getFields().add(field);
-            var out = new ByteArrayOutputStream();
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
             doc.save(out);
             pdf = out.toByteArray();
         }
@@ -196,12 +197,12 @@ public class RefactorAndFeatureTest {
             PDComboBox combo = new PDComboBox(acroForm);
             combo.setPartialName("myCombo");
             combo.setOptions(Arrays.asList("A", "B", "C"));
-            var widget = combo.getWidgets().get(0);
+            PDAnnotationWidget widget = combo.getWidgets().get(0);
             widget.setRectangle(new PDRectangle(50, 50, 200, 30));
             widget.setPage(page);
             page.getAnnotations().add(widget);
             acroForm.getFields().add(combo);
-            var out = new ByteArrayOutputStream();
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
             doc.save(out);
             pdf = out.toByteArray();
         }
@@ -209,6 +210,54 @@ public class RefactorAndFeatureTest {
                 Arrays.asList("X", "Y", "Z", "W"));
         assertNotNull(modified);
         assertTrue(modified.length > 0);
+    }
+
+    @Test
+    void addFormFieldsBatchAddsMultiple() throws IOException {
+        byte[] pdf = createSimplePdf(1);
+        FormFieldRequest first = new FormFieldRequest();
+        first.setFieldType("text");
+        first.setFieldName("batchA");
+        first.setPageIndex(0);
+        first.setX(50); first.setY(700); first.setWidth(180); first.setHeight(20);
+
+        FormFieldRequest second = new FormFieldRequest();
+        second.setFieldType("checkbox");
+        second.setFieldName("batchB");
+        second.setPageIndex(0);
+        second.setX(50); second.setY(660); second.setWidth(18); second.setHeight(18);
+
+        byte[] modified = editService.addFormFields(pdf, Arrays.asList(first, second));
+        PdfSession session = pdfService.uploadAndParse("batch.pdf", modified);
+        PdfNode acroForm = findByCategory(session.getTreeRoot(), "acroform");
+        assertNotNull(acroForm);
+        assertTrue(acroForm.getChildren().stream().anyMatch(n -> n.getName().contains("batchA")));
+        assertTrue(acroForm.getChildren().stream().anyMatch(n -> n.getName().contains("batchB")));
+    }
+
+    @Test
+    void updateFieldRectChangesBoundingBox() throws IOException {
+        byte[] pdf = createSimplePdf(1);
+        FormFieldRequest req = new FormFieldRequest();
+        req.setFieldType("text");
+        req.setFieldName("moveMe");
+        req.setPageIndex(0);
+        req.setX(60); req.setY(640); req.setWidth(120); req.setHeight(20);
+        byte[] withField = editService.addFormField(pdf, req);
+
+        byte[] moved = editService.updateFieldRect(withField, "moveMe", 100, 500, 200, 30);
+        PdfSession session = pdfService.uploadAndParse("moved.pdf", moved);
+        PdfNode acroForm = findByCategory(session.getTreeRoot(), "acroform");
+        assertNotNull(acroForm);
+        PdfNode target = acroForm.getChildren().stream()
+                .filter(n -> n.getName() != null && n.getName().contains("moveMe"))
+                .findFirst().orElse(null);
+        assertNotNull(target);
+        assertNotNull(target.getBoundingBox());
+        assertEquals(100.0, target.getBoundingBox()[0], 0.5);
+        assertEquals(500.0, target.getBoundingBox()[1], 0.5);
+        assertEquals(200.0, target.getBoundingBox()[2], 0.5);
+        assertEquals(30.0, target.getBoundingBox()[3], 0.5);
     }
 
     // ======================== COS EDIT (end-to-end) ========================
@@ -279,7 +328,7 @@ public class RefactorAndFeatureTest {
         req.setFieldType("text"); req.setFieldName("ctrlField");
         req.setPageIndex(0); req.setX(50); req.setY(50);
         req.setWidth(150); req.setHeight(25);
-        var resp = editCtrl.addFormField(session.getId(), req);
+        ResponseEntity<Map<String, Object>> resp = editCtrl.addFormField(session.getId(), req);
         assertEquals(200, resp.getStatusCodeValue());
         assertNotNull(resp.getBody());
         assertNotNull(resp.getBody().get("tree"));
@@ -290,7 +339,7 @@ public class RefactorAndFeatureTest {
         byte[] pdf = createSimplePdf(1);
         PdfSession session = pdfService.uploadAndParse("test.pdf", pdf);
         ResourceApiController resCtrl = new ResourceApiController(pdfService);
-        var resp = resCtrl.getResource(session.getId(), 99999, 0, null, false);
+        ResponseEntity<byte[]> resp = resCtrl.getResource(session.getId(), 99999, 0, null, false);
         assertEquals(404, resp.getStatusCodeValue());
     }
 
@@ -299,7 +348,7 @@ public class RefactorAndFeatureTest {
     private byte[] createSimplePdf(int pageCount) throws IOException {
         try (PDDocument doc = new PDDocument()) {
             for (int i = 0; i < pageCount; i++) doc.addPage(new PDPage());
-            var out = new ByteArrayOutputStream();
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
             doc.save(out);
             return out.toByteArray();
         }
@@ -311,7 +360,7 @@ public class RefactorAndFeatureTest {
             PDDocumentInformation info = doc.getDocumentInformation();
             info.setTitle(title);
             info.setAuthor(author);
-            var out = new ByteArrayOutputStream();
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
             doc.save(out);
             return out.toByteArray();
         }

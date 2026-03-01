@@ -9,22 +9,53 @@ PDFalyzer.EditMode = (function ($, P) {
     var $drawRect = null;
     var targetPage = -1;
 
+    function hasSession() {
+        return !!P.state.sessionId;
+    }
+
     function init() {
-        $('#editModeBtn').on('click', function () {
-            P.state.editMode = !P.state.editMode;
-            $(this).toggleClass('active', P.state.editMode);
-            $('#editToolbar').toggleClass('active', P.state.editMode);
-            if (!P.state.editMode) {
-                P.state.editFieldType = null;
-                $('.edit-field-btn').removeClass('active');
-            }
-        });
+        $('#editToolbar').addClass('active');
+        P.state.editMode = true;
 
         $('.edit-field-btn').on('click', function () {
+            if (!hasSession()) {
+                P.Utils.toast('Load a PDF session first', 'warning');
+                return;
+            }
             $('.edit-field-btn').removeClass('active');
             $(this).addClass('active');
             P.state.editFieldType = $(this).data('type');
+
+            var pageIndex = 0;
+            var rect = computeNextLineRect(pageIndex, P.state.editFieldType);
+            var fieldName = prompt('Field name:', P.state.editFieldType + '_' + Date.now());
+            if (!fieldName) return;
+
+            var options = getDefaultOptions(P.state.editFieldType);
+            var optionsJson = prompt('Field options JSON:', JSON.stringify(options));
+            if (optionsJson) {
+                try {
+                    options = JSON.parse(optionsJson);
+                } catch (e) {
+                    P.Utils.toast('Invalid options JSON, using defaults', 'warning');
+                }
+            }
+
+            P.state.pendingFormAdds.push({
+                fieldType: P.state.editFieldType,
+                fieldName: fieldName,
+                pageIndex: pageIndex,
+                x: rect.x,
+                y: rect.y,
+                width: rect.width,
+                height: rect.height,
+                options: options
+            });
+            updateSaveButton();
+            P.Utils.toast('Field queued. Click Save to persist changes.', 'info');
         });
+
+        $('#formSaveBtn').on('click', savePendingChanges);
     }
 
     function startDraw(e, pageIndex, wrapper) {
@@ -67,29 +98,258 @@ PDFalyzer.EditMode = (function ($, P) {
 
             var fieldName = prompt('Field name:', P.state.editFieldType + '_' + Date.now());
             if (!fieldName) return;
-            addField(pageIndex, pdfX, pdfY, pdfW, pdfH, fieldName);
+
+            var options = getDefaultOptions(P.state.editFieldType);
+            var optionsJson = prompt('Field options JSON:', JSON.stringify(options));
+            if (optionsJson) {
+                try {
+                    options = JSON.parse(optionsJson);
+                } catch (err) {
+                    P.Utils.toast('Invalid options JSON, using defaults', 'warning');
+                }
+            }
+
+            P.state.pendingFormAdds.push({
+                fieldType: P.state.editFieldType,
+                fieldName: fieldName,
+                pageIndex: pageIndex,
+                x: pdfX,
+                y: pdfY,
+                width: pdfW,
+                height: pdfH,
+                options: options
+            });
+            updateSaveButton();
+            P.Utils.toast('Field queued. Click Save to persist changes.', 'info');
         };
 
         $(document).on('mousemove', moveHandler).on('mouseup', upHandler);
     }
 
-    function addField(pageIndex, x, y, w, h, fieldName) {
-        P.Utils.apiFetch('/api/edit/' + P.state.sessionId + '/add-field', {
-            method: 'POST', contentType: 'application/json',
-            data: JSON.stringify({
-                fieldType: P.state.editFieldType,
-                fieldName: fieldName,
-                pageIndex: pageIndex,
-                x: x, y: y, width: w, height: h
+    function savePendingChanges() {
+        if (!hasSession()) return;
+        if (!P.state.pendingFormAdds.length && !P.state.pendingFieldRects.length) {
+            P.Utils.toast('No pending form changes', 'info');
+            return;
+        }
+
+        $('#formSaveBtn').prop('disabled', true);
+
+        var saveAdds = $.Deferred().resolve();
+        if (P.state.pendingFormAdds.length) {
+            saveAdds = P.Utils.apiFetch('/api/edit/' + P.state.sessionId + '/add-fields', {
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify(P.state.pendingFormAdds)
+            });
+        }
+
+        saveAdds
+            .done(function (data) {
+                if (data && data.tree) {
+                    P.state.treeData = data.tree;
+                }
+                applyPendingRectUpdates();
             })
-        })
-        .done(function (data) {
-            P.state.treeData = data.tree;
-            P.Tree.render(P.state.treeData);
-            P.Viewer.loadPdf(P.state.sessionId);
-            P.Utils.toast('Field "' + fieldName + '" added', 'success');
-        })
-        .fail(function () { P.Utils.toast('Add field failed', 'danger'); });
+            .fail(function () {
+                P.Utils.toast('Saving new fields failed', 'danger');
+                updateSaveButton();
+            });
+    }
+
+    function applyPendingRectUpdates() {
+        if (!P.state.pendingFieldRects.length) {
+            finalizeSave();
+            return;
+        }
+
+        var queue = P.state.pendingFieldRects.slice();
+        function next() {
+            if (!queue.length) {
+                finalizeSave();
+                return;
+            }
+            var item = queue.shift();
+            P.Utils.apiFetch('/api/edit/' + P.state.sessionId + '/field/' +
+                encodeURIComponent(item.fieldName) + '/rect', {
+                method: 'POST',
+                contentType: 'application/json',
+                data: JSON.stringify({
+                    x: item.x,
+                    y: item.y,
+                    width: item.width,
+                    height: item.height
+                })
+            }).done(function (data) {
+                if (data && data.tree) P.state.treeData = data.tree;
+                next();
+            }).fail(function () {
+                P.Utils.toast('Saving field geometry failed for ' + item.fieldName, 'danger');
+                next();
+            });
+        }
+        next();
+    }
+
+    function finalizeSave() {
+        P.state.pendingFormAdds = [];
+        P.state.pendingFieldRects = [];
+        if (P.state.treeData) P.Tree.render(P.state.treeData);
+        P.Viewer.loadPdf(P.state.sessionId);
+        updateSaveButton();
+        P.Utils.toast('Form changes saved', 'success');
+    }
+
+    function resetPending() {
+        P.state.pendingFormAdds = [];
+        P.state.pendingFieldRects = [];
+        updateSaveButton();
+    }
+
+    function updateSaveButton() {
+        var hasPending = P.state.pendingFormAdds.length > 0 || P.state.pendingFieldRects.length > 0;
+        $('#formSaveBtn').prop('disabled', !hasPending || !hasSession());
+    }
+
+    function getDefaultOptions(fieldType) {
+        if (fieldType === 'text') return { required: false, readonly: false, multiline: false, defaultValue: '' };
+        if (fieldType === 'checkbox') return { required: false, readonly: false, checked: false };
+        if (fieldType === 'combo') return { required: false, readonly: false, editable: false, choices: 'A,B,C', defaultValue: '' };
+        if (fieldType === 'radio') return { required: false, readonly: false };
+        if (fieldType === 'signature') return { required: true, readonly: false };
+        return {};
+    }
+
+    function computeNextLineRect(pageIndex, fieldType) {
+        var baseX = 50;
+        var baseY = 700;
+        var lineHeight = 34;
+        var width = fieldType === 'signature' ? 220 : 180;
+        var height = fieldType === 'signature' ? 28 : 22;
+
+        var existingOnPage = collectFieldNodesOnPage(pageIndex).length;
+        var pendingOnPage = P.state.pendingFormAdds.filter(function (f) { return f.pageIndex === pageIndex; }).length;
+        var line = existingOnPage + pendingOnPage;
+        return {
+            x: baseX,
+            y: Math.max(40, baseY - (line * lineHeight)),
+            width: width,
+            height: height
+        };
+    }
+
+    function collectFieldNodesOnPage(pageIndex) {
+        var result = [];
+        function walk(node) {
+            if (!node) return;
+            if (node.nodeCategory === 'field' && node.pageIndex === pageIndex && node.boundingBox) {
+                result.push(node);
+            }
+            if (node.children) node.children.forEach(walk);
+        }
+        walk(P.state.treeData);
+        return result;
+    }
+
+    function renderFieldHandles(pageIndex, wrapperEl) {
+        if (!hasSession() || !wrapperEl) return;
+        $(wrapperEl).find('.form-field-handle').remove();
+        var viewport = P.state.pageViewports[pageIndex];
+        if (!viewport) return;
+
+        var fields = collectFieldNodesOnPage(pageIndex);
+        fields.forEach(function (fieldNode) {
+            var bbox = fieldNode.boundingBox;
+            var scale = viewport.scale;
+            var left = bbox[0] * scale;
+            var top = viewport.height - (bbox[1] + bbox[3]) * scale;
+            var width = bbox[2] * scale;
+            var height = bbox[3] * scale;
+
+            var fullName = fieldNode.properties && fieldNode.properties.FullName;
+            if (!fullName) return;
+
+            var $handle = $('<div>', { 'class': 'form-field-handle' })
+                .attr('data-field-name', fullName)
+                .css({ left: left + 'px', top: top + 'px', width: width + 'px', height: height + 'px' });
+            var $resize = $('<div>', { 'class': 'form-field-resize' });
+            $handle.append($resize).appendTo(wrapperEl);
+
+            bindDragResize($handle, $resize, fieldNode, viewport);
+        });
+    }
+
+    function bindDragResize($handle, $resize, fieldNode, viewport) {
+        var dragging = false;
+        var resizing = false;
+        var start = {};
+
+        $handle.on('mousedown', function (e) {
+            if ($(e.target).closest('.form-field-resize').length) return;
+            e.preventDefault();
+            e.stopPropagation();
+            dragging = true;
+            start = {
+                x: e.clientX,
+                y: e.clientY,
+                left: parseFloat($handle.css('left')),
+                top: parseFloat($handle.css('top'))
+            };
+        });
+
+        $resize.on('mousedown', function (e) {
+            e.preventDefault();
+            e.stopPropagation();
+            resizing = true;
+            start = {
+                x: e.clientX,
+                y: e.clientY,
+                width: $handle.width(),
+                height: $handle.height()
+            };
+        });
+
+        $(document).on('mousemove.formHandle', function (e) {
+            if (dragging) {
+                var dx = e.clientX - start.x;
+                var dy = e.clientY - start.y;
+                $handle.css({ left: (start.left + dx) + 'px', top: (start.top + dy) + 'px' });
+            } else if (resizing) {
+                var rw = Math.max(20, start.width + (e.clientX - start.x));
+                var rh = Math.max(14, start.height + (e.clientY - start.y));
+                $handle.css({ width: rw + 'px', height: rh + 'px' });
+            }
+        }).on('mouseup.formHandle', function () {
+            if (!dragging && !resizing) return;
+            dragging = false;
+            resizing = false;
+
+            var left = parseFloat($handle.css('left'));
+            var top = parseFloat($handle.css('top'));
+            var width = $handle.width();
+            var height = $handle.height();
+            var scale = viewport.scale;
+
+            var pdfX = left / scale;
+            var pdfY = (viewport.height - top - height) / scale;
+            var pdfW = width / scale;
+            var pdfH = height / scale;
+
+            queueRectChange(fieldNode.properties.FullName, pdfX, pdfY, pdfW, pdfH);
+            updateSaveButton();
+        });
+    }
+
+    function queueRectChange(fieldName, x, y, width, height) {
+        var idx = P.state.pendingFieldRects.findIndex(function (r) {
+            return r.fieldName === fieldName;
+        });
+        var payload = { fieldName: fieldName, x: x, y: y, width: width, height: height };
+        if (idx >= 0) {
+            P.state.pendingFieldRects[idx] = payload;
+        } else {
+            P.state.pendingFieldRects.push(payload);
+        }
     }
 
     /**
@@ -126,6 +386,14 @@ PDFalyzer.EditMode = (function ($, P) {
         .fail(function () { P.Utils.toast('Update field value failed', 'danger'); });
     }
 
-    return { init: init, startDraw: startDraw, deleteField: deleteField,
-             setFieldValue: setFieldValue };
+    return {
+        init: init,
+        startDraw: startDraw,
+        deleteField: deleteField,
+        setFieldValue: setFieldValue,
+        renderFieldHandles: renderFieldHandles,
+        resetPending: resetPending,
+        savePendingChanges: savePendingChanges,
+        updateSaveButton: updateSaveButton
+    };
 })(jQuery, PDFalyzer);
