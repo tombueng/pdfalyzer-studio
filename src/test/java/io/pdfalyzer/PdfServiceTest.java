@@ -2,15 +2,9 @@ package io.pdfalyzer;
 
 import io.pdfalyzer.model.PdfNode;
 import io.pdfalyzer.model.PdfSession;
-import io.pdfalyzer.service.PdfService;
-import io.pdfalyzer.service.PdfStructureParser;
-import io.pdfalyzer.service.SessionService;
-import io.pdfalyzer.service.CosEditService;
+import io.pdfalyzer.service.*;
 import io.pdfalyzer.model.CosUpdateRequest;
-import io.pdfalyzer.web.ApiController;
-import io.pdfalyzer.service.FontInspectorService;
-import io.pdfalyzer.service.ValidationService;
-import io.pdfalyzer.service.PdfEditService;
+import io.pdfalyzer.web.ResourceApiController;
 import org.springframework.http.ResponseEntity;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
@@ -45,11 +39,19 @@ import static org.junit.jupiter.api.Assertions.*;
 public class PdfServiceTest {
 
     private PdfService pdfService;
+    private PdfStructureParser parser;
+
+    private static PdfStructureParser createParser() {
+        CosNodeBuilder cosBuilder = new CosNodeBuilder();
+        PageResourceBuilder pageResourceBuilder = new PageResourceBuilder(cosBuilder);
+        SemanticTreeBuilder semanticBuilder = new SemanticTreeBuilder(cosBuilder, pageResourceBuilder);
+        return new PdfStructureParser(semanticBuilder, cosBuilder);
+    }
 
     @BeforeEach
     void setUp() {
         SessionService sessionService = new SessionService();
-        PdfStructureParser parser = new PdfStructureParser();
+        parser = createParser();
         pdfService = new PdfService(sessionService, parser);
     }
 
@@ -217,9 +219,7 @@ public class PdfServiceTest {
             }
         }
         assertTrue(objNum >= 0, "expected to find an image stream object in tree or document");
-        ApiController ctrl = new ApiController(pdfService,
-                new FontInspectorService(), new ValidationService(),
-                new PdfEditService(), new CosEditService(), new PdfStructureParser());
+        ResourceApiController ctrl = new ResourceApiController(pdfService);
         ResponseEntity<byte[]> resp = ctrl.getResource(session.getId(),
                 objNum, genNum, null, true);
         assertNotNull(resp.getHeaders().getContentType());
@@ -288,9 +288,7 @@ public class PdfServiceTest {
         }
         assertTrue(objNum >= 0, "expected xml stream node");
 
-        ApiController ctrl = new ApiController(pdfService,
-                new FontInspectorService(), new ValidationService(),
-                new PdfEditService(), new CosEditService(), new PdfStructureParser());
+        ResourceApiController ctrl = new ResourceApiController(pdfService);
         ResponseEntity<byte[]> resp = ctrl.getResource(session.getId(),
                 objNum, genNum, null, true);
         assertEquals("application/xml", resp.getHeaders().getContentType().toString());
@@ -341,9 +339,7 @@ public class PdfServiceTest {
             queue.addAll(n.getChildren());
         }
         assertTrue(maskObj >= 0, "should find a mask stream");
-        ApiController ctrl = new ApiController(pdfService,
-                new FontInspectorService(), new ValidationService(),
-                new PdfEditService(), new CosEditService(), new PdfStructureParser());
+        ResourceApiController ctrl = new ResourceApiController(pdfService);
         ResponseEntity<byte[]> respMask = ctrl.getResource(session.getId(), maskObj, maskGen, null, true);
             assertNotNull(respMask.getHeaders().getContentType());
             byte[] bodyMask = respMask.getBody();

@@ -2,20 +2,17 @@ package io.pdfalyzer.service;
 
 import io.pdfalyzer.model.FontInfo;
 import org.apache.pdfbox.Loader;
-import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.cos.*;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDResources;
-import org.apache.pdfbox.pdmodel.font.PDFont;
-import org.apache.pdfbox.pdmodel.font.PDFontDescriptor;
-import org.apache.pdfbox.pdmodel.font.PDType3Font;
+import org.apache.pdfbox.pdmodel.font.*;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.*;
 
 @Service
 public class FontInspectorService {
@@ -34,18 +31,71 @@ public class FontInspectorService {
 
     public List<FontInfo> analyzePageFonts(byte[] pdfBytes, int pageIndex) throws IOException {
         try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
-            if (pageIndex < 0 || pageIndex >= doc.getNumberOfPages()) {
+            if (pageIndex < 0 || pageIndex >= doc.getNumberOfPages())
                 throw new IllegalArgumentException("Invalid page index: " + pageIndex);
-            }
             return analyzePageFontsInternal(doc.getPage(pageIndex), pageIndex);
         }
+    }
+
+    /**
+     * Extract the embedded font file bytes for a font at the given indirect object reference.
+     * Returns null if no embedded file is present.
+     */
+    public byte[] extractFontFile(byte[] pdfBytes, int objNum, int genNum) throws IOException {
+        try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+            COSDocument cosDoc = doc.getDocument();
+            COSObject cosObj = cosDoc.getObjectFromPool(new COSObjectKey(objNum, genNum));
+            if (cosObj == null || !(cosObj.getObject() instanceof COSDictionary)) return null;
+            COSDictionary fontDict = (COSDictionary) cosObj.getObject();
+            COSBase fdBase = fontDict.getDictionaryObject(COSName.FONT_DESC);
+            if (!(fdBase instanceof COSDictionary)) return null;
+            COSDictionary fd = (COSDictionary) fdBase;
+            for (String key : new String[]{"FontFile2", "FontFile3", "FontFile"}) {
+                COSBase ff = fd.getDictionaryObject(COSName.getPDFName(key));
+                if (ff instanceof COSStream) {
+                    try (java.io.InputStream is = ((COSStream) ff).createInputStream()) {
+                        return is.readAllBytes();
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Return the character-to-unicode mapping for a named font on a given page.
+     * Keys are decimal codepoints (as strings), values are Unicode strings.
+     */
+    public Map<String, String> getCharacterMap(byte[] pdfBytes, int pageIndex,
+                                                String fontObjectId) throws IOException {
+        Map<String, String> result = new LinkedHashMap<>();
+        try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+            if (pageIndex < 0 || pageIndex >= doc.getNumberOfPages()) return result;
+            PDResources res = doc.getPage(pageIndex).getResources();
+            if (res == null) return result;
+            PDFont font;
+            try {
+                font = res.getFont(COSName.getPDFName(fontObjectId));
+            } catch (Exception e) {
+                return result;
+            }
+            if (font == null) return result;
+            for (int code = 0; code <= 255; code++) {
+                try {
+                    String unicode = font.toUnicode(code);
+                    if (unicode != null && !unicode.isEmpty()) {
+                        result.put(String.valueOf(code), unicode);
+                    }
+                } catch (Exception ignored) {}
+            }
+        }
+        return result;
     }
 
     private List<FontInfo> analyzePageFontsInternal(PDPage page, int pageIndex) {
         List<FontInfo> fonts = new ArrayList<>();
         PDResources resources = page.getResources();
         if (resources == null) return fonts;
-
         for (COSName fontName : resources.getFontNames()) {
             try {
                 PDFont font = resources.getFont(fontName);
@@ -55,37 +105,32 @@ public class FontInspectorService {
                 info.setEmbedded(font.isEmbedded());
                 info.setPageIndex(pageIndex);
                 info.setObjectId(fontName.getName());
-
-                // Subset detection
                 String name = font.getName();
-                if (name != null && name.length() > 7 && name.charAt(6) == '+') {
+                if (name != null && name.length() > 7 && name.charAt(6) == '+')
                     info.setSubset(true);
-                }
-
-                // Encoding - try to get encoding info from the COS dictionary
                 try {
                     if (font.getCOSObject().containsKey(COSName.ENCODING)) {
-                        info.setEncoding(font.getCOSObject().getDictionaryObject(COSName.ENCODING).toString());
+                        info.setEncoding(
+                                font.getCOSObject().getDictionaryObject(COSName.ENCODING).toString());
                     }
-                } catch (Exception ignored) {
+                } catch (Exception ignored) {}
+                // Store object key for extraction
+                COSObjectKey key = null;
+                try { key = font.getCOSObject().getKey(); } catch (Exception ignored) {}
+                if (key != null) {
+                    info.setObjectNumber((int) key.getNumber());
+                    info.setGenerationNumber((int) key.getGeneration());
                 }
-
-                // Check for issues
                 PDFontDescriptor descriptor = font.getFontDescriptor();
-                if (descriptor != null && !font.isEmbedded()) {
+                if (descriptor != null && !font.isEmbedded())
                     info.addIssue("Font is not embedded - may render differently across systems");
-                }
-
-                if (font instanceof PDType3Font) {
+                if (font instanceof PDType3Font)
                     info.addIssue("Type3 font - may have rendering issues across platforms");
-                }
-
                 fonts.add(info);
             } catch (Exception e) {
                 log.debug("Could not analyze font {} on page {}", fontName.getName(), pageIndex, e);
             }
         }
-
         return fonts;
     }
 }

@@ -8,6 +8,8 @@
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootswatch@5.3.2/dist/cyborg/bootstrap.min.css" />
     <link rel="stylesheet" th:href="@{/webjars/font-awesome/6.4.0/css/all.min.css}" />
     <link rel="stylesheet" th:href="@{/styles.css}" />
+    <link rel="stylesheet" th:href="@{/styles-tree.css}" />
+    <link rel="stylesheet" th:href="@{/styles-editor.css}" />
 </head>
 <body>
     <!-- Navbar -->
@@ -78,6 +80,7 @@
                 <button class="tab-btn" data-tab="validation"><i class="fas fa-check-circle me-1"></i>Validation</button>
                 <button class="tab-btn" data-tab="rawcos"><i class="fas fa-database me-1"></i>Raw COS</button>
                 <button class="tab-btn" data-tab="bookmarks"><i class="fas fa-bookmark me-1"></i>Bookmarks</button>
+                <button class="tab-btn" data-tab="attachments"><i class="fas fa-paperclip me-1"></i>Attachments</button>
             </div>
             <div id="treeContent">
                 <div class="text-muted text-center mt-5" style="font-size:13px;">
@@ -119,6 +122,22 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <script th:src="@{/webjars/jquery/3.7.1/jquery.min.js}"></script>
     <script th:src="@{/webjars/bootstrap/5.3.0/js/bootstrap.bundle.min.js}"></script>
+    <!-- PDFalyzer modules (order matters: state must be first) -->
+    <script th:src="@{/js/app-state.js}"></script>
+    <script th:src="@{/js/app-utils.js}"></script>
+    <script th:src="@{/js/app-resource.js}"></script>
+    <script th:src="@{/js/app-dict-editor.js}"></script>
+    <script th:src="@{/js/app-cos-editor.js}"></script>
+    <script th:src="@{/js/app-tree.js}"></script>
+    <script th:src="@{/js/app-viewer.js}"></script>
+    <script th:src="@{/js/app-search.js}"></script>
+    <script th:src="@{/js/app-tabs.js}"></script>
+    <script th:src="@{/js/app-edit-mode.js}"></script>
+    <script th:src="@{/js/app-upload.js}"></script>
+    <script th:src="@{/js/app-zoom.js}"></script>
+    <script th:src="@{/js/app-divider.js}"></script>
+    <script th:src="@{/js/app-keyboard.js}"></script>
+    <script th:src="@{/js/app-export.js}"></script>
     <script th:src="@{/app.js}"></script>
 </body>
 </html>
