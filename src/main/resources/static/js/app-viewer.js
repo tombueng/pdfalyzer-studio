@@ -4,6 +4,17 @@
 PDFalyzer.Viewer = (function ($, P) {
     'use strict';
 
+    var activeRenderRequestId = 0;
+
+    function beginRenderRequest() {
+        activeRenderRequestId += 1;
+        return activeRenderRequestId;
+    }
+
+    function isRenderRequestActive(requestId) {
+        return requestId === activeRenderRequestId;
+    }
+
     function ensureStagingViewer() {
         var $staging = $('#pdfViewerStaging');
         if ($staging.length) return $staging;
@@ -163,11 +174,13 @@ PDFalyzer.Viewer = (function ($, P) {
     function renderPdfIntoContainer(pdf, $container, pageViewports, pageCanvases, options) {
         var opts = options || {};
         var disableEntryAnimation = !!opts.disableEntryAnimation;
+        var isCancelled = typeof opts.isCancelled === 'function' ? opts.isCancelled : null;
         $container.empty();
         var chain = Promise.resolve();
         for (var i = 1; i <= pdf.numPages; i++) {
             chain = chain.then((function (pageNum) {
                 return function () {
+                    if (isCancelled && isCancelled()) return;
                     return renderPageToContainer(pdf, pageNum, $container, pageViewports, pageCanvases,
                         disableEntryAnimation);
                 };
@@ -224,23 +237,49 @@ PDFalyzer.Viewer = (function ($, P) {
     function renderAllPages(options) {
         if (!P.state.pdfDoc) return;
         var opts = options || {};
+        var requestId = beginRenderRequest();
         var viewState = opts.preserveView ? capturePaneViewState() : null;
+        var useSmoothSwap = !!opts.smoothSwap && $('#pdfViewer').children().length > 0;
         var nextViewports = [];
         var nextCanvases = [];
 
-        return renderPdfIntoContainer(P.state.pdfDoc, $('#pdfViewer'), nextViewports, nextCanvases)
-            .then(function () {
+        if (useSmoothSwap) {
+            var $staging = ensureStagingViewer();
+            $staging.removeClass('pdf-viewer-crossfade-in pdf-viewer-staging-active').empty();
+
+            return renderPdfIntoContainer(P.state.pdfDoc, $staging, nextViewports, nextCanvases, {
+                disableEntryAnimation: true,
+                isCancelled: function () { return !isRenderRequestActive(requestId); }
+            }).then(function () {
+                if (!isRenderRequestActive(requestId)) {
+                    $staging.removeClass('pdf-viewer-crossfade-in pdf-viewer-staging-active').empty();
+                    return;
+                }
+
                 P.state.pageViewports = nextViewports;
                 P.state.pageCanvases = nextCanvases;
-                restorePaneViewState(viewState);
+                swapStagedViewer($staging, viewState);
+            }).catch(function () {
+                if (!isRenderRequestActive(requestId)) return;
+                $staging.removeClass('pdf-viewer-crossfade-in pdf-viewer-staging-active').empty();
             });
+        }
+
+        return renderPdfIntoContainer(P.state.pdfDoc, $('#pdfViewer'), nextViewports, nextCanvases, {
+            isCancelled: function () { return !isRenderRequestActive(requestId); }
+        }).then(function () {
+            if (!isRenderRequestActive(requestId)) return;
+            P.state.pageViewports = nextViewports;
+            P.state.pageCanvases = nextCanvases;
+            restorePaneViewState(viewState);
+        });
     }
 
     function setScale(scale) {
         if (scale <= 0) return;
         P.state.currentScale  = scale;
         P.state.autoZoomMode  = 'off';
-        renderAllPages({ preserveView: true });
+        renderAllPages({ preserveView: true, smoothSwap: true });
         if (P.Zoom && P.Zoom.updateButton) P.Zoom.updateButton();
     }
 
@@ -249,7 +288,7 @@ PDFalyzer.Viewer = (function ($, P) {
         var avail = $('#pdfPane').width() - 40;
         P.state.currentScale = avail / P.state.basePageSize.width;
         P.state.autoZoomMode = 'width';
-        renderAllPages({ preserveView: true });
+        renderAllPages({ preserveView: true, smoothSwap: true });
         if (P.Zoom && P.Zoom.updateButton) P.Zoom.updateButton();
     }
 
@@ -258,7 +297,7 @@ PDFalyzer.Viewer = (function ($, P) {
         var avail = $('#pdfPane').height() - 40;
         P.state.currentScale = avail / P.state.basePageSize.height;
         P.state.autoZoomMode = 'height';
-        renderAllPages({ preserveView: true });
+        renderAllPages({ preserveView: true, smoothSwap: true });
         if (P.Zoom && P.Zoom.updateButton) P.Zoom.updateButton();
     }
 

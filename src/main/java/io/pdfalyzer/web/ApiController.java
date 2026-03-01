@@ -69,21 +69,7 @@ public class ApiController {
 
     @GetMapping("/sample/latest")
     public ResponseEntity<byte[]> getLatestSamplePdf() throws IOException {
-        Path sourceFile = Paths.get("src", "main", "resources", "test.pdf")
-                .toAbsolutePath().normalize();
-
-        byte[] data = null;
-        if (Files.exists(sourceFile) && Files.isRegularFile(sourceFile)) {
-            data = Files.readAllBytes(sourceFile);
-        } else {
-            try (InputStream in = getClass().getResourceAsStream("/test.pdf")) {
-                if (in != null) {
-                    ByteArrayOutputStream out = new ByteArrayOutputStream();
-                    in.transferTo(out);
-                    data = out.toByteArray();
-                }
-            }
-        }
+        byte[] data = loadSamplePdfBytes();
 
         if (data == null || data.length == 0) {
             return ResponseEntity.notFound().build();
@@ -97,6 +83,41 @@ public class ApiController {
                 .header(HttpHeaders.CONTENT_DISPOSITION, "inline; filename=\"test.pdf\"")
                 .contentLength(data.length)
                 .body(data);
+    }
+
+    @PostMapping("/sample/load")
+    public ResponseEntity<Map<String, Object>> loadLatestSamplePdfSession() throws IOException {
+        byte[] data = loadSamplePdfBytes();
+        if (data == null || data.length == 0) {
+            return ResponseEntity.notFound().build();
+        }
+
+        PdfSession session = pdfService.uploadAndParse("test.pdf", data);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("sessionId", session.getId());
+        result.put("filename", session.getFilename());
+        result.put("pageCount", session.getPageCount());
+        result.put("tree", session.getTreeRoot());
+        result.put("fileSize", data.length);
+        return ResponseEntity.ok(result);
+    }
+
+    private byte[] loadSamplePdfBytes() throws IOException {
+        Path sourceFile = Paths.get("src", "main", "resources", "test.pdf")
+                .toAbsolutePath().normalize();
+
+        if (Files.exists(sourceFile) && Files.isRegularFile(sourceFile)) {
+            return Files.readAllBytes(sourceFile);
+        }
+
+        try (InputStream in = getClass().getResourceAsStream("/test.pdf")) {
+            if (in != null) {
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
+                in.transferTo(out);
+                return out.toByteArray();
+            }
+        }
+        return null;
     }
 
     @GetMapping("/tree/{sessionId}")

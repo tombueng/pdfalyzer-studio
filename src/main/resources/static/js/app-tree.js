@@ -126,7 +126,7 @@ PDFalyzer.Tree = (function ($, P) {
         }
         applySelectionClasses();
         var $el = $('.tree-node[data-node-id="' + node.id + '"]');
-        if (!$el.length && node.nodeCategory === 'field' && P.state.treeData) {
+        if (!$el.length && node.nodeCategory === 'field' && P.state.treeData && P.state.currentTab === 'forms') {
             renderSubtree(P.state.treeData, 'field');
             $el = $('.tree-node[data-node-id="' + node.id + '"]');
         }
@@ -146,6 +146,15 @@ PDFalyzer.Tree = (function ($, P) {
         if (!suppressPropertiesPanel && node.properties && $el.length) {
             showPropertiesPanel(node, $el.find('> .tree-node-header'));
         }
+    }
+
+    function ensureChildrenRendered($childrenEl, node, depth) {
+        if (!$childrenEl || !$childrenEl.length || !$childrenEl.children || $childrenEl.children().length) return;
+        if (!node || !node.children || !node.children.length) return;
+        var nextDepth = (depth || 0) + 1;
+        node.children.forEach(function (c) {
+            $childrenEl.append(buildNodeEl(c, nextDepth));
+        });
     }
 
     function syncFieldSelection(node, additive) {
@@ -360,11 +369,7 @@ PDFalyzer.Tree = (function ($, P) {
                 
                 if (isExpanding) {
                     // Expanding - render children if not already done
-                    if (!$childrenEl.children().length) {
-                        node.children.forEach(function (c) {
-                            $childrenEl.append(buildNodeEl(c, depth + 1));
-                        });
-                    }
+                    ensureChildrenRendered($childrenEl, node, depth);
                 } else {
                     // Collapsing - remove properties panel
                     $header.siblings('.node-properties').remove();
@@ -525,9 +530,45 @@ PDFalyzer.Tree = (function ($, P) {
 
     // ======================== NAVIGATION HELPERS ========================
 
+    function findPathById(node, targetId, path) {
+        if (!node) return false;
+        path.push(node);
+        if (String(node.id) === String(targetId)) return true;
+        if (node.children) {
+            for (var i = 0; i < node.children.length; i++) {
+                if (findPathById(node.children[i], targetId, path)) return true;
+            }
+        }
+        path.pop();
+        return false;
+    }
+
     function expandToNode(node) {
-        /* Currently the nodes are auto-expanded up to depth 2.
-           For deeper nodes the user can click to expand. */
+        if (!node || !P.state.treeData) return;
+
+        var path = [];
+        if (!findPathById(P.state.treeData, node.id, path) || path.length < 2) return;
+
+        for (var depth = 0; depth < path.length - 1; depth++) {
+            var ancestor = path[depth];
+            var $ancestor = $('.tree-node[data-node-id="' + ancestor.id + '"]');
+            if (!$ancestor.length) {
+                render(P.state.treeData);
+                $ancestor = $('.tree-node[data-node-id="' + ancestor.id + '"]');
+                if (!$ancestor.length) continue;
+            }
+
+            var $childrenEl = $ancestor.children('.tree-children');
+            if (!$childrenEl.length) continue;
+
+            ensureChildrenRendered($childrenEl, ancestor, depth);
+            $childrenEl.css('display', 'block');
+
+            var $icon = $ancestor.find('> .tree-node-header > .tree-toggle > i');
+            if ($icon.length) {
+                $icon.removeClass('fa-chevron-right').addClass('fa-chevron-down');
+            }
+        }
     }
 
     function navigateToObject(objNum, genNum) {
