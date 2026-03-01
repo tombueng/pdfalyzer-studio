@@ -346,6 +346,99 @@ public class PdfEditService {
         }
     }
 
+    public byte[] applyFieldOptions(byte[] pdfBytes,
+                                    List<String> fieldNames,
+                                    Map<String, Object> options) throws IOException {
+        if (fieldNames == null || fieldNames.isEmpty() || options == null || options.isEmpty()) {
+            return pdfBytes;
+        }
+        try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+            PDAcroForm acroForm = doc.getDocumentCatalog().getAcroForm();
+            if (acroForm == null) throw new IllegalArgumentException("No AcroForm in document");
+
+            for (String fieldName : fieldNames) {
+                PDField target = findField(acroForm.getFields(), fieldName);
+                if (target != null) {
+                    applyOptionsToField(target, options);
+                }
+            }
+
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            doc.save(out);
+            log.info("Applied options {} to {} fields", options.keySet(), fieldNames.size());
+            return out.toByteArray();
+        }
+    }
+
+    private void applyOptionsToField(PDField field, Map<String, Object> options) throws IOException {
+        Boolean required = parseTriState(options.get("required"));
+        if (required != null) field.setRequired(required);
+
+        Boolean readonly = parseTriState(options.get("readonly"));
+        if (readonly != null) field.setReadOnly(readonly);
+
+        if (field instanceof PDTextField) {
+            PDTextField textField = (PDTextField) field;
+            Boolean multiline = parseTriState(options.get("multiline"));
+            if (multiline != null) textField.setMultiline(multiline);
+        }
+
+        if (field instanceof PDComboBox) {
+            PDComboBox comboBox = (PDComboBox) field;
+            Boolean editable = parseTriState(options.get("editable"));
+            if (editable != null) comboBox.setEdit(editable);
+            Object choicesObj = options.get("choices");
+            if (choicesObj instanceof List<?>) {
+                List<?> rawChoices = (List<?>) choicesObj;
+                java.util.List<String> choices = rawChoices.stream()
+                        .filter(v -> v != null && !v.toString().isBlank())
+                        .map(Object::toString)
+                        .toList();
+                if (!choices.isEmpty()) comboBox.setOptions(choices);
+            }
+        }
+
+        if (field instanceof PDListBox) {
+            PDListBox listBox = (PDListBox) field;
+            Object choicesObj = options.get("choices");
+            if (choicesObj instanceof List<?>) {
+                List<?> rawChoices = (List<?>) choicesObj;
+                java.util.List<String> choices = rawChoices.stream()
+                        .filter(v -> v != null && !v.toString().isBlank())
+                        .map(Object::toString)
+                        .toList();
+                if (!choices.isEmpty()) listBox.setOptions(choices);
+            }
+        }
+
+        if (field instanceof PDCheckBox) {
+            PDCheckBox checkBox = (PDCheckBox) field;
+            Boolean checked = parseTriState(options.get("checked"));
+            if (checked != null) {
+                if (checked) checkBox.check();
+                else checkBox.unCheck();
+            }
+        }
+
+        if (options.containsKey("defaultValue")) {
+            Object valueObj = options.get("defaultValue");
+            if (valueObj != null) {
+                String value = valueObj.toString();
+                if (!value.isBlank()) field.setValue(value);
+            }
+        }
+    }
+
+    private Boolean parseTriState(Object value) {
+        if (value == null) return null;
+        if (value instanceof Boolean) return (Boolean) value;
+        String s = value.toString().trim().toLowerCase();
+        if (s.isEmpty() || "keep".equals(s) || "mixed".equals(s) || "null".equals(s)) return null;
+        if ("true".equals(s)) return Boolean.TRUE;
+        if ("false".equals(s)) return Boolean.FALSE;
+        return null;
+    }
+
     private void applyCommonFieldOptions(PDField field, Map<String, String> options) {
         if (options == null || options.isEmpty()) return;
         if ("true".equalsIgnoreCase(options.get("required"))) field.setRequired(true);

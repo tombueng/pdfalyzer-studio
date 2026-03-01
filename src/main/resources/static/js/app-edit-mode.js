@@ -16,6 +16,7 @@ PDFalyzer.EditMode = (function ($, P) {
     function init() {
         $('#editToolbar').addClass('active');
         P.state.editMode = true;
+        P.state.selectedFieldNames = [];
 
         $('.edit-field-btn').on('click', function () {
             if (!hasSession()) {
@@ -56,6 +57,8 @@ PDFalyzer.EditMode = (function ($, P) {
         });
 
         $('#formSaveBtn').on('click', savePendingChanges);
+        $('#formOptionsBtn').on('click', openOptionsPopup);
+        $('#applyFieldOptionsBtn').on('click', applyOptionsFromModal);
     }
 
     function startDraw(e, pageIndex, wrapper) {
@@ -196,6 +199,7 @@ PDFalyzer.EditMode = (function ($, P) {
         P.state.pendingFieldRects = [];
         if (P.state.treeData) P.Tree.render(P.state.treeData);
         P.Viewer.loadPdf(P.state.sessionId);
+        refreshSelectionButtons();
         updateSaveButton();
         P.Utils.toast('Form changes saved', 'success');
     }
@@ -203,12 +207,19 @@ PDFalyzer.EditMode = (function ($, P) {
     function resetPending() {
         P.state.pendingFormAdds = [];
         P.state.pendingFieldRects = [];
+        P.state.selectedFieldNames = [];
+        refreshSelectionButtons();
         updateSaveButton();
     }
 
     function updateSaveButton() {
         var hasPending = P.state.pendingFormAdds.length > 0 || P.state.pendingFieldRects.length > 0;
         $('#formSaveBtn').prop('disabled', !hasPending || !hasSession());
+    }
+
+    function refreshSelectionButtons() {
+        var selectedCount = (P.state.selectedFieldNames || []).length;
+        $('#formOptionsBtn').prop('disabled', !hasSession() || selectedCount === 0);
     }
 
     function getDefaultOptions(fieldType) {
@@ -272,11 +283,15 @@ PDFalyzer.EditMode = (function ($, P) {
             var $handle = $('<div>', { 'class': 'form-field-handle' })
                 .attr('data-field-name', fullName)
                 .css({ left: left + 'px', top: top + 'px', width: width + 'px', height: height + 'px' });
+            if ((P.state.selectedFieldNames || []).indexOf(fullName) >= 0) {
+                $handle.addClass('selected');
+            }
             var $resize = $('<div>', { 'class': 'form-field-resize' });
             $handle.append($resize).appendTo(wrapperEl);
 
             bindDragResize($handle, $resize, fieldNode, viewport);
         });
+        refreshSelectionButtons();
     }
 
     function bindDragResize($handle, $resize, fieldNode, viewport) {
@@ -288,6 +303,17 @@ PDFalyzer.EditMode = (function ($, P) {
             if ($(e.target).closest('.form-field-resize').length) return;
             e.preventDefault();
             e.stopPropagation();
+
+            var name = fieldNode.properties && fieldNode.properties.FullName;
+            if (name) {
+                if (e.ctrlKey || e.metaKey || e.shiftKey) {
+                    toggleFieldSelection(name);
+                } else {
+                    P.state.selectedFieldNames = [name];
+                }
+                P.Viewer.renderAllPages();
+            }
+
             dragging = true;
             start = {
                 x: e.clientX,
@@ -337,6 +363,123 @@ PDFalyzer.EditMode = (function ($, P) {
 
             queueRectChange(fieldNode.properties.FullName, pdfX, pdfY, pdfW, pdfH);
             updateSaveButton();
+        });
+    }
+
+    function toggleFieldSelection(fieldName) {
+        if (!P.state.selectedFieldNames) P.state.selectedFieldNames = [];
+        var idx = P.state.selectedFieldNames.indexOf(fieldName);
+        if (idx >= 0) P.state.selectedFieldNames.splice(idx, 1);
+        else P.state.selectedFieldNames.push(fieldName);
+        refreshSelectionButtons();
+    }
+
+    function openOptionsPopup() {
+        if (!hasSession()) return;
+        var selected = P.state.selectedFieldNames || [];
+        if (!selected.length) {
+            P.Utils.toast('Select one or more fields first (Ctrl/Shift-click handles)', 'warning');
+            return;
+        }
+
+        var selectedNodes = getSelectedFieldNodes();
+        var single = selectedNodes.length === 1 ? selectedNodes[0] : null;
+        $('#fieldOptionsSelectionInfo').text(
+            selected.length === 1
+                ? ('Editing: ' + selected[0])
+                : ('Editing ' + selected.length + ' fields (tri-state controls)')
+        );
+
+        $('#optRequired').val(resolveTriState(selectedNodes, 'Required'));
+        $('#optReadonly').val(resolveTriState(selectedNodes, 'ReadOnly'));
+        $('#optMultiline').val('keep');
+        $('#optEditable').val('keep');
+        $('#optChecked').val('keep');
+        $('#optDefaultValue').val(single && single.properties ? (single.properties.Value || '') : '');
+        $('#optChoices').val('');
+
+        $('#optDefaultValue').prop('disabled', !single);
+        $('#optChoices').prop('disabled', !single);
+
+        var modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('fieldOptionsModal'));
+        modal.show();
+    }
+
+    function resolveTriState(nodes, propertyName) {
+        if (!nodes.length) return 'keep';
+        var first = readBooleanProperty(nodes[0], propertyName);
+        for (var i = 1; i < nodes.length; i++) {
+            if (readBooleanProperty(nodes[i], propertyName) !== first) return 'keep';
+        }
+        return first ? 'true' : 'false';
+    }
+
+    function readBooleanProperty(node, propertyName) {
+        var value = node && node.properties ? node.properties[propertyName] : null;
+        return String(value).toLowerCase() === 'true';
+    }
+
+    function getSelectedFieldNodes() {
+        var names = P.state.selectedFieldNames || [];
+        var found = [];
+        function walk(node) {
+            if (!node) return;
+            if (node.nodeCategory === 'field' && node.properties && node.properties.FullName) {
+                if (names.indexOf(node.properties.FullName) >= 0) found.push(node);
+            }
+            if (node.children) node.children.forEach(walk);
+        }
+        walk(P.state.treeData);
+        return found;
+    }
+
+    function parseTriStateValue(value) {
+        if (value === 'true') return true;
+        if (value === 'false') return false;
+        return null;
+    }
+
+    function applyOptionsFromModal() {
+        if (!hasSession()) return;
+        var fieldNames = (P.state.selectedFieldNames || []).slice();
+        if (!fieldNames.length) return;
+
+        var options = {
+            required: parseTriStateValue($('#optRequired').val()),
+            readonly: parseTriStateValue($('#optReadonly').val()),
+            multiline: parseTriStateValue($('#optMultiline').val()),
+            editable: parseTriStateValue($('#optEditable').val()),
+            checked: parseTriStateValue($('#optChecked').val())
+        };
+
+        if (!$('#optDefaultValue').prop('disabled')) {
+            var defaultValue = $('#optDefaultValue').val();
+            if (defaultValue) options.defaultValue = defaultValue;
+        }
+        if (!$('#optChoices').prop('disabled')) {
+            var choicesRaw = $('#optChoices').val();
+            if (choicesRaw) {
+                options.choices = choicesRaw.split(',').map(function (v) { return v.trim(); })
+                    .filter(function (v) { return v.length > 0; });
+            }
+        }
+
+        P.Utils.apiFetch('/api/edit/' + P.state.sessionId + '/fields/options', {
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ fieldNames: fieldNames, options: options })
+        }).done(function (data) {
+            if (data && data.tree) {
+                P.state.treeData = data.tree;
+                P.Tree.render(P.state.treeData);
+                P.Viewer.loadPdf(P.state.sessionId);
+            }
+            var modalEl = document.getElementById('fieldOptionsModal');
+            var modal = bootstrap.Modal.getInstance(modalEl);
+            if (modal) modal.hide();
+            P.Utils.toast('Field options updated', 'success');
+        }).fail(function () {
+            P.Utils.toast('Failed to update field options', 'danger');
         });
     }
 

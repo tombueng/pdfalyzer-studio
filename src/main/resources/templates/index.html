@@ -42,6 +42,9 @@
                     <button class="edit-field-btn" data-type="combo"><i class="fas fa-list me-1"></i>Combo</button>
                     <button class="edit-field-btn" data-type="radio"><i class="fas fa-dot-circle me-1"></i>Radio</button>
                     <button class="edit-field-btn" data-type="signature"><i class="fas fa-signature me-1"></i>Signature</button>
+                    <button class="btn btn-outline-accent btn-sm" id="formOptionsBtn" disabled title="Edit options for selected field(s)">
+                        <i class="fas fa-sliders-h me-1"></i>Options
+                    </button>
                     <button class="btn btn-outline-accent btn-sm" id="formSaveBtn" disabled title="Save pending form changes">
                         <i class="fas fa-save me-1"></i>Save
                     </button>
@@ -117,6 +120,74 @@
         </div>
       </div>
     </div>
+
+        <div class="modal fade" id="fieldOptionsModal" tabindex="-1" aria-labelledby="fieldOptionsLabel" aria-hidden="true">
+            <div class="modal-dialog modal-dialog-centered">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="fieldOptionsLabel">Field Options</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="mb-2 text-muted" id="fieldOptionsSelectionInfo" style="font-size:12px;"></div>
+                        <div class="row g-2">
+                            <div class="col-6">
+                                <label class="form-label form-label-sm">Required</label>
+                                <select class="form-select form-select-sm" id="optRequired">
+                                    <option value="keep">(keep/mixed)</option>
+                                    <option value="true">true</option>
+                                    <option value="false">false</option>
+                                </select>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label form-label-sm">ReadOnly</label>
+                                <select class="form-select form-select-sm" id="optReadonly">
+                                    <option value="keep">(keep/mixed)</option>
+                                    <option value="true">true</option>
+                                    <option value="false">false</option>
+                                </select>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label form-label-sm">Multiline</label>
+                                <select class="form-select form-select-sm" id="optMultiline">
+                                    <option value="keep">(keep/mixed)</option>
+                                    <option value="true">true</option>
+                                    <option value="false">false</option>
+                                </select>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label form-label-sm">Editable (combo)</label>
+                                <select class="form-select form-select-sm" id="optEditable">
+                                    <option value="keep">(keep/mixed)</option>
+                                    <option value="true">true</option>
+                                    <option value="false">false</option>
+                                </select>
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label form-label-sm">Checked (checkbox)</label>
+                                <select class="form-select form-select-sm" id="optChecked">
+                                    <option value="keep">(keep/mixed)</option>
+                                    <option value="true">true</option>
+                                    <option value="false">false</option>
+                                </select>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label form-label-sm">Default value (single-select)</label>
+                                <input class="form-control form-control-sm" id="optDefaultValue" placeholder="leave empty to keep" />
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label form-label-sm">Choices comma-separated (single combo/list)</label>
+                                <input class="form-control form-control-sm" id="optChoices" placeholder="A,B,C" />
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline-accent btn-sm" data-bs-dismiss="modal">Cancel</button>
+                        <button type="button" class="btn btn-accent btn-sm" id="applyFieldOptionsBtn">Apply</button>
+                    </div>
+                </div>
+            </div>
+        </div>
 
     <!-- pdf.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
