@@ -13,6 +13,8 @@ public class FontInfo {
     private List<String> issues = new ArrayList<>();
     private int pageIndex;
     private String objectId;
+    private int objectNumber = -1;
+    private int generationNumber = -1;
 
     public FontInfo() {}
 
@@ -44,4 +46,10 @@ public class FontInfo {
 
     public String getObjectId() { return objectId; }
     public void setObjectId(String objectId) { this.objectId = objectId; }
+
+    public int getObjectNumber() { return objectNumber; }
+    public void setObjectNumber(int objectNumber) { this.objectNumber = objectNumber; }
+
+    public int getGenerationNumber() { return generationNumber; }
+    public void setGenerationNumber(int generationNumber) { this.generationNumber = generationNumber; }
 }
