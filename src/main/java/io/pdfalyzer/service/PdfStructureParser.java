@@ -737,6 +737,12 @@ public class PdfStructureParser {
                     if (key != null) {
                         pageObjNum = (int) key.getNumber();
                         pageGenNum = (int) key.getGeneration();
+                    } else {
+                        COSObjectKey scanned = findObjectKeyInDocument(dict, ctx.doc);
+                        if (scanned != null) {
+                            pageObjNum = (int) scanned.getNumber();
+                            pageGenNum = (int) scanned.getGeneration();
+                        }
                     }
                 } catch (Exception e) {
                     // If getKey() fails, try alternative method
@@ -778,6 +784,12 @@ public class PdfStructureParser {
                             if (key != null) {
                                 imgNode.setObjectNumber((int) key.getNumber());
                                 imgNode.setGenerationNumber((int) key.getGeneration());
+                            } else {
+                                COSObjectKey scanned = findObjectKeyInDocument(stream, ctx.doc);
+                                if (scanned != null) {
+                                    imgNode.setObjectNumber((int) scanned.getNumber());
+                                    imgNode.setGenerationNumber((int) scanned.getGeneration());
+                                }
                             }
                         }
                         
@@ -819,6 +831,22 @@ public class PdfStructureParser {
         folder.setPageIndex(pageIndex);
         imageNodes.forEach(folder::addChild);
         return folder;
+    }
+
+    private COSObjectKey findObjectKeyInDocument(COSBase target, PDDocument doc) {
+        if (target == null || doc == null) return null;
+        try {
+            COSDocument cosDoc = doc.getDocument();
+            for (COSObjectKey key : cosDoc.getXrefTable().keySet()) {
+                COSObject candidate = cosDoc.getObjectFromPool(key);
+                if (candidate != null && candidate.getObject() == target) {
+                    return key;
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Could not locate object key via xref scan", e);
+        }
+        return null;
     }
 
     // ======================== SEMANTIC: ANNOTATIONS ========================

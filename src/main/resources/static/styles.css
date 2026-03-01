@@ -587,11 +587,20 @@ html, body {
     font-size: 11px;
     padding: 2px 4px;
 }
-.cos-add-btn, .cos-delete-btn, .resource-download-btn, .resource-open-btn, .resource-delete-btn {
+.cos-add-btn, .cos-delete-btn {
     margin-left: 6px;
     cursor: pointer;
     color: var(--accent);
     opacity: 0;
+    font-size: 11px;
+    padding: 2px 4px;
+    transition: opacity 0.2s;
+}
+.resource-download-btn, .resource-open-btn, .resource-delete-btn {
+    margin-left: 6px;
+    cursor: pointer;
+    color: var(--accent);
+    opacity: 0.65;
     font-size: 11px;
     padding: 2px 4px;
     transition: opacity 0.2s;
