@@ -221,7 +221,7 @@ public class PdfServiceTest {
                 new FontInspectorService(), new ValidationService(),
                 new PdfEditService(), new CosEditService(), new PdfStructureParser());
         ResponseEntity<byte[]> resp = ctrl.getResource(session.getId(),
-                objNum, genNum, true);
+                objNum, genNum, null, true);
         assertNotNull(resp.getHeaders().getContentType());
         byte[] body = resp.getBody();
         assertTrue(body.length > 0);
@@ -292,7 +292,7 @@ public class PdfServiceTest {
                 new FontInspectorService(), new ValidationService(),
                 new PdfEditService(), new CosEditService(), new PdfStructureParser());
         ResponseEntity<byte[]> resp = ctrl.getResource(session.getId(),
-                objNum, genNum, true);
+                objNum, genNum, null, true);
         assertEquals("application/xml", resp.getHeaders().getContentType().toString());
         byte[] body = resp.getBody();
         assertNotNull(body);
@@ -344,11 +344,12 @@ public class PdfServiceTest {
         ApiController ctrl = new ApiController(pdfService,
                 new FontInspectorService(), new ValidationService(),
                 new PdfEditService(), new CosEditService(), new PdfStructureParser());
-        ResponseEntity<byte[]> respMask = ctrl.getResource(session.getId(), maskObj, maskGen, true);
-        assertNotNull(respMask.getHeaders().getContentType());
-        byte[] bodyMask = respMask.getBody();
-        assertTrue(bodyMask.length > 0);
-        // should be valid PNG since we convert via PDImageXObject
+        ResponseEntity<byte[]> respMask = ctrl.getResource(session.getId(), maskObj, maskGen, null, true);
+            assertNotNull(respMask.getHeaders().getContentType());
+            byte[] bodyMask = respMask.getBody();
+            assertTrue(bodyMask.length > 0);
+            // should be valid PNG since we convert via PDImageXObject
+            assertEquals((byte)0x89, bodyMask[0]);
         assertEquals((byte)0x89, bodyMask[0]);
     }
 }

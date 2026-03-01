@@ -125,6 +125,12 @@ public class CosEditService {
                 return new COSString(rawValue);
             case "COSName":
                 return COSName.getPDFName(rawValue);
+            case "COSDictionary":
+                // Create new empty dictionary
+                return new COSDictionary();
+            case "COSArray":
+                // Create new empty array
+                return new COSArray();
             default:
                 throw new IllegalArgumentException("Unsupported value type: " + valueType);
         }

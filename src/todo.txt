@@ -1,17 +1,17 @@
 
 Structural view:
-	for dictionaries in the structural view one should not only be able to edit entries, 
+	✓ DONE: for dictionaries in the structural view one should not only be able to edit entries, 
 	but also delete them or add new ones (offer support according to what type of dict 
-	this is and what is allowed/usefull in this dict)
-	Dictionary items in the tree should have more information 
-	circular references should still be expandable and viewable in the ui!
-	Error message in UI disappear to fast (let them stay and user must click them to remove) and red text und dark background not readable.
+	this is and what is allowed/usefull in this dict) - ALSO deleting whole dictionary is possible
+	✓ DONE: Dictionary items in the tree should have more information 
+	circular references should still be expandable and viewable in the ui! do not limit the inspectable depth to less than 30.
+	✓ DONE: Error message in UI disappear to fast (let them stay and user must click them to remove) and red text und dark background not readable.
 	All resources shall have a working "download" button (send good filename) and "open in tab" button (send correct mediatype and filename). 
-	click on links is no jumping anywhere
+	✓ DONE: click on links is no jumping anywhere (circular reference links now properly navigate)
 	attachments handling (new tab) is missing
-	remove the "pages" tab
-	image-nodes shall have the view, download and delete buttons, not only the smask 
-	click on bookmark should jump to bookmark in the pdf viewer
+	✓ DONE: remove the "pages" tab
+	✓ DONE: image-nodes shall have the view, download and delete buttons, not only the smask 
+	✓ DONE: click on bookmark should jump to bookmark in the pdf viewer
 	
 	
 	

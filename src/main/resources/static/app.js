@@ -59,8 +59,18 @@ var PDFalyzer = (function ($) {
     // ===================== UPLOAD =====================
 
     var Upload = {
+        _inFlight: false,
+
+        renderIdleButton: function () {
+            $('#uploadBtn').html('<i class="fas fa-upload me-1"></i> Upload PDF<input type="file" id="fileInput" accept=".pdf" hidden />');
+        },
+
+        renderUploadingButton: function () {
+            $('#uploadBtn').html('<span class="spinner-border spinner-border-sm"></span> Uploading...<input type="file" id="fileInput" accept=".pdf" hidden disabled />');
+        },
+
         init: function () {
-            $('#fileInput').on('change', function () {
+            $(document).on('change', '#fileInput', function () {
                 if (this.files.length > 0) {
                     Upload.upload(this.files[0]);
                 }
@@ -89,16 +99,22 @@ var PDFalyzer = (function ($) {
         },
 
         upload: function (file) {
+            if (Upload._inFlight) {
+                return;
+            }
+
             if (file.size > 100 * 1024 * 1024) {
                 toast('File exceeds 100 MB limit', 'danger');
                 return;
             }
 
+            Upload._inFlight = true;
             var formData = new FormData();
             formData.append('file', file);
 
             var $btn = $('#uploadBtn');
-            $btn.html('<span class="spinner-border spinner-border-sm"></span> Uploading...');
+            $btn.addClass('disabled').attr('aria-disabled', 'true');
+            Upload.renderUploadingButton();
 
             apiFetch('/api/upload', {
                 method: 'POST',
@@ -130,7 +146,33 @@ var PDFalyzer = (function ($) {
                     toast(msg, 'danger');
                 })
                 .always(function () {
-                    $btn.html('<i class="fas fa-upload me-1"></i> Upload PDF');
+                    Upload._inFlight = false;
+                    $btn.removeClass('disabled').removeAttr('aria-disabled');
+                    Upload.renderIdleButton();
+                    $('#fileInput').val('');
+                });
+        },
+
+        loadSampleOnInit: function () {
+            if (sessionId || Upload._inFlight) {
+                return;
+            }
+
+            fetch('/test.pdf', { cache: 'no-store' })
+                .then(function (resp) {
+                    if (!resp.ok) {
+                        throw new Error('Sample not found');
+                    }
+                    return resp.blob();
+                })
+                .then(function (blob) {
+                    if (sessionId || Upload._inFlight) {
+                        return;
+                    }
+                    var sampleFile = new File([blob], 'test.pdf', { type: 'application/pdf' });
+                    Upload.upload(sampleFile);
+                })
+                .catch(function () {
                 });
         }
     };
@@ -177,6 +219,67 @@ var PDFalyzer = (function ($) {
                     hideLoading();
                     toast('Could not preview resource', 'danger');
                 });
+        },
+        
+        deleteResource: function(node, $headerEl) {
+            if (!sessionId || node.objectNumber === undefined || node.objectNumber < 0) {
+                toast('Cannot delete: object reference not available', 'warning');
+                return;
+            }
+            
+            // Check if node has a keyPath for deletion
+            if (!node.keyPath) {
+                toast('Cannot delete: no key path available', 'warning');
+                return;
+            }
+            
+            var keyPath;
+            try { keyPath = JSON.parse(node.keyPath); }
+            catch (e) { 
+                toast('Cannot delete: invalid key path', 'warning'); 
+                return; 
+            }
+            
+            // Inline confirmation box
+            $('.cos-inline-editor, .cos-add-editor, .cos-delete-confirm').remove();
+            var $confirm = $('<div>', { 'class': 'cos-delete-confirm' });
+            var resourceType = node.nodeCategory === 'image' ? 'image' : 'resource';
+            $confirm.text('Delete ' + resourceType + ' "' + node.name + '"? ');
+            
+            var $yes = $('<button>', { 'class': 'btn btn-sm btn-danger me-1', text: 'Yes' })
+                .on('click', function () {
+                    var body = {
+                        objectNumber: node.objectNumber,
+                        generationNumber: node.generationNumber || 0,
+                        keyPath: keyPath,
+                        operation: 'remove'
+                    };
+                    apiFetch('/api/cos/' + sessionId + '/update', {
+                        method: 'POST',
+                        contentType: 'application/json',
+                        data: JSON.stringify(body)
+                    })
+                        .done(function (data) {
+                            treeData = data.tree;
+                            Tree.render(treeData);
+                            Viewer.loadPdf(sessionId);
+                            toast(resourceType.charAt(0).toUpperCase() + resourceType.slice(1) + ' deleted', 'success');
+                        })
+                        .fail(function () {
+                            toast('Delete failed', 'danger');
+                        });
+                    $confirm.remove();
+                });
+            
+            var $no = $('<button>', { 'class': 'btn btn-sm btn-secondary', text: 'No' })
+                .on('click', function () { $confirm.remove(); });
+            
+            $confirm.append($yes, $no);
+            if ($headerEl && $headerEl.length) {
+                $headerEl.after($confirm);
+            } else {
+                $('.tree-node-header').last().after($confirm);
+            }
         }
     };
 
@@ -265,20 +368,6 @@ var PDFalyzer = (function ($) {
                 $header.append($delBtn);
             }
 
-            // Info button for dictionaries/arrays showing type and allowed operations
-            if (node.cosType === 'COSDictionary' || node.cosType === 'COSArray') {
-                var dictType = (node.properties && node.properties.Type) ? node.properties.Type : 'Generic Dictionary';
-                var $infoBtn = $('<span>', {
-                    'class': 'cos-info-btn',
-                    title: 'Dictionary type: ' + dictType,
-                    html: '<i class="fas fa-info-circle"></i>'
-                }).on('click', function (e) {
-                    e.stopPropagation();
-                    DictEditor.showInfo(node);
-                });
-                $header.append($infoBtn);
-            }
-
             // Add entry button for dictionaries/arrays
             if (node.cosType === 'COSDictionary' || node.cosType === 'COSArray') {
                 var $addBtn = $('<span>', {
@@ -292,26 +381,41 @@ var PDFalyzer = (function ($) {
                 $header.append($addBtn);
             }
 
-            // Resource download/open buttons (available for stream objects)
-            if (node.objectNumber >= 0 && node.cosType === 'COSStream') {
+            // Resource download/open/delete buttons (available for stream objects and images)
+            var showResourceButtons = (node.objectNumber >= 0 && node.cosType === 'COSStream') || 
+                                     (node.nodeCategory === 'image' && node.objectNumber >= 0);
+            if (showResourceButtons) {
                 var urlBase = '/api/resource/' + sessionId + '/' + node.objectNumber + '/' + node.generationNumber;
+                    if (node.keyPath) {
+                        urlBase += '?keyPath=' + encodeURIComponent(node.keyPath);
+                    }
+                var $preview = $('<span>', {
+                    'class': 'resource-open-btn',
+                    title: 'Preview',
+                    html: '<i class="fas fa-eye"></i>'
+                }).on('click', function (e) {
+                    e.stopPropagation();
+                        var previewUrl = urlBase + (node.keyPath ? '&inline=true' : '?inline=true');
+                        Resource.preview(previewUrl);
+                });
                 var $dl = $('<span>', {
                     'class': 'resource-download-btn',
                     title: 'Download resource',
                     html: '<i class="fas fa-download"></i>'
                 }).on('click', function (e) {
                     e.stopPropagation();
-                    window.open(urlBase + '?inline=false', '_blank');
+                        var downloadUrl = urlBase + (node.keyPath ? '&inline=false' : '?inline=false');
+                        window.open(downloadUrl, '_blank');
                 });
-                var $open = $('<span>', {
-                    'class': 'resource-open-btn',
-                    title: 'Preview',
-                    html: '<i class="fas fa-eye"></i>'
+                var $delete = $('<span>', {
+                    'class': 'resource-delete-btn',
+                    title: 'Delete this resource',
+                    html: '<i class="fas fa-trash-alt"></i>'
                 }).on('click', function (e) {
                     e.stopPropagation();
-                    Resource.preview(urlBase + '?inline=true');
+                    Resource.deleteResource(node, $header);
                 });
-                $header.append($dl).append($open);
+                $header.append($preview).append($dl).append($delete);
             }
 
             $div.append($header);
@@ -362,8 +466,8 @@ var PDFalyzer = (function ($) {
                 }
                 $div.append($childrenDiv);
 
-                // Toggle click
-                $toggle.on('click', (function ($cd, $pd, $tg, node) {
+                // Toggle click - now on entire header
+                var toggleFunc = (function ($cd, $pd, $tg, node) {
                     return function (e) {
                         e.stopPropagation();
                         var showing = $cd.css('display') !== 'none';
@@ -384,7 +488,10 @@ var PDFalyzer = (function ($) {
                         if ($pd.length) $pd.css('display', showing ? 'none' : 'block');
                         $tg.toggleClass('expanded');
                     };
-                })($childrenDiv, $div.children('.node-properties'), $toggle, node));
+                })($childrenDiv, $div.children('.node-properties'), $toggle, node);
+                
+                $toggle.on('click', toggleFunc);
+                $header.on('click', toggleFunc);
             }
 
             // Click to select
@@ -399,11 +506,52 @@ var PDFalyzer = (function ($) {
             $('.tree-node-header.selected').removeClass('selected');
             selectedNodeId = node.id;
 
+            // Build path from root to target node
+            var path = [];
+            function buildPath(n, targetId, currentPath) {
+                if (n.id === targetId) {
+                    path = currentPath.concat([n]);
+                    return true;
+                }
+                if (n.children) {
+                    for (var i = 0; i < n.children.length; i++) {
+                        if (buildPath(n.children[i], targetId, currentPath.concat([n]))) {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }
+            
+            if (treeData) {
+                buildPath(treeData, node.id, []);
+            }
+
+            // Expand nodes along the path
+            for (var i = 0; i < path.length; i++) {
+                var pathNode = path[i];
+                $('.tree-node').each(function () {
+                    if ($(this).data('node-id') === pathNode.id) {
+                        var $childrenDiv = $(this).children('.tree-children');
+                        if ($childrenDiv.length > 0 && !$childrenDiv.data('children-rendered')) {
+                            // Render children if not already done
+                            if (pathNode.children) {
+                                for (var j = 0; j < pathNode.children.length; j++) {
+                                    $childrenDiv.append(Tree.buildNodeEl(pathNode.children[j], false));
+                                }
+                                $childrenDiv.data('children-rendered', true);
+                            }
+                        }
+                        $childrenDiv.show();
+                        $(this).children('.tree-toggle').addClass('expanded');
+                        $(this).children('.node-properties').show();
+                    }
+                });
+            }
+
+            // Select and scroll to target
             $('.tree-node').each(function () {
                 if ($(this).data('node-id') === node.id) {
-                    // expand all parents so the node is visible
-                    $(this).parents('.tree-children').show();
-                    $(this).parents('.tree-node').children('.tree-toggle').addClass('expanded');
                     $(this).children('.tree-node-header').addClass('selected');
                     this.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
                     return false;
@@ -1044,7 +1192,7 @@ var PDFalyzer = (function ($) {
             $form.append($keyInput);
 
             var $typeSelect = $('<select>', { 'class': 'cos-edit-input' });
-            var types = ['boolean', 'integer', 'float', 'name', 'string', 'hex-string'];
+            var types = ['boolean', 'integer', 'float', 'name', 'string', 'hex-string', 'dictionary', 'array'];
             types.forEach(function(t) {
                 var v = 'COS' + t.charAt(0).toUpperCase() + t.slice(1);
                 $typeSelect.append($('<option>', { value: v, text: t }));
@@ -1053,6 +1201,16 @@ var PDFalyzer = (function ($) {
 
             var $valueInput = $('<input>', { 'class': 'cos-edit-input', type: 'text', placeholder: 'value' });
             $form.append($valueInput);
+            
+            // Hide value input when dictionary or array is selected
+            $typeSelect.on('change', function() {
+                var selectedType = $(this).val();
+                if (selectedType === 'COSDictionary' || selectedType === 'COSArray') {
+                    $valueInput.hide();
+                } else {
+                    $valueInput.show();
+                }
+            });
 
             var $saveBtn = $('<button>', {
                 'class': 'cos-edit-save',
@@ -1075,7 +1233,7 @@ var PDFalyzer = (function ($) {
                 }
                 
                 var type = $typeSelect.val();
-                var val = $valueInput.val();
+                var val = (type === 'COSDictionary' || type === 'COSArray') ? '' : $valueInput.val();
                 var k = key; // keep as string; empty string will trigger append on backend
                 var body = {
                     objectNumber: node.objectNumber,
@@ -1130,10 +1288,33 @@ var PDFalyzer = (function ($) {
                 toast('Cannot delete: empty key path', 'warning');
                 return;
             }
+            
+            // Check if this is a required key in a typed dictionary
+            var warningMsg = '';
+            if (node.name && node.name.startsWith('/')) {
+                var keyName = node.name.substring(1);
+                // Try to find parent node to check if this is required
+                var $parentHeader = $headerEl.closest('.tree-node').parent().closest('.tree-node').find('> .tree-node-header');
+                if ($parentHeader.length > 0) {
+                    var parentNodeId = $parentHeader.closest('.tree-node').data('node-id');
+                    // We don't have easy access to the parent node object here, but we can warn generically
+                    if (['Type', 'Pages', 'Kids', 'Count', 'Parent', 'MediaBox', 'Fields'].indexOf(keyName) >= 0) {
+                        warningMsg = ' This may be a required key!';
+                    }
+                }
+            }
+            
             // inline confirmation box
             $('.cos-inline-editor, .cos-add-editor, .cos-delete-confirm').remove();
             var $confirm = $('<div>', { 'class': 'cos-delete-confirm' });
-            $confirm.text('Delete ' + node.name + '? ');
+            
+            var isDictOrArray = (node.cosType === 'COSDictionary' || node.cosType === 'COSArray' || node.cosType === 'COSStream');
+            var confirmText = isDictOrArray ? 
+                'Delete entire ' + (node.cosType === 'COSArray' ? 'array' : 'dictionary') + ' "' + node.name + '"?' + warningMsg :
+                'Delete ' + node.name + '?' + warningMsg;
+            
+            $confirm.text(confirmText + ' ');
+            
             var $yes = $('<button>', { 'class': 'btn btn-sm btn-danger me-1', text: 'Yes' })
                 .on('click', function () {
                     var body = {
@@ -1521,6 +1702,7 @@ var PDFalyzer = (function ($) {
         Keyboard.init();
         Export.init();
         Zoom.init();
+        Upload.loadSampleOnInit();
     }
 
     $(init);

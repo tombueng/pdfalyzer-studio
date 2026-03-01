@@ -189,6 +189,7 @@ public class ApiController {
             @PathVariable String sessionId,
             @PathVariable int objNum,
             @PathVariable int genNum,
+                @RequestParam(name = "keyPath", required = false) String keyPath,
             @RequestParam(name = "inline", defaultValue = "false") boolean inline) throws IOException {
         PdfSession session = pdfService.getSession(sessionId);
         byte[] pdfBytes = session.getPdfBytes();
@@ -200,11 +201,37 @@ public class ApiController {
                 return ResponseEntity.notFound().build();
             }
             COSBase base = cosObj.getObject();
-            if (!(base instanceof COSStream)) {
-                return ResponseEntity.badRequest().body(new byte[0]);
+            
+                // If base is not a stream but we have a keyPath, try to find the stream via keyPath
+                COSStream stream = null;
+                if (base instanceof COSStream) {
+                    stream = (COSStream) base;
+                } else if (keyPath != null && !keyPath.isEmpty() && base instanceof org.apache.pdfbox.cos.COSDictionary) {
+                    // keyPath is JSON array like ["Resources", "XObject", "/ImageName"]
+                    // Use it to navigate from page dictionary to the actual stream
+                    try {
+                        org.apache.pdfbox.cos.COSDictionary current = (org.apache.pdfbox.cos.COSDictionary) base;
+                        java.util.List<String> pathSegments = new com.fasterxml.jackson.databind.ObjectMapper().readValue(
+                            keyPath, new com.fasterxml.jackson.core.type.TypeReference<java.util.List<String>>() {});
+                    
+                        for (String segment : pathSegments) {
+                            COSBase next = current.getDictionaryObject(segment);
+                            if (next == null) break;
+                            if (next instanceof org.apache.pdfbox.cos.COSDictionary) {
+                                current = (org.apache.pdfbox.cos.COSDictionary) next;
+                            } else if (next instanceof COSStream) {
+                                stream = (COSStream) next;
+                                break;
+                            }
+                        }
+                    } catch (Exception e) {
+                        // keyPath navigation failed, let it fall through to error
+                    }
             }
-            @SuppressWarnings("resource")
-            COSStream stream = (COSStream) base;
+            
+                if (stream == null) {
+                    return ResponseEntity.badRequest().body(new byte[0]);
+                }
             byte[] data;
             String mediaType = "application/octet-stream";
             String filename = "obj-" + objNum + "-" + genNum + ".bin";
