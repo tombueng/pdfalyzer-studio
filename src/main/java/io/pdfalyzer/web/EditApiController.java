@@ -49,6 +49,16 @@ public class EditApiController {
         return treeResponse(sessionId);
     }
 
+    @PostMapping("/edit/{sessionId}/add-fields")
+    public ResponseEntity<Map<String, Object>> addFormFields(
+            @PathVariable String sessionId,
+            @RequestBody List<FormFieldRequest> requests) throws IOException {
+        byte[] bytes = pdfService.getSessionPdfBytes(sessionId);
+        byte[] modified = pdfEditService.addFormFields(bytes, requests);
+        pdfService.updateSessionPdf(sessionId, modified);
+        return treeResponse(sessionId);
+    }
+
     @DeleteMapping("/edit/{sessionId}/field/{fieldName}")
     public ResponseEntity<Map<String, Object>> deleteFormField(
             @PathVariable String sessionId,
@@ -82,6 +92,24 @@ public class EditApiController {
         }
         byte[] bytes = pdfService.getSessionPdfBytes(sessionId);
         byte[] modified = pdfEditService.setComboChoices(bytes, fieldName, choices);
+        pdfService.updateSessionPdf(sessionId, modified);
+        return treeResponse(sessionId);
+    }
+
+    @PostMapping("/edit/{sessionId}/field/{fieldName}/rect")
+    public ResponseEntity<Map<String, Object>> updateFieldRect(
+            @PathVariable String sessionId,
+            @PathVariable String fieldName,
+            @RequestBody Map<String, Double> body) throws IOException {
+        Double x = body.get("x");
+        Double y = body.get("y");
+        Double width = body.get("width");
+        Double height = body.get("height");
+        if (x == null || y == null || width == null || height == null) {
+            return ResponseEntity.badRequest().build();
+        }
+        byte[] bytes = pdfService.getSessionPdfBytes(sessionId);
+        byte[] modified = pdfEditService.updateFieldRect(bytes, fieldName, x, y, width, height);
         pdfService.updateSessionPdf(sessionId, modified);
         return treeResponse(sessionId);
     }

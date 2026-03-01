@@ -59,7 +59,12 @@ PDFalyzer.Viewer = (function ($, P) {
                          }
                      });
 
-            return page.render({ canvasContext: canvas.getContext('2d'), viewport: viewport }).promise;
+            return page.render({ canvasContext: canvas.getContext('2d'), viewport: viewport }).promise
+                .then(function () {
+                    if (P.EditMode && P.EditMode.renderFieldHandles) {
+                        P.EditMode.renderFieldHandles(pageNum - 1, $wrapper[0]);
+                    }
+                });
         });
     }
 

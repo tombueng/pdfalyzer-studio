@@ -35,9 +35,17 @@
                 <button class="btn btn-outline-accent btn-sm" id="zoomModeBtn" disabled title="Toggle auto zoom mode">
                     <i class="fas fa-expand-arrows-alt"></i>
                 </button>
-                <button class="btn btn-outline-accent btn-sm" id="editModeBtn" disabled title="Toggle Edit Mode (Ctrl+E)">
-                    <i class="fas fa-edit"></i>
-                </button>
+                <div id="editToolbar" class="d-flex align-items-center gap-1">
+                    <span class="text-muted me-1" style="font-size:12px;">Add field:</span>
+                    <button class="edit-field-btn" data-type="text"><i class="fas fa-keyboard me-1"></i>Text</button>
+                    <button class="edit-field-btn" data-type="checkbox"><i class="fas fa-check-square me-1"></i>Checkbox</button>
+                    <button class="edit-field-btn" data-type="combo"><i class="fas fa-list me-1"></i>Combo</button>
+                    <button class="edit-field-btn" data-type="radio"><i class="fas fa-dot-circle me-1"></i>Radio</button>
+                    <button class="edit-field-btn" data-type="signature"><i class="fas fa-signature me-1"></i>Signature</button>
+                    <button class="btn btn-outline-accent btn-sm" id="formSaveBtn" disabled title="Save pending form changes">
+                        <i class="fas fa-save me-1"></i>Save
+                    </button>
+                </div>
             </div>
         </div>
     </nav>
@@ -58,14 +66,6 @@
                 </label>
             </div>
             <div id="pdfViewer" style="display:none;"></div>
-            <div id="editToolbar">
-                <span class="text-muted me-2" style="font-size:12px;">Add field:</span>
-                <button class="edit-field-btn" data-type="text"><i class="fas fa-keyboard me-1"></i>Text</button>
-                <button class="edit-field-btn" data-type="checkbox"><i class="fas fa-check-square me-1"></i>Checkbox</button>
-                <button class="edit-field-btn" data-type="combo"><i class="fas fa-list me-1"></i>Combo</button>
-                <button class="edit-field-btn" data-type="radio"><i class="fas fa-dot-circle me-1"></i>Radio</button>
-                <button class="edit-field-btn" data-type="signature"><i class="fas fa-signature me-1"></i>Signature</button>
-            </div>
         </div>
 
         <!-- Resize Divider -->

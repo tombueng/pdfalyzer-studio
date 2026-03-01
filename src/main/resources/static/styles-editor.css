@@ -7,12 +7,13 @@
 
 /* === Edit Mode === */
 #editToolbar {
-    display: none;
-    padding: 8px;
-    background: rgba(0,0,0,0.3);
-    border-top: 1px solid var(--border);
+    display: flex;
+    padding: 0;
+    background: transparent;
+    border-top: none;
     gap: 6px;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
+    align-items: center;
 }
 
 #editToolbar.active { display: flex; }
@@ -44,6 +45,25 @@
     border: 2px dashed var(--accent);
     background: rgba(0, 212, 255, 0.1);
     pointer-events: none;
+}
+
+.form-field-handle {
+    position: absolute;
+    border: 1px dashed rgba(0, 212, 255, 0.9);
+    background: rgba(0, 212, 255, 0.08);
+    box-sizing: border-box;
+    cursor: move;
+    z-index: 4;
+}
+
+.form-field-resize {
+    position: absolute;
+    right: -1px;
+    bottom: -1px;
+    width: 10px;
+    height: 10px;
+    background: var(--accent);
+    cursor: nwse-resize;
 }
 
 /* === Animations === */
