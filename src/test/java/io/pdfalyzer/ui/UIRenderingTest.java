@@ -291,6 +291,77 @@ public class UIRenderingTest {
         assertTrue(dangerToasts.isEmpty(), "No danger toast should be shown during attribute modify/delete workflow");
     }
 
+    @Test
+    public void testFieldSelectionSyncBetweenTreeAndPdfView() {
+        if (driver == null) {
+            System.out.println("Skipping testFieldSelectionSyncBetweenTreeAndPdfView - ChromeDriver not available");
+            return;
+        }
+
+        driver.get(baseUrl);
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
+        wait.until(ExpectedConditions.or(
+            ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
+            ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
+        ));
+
+        wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(".form-field-handle")));
+
+        driver.manage().timeouts().scriptTimeout(Duration.ofSeconds(30));
+        Object result = ((JavascriptExecutor) driver).executeAsyncScript(
+            "const done = arguments[arguments.length - 1];" +
+            "const P = window.PDFalyzer;" +
+            "if(!P || !P.state || !P.Tree){ done({ok:false,msg:'no-pdfalyzer'}); return; }" +
+            "const handles = Array.from(document.querySelectorAll('.form-field-handle[data-field-name]'));" +
+            "if(!handles.length){ done({ok:false,msg:'no-handles'}); return; }" +
+            "P.Tree.renderSubtree(P.state.treeData, 'field');" +
+            "const firstName = handles[0].getAttribute('data-field-name');" +
+            "if(!firstName){ done({ok:false,msg:'missing-first-name'}); return; }" +
+            "const firstHeader = document.querySelector('.tree-node-header[data-field-name=\"' + firstName + '\"]');" +
+            "if(!firstHeader){ done({ok:false,msg:'tree-header-not-found'}); return; }" +
+            "firstHeader.dispatchEvent(new MouseEvent('click', { bubbles:true }));" +
+            "setTimeout(function(){" +
+            "  const selectedNames = Array.isArray(P.state.selectedFieldNames) ? P.state.selectedFieldNames : [];" +
+            "  const firstHandleEl = document.querySelector('.form-field-handle[data-field-name=\"' + firstName + '\"]');" +
+            "  const treeToPdfState = selectedNames.indexOf(firstName) >= 0;" +
+            "  const treeToPdfHandle = !!firstHandleEl && firstHandleEl.classList.contains('selected');" +
+            "  const treeToPdfTree = firstHeader.classList.contains('field-selected') || firstHeader.classList.contains('selected');" +
+            "  const secondHandle = handles.length > 1 ? handles[1] : handles[0];" +
+            "  const secondName = secondHandle.getAttribute('data-field-name');" +
+            "  let secondNode = null;" +
+            "  (function walk(n){" +
+            "    if(!n || secondNode) return;" +
+            "    if(n.nodeCategory==='field' && n.properties && n.properties.FullName===secondName){ secondNode=n; return; }" +
+            "    if(n.children) n.children.forEach(walk);" +
+            "  })(P.state.treeData);" +
+            "  if(P.EditMode && P.EditMode.selectFieldFromViewer && secondNode){" +
+            "    P.EditMode.selectFieldFromViewer(secondNode, false);" +
+            "  }" +
+            "  setTimeout(function(){" +
+            "    const secondHeader = document.querySelector('.tree-node-header[data-field-name=\"' + secondName + '\"]');" +
+            "    const afterNames = Array.isArray(P.state.selectedFieldNames) ? P.state.selectedFieldNames : [];" +
+            "    const pdfToTreeState = afterNames.indexOf(secondName) >= 0;" +
+            "    const pdfToTreeTree = !!secondHeader && (secondHeader.classList.contains('field-selected') || secondHeader.classList.contains('selected'));" +
+            "    done({" +
+            "      ok: treeToPdfState && treeToPdfHandle && treeToPdfTree && pdfToTreeState && pdfToTreeTree," +
+            "      treeToPdfState: treeToPdfState," +
+            "      treeToPdfHandle: treeToPdfHandle," +
+            "      treeToPdfTree: treeToPdfTree," +
+            "      pdfToTreeState: pdfToTreeState," +
+            "      pdfToTreeTree: pdfToTreeTree," +
+            "      firstName: firstName," +
+            "      secondName: secondName" +
+            "    });" +
+            "  }, 60);" +
+            "}, 60);"
+        );
+
+        assertTrue(result instanceof Map, "Expected script result map");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> map = (Map<String, Object>) result;
+        assertEquals(Boolean.TRUE, map.get("ok"), "Field selection sync must work both directions: " + map);
+    }
+
         @Test
         public void testMultiselectTriStateFieldOptionsWorkflow() {
         if (driver == null) {

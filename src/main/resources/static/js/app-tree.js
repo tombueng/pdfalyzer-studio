@@ -17,6 +17,7 @@ PDFalyzer.Tree = (function ($, P) {
         if (!data) return;
         var $container = $('#treeContent').empty();
         $container.append(buildNodeEl(data, 0));
+        applySelectionClasses();
     }
 
     function renderSubtree(rootData, category) {
@@ -27,6 +28,7 @@ PDFalyzer.Tree = (function ($, P) {
             return;
         }
         nodes.forEach(function (n) { $container.append(buildNodeEl(n, 0)); });
+        applySelectionClasses();
     }
 
     function renderSearchResults(results) {
@@ -36,15 +38,18 @@ PDFalyzer.Tree = (function ($, P) {
             return;
         }
         results.forEach(function (n) { $container.append(buildNodeEl(n, 0)); });
+        applySelectionClasses();
     }
 
     // ======================== SELECT NODE ========================
 
-    function selectNode(node) {
+    function selectNode(node, additive, preserveFieldSelection) {
         P.state.selectedNodeId = node.id;
-        $('.tree-node-header').removeClass('selected');
+        if (!preserveFieldSelection) {
+            syncFieldSelection(node, !!additive);
+        }
+        applySelectionClasses();
         var $el = $('.tree-node[data-node-id="' + node.id + '"]');
-        $el.find('> .tree-node-header').addClass('selected');
         expandToNode(node);
         if ($el.length) {
             $el[0].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
@@ -54,7 +59,40 @@ PDFalyzer.Tree = (function ($, P) {
             if (node.boundingBox) P.Viewer.highlight(node.pageIndex, node.boundingBox);
             else P.Viewer.scrollToPage(node.pageIndex);
         }
+        if (P.EditMode && P.EditMode.refreshFieldSelectionHighlights) {
+            P.EditMode.refreshFieldSelectionHighlights();
+        }
         if (node.properties) showPropertiesPanel(node, $el.find('> .tree-node-header'));
+    }
+
+    function syncFieldSelection(node, additive) {
+        if (!P.state.selectedFieldNames) P.state.selectedFieldNames = [];
+        var fieldName = node && node.properties ? node.properties.FullName : null;
+        if (node && node.nodeCategory === 'field' && fieldName) {
+            if (additive) {
+                var idx = P.state.selectedFieldNames.indexOf(fieldName);
+                if (idx >= 0) P.state.selectedFieldNames.splice(idx, 1);
+                else P.state.selectedFieldNames.push(fieldName);
+            } else {
+                P.state.selectedFieldNames = [fieldName];
+            }
+            return;
+        }
+        if (!additive) {
+            P.state.selectedFieldNames = [];
+        }
+    }
+
+    function applySelectionClasses() {
+        var selectedFields = P.state.selectedFieldNames || [];
+        $('.tree-node-header').removeClass('selected field-selected');
+        if (P.state.selectedNodeId !== null && P.state.selectedNodeId !== undefined) {
+            $('.tree-node[data-node-id="' + P.state.selectedNodeId + '"] > .tree-node-header').addClass('selected');
+        }
+        if (!selectedFields.length) return;
+        selectedFields.forEach(function (fieldName) {
+            $('.tree-node-header[data-field-name="' + fieldName + '"]').addClass('field-selected');
+        });
     }
 
     function showPropertiesPanel(node, $headerEl) {
@@ -119,6 +157,9 @@ PDFalyzer.Tree = (function ($, P) {
     function buildNodeEl(node, depth) {
         var $wrapper = $('<div>', { 'class': 'tree-node', 'data-node-id': node.id });
         var $header  = $('<div>', { 'class': 'tree-node-header' });
+        if (node.nodeCategory === 'field' && node.properties && node.properties.FullName) {
+            $header.attr('data-field-name', node.properties.FullName);
+        }
         $wrapper.append($header);
 
         // Toggle
@@ -163,6 +204,7 @@ PDFalyzer.Tree = (function ($, P) {
         // Click → expand / select / highlight
         $header.on('click', function (e) {
             if ($(e.target).closest('button, a').length) return;
+            var additive = !!(e.ctrlKey || e.metaKey || e.shiftKey);
             if (hasChildren) {
                 var isExpanding = $toggle.find('i').hasClass('fa-chevron-right');
                 $toggle.find('i').toggleClass('fa-chevron-right fa-chevron-down');
@@ -178,10 +220,9 @@ PDFalyzer.Tree = (function ($, P) {
                 } else {
                     // Collapsing - remove properties panel
                     $header.siblings('.node-properties').remove();
-                    return;
                 }
             }
-            selectNode(node);
+            selectNode(node, additive, false);
         });
 
         // Children container (lazy, initially hidden)
@@ -236,7 +277,8 @@ PDFalyzer.Tree = (function ($, P) {
         }
 
         // Image / stream resource buttons
-        if ((node.nodeCategory === 'image' || node.cosType === 'COSStream') &&
+        if (node.nodeCategory !== 'attachment' &&
+            (node.nodeCategory === 'image' || node.cosType === 'COSStream') &&
                 node.objectNumber >= 0) {
             var resourceUrl = '/api/resource/' + P.state.sessionId + '/' +
                               node.objectNumber + '/' + (node.generationNumber || 0);
@@ -295,7 +337,7 @@ PDFalyzer.Tree = (function ($, P) {
                              html: '<i class="fas fa-eye"></i>' })
                 .on('click', function (e) {
                     e.stopPropagation();
-                    P.Resource.preview(attachUrl + '?inline=true');
+                    window.open(attachUrl + '?inline=true', '_blank');
                 })
                 .appendTo($header);
             $('<button>', { 'class': 'resource-download-btn', title: 'Download attachment',
@@ -366,5 +408,6 @@ PDFalyzer.Tree = (function ($, P) {
 
     return { render: render, renderSubtree: renderSubtree,
              renderSearchResults: renderSearchResults, selectNode: selectNode,
-             navigateToObject: navigateToObject, findAllByCategory: findAllByCategory };
+             navigateToObject: navigateToObject, findAllByCategory: findAllByCategory,
+             applySelectionClasses: applySelectionClasses };
 })(jQuery, PDFalyzer);
