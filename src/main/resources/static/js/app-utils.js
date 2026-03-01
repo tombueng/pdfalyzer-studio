@@ -129,6 +129,7 @@ PDFalyzer.Utils = (function ($) {
 
         if (updatedTree) {
             P.state.treeData = updatedTree;
+            P.state.rawCosTreeData = null;
         }
 
         if (P.state.treeData) {

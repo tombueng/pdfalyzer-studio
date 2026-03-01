@@ -21,6 +21,8 @@ PDFalyzer.Upload = (function ($, P) {
     function applyUploadSuccess(data, bytesSize) {
         P.state.sessionId = data.sessionId;
         P.state.treeData  = data.tree;
+        P.state.rawCosTreeData = null;
+        P.state.tabTreeViewStates = {};
         var sizeValue = typeof bytesSize === 'number' ? bytesSize : 0;
         var humanSize = P.Utils.formatBytes(sizeValue);
         $('#statusFilename').html('<i class="fas fa-file-pdf"></i> ' + data.filename);

@@ -708,10 +708,10 @@ PDFalyzer.EditMode = (function ($, P) {
         return isTruthyFlag(props.ReadOnly) || isTruthyFlag(props.readonly);
     }
 
-    function renderFieldHandles(pageIndex, wrapperEl) {
+    function renderFieldHandles(pageIndex, wrapperEl, viewportOverride) {
         if (!hasSession() || !wrapperEl) return;
         $(wrapperEl).find('.form-field-handle').remove();
-        var viewport = P.state.pageViewports[pageIndex];
+        var viewport = viewportOverride || P.state.pageViewports[pageIndex];
         if (!viewport) return;
 
         var fields = collectFieldNodesOnPage(pageIndex);

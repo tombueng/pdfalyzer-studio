@@ -165,7 +165,7 @@ PDFalyzer.Viewer = (function ($, P) {
             return page.render({ canvasContext: canvas.getContext('2d'), viewport: viewport }).promise
                 .then(function () {
                     if (P.EditMode && P.EditMode.renderFieldHandles) {
-                        P.EditMode.renderFieldHandles(pageNum - 1, $wrapper[0]);
+                        P.EditMode.renderFieldHandles(pageNum - 1, $wrapper[0], viewport);
                     }
                 });
         });
@@ -175,18 +175,30 @@ PDFalyzer.Viewer = (function ($, P) {
         var opts = options || {};
         var disableEntryAnimation = !!opts.disableEntryAnimation;
         var isCancelled = typeof opts.isCancelled === 'function' ? opts.isCancelled : null;
-        $container.empty();
+        var atomicCommit = !!opts.atomicCommit;
+        var $renderTarget = atomicCommit ? $('<div>') : $container;
+
+        if (!atomicCommit) {
+            $container.empty();
+        }
+
         var chain = Promise.resolve();
         for (var i = 1; i <= pdf.numPages; i++) {
             chain = chain.then((function (pageNum) {
                 return function () {
                     if (isCancelled && isCancelled()) return;
-                    return renderPageToContainer(pdf, pageNum, $container, pageViewports, pageCanvases,
+                    return renderPageToContainer(pdf, pageNum, $renderTarget, pageViewports, pageCanvases,
                         disableEntryAnimation);
                 };
             })(i));
         }
-        return chain;
+
+        return chain.then(function () {
+            if (isCancelled && isCancelled()) return;
+            if (atomicCommit) {
+                $container.empty().append($renderTarget.children());
+            }
+        });
     }
 
     function loadPdf(sid, options) {
@@ -266,6 +278,7 @@ PDFalyzer.Viewer = (function ($, P) {
         }
 
         return renderPdfIntoContainer(P.state.pdfDoc, $('#pdfViewer'), nextViewports, nextCanvases, {
+            atomicCommit: true,
             isCancelled: function () { return !isRenderRequestActive(requestId); }
         }).then(function () {
             if (!isRenderRequestActive(requestId)) return;
