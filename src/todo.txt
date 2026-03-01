@@ -14,7 +14,7 @@ circular references should still be expandable and viewable in the ui! do not li
 ✓ DONE: Attribute modification and node deletion now work (fixed objectNumber propagation in attachCosChildren)
 
 form field editor
-Insert field seem to be "incomplete",may the widget or appearance is missing? signature are not shown in adobe, test fields are, checkbox/radio is visible but not clickable/changeable.
+✓ DONE: Insert field seem to be "incomplete",may the widget or appearance is missing? signature are not shown in adobe, test fields are, checkbox/radio is visible but not clickable/changeable.
 ✓ DONE: Must be able to modify/delete all existing form fields (deleteFormField + setFormFieldValue endpoints)
 ✓ DONE: editor mode always active, remove button and move editor toolbar into top menubar. 
 ✓ DONE: adding new fields should not auto save and reload. add a "save" button instead.

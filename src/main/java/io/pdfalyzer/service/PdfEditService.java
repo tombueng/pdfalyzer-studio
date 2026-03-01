@@ -5,6 +5,7 @@ import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.*;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
 import org.apache.pdfbox.pdmodel.PDResources;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.font.PDType1Font;
@@ -182,7 +183,7 @@ public class PdfEditService {
         PDRadioButton field = new PDRadioButton(acroForm);
         field.setPartialName(request.getFieldName());
 
-        PDAnnotationWidget widget = new PDAnnotationWidget();
+        PDAnnotationWidget widget = field.getWidgets().get(0);
         widget.setRectangle(rect);
         widget.setPage(page);
         widget.setPrinted(true);
@@ -190,15 +191,15 @@ public class PdfEditService {
         PDAppearanceDictionary appearances = new PDAppearanceDictionary();
         PDAppearanceStream normalAppearance = new PDAppearanceStream(doc);
         normalAppearance.setBBox(new PDRectangle(rect.getWidth(), rect.getHeight()));
+        normalAppearance.setResources(acroForm.getDefaultResources());
         appearances.setNormalAppearance(normalAppearance);
         widget.setAppearance(appearances);
 
-        field.setWidgets(java.util.Collections.singletonList(widget));
         page.getAnnotations().add(widget);
         acroForm.getFields().add(field);
         applyCommonFieldOptions(field, request.getOptions());
         field.setExportValues(java.util.Collections.singletonList("On"));
-        field.setValue("On");
+        field.setValue("Off");
     }
 
     private void addSignatureField(PDDocument doc, PDAcroForm acroForm, PDPage page,
@@ -214,6 +215,18 @@ public class PdfEditService {
         PDAppearanceDictionary appearances = new PDAppearanceDictionary();
         PDAppearanceStream normalAppearance = new PDAppearanceStream(doc);
         normalAppearance.setBBox(new PDRectangle(rect.getWidth(), rect.getHeight()));
+        normalAppearance.setResources(acroForm.getDefaultResources());
+        try (PDPageContentStream cs = new PDPageContentStream(doc, normalAppearance)) {
+            cs.setStrokingColor(0f);
+            cs.setLineWidth(1f);
+            cs.addRect(0.5f, 0.5f, Math.max(1f, rect.getWidth() - 1f), Math.max(1f, rect.getHeight() - 1f));
+            cs.stroke();
+            cs.beginText();
+            cs.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA_OBLIQUE), 9);
+            cs.newLineAtOffset(4, Math.max(10, rect.getHeight() / 2));
+            cs.showText("Sign here");
+            cs.endText();
+        }
         appearances.setNormalAppearance(normalAppearance);
         widget.setAppearance(appearances);
 
