@@ -735,6 +735,23 @@ public class PdfStructureParser {
                         imgNode.addProperty("Color Space", img.getColorSpace().getName());
                         imgNode.addProperty("BitsPerComponent", String.valueOf(img.getBitsPerComponent()));
 
+                        // Set COS type and object reference so buttons appear
+                        COSBase cosObj = img.getCOSObject();
+                        imgNode.setCosType("COSStream");
+                        if (cosObj instanceof COSObject) {
+                            COSObject indirect = (COSObject) cosObj;
+                            imgNode.setObjectNumber((int) indirect.getObjectNumber());
+                            imgNode.setGenerationNumber((int) indirect.getGenerationNumber());
+                        } else if (cosObj instanceof COSStream) {
+                            // For direct stream objects, check if there's a key in the stream itself
+                            COSStream stream = (COSStream) cosObj;
+                            COSObjectKey key = stream.getKey();
+                            if (key != null) {
+                                imgNode.setObjectNumber((int) key.getNumber());
+                                imgNode.setGenerationNumber((int) key.getGeneration());
+                            }
+                        }
+
                         try {
                             attachCosChildren(imgNode, img.getCOSObject(), "page-" + pageIndex + "-img-" + xobjName.getName() + "-cos", ctx, 0);
                         } catch (Exception e) {
