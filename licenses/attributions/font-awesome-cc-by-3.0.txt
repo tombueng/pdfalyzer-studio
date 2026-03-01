@@ -1,0 +1,15 @@
+Font Awesome Attribution (WebJar metadata)
+
+This distribution includes Font Awesome assets via:
+- org.webjars:font-awesome:6.4.0
+
+Attribution statement (for CC BY 3.0 metadata path):
+- "Font Awesome" by Fonticons, Inc.
+- License: Creative Commons Attribution 3.0 Unported (CC BY 3.0)
+- License URL: https://creativecommons.org/licenses/by/3.0/
+
+Source package URL:
+- https://www.webjars.org
+
+Note:
+- If upstream license metadata or package composition changes, update this attribution file and NOTICE accordingly.

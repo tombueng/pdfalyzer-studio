@@ -18,6 +18,7 @@ var PDFalyzer = (function () {
             pendingFieldOptions: [],
             pendingFieldDeletes: {},
             selectedFieldNames: [],
+            selectedImageNodeIds: [],
             pageViewports: [],
             pageCanvases: [],
             currentScale: 1.5,

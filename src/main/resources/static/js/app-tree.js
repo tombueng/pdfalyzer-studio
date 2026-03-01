@@ -13,15 +13,64 @@ PDFalyzer.Tree = (function ($, P) {
 
     // ======================== RENDER ========================
 
-    function render(data) {
+    function captureViewState() {
+        var $container = $('#treeContent');
+        if (!$container.length) return null;
+        var expandedNodeIds = [];
+        $container.find('.tree-node').each(function () {
+            var $node = $(this);
+            var $children = $node.children('.tree-children');
+            if (!$children.length) return;
+            if ($children.css('display') !== 'none') {
+                expandedNodeIds.push(String($node.data('node-id')));
+            }
+        });
+        return {
+            expandedNodeIds: expandedNodeIds,
+            scrollTop: $container.scrollTop()
+        };
+    }
+
+    function restoreViewState(viewState) {
+        if (!viewState) return;
+        var expandedSet = Object.create(null);
+        (viewState.expandedNodeIds || []).forEach(function (id) {
+            expandedSet[String(id)] = true;
+        });
+
+        $('#treeContent .tree-node').each(function () {
+            var $node = $(this);
+            var $children = $node.children('.tree-children');
+            if (!$children.length) return;
+            var nodeId = String($node.data('node-id'));
+            var isExpanded = !!expandedSet[nodeId];
+            $children.css('display', isExpanded ? 'block' : 'none');
+            var $icon = $node.find('> .tree-node-header > .tree-toggle > i');
+            if ($icon.length) {
+                $icon.toggleClass('fa-chevron-down', isExpanded)
+                    .toggleClass('fa-chevron-right', !isExpanded);
+            }
+        });
+
+        if (typeof viewState.scrollTop === 'number') {
+            $('#treeContent').scrollTop(viewState.scrollTop);
+        }
+    }
+
+    function render(data, options) {
         if (!data) return;
+        var opts = options || {};
+        var viewState = opts.viewState || captureViewState();
         var $container = $('#treeContent').empty();
         $container.append(buildNodeEl(data, 0));
         appendPendingFieldPanel($container);
         applySelectionClasses();
+        restoreViewState(viewState);
     }
 
-    function renderSubtree(rootData, category) {
+    function renderSubtree(rootData, category, options) {
+        var opts = options || {};
+        var viewState = opts.viewState || captureViewState();
         var $container = $('#treeContent').empty();
         var nodes = findAllByCategory(rootData, category);
         if (nodes.length === 0) {
@@ -32,9 +81,12 @@ PDFalyzer.Tree = (function ($, P) {
         nodes.forEach(function (n) { $container.append(buildNodeEl(n, 0)); });
         appendPendingFieldPanel($container, category);
         applySelectionClasses();
+        restoreViewState(viewState);
     }
 
-    function renderSearchResults(results) {
+    function renderSearchResults(results, options) {
+        var opts = options || {};
+        var viewState = opts.viewState || captureViewState();
         var $container = $('#treeContent').empty();
         if (results.length === 0) {
             $container.html('<div class="text-muted text-center mt-3">No results</div>');
@@ -43,6 +95,7 @@ PDFalyzer.Tree = (function ($, P) {
         results.forEach(function (n) { $container.append(buildNodeEl(n, 0)); });
         appendPendingFieldPanel($container);
         applySelectionClasses();
+        restoreViewState(viewState);
     }
 
     function appendPendingFieldPanel($container, category) {
@@ -77,16 +130,16 @@ PDFalyzer.Tree = (function ($, P) {
             renderSubtree(P.state.treeData, 'field');
             $el = $('.tree-node[data-node-id="' + node.id + '"]');
         }
+        if (!$el.length && P.state.treeData) {
+            render(P.state.treeData);
+            $el = $('.tree-node[data-node-id="' + node.id + '"]');
+        }
         applySelectionClasses();
         expandToNode(node);
         if ($el.length) {
             $el[0].scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
-        if (node.pageIndex >= 0) {
-            P.Viewer.clearHighlights();
-            if (node.boundingBox) P.Viewer.highlight(node.pageIndex, node.boundingBox);
-            else P.Viewer.scrollToPage(node.pageIndex);
-        }
+        refreshViewerSelectionHighlights(node);
         if (P.EditMode && P.EditMode.refreshFieldSelectionHighlights) {
             P.EditMode.refreshFieldSelectionHighlights();
         }
@@ -97,6 +150,8 @@ PDFalyzer.Tree = (function ($, P) {
 
     function syncFieldSelection(node, additive) {
         if (!P.state.selectedFieldNames) P.state.selectedFieldNames = [];
+        if (!P.state.selectedImageNodeIds) P.state.selectedImageNodeIds = [];
+
         var fieldName = node && node.properties ? node.properties.FullName : null;
         if (node && node.nodeCategory === 'field' && fieldName) {
             if (additive) {
@@ -105,24 +160,86 @@ PDFalyzer.Tree = (function ($, P) {
                 else P.state.selectedFieldNames.push(fieldName);
             } else {
                 P.state.selectedFieldNames = [fieldName];
+                P.state.selectedImageNodeIds = [];
+            }
+            return;
+        }
+
+        if (node && node.nodeCategory === 'image' && node.id !== undefined && node.id !== null) {
+            var imageNodeId = node.id;
+            if (additive) {
+                var imageIdx = P.state.selectedImageNodeIds.indexOf(imageNodeId);
+                if (imageIdx >= 0) P.state.selectedImageNodeIds.splice(imageIdx, 1);
+                else P.state.selectedImageNodeIds.push(imageNodeId);
+            } else {
+                P.state.selectedImageNodeIds = [imageNodeId];
+                P.state.selectedFieldNames = [];
             }
             return;
         }
         if (!additive) {
             P.state.selectedFieldNames = [];
+            P.state.selectedImageNodeIds = [];
         }
     }
 
     function applySelectionClasses() {
         var selectedFields = P.state.selectedFieldNames || [];
-        $('.tree-node-header').removeClass('selected field-selected');
+        var selectedImages = P.state.selectedImageNodeIds || [];
+        $('.tree-node-header').removeClass('selected field-selected image-selected');
         if (P.state.selectedNodeId !== null && P.state.selectedNodeId !== undefined) {
             $('.tree-node[data-node-id="' + P.state.selectedNodeId + '"] > .tree-node-header').addClass('selected');
+        }
+        if (selectedImages.length) {
+            selectedImages.forEach(function (imageNodeId) {
+                $('.tree-node[data-node-id="' + imageNodeId + '"] > .tree-node-header').addClass('image-selected');
+            });
         }
         if (!selectedFields.length) return;
         selectedFields.forEach(function (fieldName) {
             $('.tree-node-header[data-field-name="' + fieldName + '"]').addClass('field-selected');
         });
+    }
+
+    function refreshViewerSelectionHighlights(node) {
+        if (!P.Viewer) return;
+
+        var selectedImageIds = P.state.selectedImageNodeIds || [];
+        if (selectedImageIds.length && P.state.treeData) {
+            var imageIdSet = Object.create(null);
+            selectedImageIds.forEach(function (id) {
+                imageIdSet[String(id)] = true;
+            });
+
+            var selectedImageNodes = [];
+            (function walk(n) {
+                if (!n) return;
+                if (n.nodeCategory === 'image' && n.id !== undefined && n.id !== null && imageIdSet[String(n.id)]) {
+                    selectedImageNodes.push(n);
+                }
+                if (n.children) n.children.forEach(walk);
+            })(P.state.treeData);
+
+            P.Viewer.clearHighlights();
+            selectedImageNodes.forEach(function (imgNode) {
+                if (imgNode.pageIndex >= 0 && imgNode.boundingBox) {
+                    P.Viewer.highlight(imgNode.pageIndex, imgNode.boundingBox);
+                }
+            });
+
+            if (node && node.pageIndex >= 0) {
+                P.Viewer.scrollToPage(node.pageIndex);
+            } else if (selectedImageNodes.length && selectedImageNodes[0].pageIndex >= 0) {
+                P.Viewer.scrollToPage(selectedImageNodes[0].pageIndex);
+            }
+            return;
+        }
+
+        if (node && node.pageIndex >= 0) {
+            P.Viewer.clearHighlights();
+            if (node.boundingBox) P.Viewer.highlight(node.pageIndex, node.boundingBox);
+            else P.Viewer.scrollToPage(node.pageIndex);
+        }
     }
 
     function showPropertiesPanel(node, $headerEl) {
@@ -442,5 +559,6 @@ PDFalyzer.Tree = (function ($, P) {
     return { render: render, renderSubtree: renderSubtree,
              renderSearchResults: renderSearchResults, selectNode: selectNode,
              navigateToObject: navigateToObject, findAllByCategory: findAllByCategory,
-             applySelectionClasses: applySelectionClasses };
+             applySelectionClasses: applySelectionClasses,
+             captureViewState: captureViewState, restoreViewState: restoreViewState };
 })(jQuery, PDFalyzer);

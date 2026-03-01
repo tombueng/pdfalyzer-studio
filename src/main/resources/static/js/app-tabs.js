@@ -6,6 +6,13 @@ PDFalyzer.Tabs = (function ($, P) {
 
     var veraPdfExportHtml = '';
     var veraPdfExportTitle = 'veraPDF Report';
+    var fontDiagnosticsState = {
+        data: null,
+        filterIssuesOnly: false,
+        search: '',
+        sort: 'issues-desc'
+    };
+    var activeGlyphObserver = null;
 
     function init() {
         $('.tab-btn').on('click', function () {
@@ -33,21 +40,74 @@ PDFalyzer.Tabs = (function ($, P) {
 
     function loadFonts() {
         clearFontUsageHighlights();
-        P.Utils.apiFetch('/api/fonts/' + P.state.sessionId)
-            .done(function (fonts) { renderFontTable(fonts); })
+        P.Utils.apiFetch('/api/fonts/' + P.state.sessionId + '/diagnostics')
+            .done(function (data) {
+                fontDiagnosticsState.data = data || { fonts: [] };
+                renderFontDiagnostics();
+            })
             .fail(function () { P.Utils.toast('Font analysis error', 'danger'); });
     }
 
-    function renderFontTable(fonts) {
+    function renderFontDiagnostics() {
+        var model = fontDiagnosticsState.data || { fonts: [] };
+        var fonts = Array.isArray(model.fonts) ? model.fonts.slice() : [];
+
+        if (fontDiagnosticsState.filterIssuesOnly) {
+            fonts = fonts.filter(function (f) {
+                return (f.issues && f.issues.length) || (f.unmappedUsedCodes > 0) || (f.unencodableUsedChars > 0);
+            });
+        }
+
+        var query = (fontDiagnosticsState.search || '').trim().toLowerCase();
+        if (query) {
+            fonts = fonts.filter(function (f) {
+                var hay = [
+                    f.fontName,
+                    f.fontType,
+                    f.encoding,
+                    (f.objectNumber >= 0 ? (f.objectNumber + ' ' + (f.generationNumber || 0)) : ''),
+                    (f.issues || []).join(' ')
+                ].join(' ').toLowerCase();
+                return hay.indexOf(query) !== -1;
+            });
+        }
+
+        sortFontRows(fonts, fontDiagnosticsState.sort);
+
         var $c = $('#treeContent');
-        if (!fonts.length) {
+        if (!model.fonts || !model.fonts.length) {
             $c.html('<div class="text-muted text-center mt-3">No fonts found</div>');
             return;
         }
-        var html = '<table class="font-table"><thead><tr>' +
-            '<th>Font</th><th>Type</th><th>Embedded</th><th>Subset</th>' +
-            '<th>Page</th><th>Issues</th><th>Actions</th>' +
+
+        var html = '<div class="font-diag-wrap">' +
+            '<div class="font-diag-stats">' +
+            metricCard('Fonts', model.totalFonts || model.fonts.length, 'fa-font', 'Total unique fonts found across all page and XObject resources.') +
+            metricCard('With issues', model.fontsWithIssues || 0, 'fa-exclamation-triangle', 'Fonts flagged with one or more potential rendering, mapping, or embedding problems.') +
+            metricCard('Missing glyphs', model.fontsWithMissingGlyphs || 0, 'fa-question-circle', 'Fonts where extracted text indicates characters that this font may not encode reliably.') +
+            metricCard('Encoding issues', model.fontsWithEncodingProblems || 0, 'fa-code', 'Fonts where used character codes are missing Unicode mapping entries (often ToUnicode issues).') +
+            '</div>' +
+            '<div class="font-diag-controls">' +
+            '<input id="fontDiagSearch" class="form-control form-control-sm" placeholder="Search font, encoding, issue..." value="' + P.Utils.escapeHtml(fontDiagnosticsState.search || '') + '" />' +
+            '<select id="fontDiagSort" class="form-select form-select-sm">' +
+            '<option value="issues-desc">Most issues first</option>' +
+            '<option value="name-asc">Name A-Z</option>' +
+            '<option value="usage-desc">Most used glyphs first</option>' +
+            '<option value="unmapped-desc">Most unmapped codes first</option>' +
+            '</select>' +
+            '<label class="form-check form-check-inline m-0"><input id="fontDiagIssuesOnly" class="form-check-input" type="checkbox" ' + (fontDiagnosticsState.filterIssuesOnly ? 'checked' : '') + '><span class="form-check-label">Issues only</span></label>' +
+            '<button id="fontDiagReload" class="btn btn-outline-accent btn-sm"><i class="fas fa-sync-alt me-1"></i>Refresh</button>' +
+            '</div>' +
+            '<table class="font-table"><thead><tr>' +
+            '<th title="Resolved PDF font name.">Font</th>' +
+            '<th title="Indirect object reference used to inspect raw font dictionary and stream.">Object</th>' +
+            '<th title="Font subtype and encoding metadata used for text decoding.">Type / Encoding</th>' +
+            '<th title="Observed glyph usage and where this font appears in the document.">Usage</th>' +
+            '<th title="How many used character codes map to Unicode and where mapping gaps exist.">Coverage</th>' +
+            '<th title="Detected risk signals and suggested remediations.">Issues</th>' +
+            '<th title="Actions for deep inspection, usage overlay, and extraction.">Actions</th>' +
             '</tr></thead><tbody>';
+
         fonts.forEach(function (f) {
             var embIcon = f.embedded
                 ? '<i class="fas fa-check-circle text-success"></i>'
@@ -56,43 +116,54 @@ PDFalyzer.Tabs = (function ($, P) {
                 ? '<i class="fas fa-check text-muted"></i>'
                 : '<i class="fas fa-minus text-muted"></i>';
             var issueHtml = (f.issues && f.issues.length > 0)
-                ? '<i class="fas fa-exclamation-triangle text-warning me-1"></i>' +
+                ? '<i class="fas fa-exclamation-triangle text-warning me-1" title="Potential issues detected for this font."></i>' +
                   '<span title="' + P.Utils.escapeHtml(f.issues.join('; ')) + '">' +
                   f.issues.length + '</span>'
-                : '<i class="fas fa-check text-success"></i>';
+                : '<i class="fas fa-check text-success" title="No immediate issues detected by current heuristics."></i>';
             var actions = '';
+            actions += '<button class="btn btn-xs btn-outline-accent me-1 font-detail-btn" ' +
+                'data-obj="' + (f.objectNumber >= 0 ? f.objectNumber : '') + '" data-gen="' + (f.generationNumber || 0) + '" ' +
+                'data-font-name="' + P.Utils.escapeHtml(f.fontName || '(unknown)') + '" ' +
+                'title="Inspect full diagnostics for this row (glyph mapping, encoding, dictionary, and usage evidence).">' +
+                '<i class="fas fa-microscope"></i></button>';
             if (f.objectNumber >= 0) {
-                actions += '<a class="btn btn-xs btn-outline-accent me-1" target="_blank" ' +
-                    'href="/api/fonts/' + P.state.sessionId + '/charmap/' + f.pageIndex +
-                    '/' + encodeURIComponent(f.objectId) + '" title="Character Map">' +
-                    '<i class="fas fa-table"></i></a>';
                 actions += '<button class="btn btn-xs btn-outline-accent me-1 font-usage-btn" ' +
                     'data-obj="' + f.objectNumber + '" data-gen="' + (f.generationNumber || 0) + '" ' +
-                    'title="Visualize usage"><i class="fas fa-highlighter"></i></button>';
+                    'title="Draw usage overlays in the PDF viewer for this font object."><i class="fas fa-highlighter"></i></button>';
                 if (f.embedded) {
                     actions += '<a class="btn btn-xs btn-outline-accent" target="_blank" ' +
                         'href="/api/fonts/' + P.state.sessionId + '/extract/' +
                         f.objectNumber + '/' + (f.generationNumber || 0) +
-                        '" title="Extract font file"><i class="fas fa-download"></i></a>';
+                        '" title="Download the embedded font program stream."><i class="fas fa-download"></i></a>';
                 }
             }
-            var issueDetail = '';
-            if (f.usageContext || f.fixSuggestion) {
-                var issueParts = [];
-                if (f.usageContext) issueParts.push('Context: ' + P.Utils.escapeHtml(f.usageContext));
-                if (f.fixSuggestion) issueParts.push('Fix: ' + P.Utils.escapeHtml(f.fixSuggestion));
-                issueDetail = '<div class="text-muted" style="font-size:11px;">' + issueParts.join('<br>') + '</div>';
-            }
+            var issueDetail = buildIssueDetail(f);
+            var pageText = (f.pagesUsed || []).length ? 'P' + f.pagesUsed.map(function (p) { return p + 1; }).join(',') : '-';
+            var objRef = (f.objectNumber >= 0) ? (f.objectNumber + ' ' + (f.generationNumber || 0) + ' R') : '(direct)';
+            var coverage = (f.mappedUsedCodes || 0) + ' / ' + (f.distinctUsedCodes || 0);
             html += '<tr>' +
-                '<td>' + P.Utils.escapeHtml(f.fontName || '(unknown)') + '</td>' +
-                '<td>' + P.Utils.escapeHtml(f.fontType || '') + '</td>' +
-                '<td>' + embIcon + '</td><td>' + subIcon + '</td>' +
-                '<td>' + (f.pageIndex + 1) + '</td>' +
+                '<td title="Font name reported by PDFBox for this resource.">' + P.Utils.escapeHtml(f.fontName || '(unknown)') + '</td>' +
+                '<td class="font-obj-ref" title="' + (f.objectNumber >= 0 ? 'Indirect object can be inspected and extracted.' : 'Direct or unresolved reference: deep object-specific diagnostics may be limited.') + '">' + P.Utils.escapeHtml(objRef) + '</td>' +
+                '<td>' + P.Utils.escapeHtml(f.fontType || '') + '<div class="text-muted" style="font-size:11px;">' +
+                '<span title="Embedded fonts travel with the PDF for reliable rendering.">' + embIcon + ' embedded</span> &nbsp; ' +
+                '<span title="Subset fonts include only some glyphs.">' + subIcon + ' subset</span><br>' +
+                P.Utils.escapeHtml(f.encoding || '(no encoding)') +
+                '</div></td>' +
+                '<td><span class="badge text-bg-secondary" title="Count of text positions observed with this font in extracted text flow.">Glyphs ' + (f.glyphCount || 0) + '</span> ' +
+                '<div class="text-muted" style="font-size:11px;">Pages: ' + P.Utils.escapeHtml(pageText) + '</div></td>' +
+                '<td><span class="badge ' + ((f.unmappedUsedCodes || 0) > 0 ? 'text-bg-danger' : 'text-bg-success') + '" title="Mapped used codes / distinct used codes.">Mapped ' + P.Utils.escapeHtml(coverage) + '</span>' +
+                ((f.unencodableUsedChars || 0) > 0 ? '<div class="text-warning" style="font-size:11px;" title="Distinct used characters that cannot be encoded by this font.">Missing glyph chars: ' + f.unencodableUsedChars + '</div>' : '') +
+                '</td>' +
                 '<td>' + issueHtml + issueDetail + '</td>' +
                 '<td>' + actions + '</td></tr>';
         });
-        html += '</tbody></table>';
+        html += '</tbody></table>' +
+            '<div id="fontDiagDetail" class="font-diag-detail text-muted">Select a font row action <i class="fas fa-microscope"></i> to inspect full glyph and mapping tables.</div>' +
+            '</div>';
         $c.html(html);
+
+        $('#fontDiagSort').val(fontDiagnosticsState.sort || 'issues-desc');
+        bindFontDiagnosticsControls();
         $c.find('.font-usage-btn').on('click', function () {
             var obj = parseInt($(this).data('obj'), 10);
             var gen = parseInt($(this).data('gen'), 10);
@@ -105,6 +176,267 @@ PDFalyzer.Tabs = (function ($, P) {
                     P.Utils.toast('Failed to load font usage', 'danger');
                 });
         });
+
+        $c.find('.font-detail-btn').on('click', function () {
+            var obj = parseInt($(this).data('obj'), 10);
+            var gen = parseInt($(this).data('gen'), 10);
+            loadFontDiagnosticsDetail(obj, gen);
+        });
+    }
+
+    function metricCard(label, value, icon, tooltip) {
+        return '<div class="font-diag-stat">' +
+            '<div class="font-diag-stat-label" title="' + P.Utils.escapeHtml(tooltip || '') + '"><i class="fas ' + icon + ' me-1"></i>' + P.Utils.escapeHtml(label) + '</div>' +
+            '<div class="font-diag-stat-value">' + value + '</div>' +
+            '</div>';
+    }
+
+    function sortFontRows(fonts, mode) {
+        fonts.sort(function (a, b) {
+            if (mode === 'name-asc') {
+                return String(a.fontName || '').localeCompare(String(b.fontName || ''));
+            }
+            if (mode === 'usage-desc') {
+                return (b.glyphCount || 0) - (a.glyphCount || 0);
+            }
+            if (mode === 'unmapped-desc') {
+                return (b.unmappedUsedCodes || 0) - (a.unmappedUsedCodes || 0);
+            }
+            var issueCmp = (b.issues || []).length - (a.issues || []).length;
+            if (issueCmp !== 0) return issueCmp;
+            return (b.unmappedUsedCodes || 0) - (a.unmappedUsedCodes || 0);
+        });
+    }
+
+    function buildIssueDetail(fontRow) {
+        var issueParts = [];
+        if (fontRow.usageContexts && fontRow.usageContexts.length) {
+            issueParts.push('Context: ' + P.Utils.escapeHtml(fontRow.usageContexts.join(', ')));
+        }
+        if (fontRow.fixSuggestion) {
+            issueParts.push('Fix: ' + P.Utils.escapeHtml(fontRow.fixSuggestion));
+        }
+        if (!issueParts.length) return '';
+        return '<div class="text-muted" style="font-size:11px;">' + issueParts.join('<br>') + '</div>';
+    }
+
+    function bindFontDiagnosticsControls() {
+        $('#fontDiagIssuesOnly').off('change').on('change', function () {
+            fontDiagnosticsState.filterIssuesOnly = !!$(this).is(':checked');
+            renderFontDiagnostics();
+        });
+        $('#fontDiagSearch').off('input').on('input', function () {
+            fontDiagnosticsState.search = $(this).val() || '';
+            renderFontDiagnostics();
+        });
+        $('#fontDiagSort').off('change').on('change', function () {
+            fontDiagnosticsState.sort = $(this).val() || 'issues-desc';
+            renderFontDiagnostics();
+        });
+        $('#fontDiagReload').off('click').on('click', function () {
+            loadFonts();
+        });
+    }
+
+    function loadFontDiagnosticsDetail(obj, gen) {
+        var $target = $('#fontDiagDetail');
+        if (!$target.length) return;
+        if (!(obj >= 0)) {
+            $target.html('<div class="text-warning"><i class="fas fa-info-circle me-1"></i>This row has no indirect object reference. Showing table-level diagnostics only (deep object dictionary/stream inspection is unavailable for direct/unresolved references).</div>');
+            return;
+        }
+        $target.html('<div class="text-muted"><span class="spinner-border spinner-border-sm"></span> Loading deep font diagnostics...</div>');
+        P.Utils.apiFetch('/api/fonts/' + P.state.sessionId + '/diagnostics/' + obj + '/' + gen)
+            .done(function (detail) {
+                renderFontDiagnosticsDetail(detail || {});
+            })
+            .fail(function () {
+                $target.html('<div class="text-danger"><i class="fas fa-exclamation-circle me-1"></i>Failed to load font diagnostics detail.</div>');
+            });
+    }
+
+    function renderFontDiagnosticsDetail(detail) {
+        var f = detail.font || {};
+        var encoding = detail.encoding || {};
+        var mappings = Array.isArray(detail.glyphMappings) ? detail.glyphMappings : [];
+        var issues = Array.isArray(detail.usedCharacterIssues) ? detail.usedCharacterIssues : [];
+        var dictionary = detail.fontDictionary || {};
+
+        var fontFamily = (f.objectNumber >= 0) ? ('pdfdiagfont_' + f.objectNumber + '_' + (f.generationNumber || 0)) : '';
+        if (f.embedded && f.objectNumber >= 0) {
+            ensureDiagnosticsFontFace(fontFamily, f.objectNumber, (f.generationNumber || 0));
+        }
+
+        var mappingRows = mappings.map(function (row) {
+            var unicode = row.unicode ? P.Utils.escapeHtml(row.unicode) : '<span class="text-danger">(unmapped)</span>';
+            var glyphPreview = '<span class="font-glyph-lazy" ' +
+                'data-unicode="' + escapeHtmlAttr(row.unicode || '') + '" ' +
+                'data-font-family="' + escapeHtmlAttr((f.embedded ? fontFamily : '')) + '" ' +
+                'title="Lazy-rendered glyph preview">' +
+                (row.unicode ? '<span class="text-muted">…</span>' : '<span class="text-danger">n/a</span>') +
+                '</span>';
+            return '<tr>' +
+                '<td>' + row.code + '</td>' +
+                '<td class="font-glyph-preview-cell">' + glyphPreview + '</td>' +
+                '<td>' + unicode + '</td>' +
+                '<td>' + P.Utils.escapeHtml(row.unicodeHex || '') + '</td>' +
+                '<td>' + (row.width == null ? '' : row.width) + '</td>' +
+                '<td>' + (row.usedCount || 0) + '</td>' +
+                '<td>' + (row.mapped ? '<span class="text-success">yes</span>' : '<span class="text-danger">no</span>') + '</td>' +
+                '</tr>';
+        }).join('');
+
+        var issueRows = issues.map(function (row) {
+            var issueGlyph = '<span class="font-glyph-lazy" ' +
+                'data-unicode="' + escapeHtmlAttr(row.character || '') + '" ' +
+                'data-font-family="' + escapeHtmlAttr((f.embedded ? fontFamily : '')) + '" ' +
+                'title="Lazy-rendered glyph preview">' +
+                ((row.character && row.character.length) ? '<span class="text-muted">…</span>' : '<span class="text-danger">n/a</span>') +
+                '</span>';
+            return '<tr>' +
+                '<td>' + P.Utils.escapeHtml(row.character || '') + '</td>' +
+                '<td class="font-glyph-preview-cell">' + issueGlyph + '</td>' +
+                '<td>' + P.Utils.escapeHtml(row.unicodeHex || '') + '</td>' +
+                '<td>' + (row.count || 0) + '</td>' +
+                '<td>' + P.Utils.escapeHtml(row.issue || '') + '</td>' +
+                '</tr>';
+        }).join('');
+
+        var dictRows = Object.keys(dictionary).map(function (k) {
+            return '<tr><td>' + P.Utils.escapeHtml(k) + '</td><td>' + P.Utils.escapeHtml(String(dictionary[k] || '')) + '</td></tr>';
+        }).join('');
+
+        var html = '<div class="font-diag-detail-title">' +
+            '<strong>' + P.Utils.escapeHtml(f.fontName || '(unknown)') + '</strong> &nbsp; ' +
+            '<span class="text-muted">Object ' + (f.objectNumber >= 0 ? (f.objectNumber + ' ' + (f.generationNumber || 0) + ' R') : '(direct)') + '</span>' +
+            '</div>' +
+            '<div class="font-detail-grid">' +
+            '<div><strong title="Encoding entry used to decode character codes.">Encoding</strong><div class="text-muted">' + P.Utils.escapeHtml(encoding.encodingObject || '(none)') + '</div></div>' +
+            '<div><strong title="ToUnicode CMap maps character codes to Unicode.">ToUnicode</strong><div class="text-muted">' + (encoding.hasToUnicode ? '<span class="text-success">present</span>' : '<span class="text-danger">missing</span>') + ' ' + P.Utils.escapeHtml(encoding.toUnicodeObject || '') + '</div></div>' +
+            '<div><strong title="Font subtype (/Type0, /TrueType, /Type1, etc.).">Subtype</strong><div class="text-muted">' + P.Utils.escapeHtml(encoding.subtype || '') + '</div></div>' +
+            '<div><strong title="Declared base font name in the font dictionary.">BaseFont</strong><div class="text-muted">' + P.Utils.escapeHtml(encoding.baseFont || '') + '</div></div>' +
+            '</div>' +
+            '<details open class="mt-2"><summary>Used character diagnostics (' + issues.length + ')</summary>' +
+            '<div class="font-detail-table-wrap"><table class="font-detail-table"><thead><tr><th title="Extracted character.">Char</th><th title="Lazy-rendered preview.">Glyph</th><th title="Unicode code point(s).">Unicode</th><th title="Occurrence count in extracted text.">Count</th><th title="Diagnostic note.">Note</th></tr></thead><tbody>' +
+            (issueRows || '<tr><td colspan="5" class="text-muted">No extracted text characters found for this font.</td></tr>') +
+            '</tbody></table></div></details>' +
+            '<details open class="mt-2"><summary>Glyph mapping table (' + mappings.length + ')</summary>' +
+            '<div class="font-detail-tools"><label class="m-0"><input type="checkbox" id="fontDetailUsedOnly"> show used codes only</label> ' +
+            '<input id="fontDetailFilter" class="form-control form-control-sm" placeholder="Filter code, unicode, hex" /></div>' +
+            '<div class="font-detail-table-wrap"><table class="font-detail-table" id="fontDetailMapTable"><thead><tr><th title="Character code used in PDF text operators.">Code</th><th title="Lazy-rendered preview of mapped glyphs.">Glyph</th><th title="Unicode text mapped from this code.">Unicode</th><th title="Unicode code point(s) in U+XXXX format.">Hex</th><th title="Glyph width reported by font metrics.">Width</th><th title="How many times this code appears in extracted text.">Used</th><th title="Whether code maps to Unicode.">Mapped</th></tr></thead><tbody>' +
+            mappingRows +
+            '</tbody></table></div></details>' +
+            '<details class="mt-2"><summary>Font dictionary (' + Object.keys(dictionary).length + ' keys)</summary>' +
+            '<div class="font-detail-table-wrap"><table class="font-detail-table"><thead><tr><th>Key</th><th>Value</th></tr></thead><tbody>' +
+            (dictRows || '<tr><td colspan="2" class="text-muted">No dictionary data.</td></tr>') +
+            '</tbody></table></div></details>';
+
+        $('#fontDiagDetail').html(html);
+        bindFontDetailFilters();
+        bindLazyGlyphRendering();
+    }
+
+    function ensureDiagnosticsFontFace(fontFamily, obj, gen) {
+        if (!fontFamily) return;
+        var styleId = 'fontDiagFace_' + fontFamily;
+        if (document.getElementById(styleId)) return;
+        var style = document.createElement('style');
+        style.id = styleId;
+        style.textContent = "@font-face{" +
+            "font-family:'" + fontFamily + "';" +
+            "src:url('/api/fonts/" + encodeURIComponent(P.state.sessionId) + "/extract/" + obj + "/" + gen + "');" +
+            "font-display:swap;" +
+            "}";
+        document.head.appendChild(style);
+    }
+
+    function bindLazyGlyphRendering() {
+        var nodes = Array.from(document.querySelectorAll('#fontDiagDetail .font-glyph-lazy[data-unicode]'));
+        if (!nodes.length) return;
+
+        if (activeGlyphObserver && typeof activeGlyphObserver.disconnect === 'function') {
+            activeGlyphObserver.disconnect();
+            activeGlyphObserver = null;
+        }
+
+        function renderGlyphNode(node) {
+            if (!node || node.getAttribute('data-rendered') === '1') return;
+            var unicode = node.getAttribute('data-unicode') || '';
+            if (!unicode) return;
+            var fontFamily = node.getAttribute('data-font-family') || '';
+
+            node.setAttribute('data-rendered', '1');
+            node.innerHTML = '';
+
+            var preview = document.createElement('span');
+            preview.className = 'font-glyph-preview';
+            preview.textContent = unicode;
+            preview.title = 'Rendered glyph preview';
+            if (fontFamily) {
+                preview.style.fontFamily = "'" + fontFamily + "', 'Segoe UI Symbol', 'Segoe UI', sans-serif";
+            }
+            node.appendChild(preview);
+        }
+
+        function renderVisibleBatch() {
+            var rendered = 0;
+            nodes.forEach(function (node) {
+                if (node.getAttribute('data-rendered') === '1') return;
+                var rect = node.getBoundingClientRect();
+                if (rect.width <= 0 || rect.height <= 0) return;
+                if (rect.bottom < -100 || rect.top > (window.innerHeight + 300)) return;
+                renderGlyphNode(node);
+                rendered += 1;
+            });
+            return rendered;
+        }
+
+        renderVisibleBatch();
+
+        if ('IntersectionObserver' in window) {
+            activeGlyphObserver = new IntersectionObserver(function (entries) {
+                entries.forEach(function (entry) {
+                    if (!entry.isIntersecting) return;
+                    renderGlyphNode(entry.target);
+                    activeGlyphObserver.unobserve(entry.target);
+                });
+            }, { root: null, rootMargin: '180px 0px', threshold: 0.01 });
+
+            nodes.forEach(function (node) {
+                if (node.getAttribute('data-rendered') === '1') return;
+                activeGlyphObserver.observe(node);
+            });
+        }
+
+        setTimeout(function () {
+            nodes.forEach(function (node) {
+                renderGlyphNode(node);
+            });
+        }, 1200);
+    }
+
+    function escapeHtmlAttr(value) {
+        return String(value == null ? '' : value)
+            .replace(/&/g, '&amp;')
+            .replace(/"/g, '&quot;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    }
+
+    function bindFontDetailFilters() {
+        function applyFilter() {
+            var query = ($('#fontDetailFilter').val() || '').toLowerCase();
+            var usedOnly = $('#fontDetailUsedOnly').is(':checked');
+            $('#fontDetailMapTable tbody tr').each(function () {
+                var $row = $(this);
+                var used = parseInt($row.children().eq(5).text(), 10) || 0;
+                var rowText = $row.text().toLowerCase();
+                var visible = (!usedOnly || used > 0) && (!query || rowText.indexOf(query) !== -1);
+                $row.toggle(visible);
+            });
+        }
+        $('#fontDetailFilter').off('input').on('input', applyFilter);
+        $('#fontDetailUsedOnly').off('change').on('change', applyFilter);
     }
 
     function clearFontUsageHighlights() {

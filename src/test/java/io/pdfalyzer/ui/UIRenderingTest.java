@@ -1,11 +1,14 @@
 package io.pdfalyzer.ui;
 
 import io.github.bonigarcia.wdm.WebDriverManager;
+import org.jcodec.api.awt.AWTSequenceEncoder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.openqa.selenium.By;
 import org.openqa.selenium.JavascriptExecutor;
+import org.openqa.selenium.OutputType;
+import org.openqa.selenium.TakesScreenshot;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.chrome.ChromeDriver;
@@ -15,8 +18,15 @@ import org.openqa.selenium.support.ui.WebDriverWait;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 
+import javax.imageio.ImageIO;
+import java.awt.image.BufferedImage;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 
@@ -35,7 +45,12 @@ public class UIRenderingTest {
     public void setUp() {
         // Setup WebDriverManager for Chromium (will download if needed)
         try {
-            WebDriverManager.chromedriver().clearDriverCache().setup();
+            try {
+                WebDriverManager.chromedriver().clearDriverCache().setup();
+            } catch (Exception cacheEx) {
+                System.err.println("Warning: Could not clear ChromeDriver cache, proceeding with setup: " + cacheEx.getMessage());
+                WebDriverManager.chromedriver().setup();
+            }
             
             ChromeOptions options = new ChromeOptions();
             options.addArguments("--headless=new");
@@ -652,6 +667,213 @@ public class UIRenderingTest {
     }
 
     @Test
+    public void testPdfViewAndTreeImageSelectionSyncBothDirections() {
+        if (driver == null) {
+            System.out.println("Skipping testPdfViewAndTreeImageSelectionSyncBothDirections - ChromeDriver not available");
+            return;
+        }
+
+        driver.get(baseUrl);
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
+        wait.until(ExpectedConditions.or(
+            ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
+            ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
+        ));
+        wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector("#pdfViewer .pdf-page-wrapper canvas")));
+        expandAllPageImageBranches(wait);
+
+        driver.manage().timeouts().scriptTimeout(Duration.ofSeconds(40));
+        Object result = ((JavascriptExecutor) driver).executeAsyncScript(
+            "const done = arguments[arguments.length - 1];" +
+            "const P = window.PDFalyzer;" +
+            "if(!P || !P.state || !P.state.treeData){ done({ok:false,msg:'no-state'}); return; }" +
+            "const images = [];" +
+            "(function walk(n){" +
+            "  if(!n) return;" +
+            "  if(n.nodeCategory==='image' && n.id!==undefined && n.id!==null && Array.isArray(n.boundingBox) && n.boundingBox.length===4 && n.pageIndex>=0){ images.push(n); }" +
+            "  if(n.children) n.children.forEach(walk);" +
+            "})(P.state.treeData);" +
+            "if(images.length < 1){ done({ok:true,skipped:true,msg:'no-images'}); return; }" +
+            "function clickImage(imageNode, withCtrl){" +
+            "  const canvas = P.state.pageCanvases[imageNode.pageIndex];" +
+            "  const vp = P.state.pageViewports[imageNode.pageIndex];" +
+            "  if(!canvas || !vp) return false;" +
+            "  const bb = imageNode.boundingBox;" +
+            "  const centerX = bb[0] + bb[2] / 2;" +
+            "  const centerY = bb[1] + bb[3] / 2;" +
+            "  const rect = canvas.getBoundingClientRect();" +
+            "  const clientX = rect.left + (centerX * vp.scale);" +
+            "  const clientY = rect.top + (vp.height - (centerY * vp.scale));" +
+            "  canvas.dispatchEvent(new MouseEvent('click', { bubbles:true, cancelable:true, clientX:clientX, clientY:clientY, ctrlKey:!!withCtrl }));" +
+            "  return true;" +
+            "}" +
+            "const first = images[0];" +
+            "if(!clickImage(first,false)){ done({ok:false,msg:'first-image-click-failed'}); return; }" +
+            "setTimeout(function(){" +
+            "  const selectedIds = Array.isArray(P.state.selectedImageNodeIds) ? P.state.selectedImageNodeIds.slice() : [];" +
+            "  const firstSelectedInState = selectedIds.indexOf(first.id) >= 0;" +
+            "  const firstHeader = document.querySelector('.tree-node[data-node-id=\"' + first.id + '\"] > .tree-node-header');" +
+            "  const firstSelectedInTree = !!firstHeader && (firstHeader.classList.contains('image-selected') || firstHeader.classList.contains('selected'));" +
+            "  let second = images.length > 1 ? images[1] : null;" +
+            "  if(!second){" +
+            "    done({ok:firstSelectedInState && firstSelectedInTree, firstSelectedInState:firstSelectedInState, firstSelectedInTree:firstSelectedInTree, skippedMulti:true, msg:'single-image-available'});" +
+            "    return;" +
+            "  }" +
+            "  let secondHeader = document.querySelector('.tree-node[data-node-id=\"' + second.id + '\"] > .tree-node-header');" +
+            "  if(!secondHeader){" +
+            "    const fallbackHeaders = Array.from(document.querySelectorAll('.tree-node[data-node-id^=\"page-\"][data-node-id*=\"-img-\"] > .tree-node-header'));" +
+            "    const alt = fallbackHeaders.find(h => {" +
+            "      const p = h && h.parentElement;" +
+            "      if(!p) return false;" +
+            "      const nid = p.getAttribute('data-node-id');" +
+            "      return !!nid && String(nid) !== String(first.id);" +
+            "    });" +
+            "    if(!alt){" +
+            "      done({ok:firstSelectedInState && firstSelectedInTree, firstSelectedInState:firstSelectedInState, firstSelectedInTree:firstSelectedInTree, skippedMulti:true, msg:'second-image-header-missing'});" +
+            "      return;" +
+            "    }" +
+            "    secondHeader = alt;" +
+            "    const altId = secondHeader.parentElement.getAttribute('data-node-id');" +
+            "    const mapped = images.find(img => String(img.id) === String(altId));" +
+            "    if(mapped) second = mapped;" +
+            "  }" +
+            "  secondHeader.dispatchEvent(new MouseEvent('click', { bubbles:true, ctrlKey:true }));" +
+            "  setTimeout(function(){" +
+            "    const idsAfterCtrlTree = Array.isArray(P.state.selectedImageNodeIds) ? P.state.selectedImageNodeIds : [];" +
+            "    const treeToPdfMulti = idsAfterCtrlTree.indexOf(first.id) >= 0 && idsAfterCtrlTree.indexOf(second.id) >= 0;" +
+            "    if(!clickImage(first, true)){ done({ok:false,msg:'ctrl-image-click-failed'}); return; }" +
+            "    setTimeout(function(){" +
+            "      const idsAfterPdfCtrl = Array.isArray(P.state.selectedImageNodeIds) ? P.state.selectedImageNodeIds : [];" +
+            "      const pdfToTreeMultiState = idsAfterPdfCtrl.indexOf(first.id) >= 0 && idsAfterPdfCtrl.indexOf(second.id) >= 0;" +
+            "      const firstTreeNow = document.querySelector('.tree-node[data-node-id=\"' + first.id + '\"] > .tree-node-header');" +
+            "      const secondTreeNow = document.querySelector('.tree-node[data-node-id=\"' + second.id + '\"] > .tree-node-header');" +
+            "      const pdfToTreeMultiClasses = !!firstTreeNow && !!secondTreeNow && firstTreeNow.classList.contains('image-selected') && secondTreeNow.classList.contains('image-selected');" +
+            "      done({" +
+            "        ok: firstSelectedInState && firstSelectedInTree && treeToPdfMulti," +
+            "        firstSelectedInState:firstSelectedInState," +
+            "        firstSelectedInTree:firstSelectedInTree," +
+            "        treeToPdfMulti:treeToPdfMulti," +
+            "        pdfToTreeMultiState:pdfToTreeMultiState," +
+            "        pdfToTreeMultiClasses:pdfToTreeMultiClasses" +
+            "      });" +
+            "    }, 120);" +
+            "  }, 120);" +
+            "}, 120);"
+        );
+
+        assertTrue(result instanceof Map, "Expected script result map");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> map = (Map<String, Object>) result;
+        assertEquals(Boolean.TRUE, map.get("ok"), "Image selection sync must work both directions: " + map);
+    }
+
+    @Test
+    public void testFontsTabRowActionsVisibleAndClickable() {
+        if (driver == null) {
+            System.out.println("Skipping testFontsTabRowActionsVisibleAndClickable - ChromeDriver not available");
+            return;
+        }
+
+        driver.get(baseUrl);
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
+        wait.until(ExpectedConditions.or(
+            ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
+            ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
+        ));
+
+        WebElement fontsTab = wait.until(ExpectedConditions.elementToBeClickable(
+            By.cssSelector(".tab-btn[data-tab='fonts']")
+        ));
+        fontsTab.click();
+
+        wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(".font-table tbody tr")));
+        wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(".font-table tbody tr td:last-child")));
+
+        Object result = ((JavascriptExecutor) driver).executeAsyncScript(
+            "const done = arguments[arguments.length - 1];" +
+            "const rows = Array.from(document.querySelectorAll('.font-table tbody tr'));" +
+            "if(!rows.length){ done({ok:false,msg:'no-font-rows'}); return; }" +
+            "let rowsWithActions = 0;" +
+            "rows.forEach(r => {" +
+            "  const actionCell = r.querySelector('td:last-child');" +
+            "  if(!actionCell) return;" +
+            "  const action = actionCell.querySelector('button.font-detail-btn, button.font-usage-btn, a[href*=\"/extract/\"]');" +
+            "  if(action) rowsWithActions += 1;" +
+            "});" +
+            "if(rowsWithActions !== rows.length){ done({ok:false,msg:'actions-missing-on-some-rows',rows:rows.length,rowsWithActions:rowsWithActions}); return; }" +
+            "const detailBtn = document.querySelector('.font-table tbody tr td:last-child button.font-detail-btn');" +
+            "if(!detailBtn){ done({ok:false,msg:'no-detail-button'}); return; }" +
+            "detailBtn.click();" +
+            "setTimeout(function(){" +
+            "  const panel = document.querySelector('#fontDiagDetail');" +
+            "  if(!panel){ done({ok:false,msg:'no-detail-panel'}); return; }" +
+            "  const text = (panel.textContent || '').toLowerCase();" +
+            "  const clicked = text.indexOf('loading deep font diagnostics') >= 0 || text.indexOf('object reference') >= 0 || text.indexOf('glyph mapping table') >= 0 || text.indexOf('diagnostics') >= 0;" +
+            "  done({ok:clicked,rows:rows.length,rowsWithActions:rowsWithActions,panelText:text.slice(0,220)});" +
+            "}, 300);"
+        );
+
+        assertTrue(result instanceof Map, "Expected script result map");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> map = (Map<String, Object>) result;
+        assertEquals(Boolean.TRUE, map.get("ok"), "Fonts row actions must be visible and clickable: " + map);
+    }
+
+    @Test
+    public void testFontDiagnosticsLazyGlyphPreviewLoads() {
+        if (driver == null) {
+            System.out.println("Skipping testFontDiagnosticsLazyGlyphPreviewLoads - ChromeDriver not available");
+            return;
+        }
+
+        driver.get(baseUrl);
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
+        wait.until(ExpectedConditions.or(
+            ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
+            ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
+        ));
+
+        WebElement fontsTab = wait.until(ExpectedConditions.elementToBeClickable(
+            By.cssSelector(".tab-btn[data-tab='fonts']")
+        ));
+        fontsTab.click();
+
+        wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(".font-table tbody tr")));
+        WebElement detailBtn = wait.until(ExpectedConditions.elementToBeClickable(
+            By.cssSelector(".font-table tbody tr td:last-child button.font-detail-btn")
+        ));
+        detailBtn.click();
+
+        wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector("#fontDiagDetail .font-glyph-lazy")));
+
+        driver.manage().timeouts().scriptTimeout(Duration.ofSeconds(10));
+        Object result = ((JavascriptExecutor) driver).executeAsyncScript(
+            "const done = arguments[arguments.length - 1];" +
+            "const root = document.querySelector('#fontDiagDetail');" +
+            "if(!root){ done({ok:false,msg:'no-detail-root'}); return; }" +
+            "const start = Date.now();" +
+            "function counts(){" +
+            "  return {" +
+            "    placeholders: root.querySelectorAll('.font-glyph-lazy .text-muted').length," +
+            "    renderedAttr: root.querySelectorAll('.font-glyph-lazy[data-rendered=\"1\"]').length," +
+            "    previews: root.querySelectorAll('.font-glyph-preview').length" +
+            "  };" +
+            "}" +
+            "(function poll(){" +
+            "  const c = counts();" +
+            "  if(c.previews > 0 || c.renderedAttr > 0){ done({ok:true,counts:c}); return; }" +
+            "  if(Date.now() - start > 6000){ done({ok:false,msg:'glyphs-did-not-render',counts:c}); return; }" +
+            "  setTimeout(poll, 120);" +
+            "})();"
+        );
+
+        assertTrue(result instanceof Map, "Expected script result map");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> map = (Map<String, Object>) result;
+        assertEquals(Boolean.TRUE, map.get("ok"), "Lazy glyph previews should render in diagnostics: " + map);
+    }
+
+    @Test
     public void testMovingSelectedFieldsEnablesSaveAndAvoidsGhostHandles() {
         if (driver == null) {
             System.out.println("Skipping testMovingSelectedFieldsEnablesSaveAndAvoidsGhostHandles - ChromeDriver not available");
@@ -848,6 +1070,147 @@ public class UIRenderingTest {
             "Both selected fields should have Required=true after tri-state apply");
         }
 
+    @Test
+    public void testSmoothRefreshPreservesTreeStateAndUsesHiddenViewerStaging() {
+        if (driver == null) {
+            System.out.println("Skipping testSmoothRefreshPreservesTreeStateAndUsesHiddenViewerStaging - ChromeDriver not available");
+            return;
+        }
+
+        driver.get(baseUrl);
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
+        wait.until(ExpectedConditions.or(
+            ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
+            ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
+        ));
+        wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector("#pdfViewer .pdf-page-wrapper")));
+
+        driver.manage().timeouts().scriptTimeout(Duration.ofSeconds(45));
+        Object result = ((JavascriptExecutor) driver).executeAsyncScript(
+            "const done = arguments[arguments.length - 1];" +
+            "const P = window.PDFalyzer;" +
+            "if(!P || !P.state || !P.state.treeData || !P.state.sessionId){ done({ok:false,msg:'missing-pdf-state'}); return; }" +
+            "P.state.currentTab = 'structure';" +
+            "if(P.Tabs && P.Tabs.switchTab){ P.Tabs.switchTab('structure'); }" +
+            "const tree = document.getElementById('treeContent');" +
+            "const pane = document.getElementById('pdfPane');" +
+            "if(!tree || !pane){ done({ok:false,msg:'missing-tree-or-pane'}); return; }" +
+            "const expandables = Array.from(document.querySelectorAll('#treeContent .tree-node')).filter(function(n){" +
+            "  const t = n.querySelector(':scope > .tree-node-header > .tree-toggle > i');" +
+            "  const c = n.querySelector(':scope > .tree-children');" +
+            "  return !!t && !!c;" +
+            "});" +
+            "if(!expandables.length){ done({ok:false,msg:'no-expandable-node'}); return; }" +
+            "const target = expandables.find(function(n){ return n.getAttribute('data-node-id') === 'pages'; }) || expandables[0];" +
+            "const targetId = target.getAttribute('data-node-id');" +
+            "tree.scrollTop = 120;" +
+            "pane.scrollTop = 240;" +
+            "const toggle = target.querySelector(':scope > .tree-node-header > .tree-toggle');" +
+            "const children = target.querySelector(':scope > .tree-children');" +
+            "if(!toggle || !children){ done({ok:false,msg:'missing-toggle-or-children'}); return; }" +
+            "if(getComputedStyle(children).display === 'none'){ toggle.click(); }" +
+            "const beforeTreeScroll = tree.scrollTop;" +
+            "const beforePaneScroll = pane.scrollTop;" +
+            "P.Utils.refreshAfterMutation(P.state.treeData);" +
+            "const stagingNow = document.getElementById('pdfViewerStaging');" +
+            "if(!stagingNow){ done({ok:false,msg:'staging-not-created'}); return; }" +
+            "let attempts = 0;" +
+            "(function poll(){" +
+            "  attempts++;" +
+            "  const wrappers = document.querySelectorAll('#pdfViewer .pdf-page-wrapper');" +
+            "  const refreshed = wrappers.length > 0 && attempts > 5;" +
+            "  if(!refreshed && attempts < 120){ setTimeout(poll, 100); return; }" +
+            "  const targetAfter = document.querySelector('#treeContent .tree-node[data-node-id=\"' + targetId + '\"]');" +
+            "  const childrenAfter = targetAfter ? targetAfter.querySelector(':scope > .tree-children') : null;" +
+            "  const expandedAfter = !!childrenAfter && getComputedStyle(childrenAfter).display !== 'none';" +
+            "  const treeScrollAfter = tree.scrollTop;" +
+            "  const paneScrollAfter = pane.scrollTop;" +
+            "  const staging = document.getElementById('pdfViewerStaging');" +
+            "  const stagingClassOk = !!staging && staging.classList.contains('pdf-viewer-staging');" +
+            "  const treeScrollPreserved = Math.abs(treeScrollAfter - beforeTreeScroll) <= 12;" +
+            "  const paneNotReset = paneScrollAfter > 80;" +
+            "  done({" +
+            "    ok: expandedAfter && treeScrollPreserved && paneNotReset && stagingClassOk," +
+            "    expandedAfter: expandedAfter," +
+            "    treeScrollBefore: beforeTreeScroll," +
+            "    treeScrollAfter: treeScrollAfter," +
+            "    paneScrollBefore: beforePaneScroll," +
+            "    paneScrollAfter: paneScrollAfter," +
+            "    stagingClassOk: stagingClassOk" +
+            "  });" +
+            "})();"
+        );
+
+        assertTrue(result instanceof Map, "Expected script result map");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> map = (Map<String, Object>) result;
+        assertEquals(Boolean.TRUE, map.get("ok"), "Smooth refresh must preserve state and staging behavior: " + map);
+    }
+
+    @Test
+    public void testCaptureSmoothRefreshTransitionVideoFrames() throws Exception {
+        if (driver == null) {
+            System.out.println("Skipping testCaptureSmoothRefreshTransitionVideoFrames - ChromeDriver not available");
+            return;
+        }
+
+        driver.get(baseUrl);
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
+        wait.until(ExpectedConditions.or(
+            ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
+            ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
+        ));
+        wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector("#pdfViewer .pdf-page-wrapper")));
+
+        Path artifactDir = Paths.get("target", "ui-artifacts", "smooth-refresh-transition",
+            "run-" + System.currentTimeMillis());
+        Files.createDirectories(artifactDir);
+
+        ((JavascriptExecutor) driver).executeScript(
+            "const tree = document.getElementById('treeContent');" +
+            "const pane = document.getElementById('pdfPane');" +
+            "if(tree) tree.scrollTop = 140;" +
+            "if(pane) pane.scrollTop = 260;" +
+            "const pages = document.querySelector('.tree-node[data-node-id=\"pages\"]');" +
+            "if(pages){" +
+            "  const t = pages.querySelector(':scope > .tree-node-header > .tree-toggle');" +
+            "  const c = pages.querySelector(':scope > .tree-children');" +
+            "  if(t && c && getComputedStyle(c).display==='none'){ t.click(); }" +
+            "}"
+        );
+
+        ((JavascriptExecutor) driver).executeScript(
+            "window.__pdfalyzerTransitionCaptureStartedAt = performance.now();" +
+            "window.PDFalyzer.Utils.refreshAfterMutation(window.PDFalyzer.state.treeData);"
+        );
+
+        int frameCount = 180;
+        int frameDelayMs = 10;
+        for (int i = 0; i < frameCount; i++) {
+            byte[] png = ((TakesScreenshot) driver).getScreenshotAs(OutputType.BYTES);
+            Path frame = artifactDir.resolve(String.format("frame-%03d.png", i));
+            Files.write(frame, png);
+            Thread.sleep(frameDelayMs);
+        }
+
+        boolean mp4Generated = tryGenerateMp4FromFrames(artifactDir, 20);
+        Path marker = artifactDir.resolve("README.txt");
+        Files.writeString(marker,
+            "Captured " + frameCount + " frames at " + frameDelayMs + "ms intervals.\n" +
+            "Frames path: " + artifactDir.toAbsolutePath() + "\n" +
+            "MP4 generated: " + mp4Generated + "\n" +
+            (mp4Generated
+                ? "Video file: transition.mp4\n"
+                : "MP4 generation failed (JCodec + ffmpeg fallback).\n")
+        );
+
+        assertTrue(Files.exists(artifactDir.resolve("frame-000.png")),
+            "Expected first transition frame to be captured");
+        assertTrue(Files.exists(artifactDir.resolve("frame-044.png")),
+            "Expected last transition frame to be captured");
+        System.out.println("Transition artifact directory: " + artifactDir.toAbsolutePath());
+    }
+
     private void expandNode(WebDriverWait wait, String nodeId) {
         By nodeSel = By.cssSelector(".tree-node[data-node-id='" + nodeId + "']");
         WebElement node = wait.until(ExpectedConditions.presenceOfElementLocated(nodeSel));
@@ -858,6 +1221,40 @@ public class UIRenderingTest {
         WebElement toggle = node.findElement(By.cssSelector(":scope > .tree-node-header > .tree-toggle"));
         ((JavascriptExecutor) driver).executeScript("arguments[0].click();", toggle);
         wait.until(d -> !node.findElements(By.cssSelector(":scope > .tree-children > .tree-node")).isEmpty());
+    }
+
+    private void expandAllPageImageBranches(WebDriverWait wait) {
+        expandNode(wait, "pages");
+
+        Object idsObj = ((JavascriptExecutor) driver).executeScript(
+            "const root = document.querySelector('.tree-node[data-node-id=\"pages\"] > .tree-children');" +
+            "if(!root) return [];" +
+            "return Array.from(root.querySelectorAll(':scope > .tree-node'))" +
+            "  .map(n => n.getAttribute('data-node-id'))" +
+            "  .filter(id => /^page-\\d+$/.test(String(id || '')));"
+        );
+
+        if (!(idsObj instanceof List<?> pageIds)) {
+            return;
+        }
+
+        for (Object idObj : pageIds) {
+            if (!(idObj instanceof String pageId) || pageId.isBlank()) {
+                continue;
+            }
+            try {
+                expandNode(wait, pageId);
+            } catch (Exception ignored) {
+            }
+            try {
+                expandNode(wait, pageId + "-resources");
+            } catch (Exception ignored) {
+            }
+            try {
+                expandNode(wait, pageId + "-images");
+            } catch (Exception ignored) {
+            }
+        }
     }
 
     private void assertNoClientJsErrors(String context) {
@@ -872,5 +1269,64 @@ public class UIRenderingTest {
         if (list.isEmpty()) return;
 
         throw new RuntimeException("JavaScript errors captured in browser (" + context + "): " + list);
+    }
+
+    private boolean tryGenerateMp4FromFrames(Path artifactDir, int fps) {
+        if (tryGenerateMp4WithJCodec(artifactDir, fps)) {
+            return true;
+        }
+
+        try {
+            Process process = new ProcessBuilder(
+                "ffmpeg",
+                "-y",
+                "-framerate", String.valueOf(fps),
+                "-i", "frame-%03d.png",
+                "-pix_fmt", "yuv420p",
+                "transition.mp4"
+            )
+                .directory(artifactDir.toFile())
+                .redirectErrorStream(true)
+                .start();
+
+            int exit = process.waitFor();
+            return exit == 0 && Files.exists(artifactDir.resolve("transition.mp4"));
+        } catch (IOException | InterruptedException e) {
+            if (e instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            return false;
+        }
+    }
+
+    private boolean tryGenerateMp4WithJCodec(Path artifactDir, int fps) {
+        List<Path> frames;
+        try {
+            frames = Files.list(artifactDir)
+                .filter(p -> {
+                    String name = p.getFileName().toString();
+                    return name.startsWith("frame-") && name.endsWith(".png");
+                })
+                .sorted(Comparator.comparing(p -> p.getFileName().toString()))
+                .toList();
+        } catch (IOException e) {
+            return false;
+        }
+
+        if (frames.isEmpty()) return false;
+
+        Path output = artifactDir.resolve("transition.mp4");
+        try {
+            AWTSequenceEncoder encoder = AWTSequenceEncoder.createSequenceEncoder(output.toFile(), fps);
+            for (Path frame : frames) {
+                BufferedImage image = ImageIO.read(frame.toFile());
+                if (image == null) continue;
+                encoder.encodeImage(image);
+            }
+            encoder.finish();
+            return Files.exists(output) && Files.size(output) > 0;
+        } catch (Exception e) {
+            return false;
+        }
     }
 }

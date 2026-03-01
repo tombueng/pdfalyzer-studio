@@ -1,0 +1,28 @@
+PDFalyzer Studio
+Copyright 2026 PDFalyzer contributors
+
+This product includes software developed by third parties.
+A machine-generated inventory is available at:
+- licenses/generated/THIRD-PARTY.txt
+
+Third-party license text files are bundled from:
+- licenses/texts/
+- licenses/manual/ (fallbacks for intermittent URL failures)
+
+Dual-license elections used by this project are tracked in:
+- licenses/compliance/dual-license-elections.md
+
+Important third-party licensing notes (from current dependency graph):
+- veraPDF components (org.verapdf:*) are published with dual licensing metadata
+  including GPL-3.0 / MPL-2.0; distribution should follow the selected license path.
+- OpenPDF (com.github.librepdf:openpdf) is dual-licensed (LGPL-2.1 / MPL-2.0).
+- Logback (ch.qos.logback:*) is dual-licensed (EPL-2.0 / LGPL).
+- Font Awesome WebJar metadata indicates CC BY 3.0 attribution requirements.
+
+Font Awesome attribution (CC BY 3.0 metadata path):
+- "Font Awesome" by Fonticons, Inc.
+- License: https://creativecommons.org/licenses/by/3.0/
+- Bundled attribution file: licenses/attributions/font-awesome-cc-by-3.0.txt
+
+Redistributors must preserve all required notices and license texts for bundled
+third-party dependencies and assets.
