@@ -56,6 +56,11 @@
     z-index: 4;
 }
 
+.form-field-handle.selected {
+    border: 2px solid var(--warning);
+    background: var(--accent-dim);
+}
+
 .form-field-resize {
     position: absolute;
     right: -1px;
