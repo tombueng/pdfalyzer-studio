@@ -18,6 +18,7 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -238,6 +239,56 @@ public class UIRenderingTest {
         assertTrue(lastUrl.toString().contains("/api/resource/"), "Download URL should point to resource endpoint");
 
         ((JavascriptExecutor) driver).executeScript("if (window.__pdfalyzerOriginalOpen) { window.open = window.__pdfalyzerOriginalOpen; }");
+    }
+
+    @Test
+    public void testAttributeModificationAndNodeDeletionWorkflow() {
+        if (driver == null) {
+            System.out.println("Skipping testAttributeModificationAndNodeDeletionWorkflow - ChromeDriver not available");
+            return;
+        }
+
+        driver.get(baseUrl);
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(30));
+        wait.until(ExpectedConditions.or(
+            ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
+            ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
+        ));
+
+        driver.manage().timeouts().scriptTimeout(Duration.ofSeconds(30));
+        Object result = ((JavascriptExecutor) driver).executeAsyncScript(
+                "const done = arguments[arguments.length - 1];" +
+                "const P = window.PDFalyzer;" +
+                "if(!P || !P.state || !P.state.sessionId){ done({ok:false, msg:'no-session'}); return; }" +
+                "function findDict(n){" +
+                "  if(!n) return null;" +
+                "  if((n.cosType==='COSDictionary' || n.cosType==='COSStream') && n.objectNumber>=0 && n.keyPath){ return n; }" +
+                "  if(n.children){ for(const c of n.children){ const r=findDict(c); if(r) return r; } }" +
+                "  return null;" +
+                "}" +
+                "const dict = findDict(P.state.treeData);" +
+                "if(!dict){ done({ok:false, msg:'no-dict'}); return; }" +
+                "let keyPath; try { keyPath = JSON.parse(dict.keyPath); } catch(e){ done({ok:false, msg:'bad-keypath'}); return; }" +
+                "const sid = P.state.sessionId;" +
+                "const payloadBase = { objectNumber: dict.objectNumber, generationNumber: dict.generationNumber || 0 };" +
+                "$.ajax({ url:'/api/cos/'+sid+'/update', method:'POST', contentType:'application/json', data: JSON.stringify(Object.assign({}, payloadBase, { keyPath: keyPath.concat(['UITestKey']), newValue:'123', valueType:'COSInteger', operation:'add' })) })" +
+                ".then(function(addResp){" +
+                "  return $.ajax({ url:'/api/cos/'+sid+'/update', method:'POST', contentType:'application/json', data: JSON.stringify(Object.assign({}, payloadBase, { keyPath: keyPath.concat(['UITestKey']), newValue:'456', valueType:'COSInteger', operation:'update' })) });" +
+                "})" +
+                ".then(function(updateResp){" +
+                "  return $.ajax({ url:'/api/cos/'+sid+'/update', method:'POST', contentType:'application/json', data: JSON.stringify(Object.assign({}, payloadBase, { keyPath: keyPath.concat(['UITestKey']), operation:'remove' })) });" +
+                "})" +
+                ".then(function(){ done({ok:true}); })" +
+                ".catch(function(err){ done({ok:false, msg: (err && err.statusText) ? err.statusText : 'ajax-failed'}); });"
+        );
+
+        assertTrue(result instanceof Map, "Expected script result to be a map");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> map = (Map<String, Object>) result;
+        assertEquals(Boolean.TRUE, map.get("ok"), "Attribute modify/delete workflow must succeed: " + map);
+
+        List<WebElement> dangerToasts = driver.findElements(By.cssSelector(".toast-msg.text-danger"));
+        assertTrue(dangerToasts.isEmpty(), "No danger toast should be shown during attribute modify/delete workflow");
     }
 
     private void expandNode(WebDriverWait wait, String nodeId) {
