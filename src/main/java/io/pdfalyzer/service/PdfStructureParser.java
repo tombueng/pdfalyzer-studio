@@ -10,6 +10,7 @@ import org.apache.pdfbox.pdmodel.font.PDFont;
 import org.apache.pdfbox.pdmodel.graphics.PDXObject;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotation;
+import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationLink;
 import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDDocumentOutline;
 import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineItem;
 import org.apache.pdfbox.pdmodel.interactive.form.PDAcroForm;
@@ -42,8 +43,10 @@ public class PdfStructureParser {
         final Map<COSObjectKey, PdfNode> cache = new HashMap<>();
         final int maxCosDepth;
         final boolean readStreamData;
+        final PDDocument doc;
 
-        ParseContext(int maxCosDepth, boolean readStreamData) {
+        ParseContext(PDDocument doc, int maxCosDepth, boolean readStreamData) {
+            this.doc = doc;
             this.maxCosDepth = maxCosDepth;
             this.readStreamData = readStreamData;
         }
@@ -53,7 +56,7 @@ public class PdfStructureParser {
 
     public PdfNode buildTree(PDDocument doc) {
         // Shared context: low depth, no stream data reading, shared cache
-        ParseContext ctx = new ParseContext(COS_DEPTH_SEMANTIC, false);
+        ParseContext ctx = new ParseContext(doc, COS_DEPTH_SEMANTIC, false);
 
         PdfNode root = new PdfNode("catalog", "Document Catalog", "root", "fa-book", "#dc3545");
         root.setNodeCategory("catalog");
@@ -103,7 +106,7 @@ public class PdfStructureParser {
 
     public PdfNode buildRawCosTree(PDDocument doc) {
         // Fresh context: high depth, with stream data, fresh cache
-        ParseContext ctx = new ParseContext(COS_DEPTH_RAW, true);
+        ParseContext ctx = new ParseContext(doc, COS_DEPTH_RAW, true);
 
         PdfNode root = new PdfNode("raw-cos", "All COS Objects", "root", "fa-database", "#e74c3c");
         root.setNodeCategory("raw-cos");
@@ -733,6 +736,23 @@ public class PdfStructureParser {
                         imgNode.addProperty("Color Space", img.getColorSpace().getName());
                         imgNode.addProperty("BitsPerComponent", String.valueOf(img.getBitsPerComponent()));
 
+                        // Set COS type and object reference so buttons appear
+                        COSBase cosObj = img.getCOSObject();
+                        imgNode.setCosType("COSStream");
+                        if (cosObj instanceof COSObject) {
+                            COSObject indirect = (COSObject) cosObj;
+                            imgNode.setObjectNumber((int) indirect.getObjectNumber());
+                            imgNode.setGenerationNumber((int) indirect.getGenerationNumber());
+                        } else if (cosObj instanceof COSStream) {
+                            // For direct stream objects, check if there's a key in the stream itself
+                            COSStream stream = (COSStream) cosObj;
+                            COSObjectKey key = stream.getKey();
+                            if (key != null) {
+                                imgNode.setObjectNumber((int) key.getNumber());
+                                imgNode.setGenerationNumber((int) key.getGeneration());
+                            }
+                        }
+
                         try {
                             attachCosChildren(imgNode, img.getCOSObject(), "page-" + pageIndex + "-img-" + xobjName.getName() + "-cos", ctx, 0);
                         } catch (Exception e) {
@@ -911,6 +931,20 @@ public class PdfStructureParser {
 
         if (item.isBold()) node.addProperty("Bold", "true");
         if (item.isItalic()) node.addProperty("Italic", "true");
+
+        // Extract destination and page index
+        try {
+            PDPage destPage = item.findDestinationPage(ctx.doc);
+            if (destPage != null) {
+                int pageIdx = ctx.doc.getPages().indexOf(destPage);
+                if (pageIdx >= 0) {
+                    node.setPageIndex(pageIdx);
+                    node.addProperty("Page", String.valueOf(pageIdx + 1));
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Could not extract destination page for bookmark: {}", title, e);
+        }
 
         try {
             attachCosChildren(node, item.getCOSObject(), "bookmark-" + index + "-cos", ctx, 0);
