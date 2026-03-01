@@ -4,6 +4,9 @@
 PDFalyzer.Tabs = (function ($, P) {
     'use strict';
 
+    var veraPdfExportHtml = '';
+    var veraPdfExportTitle = 'veraPDF Report';
+
     function init() {
         $('.tab-btn').on('click', function () {
             $('.tab-btn').removeClass('active');
@@ -171,10 +174,17 @@ PDFalyzer.Tabs = (function ($, P) {
         var reportFormat = (result.reportFormat || '').toLowerCase();
         var looksLikeHtml = report.indexOf('<html') !== -1 || report.indexOf('<!DOCTYPE html') !== -1;
         var looksLikeXml = /^\s*<\?xml|^\s*<report[\s>]/i.test(report);
-        var header = '<div class="mb-2" style="padding:8px;">' +
+        var header = '<div class="mb-2 d-flex justify-content-between align-items-center gap-2" style="padding:8px;">' +
+            '<div>' +
             '<span class="badge ' + (success ? 'bg-success' : 'bg-secondary') + ' me-2">' +
             (success ? 'PASS' : 'CHECK') + '</span>' +
-            '<span class="text-muted">veraPDF ' + (available ? 'result' : 'not available') + '</span></div>';
+            '<span class="text-muted">veraPDF ' + (available ? 'result' : 'not available') + '</span>' +
+            '</div>' +
+            '<div>' +
+            '<button class="btn btn-outline-accent btn-sm me-1" id="exportVeraPdfHtmlBtn"><i class="fas fa-code me-1"></i>Export HTML</button>' +
+            '<button class="btn btn-outline-accent btn-sm" id="exportVeraPdfPdfBtn"><i class="fas fa-file-pdf me-1"></i>Export PDF</button>' +
+            '</div>' +
+            '</div>';
 
         if (report && (reportFormat === 'html' || looksLikeHtml)) {
             $('#treeContent').html(
@@ -184,11 +194,14 @@ PDFalyzer.Tabs = (function ($, P) {
                 '</div>'
             );
             $('#treeContent iframe')[0].srcdoc = report;
+            setVeraPdfExportContent(report, 'veraPDF Detailed HTML Report');
+            bindVeraPdfExportButtons();
             return;
         }
 
         if (report && (reportFormat === 'xml' || reportFormat === 'mrr' || looksLikeXml)) {
             renderVeraPdfXmlReport(header, report);
+            bindVeraPdfExportButtons();
             return;
         }
 
@@ -199,6 +212,11 @@ PDFalyzer.Tabs = (function ($, P) {
             P.Utils.escapeHtml(report || 'No report output') +
             '</pre></div>'
         );
+        setVeraPdfExportContent(
+            wrapHtmlDocument('veraPDF Report', '<pre>' + P.Utils.escapeHtml(report || 'No report output') + '</pre>'),
+            'veraPDF Report'
+        );
+        bindVeraPdfExportButtons();
     }
 
     function renderVeraPdfXmlReport(header, xmlReport) {
@@ -269,6 +287,7 @@ PDFalyzer.Tabs = (function ($, P) {
 
         html += '</div>';
         $('#treeContent').html(html);
+        setVeraPdfExportContent(wrapHtmlDocument('veraPDF Detailed Report', html), 'veraPDF Detailed Report');
     }
 
     function buildRuleHtml(ruleEl, failed) {
@@ -284,17 +303,19 @@ PDFalyzer.Tabs = (function ($, P) {
 
         var checks = Array.from(ruleEl.querySelectorAll('check, failedCheck, passedCheck, assertion'));
 
-        var html = '<div class="border rounded p-2 mb-2 ' + (failed ? 'border-danger-subtle bg-danger-subtle' : 'border-success-subtle') + '">' +
+        var ruleContainerClass = failed ? 'border-danger bg-dark text-light' : 'border-success-subtle';
+        var metaTextClass = failed ? 'text-light' : 'text-muted';
+        var html = '<div class="border rounded p-2 mb-2 ' + ruleContainerClass + '">' +
             '<div class="d-flex flex-wrap align-items-center gap-2 mb-1">' +
             '<span class="badge ' + (failed ? 'bg-danger' : 'bg-success') + '">' + P.Utils.escapeHtml(status || (failed ? 'failed' : 'passed')) + '</span>' +
             (clause ? '<span class="badge bg-secondary">Clause ' + P.Utils.escapeHtml(clause) + '</span>' : '') +
             (testNumber ? '<span class="badge bg-secondary">Test ' + P.Utils.escapeHtml(testNumber) + '</span>' : '') +
             '<span class="badge bg-dark">Checks ' + P.Utils.escapeHtml(failedChecks) + ' failed / ' + P.Utils.escapeHtml(passedChecks) + ' passed</span>' +
             '</div>' +
-            (spec ? '<div class="text-muted" style="font-size:12px;">' + P.Utils.escapeHtml(spec) + '</div>' : '') +
+            (spec ? '<div class="' + metaTextClass + '" style="font-size:12px;">' + P.Utils.escapeHtml(spec) + '</div>' : '') +
             (descNode ? '<div class="mt-1">' + P.Utils.escapeHtml(descNode.textContent || '') + '</div>' : '') +
-            (objNode ? '<div class="text-muted" style="font-size:12px;">Object: ' + P.Utils.escapeHtml(objNode.textContent || '') + '</div>' : '') +
-            (testNode ? '<div class="mt-1"><code>' + P.Utils.escapeHtml(testNode.textContent || '') + '</code></div>' : '');
+            (objNode ? '<div class="' + metaTextClass + '" style="font-size:12px;">Object: ' + P.Utils.escapeHtml(objNode.textContent || '') + '</div>' : '') +
+            (testNode ? '<div class="mt-1"><code class="' + (failed ? 'text-warning' : '') + '">' + P.Utils.escapeHtml(testNode.textContent || '') + '</code></div>' : '');
 
         if (checks.length) {
             html += '<details class="mt-1"><summary style="cursor:pointer;">Check details (' + checks.length + ')</summary>' +
@@ -310,6 +331,54 @@ PDFalyzer.Tabs = (function ($, P) {
 
         html += '</div>';
         return html;
+    }
+
+    function setVeraPdfExportContent(html, title) {
+        veraPdfExportHtml = html || '';
+        veraPdfExportTitle = title || 'veraPDF Report';
+    }
+
+    function bindVeraPdfExportButtons() {
+        $('#exportVeraPdfHtmlBtn').off('click').on('click', function () {
+            if (!veraPdfExportHtml) {
+                P.Utils.toast('No veraPDF report available to export', 'warning');
+                return;
+            }
+            var blob = new Blob([veraPdfExportHtml], { type: 'text/html;charset=utf-8' });
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url;
+            a.download = 'verapdf-report.html';
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(function () { URL.revokeObjectURL(url); }, 0);
+        });
+
+        $('#exportVeraPdfPdfBtn').off('click').on('click', function () {
+            if (!veraPdfExportHtml) {
+                P.Utils.toast('No veraPDF report available to export', 'warning');
+                return;
+            }
+            var printWin = window.open('', '_blank');
+            if (!printWin) {
+                P.Utils.toast('Popup blocked. Allow popups to export PDF.', 'warning');
+                return;
+            }
+            printWin.document.open();
+            printWin.document.write(veraPdfExportHtml);
+            printWin.document.close();
+            setTimeout(function () {
+                printWin.focus();
+                printWin.print();
+            }, 250);
+        });
+    }
+
+    function wrapHtmlDocument(title, bodyHtml) {
+        return '<!doctype html><html><head><meta charset="utf-8"><title>' + P.Utils.escapeHtml(title) + '</title>' +
+            '<style>body{font-family:Segoe UI,Arial,sans-serif;background:#111;color:#e9ecef;margin:0;padding:16px;} .card{border:1px solid #444;border-radius:8px;background:#1c1f24;margin-bottom:10px;} .card-body,.card-header{padding:10px;} .badge{display:inline-block;padding:4px 8px;border-radius:6px;font-size:12px;margin-right:6px;} .bg-danger{background:#b02a37;color:#fff;} .bg-success{background:#146c43;color:#fff;} .bg-secondary{background:#495057;color:#fff;} .bg-dark{background:#212529;color:#fff;} .text-muted{color:#cfd4da;} .border{border:1px solid #444;} .rounded{border-radius:8px;} pre,code{font-family:Consolas,monospace;} pre{background:#0f1115;padding:10px;border-radius:6px;border:1px solid #333;} details>summary{cursor:pointer;}</style>' +
+            '</head><body><h2 style="margin-top:0;">' + P.Utils.escapeHtml(title) + '</h2>' + bodyHtml + '</body></html>';
     }
 
     function renderValidation(issues) {
