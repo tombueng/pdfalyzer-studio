@@ -9,6 +9,7 @@ none
 - attachment preview (pdf/img) should not open the "save as popup" but display in browser tab directly withou downloading. make it display inline in new tab.
 - height and icon size of toolbar buttons still inconsistent, the form-add-field-buttons are to small.
 - Form fields can still not be made "selected" by clicking in PDF view; toolbar options activation and Ctrl/Shift multi-select work.
+- on the logger: o.a.p.p.i.form.PDSignatureField          : Appearance generation for signature fields not implemented here. You need to generate/update that manually, see the CreateVisibleSignature*.java files in the examples subproject of the source code download
 
 
 
