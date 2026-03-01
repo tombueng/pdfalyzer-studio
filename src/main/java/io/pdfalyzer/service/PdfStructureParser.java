@@ -615,7 +615,7 @@ public class PdfStructureParser {
                 PdfNode fontsFolder = buildPageFontsNode(resources, index, ctx);
                 if (fontsFolder != null) resourcesNode.addChild(fontsFolder);
 
-                PdfNode imagesFolder = buildPageImagesNode(resources, index, ctx);
+                PdfNode imagesFolder = buildPageImagesNode(page, resources, index, ctx);
                 if (imagesFolder != null) resourcesNode.addChild(imagesFolder);
 
                 try {
@@ -717,8 +717,36 @@ public class PdfStructureParser {
         return folder;
     }
 
-    private PdfNode buildPageImagesNode(PDResources resources, int pageIndex, ParseContext ctx) {
+    private PdfNode buildPageImagesNode(PDPage page, PDResources resources, int pageIndex, ParseContext ctx) {
         List<PdfNode> imageNodes = new ArrayList<>();
+        
+        // Get page object number for keyPath construction
+        COSBase pageObj = page.getCOSObject();
+        int pageObjNum = -1;
+        int pageGenNum = 0;
+        try {
+            if (pageObj instanceof COSObject) {
+                COSObject indirect = (COSObject) pageObj;
+                pageObjNum = (int) indirect.getObjectNumber();
+                pageGenNum = (int) indirect.getGenerationNumber();
+            } else if (pageObj instanceof COSDictionary) {
+                // Try to get key from dictionary
+                COSDictionary dict = (COSDictionary) pageObj;
+                try {
+                    COSObjectKey key = dict.getKey();
+                    if (key != null) {
+                        pageObjNum = (int) key.getNumber();
+                        pageGenNum = (int) key.getGeneration();
+                    }
+                } catch (Exception e) {
+                    // If getKey() fails, try alternative method
+                    log.debug("Could not get key from page dictionary: {}", e.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Error extracting page object number: {}", e.getMessage());
+        }
+        
         try {
             for (COSName xobjName : resources.getXObjectNames()) {
                 try {
@@ -751,6 +779,22 @@ public class PdfStructureParser {
                                 imgNode.setObjectNumber((int) key.getNumber());
                                 imgNode.setGenerationNumber((int) key.getGeneration());
                             }
+                        }
+                        
+                            // Fallback: use page's indirect reference so buttons work
+                            // Images in resources dict are always accessible via page object
+                            if (imgNode.getObjectNumber() < 0 && pageObjNum >= 0) {
+                                imgNode.setObjectNumber(pageObjNum);
+                                imgNode.setGenerationNumber(pageGenNum);
+                            }
+                        
+                        // Set keyPath so image can be deleted from page resources
+                        if (pageObjNum >= 0) {
+                            List<String> keyPath = new ArrayList<>();
+                            keyPath.add("Resources");
+                            keyPath.add("XObject");
+                            keyPath.add("/" + xobjName.getName());
+                            imgNode.setKeyPath(keyPathToJson(keyPath));
                         }
 
                         try {
