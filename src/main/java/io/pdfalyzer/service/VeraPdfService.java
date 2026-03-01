@@ -35,10 +35,12 @@ public class VeraPdfService {
 
             ProcessorConfig config = ProcessorFactory.defaultConfig();
             BatchProcessor processor = ProcessorFactory.fileBatchProcessor(config);
-            ByteArrayOutputStream out = new ByteArrayOutputStream();
+                ByteArrayOutputStream out = new ByteArrayOutputStream();
                 BatchProcessingHandler handler =
-                    ProcessorFactory.getHandler(FormatOption.HTML, true, out, false);
-            BatchSummary summary = processor.process(Collections.singletonList(tempPdf.toFile()), handler);
+                    ProcessorFactory.getHandler(FormatOption.TEXT, false, out, false);
+                BatchSummary summary = processor.process(Collections.singletonList(tempPdf.toFile()), handler);
+                String output = out.toString(StandardCharsets.UTF_8);
+                String reportFormat = "text";
 
             ValidationBatchSummary validationSummary = summary == null ? null : summary.getValidationSummary();
             int compliant = validationSummary == null ? 0 : validationSummary.getCompliantPdfaCount();
@@ -47,8 +49,6 @@ public class VeraPdfService {
             int exceptions = summary == null ? 0 : summary.getVeraExceptions();
             int outOfMemory = summary == null ? 0 : summary.getOutOfMemory();
 
-            String output = out.toString(StandardCharsets.UTF_8);
-            String reportFormat = "html";
             if (output == null || output.isBlank()) {
                 reportFormat = "text";
                 output = "veraPDF embedded validation finished. " +

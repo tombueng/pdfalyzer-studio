@@ -4,6 +4,8 @@ import io.pdfalyzer.model.*;
 import io.pdfalyzer.service.*;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -23,6 +25,8 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api")
 public class ApiController {
+
+    private static final Logger log = LoggerFactory.getLogger(ApiController.class);
 
     private final PdfService pdfService;
     private final FontInspectorService fontInspectorService;
@@ -176,6 +180,25 @@ public class ApiController {
             }
         }
         return ResponseEntity.ok(rawCos);
+    }
+
+    @PostMapping("/client-errors")
+    public ResponseEntity<Map<String, Object>> logClientError(@RequestBody(required = false) Map<String, Object> payload) {
+        Map<String, Object> safePayload = payload == null ? Map.of() : payload;
+        String kind = String.valueOf(safePayload.getOrDefault("kind", "error"));
+        String message = String.valueOf(safePayload.getOrDefault("message", "(no message)"));
+        String source = String.valueOf(safePayload.getOrDefault("source", ""));
+        String line = String.valueOf(safePayload.getOrDefault("line", ""));
+        String column = String.valueOf(safePayload.getOrDefault("column", ""));
+        String stack = String.valueOf(safePayload.getOrDefault("stack", ""));
+        String timestamp = String.valueOf(safePayload.getOrDefault("timestamp", ""));
+
+        log.warn("Client JS error kind={} message={} source={} line={} column={} timestamp={} stack={}",
+                kind, message, source, line, column, timestamp, stack);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("logged", true);
+        return ResponseEntity.ok(result);
     }
 
     // ======================== PRIVATE ========================

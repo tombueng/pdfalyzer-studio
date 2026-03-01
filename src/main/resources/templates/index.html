@@ -121,6 +121,41 @@
       </div>
     </div>
 
+    <div class="modal fade" id="fieldCreateModal" tabindex="-1" aria-labelledby="fieldCreateLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="fieldCreateLabel">Add Field</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-2">
+                        <div class="col-6">
+                            <label class="form-label form-label-sm">Type</label>
+                            <input class="form-control form-control-sm" id="createFieldType" readonly />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label form-label-sm">Page</label>
+                            <input class="form-control form-control-sm" id="createFieldPage" readonly />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label form-label-sm">Field ID</label>
+                            <input class="form-control form-control-sm" id="createFieldId" placeholder="field_id" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label form-label-sm">Options JSON</label>
+                            <textarea class="form-control form-control-sm" id="createFieldOptions" rows="6"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-accent btn-sm" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-accent btn-sm" id="applyCreateFieldBtn">Queue Field</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
         <div class="modal fade" id="fieldOptionsModal" tabindex="-1" aria-labelledby="fieldOptionsLabel" aria-hidden="true">
             <div class="modal-dialog modal-dialog-centered">
                 <div class="modal-content">

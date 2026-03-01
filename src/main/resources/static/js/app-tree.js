@@ -43,7 +43,7 @@ PDFalyzer.Tree = (function ($, P) {
 
     // ======================== SELECT NODE ========================
 
-    function selectNode(node, additive, preserveFieldSelection) {
+    function selectNode(node, additive, preserveFieldSelection, suppressPropertiesPanel) {
         P.state.selectedNodeId = node.id;
         if (!preserveFieldSelection) {
             syncFieldSelection(node, !!additive);
@@ -67,7 +67,9 @@ PDFalyzer.Tree = (function ($, P) {
         if (P.EditMode && P.EditMode.refreshFieldSelectionHighlights) {
             P.EditMode.refreshFieldSelectionHighlights();
         }
-        if (node.properties) showPropertiesPanel(node, $el.find('> .tree-node-header'));
+        if (!suppressPropertiesPanel && node.properties && $el.length) {
+            showPropertiesPanel(node, $el.find('> .tree-node-header'));
+        }
     }
 
     function syncFieldSelection(node, additive) {
@@ -210,6 +212,7 @@ PDFalyzer.Tree = (function ($, P) {
         $header.on('click', function (e) {
             if ($(e.target).closest('button, a').length) return;
             var additive = !!(e.ctrlKey || e.metaKey || e.shiftKey);
+            var suppressPropertiesPanel = false;
             if (hasChildren) {
                 var isExpanding = $toggle.find('i').hasClass('fa-chevron-right');
                 $toggle.find('i').toggleClass('fa-chevron-right fa-chevron-down');
@@ -225,9 +228,11 @@ PDFalyzer.Tree = (function ($, P) {
                 } else {
                     // Collapsing - remove properties panel
                     $header.siblings('.node-properties').remove();
+                    $childrenEl.find('.node-properties').remove();
+                    suppressPropertiesPanel = true;
                 }
             }
-            selectNode(node, additive, false);
+            selectNode(node, additive, false, suppressPropertiesPanel);
         });
 
         // Children container (lazy, initially hidden)

@@ -57,10 +57,19 @@ public class UIRenderingTest {
     @AfterEach
     public void tearDown() {
         if (driver != null) {
+            RuntimeException captureFailure = null;
+            try {
+                assertNoClientJsErrors("after test execution");
+            } catch (RuntimeException ex) {
+                captureFailure = ex;
+            }
             try {
                 driver.quit();
             } catch (Exception e) {
                 System.err.println("Error closing WebDriver: " + e.getMessage());
+            }
+            if (captureFailure != null) {
+                throw captureFailure;
             }
         }
     }
@@ -174,6 +183,89 @@ public class UIRenderingTest {
         } else {
             System.out.println("No tree label elements found - test skipped (valid state for empty PDF)");
         }
+    }
+
+    @Test
+    public void testJsErrorCaptureHookIsInstalled() {
+        if (driver == null) {
+            System.out.println("Skipping testJsErrorCaptureHookIsInstalled - ChromeDriver not available");
+            return;
+        }
+
+        driver.get(baseUrl);
+        Object installed = ((JavascriptExecutor) driver).executeScript("return !!window.__pdfalyzerErrorCaptureInstalled;");
+        Object errors = ((JavascriptExecutor) driver).executeScript("return Array.isArray(window.__pdfalyzerJsErrors);");
+
+        assertEquals(Boolean.TRUE, installed, "Client error capture flag should be set");
+        assertEquals(Boolean.TRUE, errors, "Client error capture array should be initialized");
+    }
+
+        @Test
+        public void testAddFieldUsesModalDialogNotPrompt() {
+        if (driver == null) {
+            System.out.println("Skipping testAddFieldUsesModalDialogNotPrompt - ChromeDriver not available");
+            return;
+        }
+
+        driver.get(baseUrl);
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
+        wait.until(ExpectedConditions.or(
+            ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
+            ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
+        ));
+
+        ((JavascriptExecutor) driver).executeScript(
+            "window.__promptCalls=0;" +
+            "window.__origPrompt=window.prompt;" +
+            "window.prompt=function(){ window.__promptCalls++; return null; };"
+        );
+
+        WebElement addTextBtn = wait.until(ExpectedConditions.elementToBeClickable(
+            By.cssSelector(".edit-field-btn[data-type='text']")
+        ));
+        addTextBtn.click();
+
+        wait.until(ExpectedConditions.visibilityOfElementLocated(By.id("fieldCreateModal")));
+        Object promptCalls = ((JavascriptExecutor) driver).executeScript("return window.__promptCalls;");
+        assertTrue(promptCalls instanceof Number);
+        assertEquals(0, ((Number) promptCalls).intValue(), "Adding fields should not invoke browser prompt");
+
+        ((JavascriptExecutor) driver).executeScript(
+            "if(window.__origPrompt){ window.prompt = window.__origPrompt; }"
+        );
+        }
+
+    @Test
+    public void testCollapsingNodeRemovesInfoPanel() {
+        if (driver == null) {
+            System.out.println("Skipping testCollapsingNodeRemovesInfoPanel - ChromeDriver not available");
+            return;
+        }
+
+        driver.get(baseUrl);
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
+        wait.until(ExpectedConditions.or(
+                ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
+                ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
+        ));
+
+        expandNode(wait, "pages");
+        By nodeBy = By.cssSelector(".tree-node[data-node-id='page-0']");
+        List<WebElement> pageNodes = driver.findElements(nodeBy);
+        if (pageNodes.isEmpty()) {
+            System.out.println("Skipping testCollapsingNodeRemovesInfoPanel - page-0 node not found");
+            return;
+        }
+
+        WebElement pageNode = pageNodes.get(0);
+        WebElement header = pageNode.findElement(By.cssSelector(":scope > .tree-node-header"));
+        WebElement toggle = pageNode.findElement(By.cssSelector(":scope > .tree-node-header > .tree-toggle"));
+
+        ((JavascriptExecutor) driver).executeScript("arguments[0].click();", header);
+        wait.until(d -> !d.findElements(By.cssSelector(".tree-node[data-node-id='page-0'] > .node-properties")).isEmpty());
+
+        ((JavascriptExecutor) driver).executeScript("arguments[0].click();", toggle);
+        wait.until(d -> d.findElements(By.cssSelector(".tree-node[data-node-id='page-0'] > .node-properties")).isEmpty());
     }
 
     @Test
@@ -533,5 +625,19 @@ public class UIRenderingTest {
         WebElement toggle = node.findElement(By.cssSelector(":scope > .tree-node-header > .tree-toggle"));
         ((JavascriptExecutor) driver).executeScript("arguments[0].click();", toggle);
         wait.until(d -> !node.findElements(By.cssSelector(":scope > .tree-children > .tree-node")).isEmpty());
+    }
+
+    private void assertNoClientJsErrors(String context) {
+        if (driver == null) return;
+        Object raw = ((JavascriptExecutor) driver).executeScript(
+                "return Array.isArray(window.__pdfalyzerJsErrors) ? window.__pdfalyzerJsErrors : [];"
+        );
+        if (!(raw instanceof List<?>)) {
+            return;
+        }
+        List<?> list = (List<?>) raw;
+        if (list.isEmpty()) return;
+
+        throw new RuntimeException("JavaScript errors captured in browser (" + context + "): " + list);
     }
 }
