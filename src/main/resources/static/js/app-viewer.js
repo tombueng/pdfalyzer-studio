@@ -129,17 +129,38 @@ PDFalyzer.Viewer = (function ($, P) {
         var scale = vp.scale;
         var pdfX  = (e.clientX - rect.left) / scale;
         var pdfY  = (vp.height - (e.clientY - rect.top)) / scale;
+
+        if (P.state.editMode && P.EditMode && P.EditMode.selectFieldFromViewer) {
+            var fieldMatch = findFieldAtPoint(P.state.treeData, pageIndex, pdfX, pdfY);
+            if (fieldMatch) {
+                var additive = !!(e.ctrlKey || e.metaKey || e.shiftKey);
+                P.EditMode.selectFieldFromViewer(fieldMatch, additive);
+                return;
+            }
+        }
+
         var match = findNodeAtPoint(P.state.treeData, pageIndex, pdfX, pdfY);
         if (!match) return;
 
-        if (P.state.editMode && match.nodeCategory === 'field' &&
-                P.EditMode && P.EditMode.selectFieldFromViewer) {
-            var additive = !!(e.ctrlKey || e.metaKey || e.shiftKey);
-            P.EditMode.selectFieldFromViewer(match, additive);
-            return;
-        }
-
         P.Tree.selectNode(match);
+    }
+
+    function findFieldAtPoint(node, pageIndex, x, y, currentBest) {
+        var best = currentBest || null;
+        if (node.pageIndex === pageIndex && node.nodeCategory === 'field' && node.boundingBox) {
+            var bb = node.boundingBox;
+            if (x >= bb[0] && x <= bb[0] + bb[2] && y >= bb[1] && y <= bb[1] + bb[3]) {
+                if (!best || (bb[2] * bb[3]) <= (best.boundingBox[2] * best.boundingBox[3])) {
+                    best = node;
+                }
+            }
+        }
+        if (node.children) {
+            node.children.forEach(function (c) {
+                best = findFieldAtPoint(c, pageIndex, x, y, best);
+            });
+        }
+        return best;
     }
 
     function findNodeAtPoint(node, pageIndex, x, y) {
