@@ -16,8 +16,10 @@ PDFalyzer.Tree = (function ($, P) {
     function captureViewState() {
         var $container = $('#treeContent');
         if (!$container.length) return null;
+        var $nodes = $container.find('.tree-node');
+        if (!$nodes.length) return null;
         var expandedNodeIds = [];
-        $container.find('.tree-node').each(function () {
+        $nodes.each(function () {
             var $node = $(this);
             var $children = $node.children('.tree-children');
             if (!$children.length) return;
@@ -38,18 +40,35 @@ PDFalyzer.Tree = (function ($, P) {
             expandedSet[String(id)] = true;
         });
 
-        $('#treeContent .tree-node').each(function () {
-            var $node = $(this);
+        function applyState($node) {
             var $children = $node.children('.tree-children');
             if (!$children.length) return;
+
             var nodeId = String($node.data('node-id'));
             var isExpanded = !!expandedSet[nodeId];
+
+            if (isExpanded) {
+                var nodeModel = $node.data('node-model');
+                var nodeDepth = parseInt($node.attr('data-depth'), 10) || 0;
+                ensureChildrenRendered($children, nodeModel, nodeDepth);
+            }
+
             $children.css('display', isExpanded ? 'block' : 'none');
             var $icon = $node.find('> .tree-node-header > .tree-toggle > i');
             if ($icon.length) {
                 $icon.toggleClass('fa-chevron-down', isExpanded)
                     .toggleClass('fa-chevron-right', !isExpanded);
             }
+
+            if (isExpanded) {
+                $children.children('.tree-node').each(function () {
+                    applyState($(this));
+                });
+            }
+        }
+
+        $('#treeContent > .tree-node').each(function () {
+            applyState($(this));
         });
 
         if (typeof viewState.scrollTop === 'number') {
@@ -60,7 +79,9 @@ PDFalyzer.Tree = (function ($, P) {
     function render(data, options) {
         if (!data) return;
         var opts = options || {};
-        var viewState = opts.viewState || captureViewState();
+        var viewState = Object.prototype.hasOwnProperty.call(opts, 'viewState')
+            ? opts.viewState
+            : captureViewState();
         var $container = $('#treeContent').empty();
         $container.append(buildNodeEl(data, 0));
         appendPendingFieldPanel($container);
@@ -70,7 +91,9 @@ PDFalyzer.Tree = (function ($, P) {
 
     function renderSubtree(rootData, category, options) {
         var opts = options || {};
-        var viewState = opts.viewState || captureViewState();
+        var viewState = Object.prototype.hasOwnProperty.call(opts, 'viewState')
+            ? opts.viewState
+            : captureViewState();
         var $container = $('#treeContent').empty();
         var nodes = findAllByCategory(rootData, category);
         if (nodes.length === 0) {
@@ -86,7 +109,9 @@ PDFalyzer.Tree = (function ($, P) {
 
     function renderSearchResults(results, options) {
         var opts = options || {};
-        var viewState = opts.viewState || captureViewState();
+        var viewState = Object.prototype.hasOwnProperty.call(opts, 'viewState')
+            ? opts.viewState
+            : captureViewState();
         var $container = $('#treeContent').empty();
         if (results.length === 0) {
             $container.html('<div class="text-muted text-center mt-3">No results</div>');
@@ -336,7 +361,12 @@ PDFalyzer.Tree = (function ($, P) {
     // ======================== NODE ELEMENT BUILDER ========================
 
     function buildNodeEl(node, depth) {
-        var $wrapper = $('<div>', { 'class': 'tree-node', 'data-node-id': node.id });
+        var $wrapper = $('<div>', {
+            'class': 'tree-node',
+            'data-node-id': node.id,
+            'data-depth': depth
+        });
+        $wrapper.data('node-model', node);
         var $header  = $('<div>', { 'class': 'tree-node-header' });
         if (node.nodeCategory === 'field' && node.properties && node.properties.FullName) {
             $header.attr('data-field-name', node.properties.FullName);
@@ -578,9 +608,7 @@ PDFalyzer.Tree = (function ($, P) {
             var ancestor = path[depth];
             var $ancestor = $('.tree-node[data-node-id="' + ancestor.id + '"]');
             if (!$ancestor.length) {
-                render(P.state.treeData);
-                $ancestor = $('.tree-node[data-node-id="' + ancestor.id + '"]');
-                if (!$ancestor.length) continue;
+                continue;
             }
 
             var $childrenEl = $ancestor.children('.tree-children');

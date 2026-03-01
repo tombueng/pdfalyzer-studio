@@ -13,27 +13,53 @@ PDFalyzer.Tabs = (function ($, P) {
         sort: 'issues-desc'
     };
     var activeGlyphObserver = null;
+    var glyphMeasureCanvas = null;
 
     function init() {
         $('.tab-btn').on('click', function () {
             $('.tab-btn').removeClass('active');
             $(this).addClass('active');
-            P.state.currentTab = $(this).data('tab');
-            switchTab(P.state.currentTab);
+            switchTab($(this).data('tab'));
         });
+    }
+
+    function isTreeTab(tab) {
+        return tab === 'structure' || tab === 'forms' || tab === 'bookmarks' ||
+            tab === 'rawcos' || tab === 'attachments';
+    }
+
+    function captureTreeViewStateForTab(tab) {
+        if (!isTreeTab(tab) || !P.Tree || !P.Tree.captureViewState) return;
+        var viewState = P.Tree.captureViewState();
+        if (!viewState) return;
+        if (!P.state.tabTreeViewStates) P.state.tabTreeViewStates = {};
+        P.state.tabTreeViewStates[tab] = viewState;
+    }
+
+    function getTreeViewStateForTab(tab) {
+        if (!P.state.tabTreeViewStates) return null;
+        return P.state.tabTreeViewStates[tab] || null;
     }
 
     function switchTab(tab) {
         if (!P.state.treeData || !P.state.sessionId) return;
+
+        var previousTab = P.state.currentTab;
+        captureTreeViewStateForTab(previousTab);
+
+        var viewState = getTreeViewStateForTab(tab);
+
         switch (tab) {
-            case 'structure':   P.Tree.render(P.state.treeData); break;
-            case 'forms':       P.Tree.renderSubtree(P.state.treeData, 'acroform'); break;
+            case 'structure':   P.Tree.render(P.state.treeData, { viewState: viewState }); break;
+            case 'forms':       P.Tree.renderSubtree(P.state.treeData, 'acroform', { viewState: viewState }); break;
             case 'fonts':       loadFonts(); break;
             case 'validation':  loadValidation(); break;
-            case 'rawcos':      loadRawCos(); break;
-            case 'bookmarks':   P.Tree.renderSubtree(P.state.treeData, 'bookmarks'); break;
+            case 'rawcos':      loadRawCos(viewState); break;
+            case 'bookmarks':   P.Tree.renderSubtree(P.state.treeData, 'bookmarks', { viewState: viewState }); break;
             case 'attachments': loadAttachments(); break;
         }
+
+        P.state.currentTab = tab;
     }
 
     // ======================== FONTS TAB ========================
@@ -271,6 +297,7 @@ PDFalyzer.Tabs = (function ($, P) {
             var unicode = row.unicode ? P.Utils.escapeHtml(row.unicode) : '<span class="text-danger">(unmapped)</span>';
             var glyphPreview = '<span class="font-glyph-lazy" ' +
                 'data-unicode="' + escapeHtmlAttr(row.unicode || '') + '" ' +
+                'data-glyph-width="' + escapeHtmlAttr(String(row.width == null ? '' : row.width)) + '" ' +
                 'data-font-family="' + escapeHtmlAttr((f.embedded ? fontFamily : '')) + '" ' +
                 'title="Lazy-rendered glyph preview">' +
                 (row.unicode ? '<span class="text-muted">…</span>' : '<span class="text-danger">n/a</span>') +
@@ -296,6 +323,7 @@ PDFalyzer.Tabs = (function ($, P) {
         var issueRows = issues.map(function (row) {
             var issueGlyph = '<span class="font-glyph-lazy" ' +
                 'data-unicode="' + escapeHtmlAttr(row.character || '') + '" ' +
+                'data-glyph-width="' + escapeHtmlAttr(String(row.width == null ? '' : row.width)) + '" ' +
                 'data-font-family="' + escapeHtmlAttr((f.embedded ? fontFamily : '')) + '" ' +
                 'title="Lazy-rendered glyph preview">' +
                 ((row.character && row.character.length) ? '<span class="text-muted">…</span>' : '<span class="text-danger">n/a</span>') +
@@ -368,12 +396,35 @@ PDFalyzer.Tabs = (function ($, P) {
     function bindGlyphDetailButtons() {
         $('#fontDiagDetail .font-glyph-detail-btn').off('click').on('click', function () {
             ensureGlyphDetailModal();
-            var obj = parseInt($(this).data('obj'), 10);
-            var gen = parseInt($(this).data('gen'), 10);
-            var code = parseInt($(this).data('code'), 10);
-            var unicode = String($(this).data('unicode') || '');
+            var obj = parseCodeValue($(this).attr('data-obj'));
+            var gen = parseCodeValue($(this).attr('data-gen'));
+            var code = parseCodeValue($(this).attr('data-code'));
+            var unicode = String($(this).attr('data-unicode') || '');
+            if (!(obj >= 0) || !(gen >= 0) || !(code >= 0)) {
+                P.Utils.toast('Invalid glyph selection metadata for diagnostics.', 'warning');
+                return;
+            }
             openGlyphDetailModal(obj, gen, code, unicode);
         });
+    }
+
+    function parseCodeValue(raw) {
+        var text = String(raw == null ? '' : raw).trim();
+        if (!text) return NaN;
+
+        if (/^0x[0-9a-f]+$/i.test(text)) {
+            return parseInt(text, 16);
+        }
+        if (/^u\+[0-9a-f]+$/i.test(text)) {
+            return parseInt(text.slice(2), 16);
+        }
+
+        var numeric = Number(text);
+        if (!Number.isNaN(numeric)) {
+            return Math.floor(numeric);
+        }
+
+        return NaN;
     }
 
     function openGlyphDetailModal(obj, gen, code, unicode) {
@@ -400,7 +451,15 @@ PDFalyzer.Tabs = (function ($, P) {
         var encoding = detail.encodingDiagnostics || {};
         var usagePages = Array.isArray(detail.usagePagesForCode) ? detail.usagePagesForCode : [];
         var unicodeSamples = Array.isArray(detail.unicodeSamplesForCode) ? detail.unicodeSamplesForCode : [];
-        var hugeGlyph = String(glyph.unicode || glyphText || '').trim();
+        var clickedGlyph = String(glyphText || '').trim();
+        var detailGlyph = String(glyph.unicode || '').trim();
+        var hugeGlyph = clickedGlyph || detailGlyph;
+        var heroFontFamily = "'Segoe UI Symbol', 'Segoe UI', sans-serif";
+        if (detail.embedded && obj >= 0) {
+            var detailFontFamily = 'pdfdiagfont_' + obj + '_' + (gen || 0);
+            ensureDiagnosticsFontFace(detailFontFamily, obj, gen || 0);
+            heroFontFamily = "'" + detailFontFamily + "', 'Segoe UI Symbol', 'Segoe UI', sans-serif";
+        }
         if (!hugeGlyph || hugeGlyph === '(unmapped)') {
             hugeGlyph = '∅';
         }
@@ -409,7 +468,9 @@ PDFalyzer.Tabs = (function ($, P) {
             '<div class="d-flex justify-content-between align-items-start gap-3">' +
             '  <div class="font-diag-detail-title mb-0"><strong>' + P.Utils.escapeHtml(detail.fontName || '(unknown font)') + '</strong> ' +
             '  <span class="text-muted">Object ' + P.Utils.escapeHtml(detail.objectRef || (obj + ' ' + gen + ' R')) + '</span></div>' +
-            '  <div title="Large glyph preview" style="font-size:220px;line-height:0.8;min-width:220px;text-align:right;opacity:0.95;user-select:text;">' + P.Utils.escapeHtml(hugeGlyph) + '</div>' +
+            '  <div class="font-glyph-hero-wrap" title="Large glyph preview">' +
+            '    <div id="fontGlyphHeroPreview" class="font-glyph-hero" style="font-family:' + escapeHtmlAttr(heroFontFamily) + ';" data-glyph-width="' + escapeHtmlAttr(String(glyph.width == null ? '' : glyph.width)) + '">' + P.Utils.escapeHtml(hugeGlyph) + '</div>' +
+            '  </div>' +
             '</div>' +
             '<div class="font-detail-grid">' +
             '  <div><strong>Glyph</strong><div class="text-muted" style="font-size:22px;line-height:1.25;">' + P.Utils.escapeHtml(glyphText) + '</div></div>' +
@@ -448,6 +509,18 @@ PDFalyzer.Tabs = (function ($, P) {
 
         $('#fontGlyphDetailBody').html(html);
 
+        var heroEl = document.getElementById('fontGlyphHeroPreview');
+        if (heroEl) {
+            fitGlyphInElement(heroEl, {
+                text: hugeGlyph,
+                maxWidth: 210,
+                maxHeight: 210,
+                minFontSize: 22,
+                maxFontSize: 220,
+                widthHintUnits: parseFloat(heroEl.getAttribute('data-glyph-width'))
+            });
+        }
+
         $('#fontGlyphHighlightBtn').off('click').on('click', function () {
             P.Utils.apiFetch('/api/fonts/' + P.state.sessionId + '/usage/' + obj + '/' + gen + '/glyph/' + code)
                 .done(function (areas) {
@@ -478,6 +551,68 @@ PDFalyzer.Tabs = (function ($, P) {
         document.head.appendChild(style);
     }
 
+    function getGlyphMeasureContext() {
+        if (!glyphMeasureCanvas) {
+            glyphMeasureCanvas = document.createElement('canvas');
+        }
+        return glyphMeasureCanvas.getContext('2d');
+    }
+
+    function measureGlyphBounds(text, fontFamily, fontSizePx) {
+        var ctx = getGlyphMeasureContext();
+        if (!ctx) {
+            return {
+                width: Math.max(1, fontSizePx * 0.6),
+                height: Math.max(1, fontSizePx),
+                ascent: fontSizePx * 0.8,
+                descent: fontSizePx * 0.2
+            };
+        }
+        ctx.font = String(fontSizePx) + 'px ' + (fontFamily || "'Segoe UI Symbol', 'Segoe UI', sans-serif");
+        var m = ctx.measureText(text || ' ');
+        var ascent = m.actualBoundingBoxAscent || (fontSizePx * 0.8);
+        var descent = m.actualBoundingBoxDescent || (fontSizePx * 0.2);
+        var width = m.width || (fontSizePx * 0.6);
+        return {
+            width: Math.max(1, width),
+            height: Math.max(1, ascent + descent),
+            ascent: ascent,
+            descent: descent
+        };
+    }
+
+    function clampNumber(value, min, max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    function fitGlyphInElement(element, options) {
+        if (!element) return;
+        var text = String((options && options.text) != null ? options.text : (element.textContent || '')).trim();
+        if (!text) return;
+
+        var computed = window.getComputedStyle(element);
+        var fontFamily = (options && options.fontFamily) || (computed && computed.fontFamily) || "'Segoe UI Symbol', 'Segoe UI', sans-serif";
+        var maxWidth = Math.max(1, (options && options.maxWidth) || element.clientWidth || 32);
+        var maxHeight = Math.max(1, (options && options.maxHeight) || element.clientHeight || 24);
+        var minFontSize = Math.max(6, (options && options.minFontSize) || 10);
+        var maxFontSize = Math.max(minFontSize, (options && options.maxFontSize) || 220);
+        var widthHintUnits = options && typeof options.widthHintUnits === 'number' ? options.widthHintUnits : NaN;
+
+        var baseSize = 100;
+        var bounds = measureGlyphBounds(text, fontFamily, baseSize);
+        var widthAtBase = bounds.width;
+        if (!isNaN(widthHintUnits) && widthHintUnits > 0) {
+            widthAtBase = Math.max(widthAtBase, baseSize * (widthHintUnits / 1000));
+        }
+
+        var sizeByWidth = maxWidth * (baseSize / Math.max(1, widthAtBase));
+        var sizeByHeight = maxHeight * (baseSize / Math.max(1, bounds.height));
+        var fitted = clampNumber(Math.floor(Math.min(sizeByWidth, sizeByHeight)), minFontSize, maxFontSize);
+
+        element.style.fontSize = fitted + 'px';
+        element.style.lineHeight = '1';
+    }
+
     function bindLazyGlyphRendering() {
         var nodes = Array.from(document.querySelectorAll('#fontDiagDetail .font-glyph-lazy[data-unicode]'));
         if (!nodes.length) return;
@@ -492,6 +627,7 @@ PDFalyzer.Tabs = (function ($, P) {
             var unicode = node.getAttribute('data-unicode') || '';
             if (!unicode) return;
             var fontFamily = node.getAttribute('data-font-family') || '';
+            var widthHintUnits = parseFloat(node.getAttribute('data-glyph-width'));
 
             node.setAttribute('data-rendered', '1');
             node.innerHTML = '';
@@ -504,6 +640,15 @@ PDFalyzer.Tabs = (function ($, P) {
                 preview.style.fontFamily = "'" + fontFamily + "', 'Segoe UI Symbol', 'Segoe UI', sans-serif";
             }
             node.appendChild(preview);
+
+            fitGlyphInElement(preview, {
+                text: unicode,
+                maxWidth: Math.max(12, node.clientWidth - 6),
+                maxHeight: Math.max(12, node.clientHeight - 6),
+                minFontSize: 10,
+                maxFontSize: 32,
+                widthHintUnits: isNaN(widthHintUnits) ? NaN : widthHintUnits
+            });
         }
 
         function renderVisibleBatch() {
@@ -563,14 +708,38 @@ PDFalyzer.Tabs = (function ($, P) {
 
             var computed = window.getComputedStyle(this);
             var fontFamily = computed && computed.fontFamily ? computed.fontFamily : "'Segoe UI Symbol', 'Segoe UI', sans-serif";
+            var container = this.parentElement;
+            var widthHintUnits = container ? parseFloat(container.getAttribute('data-glyph-width')) : NaN;
 
             var $tooltip = $('<div>', { 'class': 'glyph-tooltip-preview' });
             var $glyph = $('<div>', { 'class': 'glyph-tooltip-char', text: glyphText });
             $glyph.css('font-family', fontFamily);
             $tooltip.append($glyph).appendTo('body');
 
+            var maxSide = Math.max(120, Math.min(260, Math.floor(Math.min(window.innerWidth, window.innerHeight) * 0.26)));
+            $glyph.css({ width: maxSide + 'px', height: maxSide + 'px' });
+            fitGlyphInElement($glyph[0], {
+                text: glyphText,
+                fontFamily: fontFamily,
+                maxWidth: maxSide - 8,
+                maxHeight: maxSide - 8,
+                minFontSize: 22,
+                maxFontSize: 220,
+                widthHintUnits: isNaN(widthHintUnits) ? NaN : widthHintUnits
+            });
+
             var updatePos = function (ev) {
-                $tooltip.css({ left: (ev.pageX + 16) + 'px', top: (ev.pageY + 16) + 'px' });
+                var tipW = $tooltip.outerWidth() || 0;
+                var tipH = $tooltip.outerHeight() || 0;
+                var viewLeft = window.scrollX;
+                var viewTop = window.scrollY;
+                var maxLeft = viewLeft + window.innerWidth - tipW - 8;
+                var maxTop = viewTop + window.innerHeight - tipH - 8;
+                var left = Math.min(ev.pageX + 16, maxLeft);
+                var top = Math.min(ev.pageY + 16, maxTop);
+                left = Math.max(viewLeft + 8, left);
+                top = Math.max(viewTop + 8, top);
+                $tooltip.css({ left: left + 'px', top: top + 'px' });
             };
             updatePos(e);
             $(document).on('mousemove.glyphtooltip', updatePos);
@@ -1027,9 +1196,17 @@ PDFalyzer.Tabs = (function ($, P) {
 
     // ======================== RAW COS TAB ========================
 
-    function loadRawCos() {
+    function loadRawCos(viewState) {
+        if (P.state.rawCosTreeData) {
+            P.Tree.render(P.state.rawCosTreeData, { viewState: viewState });
+            return;
+        }
+
         P.Utils.apiFetch('/api/tree/' + P.state.sessionId + '/raw-cos')
-            .done(function (rawTree) { P.Tree.render(rawTree); })
+            .done(function (rawTree) {
+                P.state.rawCosTreeData = rawTree;
+                P.Tree.render(rawTree, { viewState: viewState });
+            })
             .fail(function () { P.Utils.toast('Failed to load raw COS', 'danger'); });
     }
 
@@ -1043,7 +1220,9 @@ PDFalyzer.Tabs = (function ($, P) {
                 '<i class="fas fa-paperclip fa-2x mb-2"></i><br>No attachments found</div>');
             return;
         }
-        P.Tree.renderSubtree(P.state.treeData, 'attachments');
+        P.Tree.renderSubtree(P.state.treeData, 'attachments', {
+            viewState: getTreeViewStateForTab('attachments')
+        });
     }
 
     return { init: init, switchTab: switchTab };
