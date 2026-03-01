@@ -1,0 +1,13 @@
+Bugs:
+Attachment preview -> opens bin instead of showing a attached pfd/image
+Tree "<" and ">" are swapped for open and closed nodes.
+When opening and closing a node, the node info block is not removed
+"document Info" node is missing the info block as many other nodes are also. there should be concise info block for all noeds where it makes sense
+strcuture tree should not be open on init
+nodes need two clicks to open
+click form field does not highlight it in tree
+multislect form field not working (highligh currently selected fields)
+options button for selected form fields not working
+form field should have options and delete buttons attached to the handle of the form field
+image preview should be shown as tooltip when hovering an image in the tree
+clicking form field realods the pdf-view, so form field cannot be moved
