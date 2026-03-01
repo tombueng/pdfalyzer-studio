@@ -99,22 +99,47 @@ PDFalyzer.Tree = (function ($, P) {
     }
 
     function appendPendingFieldPanel($container, category) {
-        var pending = P.state.pendingFormAdds || [];
-        if (!pending.length) return;
-        if (category && category !== 'acroform' && category !== 'field') return;
+        var pendingFields = P.state.pendingFormAdds || [];
+        var pendingCos = P.state.pendingCosChanges || [];
+        if (!pendingFields.length && !pendingCos.length) return;
+        if (category && category !== 'acroform' && category !== 'field' &&
+            category !== 'info' && category !== 'cos' && category !== 'raw-cos') return;
+
+        var total = pendingFields.length + pendingCos.length;
 
         var html = '<div class="pending-fields-panel">' +
-            '<div class="pending-fields-title">Pending new fields (' + pending.length + ')</div>' +
+            '<div class="pending-fields-title">Pending changes (' + total + ')</div>' +
             '<ul class="pending-fields-list">';
-        pending.forEach(function (item) {
+
+        pendingFields.forEach(function (item) {
             html += '<li><span class="pending-field-name">' + P.Utils.escapeHtml(item.fieldName || '(unnamed)') + '</span>' +
                 '<span class="pending-field-meta">' +
                 P.Utils.escapeHtml((item.fieldType || 'field') + ' · Page ' + ((item.pageIndex || 0) + 1)) +
                 '</span></li>';
         });
+
+        pendingCos.forEach(function (item) {
+            var op = item && item.operation ? String(item.operation).toUpperCase() : 'COS';
+            var summary = item && item.summary ? item.summary : 'COS change';
+            html += '<li><span class="pending-field-name">' + P.Utils.escapeHtml(summary) + '</span>' +
+                '<span class="pending-field-meta">' + P.Utils.escapeHtml(op) + '</span></li>';
+        });
+
         html += '</ul><div class="pending-fields-hint">Click Save to persist to PDF</div></div>';
 
         $container.prepend($(html));
+    }
+
+    function refreshPendingPanel() {
+        var $container = $('#treeContent');
+        if (!$container.length) return;
+        $container.find('.pending-fields-panel').remove();
+
+        var category = null;
+        if (P.state.currentTab === 'forms') category = 'acroform';
+        else if (P.state.currentTab === 'rawcos') category = 'raw-cos';
+
+        appendPendingFieldPanel($container, category);
     }
 
     // ======================== SELECT NODE ========================
@@ -601,5 +626,6 @@ PDFalyzer.Tree = (function ($, P) {
              renderSearchResults: renderSearchResults, selectNode: selectNode,
              navigateToObject: navigateToObject, findAllByCategory: findAllByCategory,
              applySelectionClasses: applySelectionClasses,
-             captureViewState: captureViewState, restoreViewState: restoreViewState };
+             captureViewState: captureViewState, restoreViewState: restoreViewState,
+             refreshPendingPanel: refreshPendingPanel };
 })(jQuery, PDFalyzer);

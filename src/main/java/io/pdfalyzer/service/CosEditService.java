@@ -19,15 +19,24 @@ public class CosEditService {
 
     public byte[] updateCosValue(byte[] pdfBytes, CosUpdateRequest request) throws IOException {
         try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
-            COSDocument cosDoc = doc.getDocument();
-            COSObjectKey key = new COSObjectKey(request.getObjectNumber(),
-                    request.getGenerationNumber());
-            COSObject cosObj = cosDoc.getObjectFromPool(key);
-            if (cosObj == null || cosObj.getObject() == null) {
-                throw new IllegalArgumentException("Object not found: " + key);
-            }
+            COSBase target;
+            String targetScope = request.getTargetScope();
 
-            COSBase target = cosObj.getObject();
+            if ("docinfo".equalsIgnoreCase(targetScope)) {
+                if (doc.getDocumentInformation() == null || doc.getDocumentInformation().getCOSObject() == null) {
+                    throw new IllegalArgumentException("Document Info dictionary not available");
+                }
+                target = doc.getDocumentInformation().getCOSObject();
+            } else {
+                COSDocument cosDoc = doc.getDocument();
+                COSObjectKey key = new COSObjectKey(request.getObjectNumber(),
+                        request.getGenerationNumber());
+                COSObject cosObj = cosDoc.getObjectFromPool(key);
+                if (cosObj == null || cosObj.getObject() == null) {
+                    throw new IllegalArgumentException("Object not found: " + key);
+                }
+                target = cosObj.getObject();
+            }
 
             List<String> path = request.getKeyPath();
             if (path == null || path.isEmpty()) {
@@ -82,8 +91,9 @@ public class CosEditService {
 
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             doc.save(out);
-            log.info("Updated COS value: obj {} {} path {} = {}",
+                log.info("Updated COS value: obj {} {} scope {} path {} = {}",
                     request.getObjectNumber(), request.getGenerationNumber(),
+                    targetScope,
                     path, request.getNewValue());
             return out.toByteArray();
         }

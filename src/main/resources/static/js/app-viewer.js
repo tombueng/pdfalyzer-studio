@@ -277,9 +277,10 @@ PDFalyzer.Viewer = (function ($, P) {
 
     function setScale(scale) {
         if (scale <= 0) return;
+        if (Math.abs(scale - P.state.currentScale) < 0.01) return;
         P.state.currentScale  = scale;
         P.state.autoZoomMode  = 'off';
-        renderAllPages({ preserveView: true, smoothSwap: true });
+        renderAllPages({ preserveView: true, smoothSwap: false });
         if (P.Zoom && P.Zoom.updateButton) P.Zoom.updateButton();
     }
 
@@ -288,7 +289,7 @@ PDFalyzer.Viewer = (function ($, P) {
         var avail = $('#pdfPane').width() - 40;
         P.state.currentScale = avail / P.state.basePageSize.width;
         P.state.autoZoomMode = 'width';
-        renderAllPages({ preserveView: true, smoothSwap: true });
+        renderAllPages({ preserveView: true, smoothSwap: false });
         if (P.Zoom && P.Zoom.updateButton) P.Zoom.updateButton();
     }
 
@@ -297,7 +298,7 @@ PDFalyzer.Viewer = (function ($, P) {
         var avail = $('#pdfPane').height() - 40;
         P.state.currentScale = avail / P.state.basePageSize.height;
         P.state.autoZoomMode = 'height';
-        renderAllPages({ preserveView: true, smoothSwap: true });
+        renderAllPages({ preserveView: true, smoothSwap: false });
         if (P.Zoom && P.Zoom.updateButton) P.Zoom.updateButton();
     }
 

@@ -118,6 +118,25 @@ public class TestPdfGenerator {
         }
     }
 
+    private record FontDemoCell(
+        String fileName,
+        PDFont renderFont,
+        String sampleText,
+        boolean symbolStyle,
+        boolean renderable
+    ) {}
+
+    private static final String LATIN_SAMPLE_TEXT =
+        "The quick brown fox jumps over the lazy dog while bright stars shimmer above quiet hills and calm rivers. "
+            + "Pack my box with five dozen liquor jugs, then review numbers like 0123456789, punctuation, accents, "
+            + "and mixed casing to verify spacing, kerning, alignment, and readability across body text in practical "
+            + "paragraphs for robust rendering checks and repeatable visual comparison on a single compact demo page.";
+
+    private static final String SYMBOL_SAMPLE_TEXT =
+        "★ ☆ ✦ ✧ ✩ ✪ ✫ ✬ ✭ ✮ ✯ ✰ ☀ ☁ ☂ ☃ ☄ ☎ ☑ ☢ ☣ ☮ ☯ ☸ ☹ ☺ ♠ ♣ ♥ ♦ ♪ ♫ ♬ ♩ ♭ ♮ ♯ "
+            + "← ↑ → ↓ ↔ ↕ ↖ ↗ ↘ ↙ ⇐ ⇑ ⇒ ⇓ ⇔ ∀ ∂ ∃ ∅ ∇ ∈ ∉ ∑ ∏ √ ∞ ∫ ≈ ≠ ≤ ≥ ± × ÷ "
+            + "■ □ ▢ ▣ ▤ ▥ ▦ ▧ ▨ ▩ ▲ △ ▼ ▽ ◆ ◇ ○ ● ◐ ◑ ◒ ◓ ◔ ◕ ◎ ◉ ◌.";
+
     public static void main(String[] args) throws Exception {
         boolean hasOutputArg = args.length > 0;
         Path outDir = hasOutputArg
@@ -200,6 +219,7 @@ public class TestPdfGenerator {
         Path zipAttachment = createZipAttachment(attachmentsDir.resolve("sample.zip"));
         Path pdfAttachment = createAttachmentPdf(attachmentsDir.resolve("sample-attachment.pdf"), freeSansForPdf);
         Path xlsAttachment = createAttachmentXls(attachmentsDir.resolve("sample.xls"));
+        ensureBaselineFilesFixture(outDir, freeSansForPdf);
 
         Path outputPdf = resourcesDir.resolve("test.pdf");
         try (PDDocument doc = new PDDocument()) {
@@ -258,7 +278,7 @@ public class TestPdfGenerator {
             );
 
             renderPage1Images(doc, page1, jpg, png, jp2, fonts.heading(), fonts.body());
-            renderPage2Fonts(doc, page2, fonts, embeddingResult.reportLines());
+            renderPage2Fonts(doc, page2, fonts.heading(), fonts.body(), embeddingResult);
             renderPage3LinksAndAttachments(
                 doc,
                 page3,
@@ -323,54 +343,458 @@ public class TestPdfGenerator {
         }
     }
 
-    private static void renderPage2Fonts(PDDocument doc, PDPage page, EmbeddedFontSet fonts, List<String> embeddingReport) throws IOException {
+    private static void renderPage2Fonts(
+        PDDocument doc,
+        PDPage page,
+        PDFont headingFont,
+        PDFont bodyFont,
+        FontEmbeddingResult embeddingResult
+    ) throws IOException {
+        List<FontDemoCell> cells = buildFontDemoCells(embeddingResult, bodyFont);
+        int totalCells = Math.max(1, cells.size());
+
+        float pageWidth = page.getMediaBox().getWidth();
+        float pageHeight = page.getMediaBox().getHeight();
+        float headingY = pageHeight - PAGE_MARGIN;
+        float introY = headingY - 22;
+        float footerY = PAGE_MARGIN;
+
+        float gridTopY = introY - 14;
+        float gridBottomY = footerY + 18;
+        float availableWidth = pageWidth - (PAGE_MARGIN * 2);
+        float availableHeight = Math.max(64f, gridTopY - gridBottomY);
+
+        int cols = Math.max(1, (int) Math.ceil(Math.sqrt(totalCells * availableWidth / availableHeight)));
+        int rows = (int) Math.ceil((double) totalCells / cols);
+        float cellGap = 6f;
+        float cellWidth = (availableWidth - ((cols - 1) * cellGap)) / cols;
+        float cellHeight = (availableHeight - ((rows - 1) * cellGap)) / rows;
+
+        float textPadding = 6f;
+        float textWidth = Math.max(20f, cellWidth - (2 * textPadding));
+        float textHeight = Math.max(20f, cellHeight - (2 * textPadding));
+        float demoFontSize = computeBestDemoFontSize(cells, textWidth, textHeight);
+        float titleLeading = demoFontSize * 1.22f;
+        float bodyLeading = demoFontSize * 1.14f;
+
         try (PDPageContentStream cs = new PDPageContentStream(doc, page)) {
-            writeHeading(cs, fonts.heading(), "Page 2: Fonts (all embedded)", page.getMediaBox().getHeight() - 36);
+            writeHeading(cs, headingFont, "Page 2: Font Demo (dynamic grid)", headingY);
 
-            drawTextLine(cs, fonts.body(), 13, PAGE_MARGIN, 700,
-                "Embedded TTF: FreeSans.ttf (UI default)");
-            drawTextLine(cs, fonts.body(), 11, PAGE_MARGIN, 682,
-                "ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz 0123456789");
+            String intro = "Fonts discovered: " + embeddingResult.discoveredFiles().size()
+                + " | Renderable as PDF fonts: " + countRenderableFonts(cells)
+                + " | Grid: " + rows + "x" + cols
+                + " | Auto text size: " + formatOneDecimal(demoFontSize) + "pt";
+            drawTextLine(cs, bodyFont, 9.5f, PAGE_MARGIN, introY, intro);
 
-            drawTextLine(cs, fonts.freeSans(), 15, PAGE_MARGIN, 640,
-                    "Embedded TTF: FreeSans.ttf");
-            drawTextLine(cs, fonts.freeSans(), 12, PAGE_MARGIN, 622,
-                    "The quick brown fox jumps over the lazy dog. 1234567890");
+            for (int index = 0; index < totalCells; index++) {
+                int row = index / cols;
+                int col = index % cols;
 
-            drawTextLine(cs, fonts.lato(), 15, PAGE_MARGIN, 580,
-                    "Embedded TTF: Lato-Regular.ttf");
-            drawTextLine(cs, fonts.lato(), 12, PAGE_MARGIN, 562,
-                    "Sphinx of black quartz, judge my vow. ÀÉÍÕÜ ñ ç");
+                float x = PAGE_MARGIN + col * (cellWidth + cellGap);
+                float yTop = gridTopY - row * (cellHeight + cellGap);
+                float y = yTop - cellHeight;
 
-                if (fonts.sourceSansAvailable()) {
-                drawTextLine(cs, fonts.sourceSans(), 15, PAGE_MARGIN, 520,
-                    "Embedded TTF: SourceSans3-Regular.ttf");
-                drawTextLine(cs, fonts.sourceSans(), 12, PAGE_MARGIN, 502,
-                    "Pack my box with five dozen liquor jugs. € £ ¥");
-                } else {
-                drawTextLine(cs, fonts.notoSerif(), 12, PAGE_MARGIN, 502,
-                    "SourceSans3-Regular.ttf unavailable locally; embedded fonts still include all available TTF assets.");
+                drawBox(cs, x, y, cellWidth, cellHeight);
+
+                FontDemoCell cell = index < cells.size() ? cells.get(index) : null;
+                if (cell == null) {
+                    continue;
                 }
 
-            drawTextLine(cs, fonts.notoSerif(), 15, PAGE_MARGIN, 460,
-                "Embedded TTF: NotoSerif-Regular.ttf");
-            drawTextLine(cs, fonts.notoSerif(), 12, PAGE_MARGIN, 442,
-                "Voix ambiguë d’un cœur qui, au zéphyr, préfère les jattes de kiwis.");
-
-            drawTextLine(cs, fonts.body(), 10, PAGE_MARGIN, 406,
-                "All listed fonts are embedded from /fonts next to the generated PDF.");
-
-            drawTextLine(cs, fonts.body(), 10, PAGE_MARGIN, 384,
-                "Auto-discovery report from /fonts:");
-            float y = 368;
-            for (String line : embeddingReport) {
-                if (y < 54) {
-                    break;
+                float cursorY = yTop - textPadding - demoFontSize;
+                List<String> titleLines = wrapTextToWidth(bodyFont, cell.fileName(), demoFontSize, textWidth, 2);
+                for (String line : titleLines) {
+                    drawTextLine(cs, bodyFont, demoFontSize, x + textPadding, cursorY, line);
+                    cursorY -= titleLeading;
                 }
-                drawTextLine(cs, fonts.body(), 8.5f, PAGE_MARGIN, y, line);
-                y -= 12;
+
+                List<String> contentLines = wrapTextToWidth(cell.renderFont(), cell.sampleText(), demoFontSize, textWidth, Integer.MAX_VALUE);
+                float contentFloor = y + textPadding + demoFontSize;
+                for (String line : contentLines) {
+                    if (cursorY < contentFloor) {
+                        break;
+                    }
+                    drawTextLine(cs, cell.renderFont(), demoFontSize, x + textPadding, cursorY, line);
+                    cursorY -= bodyLeading;
+                }
+            }
+
+            drawTextLine(cs, bodyFont, 8.5f, PAGE_MARGIN, footerY,
+                "Each box is generated dynamically from /fonts; symbol-capable fonts receive symbol samples automatically.");
+        }
+    }
+
+    private static List<FontDemoCell> buildFontDemoCells(FontEmbeddingResult embeddingResult, PDFont fallbackFont) {
+        List<FontDemoCell> cells = new ArrayList<>();
+        for (Path discoveredFile : embeddingResult.discoveredFiles()) {
+            String fileName = discoveredFile.getFileName().toString();
+            PDFont embeddedFont = lookupEmbeddedFontForDiscoveredFile(embeddingResult, discoveredFile);
+            if (embeddedFont != null) {
+                boolean symbolStyle = shouldPreferSymbolSample(embeddedFont);
+                String preferred = symbolStyle ? SYMBOL_SAMPLE_TEXT : LATIN_SAMPLE_TEXT;
+                String sanitized = sanitizeForFont(embeddedFont, preferred);
+                if (!isSampleRichEnough(sanitized)) {
+                    sanitized = sanitizeForFont(embeddedFont, LATIN_SAMPLE_TEXT);
+                }
+                if (!isSampleRichEnough(sanitized)) {
+                    sanitized = sanitizeForFont(embeddedFont, SYMBOL_SAMPLE_TEXT);
+                }
+                if (!isSampleRichEnough(sanitized)) {
+                    sanitized = generateGlyphDrivenSample(embeddedFont, 380);
+                }
+                if (sanitized.isBlank()) {
+                    sanitized = "";
+                }
+                cells.add(new FontDemoCell(fileName, embeddedFont, sanitized, symbolStyle, true));
+            } else {
+                cells.add(new FontDemoCell(
+                    fileName,
+                    fallbackFont,
+                    "Attachment-only font asset (not renderable as PDF text font on this JVM build).",
+                    false,
+                    false
+                ));
             }
         }
+        return cells;
+    }
+
+    private static PDFont lookupEmbeddedFontForDiscoveredFile(FontEmbeddingResult embeddingResult, Path discoveredFile) {
+        if (embeddingResult == null || discoveredFile == null) {
+            return null;
+        }
+
+        String baseName = discoveredFile.getFileName().toString().toLowerCase();
+        PDFont direct = embeddingResult.embeddedFontsByFilename().get(baseName);
+        if (direct != null) {
+            return direct;
+        }
+
+        String unixSuffix = "/" + baseName;
+        for (Map.Entry<String, PDFont> entry : embeddingResult.embeddedFontsByFilename().entrySet()) {
+            String key = entry.getKey();
+            if (key.equals(baseName) || key.endsWith(unixSuffix)) {
+                return entry.getValue();
+            }
+        }
+        return null;
+    }
+
+    private static int countRenderableFonts(List<FontDemoCell> cells) {
+        int count = 0;
+        for (FontDemoCell cell : cells) {
+            if (cell.renderable()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    private static float computeBestDemoFontSize(List<FontDemoCell> cells, float textWidth, float textHeight) throws IOException {
+        if (cells.isEmpty()) {
+            return 8f;
+        }
+        float minSize = 2.5f;
+        float maxSize = 13f;
+        float best = minSize;
+        for (int i = 0; i < 18; i++) {
+            float mid = (minSize + maxSize) / 2f;
+            if (fitsAllCells(cells, textWidth, textHeight, mid)) {
+                best = mid;
+                minSize = mid;
+            } else {
+                maxSize = mid;
+            }
+        }
+        return best;
+    }
+
+    private static boolean fitsAllCells(List<FontDemoCell> cells, float textWidth, float textHeight, float fontSize) throws IOException {
+        float titleLeading = fontSize * 1.22f;
+        float bodyLeading = fontSize * 1.14f;
+
+        for (FontDemoCell cell : cells) {
+            List<String> titleLines = wrapTextToWidth(new PDType1Font(Standard14Fonts.FontName.HELVETICA), cell.fileName(), fontSize, textWidth, 2);
+            List<String> contentLines = wrapTextToWidth(cell.renderFont(), cell.sampleText(), fontSize, textWidth, Integer.MAX_VALUE);
+            float required = titleLines.size() * titleLeading + contentLines.size() * bodyLeading;
+            if (required > textHeight) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static List<String> wrapTextToWidth(PDFont font, String text, float fontSize, float maxWidth, int maxLines) throws IOException {
+        List<String> lines = new ArrayList<>();
+        if (text == null || text.isBlank() || maxLines <= 0) {
+            return lines;
+        }
+
+        String[] words = text.trim().split("\\s+");
+        StringBuilder current = new StringBuilder();
+
+        for (String word : words) {
+            if (word.isBlank()) {
+                continue;
+            }
+            String candidate = current.length() == 0 ? word : current + " " + word;
+            if (stringWidth(font, candidate, fontSize) <= maxWidth) {
+                current.setLength(0);
+                current.append(candidate);
+                continue;
+            }
+
+            if (current.length() > 0) {
+                lines.add(current.toString());
+                if (lines.size() >= maxLines) {
+                    return lines;
+                }
+                current.setLength(0);
+            }
+
+            if (stringWidth(font, word, fontSize) <= maxWidth) {
+                current.append(word);
+            } else {
+                List<String> split = splitWordToWidth(font, word, fontSize, maxWidth);
+                for (int i = 0; i < split.size(); i++) {
+                    boolean isLast = i == split.size() - 1;
+                    if (isLast) {
+                        current.append(split.get(i));
+                    } else {
+                        lines.add(split.get(i));
+                        if (lines.size() >= maxLines) {
+                            return lines;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (current.length() > 0 && lines.size() < maxLines) {
+            lines.add(current.toString());
+        }
+        return lines;
+    }
+
+    private static List<String> splitWordToWidth(PDFont font, String word, float fontSize, float maxWidth) throws IOException {
+        List<String> parts = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        for (int i = 0; i < word.length(); i++) {
+            char ch = word.charAt(i);
+            String candidate = current.toString() + ch;
+            if (stringWidth(font, candidate, fontSize) <= maxWidth || current.length() == 0) {
+                current.append(ch);
+            } else {
+                parts.add(current.toString());
+                current.setLength(0);
+                current.append(ch);
+            }
+        }
+        if (current.length() > 0) {
+            parts.add(current.toString());
+        }
+        return parts;
+    }
+
+    private static float stringWidth(PDFont font, String text, float fontSize) throws IOException {
+        if (text == null || text.isEmpty()) {
+            return 0f;
+        }
+        return (font.getStringWidth(text) / 1000f) * fontSize;
+    }
+
+    private static boolean shouldPreferSymbolSample(PDFont font) {
+        String latinProbe = "The quick brown fox jumps over the lazy dog 0123456789";
+        String symbolProbe = "★ ☆ ☀ ☂ ☺ ♠ ♥ ♦ ♪ ← ↑ → ↓ ∑ √ ∞ ≈ ≠ ≤ ≥";
+        double latinCoverage = coverageRatio(font, latinProbe);
+        double symbolCoverage = coverageRatio(font, symbolProbe);
+        return symbolCoverage >= 0.45 && symbolCoverage > (latinCoverage + 0.18);
+    }
+
+    private static double coverageRatio(PDFont font, String sample) {
+        if (sample == null || sample.isEmpty()) {
+            return 0.0;
+        }
+        int supported = 0;
+        int total = 0;
+        int[] codePoints = sample.codePoints().toArray();
+        for (int codePoint : codePoints) {
+            if (Character.isWhitespace(codePoint)) {
+                continue;
+            }
+            total++;
+            if (hasGlyphSafe(font, codePoint)) {
+                supported++;
+            }
+        }
+        if (total == 0) {
+            return 0.0;
+        }
+        return supported / (double) total;
+    }
+
+    private static boolean isSampleRichEnough(String text) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+        String normalized = text.trim();
+        int[] cps = normalized.codePoints().filter(cp -> !Character.isWhitespace(cp)).toArray();
+        if (cps.length < 24) {
+            return false;
+        }
+        Set<Integer> unique = new LinkedHashSet<>();
+        for (int cp : cps) {
+            unique.add(cp);
+            if (unique.size() >= 6) {
+                break;
+            }
+        }
+        return unique.size() >= 6;
+    }
+
+    private static String sanitizeForFont(PDFont font, String text) {
+        if (text == null || text.isBlank()) {
+            return "";
+        }
+        StringBuilder cleaned = new StringBuilder();
+        int[] codePoints = text.codePoints().toArray();
+        for (int codePoint : codePoints) {
+            if (Character.isWhitespace(codePoint)) {
+                if (hasGlyphSafe(font, codePoint)) {
+                    cleaned.appendCodePoint(codePoint);
+                }
+                continue;
+            }
+            if (hasGlyphSafe(font, codePoint)) {
+                cleaned.appendCodePoint(codePoint);
+            }
+        }
+        return cleaned.toString().trim().replaceAll("\\s+", " ");
+    }
+
+    private static String generateGlyphDrivenSample(PDFont font, int targetLength) {
+        int[] ranges = {
+            0x0021, 0x007E,
+            0x00A1, 0x00FF,
+            0x0100, 0x017F,
+            0x0180, 0x024F,
+            0x0370, 0x03FF,
+            0x0400, 0x04FF,
+            0x2190, 0x21FF,
+            0x2200, 0x22FF,
+            0x2300, 0x23FF,
+            0x2460, 0x24FF,
+            0x2500, 0x257F,
+            0x25A0, 0x25FF,
+            0x2600, 0x26FF,
+            0x2700, 0x27BF,
+            0x2B00, 0x2BFF,
+            0xE000, 0xF8FF,
+            0xF0000, 0xFFFFD,
+            0x100000, 0x10FFFD,
+            0x1F300, 0x1F5FF,
+            0x1F600, 0x1F64F,
+            0x1F680, 0x1F6FF,
+            0x1F900, 0x1FAFF
+        };
+
+        Map<Integer, Double> scored = new LinkedHashMap<>();
+        for (int i = 0; i < ranges.length; i += 2) {
+            int start = ranges[i];
+            int end = ranges[i + 1];
+            for (int codePoint = start; codePoint <= end; codePoint++) {
+                if (!isInterestingCodePoint(codePoint)) {
+                    continue;
+                }
+                float width = glyphWidthUnits(font, codePoint);
+                if (width <= 0f) {
+                    continue;
+                }
+                double score = width;
+                if (!Character.isLetterOrDigit(codePoint)) {
+                    score += 380.0;
+                }
+                score += utf8ByteLength(codePoint) * 65.0;
+                if (isSymbolBlock(codePoint)) {
+                    score += 320.0;
+                }
+                scored.put(codePoint, score);
+            }
+        }
+
+        List<Integer> supported = scored.entrySet().stream()
+            .sorted((a, b) -> Double.compare(b.getValue(), a.getValue()))
+            .map(Map.Entry::getKey)
+            .limit(64)
+            .toList();
+
+        if (supported.isEmpty()) {
+            return "";
+        }
+
+        String separator = hasGlyphSafe(font, 0x20) ? " " : (hasGlyphSafe(font, 0x00A0) ? "\u00A0" : "");
+        StringBuilder sample = new StringBuilder();
+        while (sample.length() < targetLength) {
+            for (Integer codePoint : supported) {
+                sample.appendCodePoint(codePoint);
+                if (!separator.isEmpty()) {
+                    sample.append(separator);
+                }
+                if (sample.length() >= targetLength) {
+                    break;
+                }
+            }
+        }
+        return sample.toString().trim();
+    }
+
+    private static boolean isInterestingCodePoint(int codePoint) {
+        if (!Character.isValidCodePoint(codePoint)) {
+            return false;
+        }
+        if (Character.isISOControl(codePoint)) {
+            return false;
+        }
+        int type = Character.getType(codePoint);
+        return type != Character.UNASSIGNED
+            && type != Character.FORMAT;
+    }
+
+    private static boolean isSymbolBlock(int codePoint) {
+        return (codePoint >= 0x2190 && codePoint <= 0x22FF)
+            || (codePoint >= 0x2300 && codePoint <= 0x23FF)
+            || (codePoint >= 0x2460 && codePoint <= 0x24FF)
+            || (codePoint >= 0x2500 && codePoint <= 0x257F)
+            || (codePoint >= 0x25A0 && codePoint <= 0x25FF)
+            || (codePoint >= 0x2600 && codePoint <= 0x26FF)
+            || (codePoint >= 0x2700 && codePoint <= 0x27BF)
+            || (codePoint >= 0x2B00 && codePoint <= 0x2BFF)
+                || (codePoint >= 0xE000 && codePoint <= 0xF8FF)
+                || (codePoint >= 0xF0000 && codePoint <= 0xFFFFD)
+                || (codePoint >= 0x100000 && codePoint <= 0x10FFFD)
+            || (codePoint >= 0x1F300 && codePoint <= 0x1FAFF);
+    }
+
+    private static int utf8ByteLength(int codePoint) {
+        return new String(Character.toChars(codePoint)).getBytes(StandardCharsets.UTF_8).length;
+    }
+
+    private static float glyphWidthUnits(PDFont font, int codePoint) {
+        try {
+            String sample = new String(Character.toChars(codePoint));
+            float width = font.getStringWidth(sample);
+            return width > 0f ? width : 0f;
+        } catch (Exception ignored) {
+            return 0f;
+        }
+    }
+
+    private static boolean hasGlyphSafe(PDFont font, int codePoint) {
+        return glyphWidthUnits(font, codePoint) > 0f;
+    }
+
+    private static String formatOneDecimal(float value) {
+        return String.format(java.util.Locale.ROOT, "%.1f", value);
     }
 
     private static void renderPage3LinksAndAttachments(
@@ -1042,6 +1466,34 @@ public class TestPdfGenerator {
         String data = "Name\tValue\nalpha\t123\nbeta\t456\ngamma\t789\n";
         Files.write(path, data.getBytes(StandardCharsets.UTF_8));
         return path;
+    }
+
+    private static void ensureBaselineFilesFixture(Path outDir, Path fontPath) throws IOException {
+        Path filesDir = outDir.resolve("files");
+        Files.createDirectories(filesDir);
+        Path fixturePdf = filesDir.resolve("1.pdf");
+        if (Files.exists(fixturePdf)) {
+            return;
+        }
+
+        try (PDDocument fixtureDoc = new PDDocument()) {
+            PDPage page = new PDPage(PDRectangle.LETTER);
+            fixtureDoc.addPage(page);
+
+            PDFont bodyFont = loadOptionalEmbeddedFont(fixtureDoc, fontPath, "FixtureBodyFont");
+            if (bodyFont == null) {
+                bodyFont = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
+            }
+
+            try (PDPageContentStream cs = new PDPageContentStream(fixtureDoc, page)) {
+                drawTextLine(cs, bodyFont, 12, PAGE_MARGIN, page.getMediaBox().getHeight() - 72,
+                    "PDFalyzer fixture: files/1.pdf");
+                drawTextLine(cs, bodyFont, 10, PAGE_MARGIN, page.getMediaBox().getHeight() - 92,
+                    "Generated automatically when no mirrored test-resource fixture is present.");
+            }
+
+            fixtureDoc.save(fixturePdf.toFile());
+        }
     }
 
     private static Path createJp2Placeholder(Path target, Path sourceImage) throws IOException {

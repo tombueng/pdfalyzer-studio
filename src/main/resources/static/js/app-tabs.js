@@ -169,8 +169,8 @@ PDFalyzer.Tabs = (function ($, P) {
             var gen = parseInt($(this).data('gen'), 10);
             P.Utils.apiFetch('/api/fonts/' + P.state.sessionId + '/usage/' + obj + '/' + gen)
                 .done(function (areas) {
-                    showFontUsageHighlights(areas || []);
-                    P.Utils.toast('Font usage areas: ' + ((areas || []).length), 'info');
+                    var usage = showFontUsageHighlights(areas || []);
+                    P.Utils.toast('Found: ' + usage.found + ' | Highlighted: ' + usage.highlighted, 'info');
                 })
                 .fail(function () {
                     P.Utils.toast('Failed to load font usage', 'danger');
@@ -275,6 +275,12 @@ PDFalyzer.Tabs = (function ($, P) {
                 'title="Lazy-rendered glyph preview">' +
                 (row.unicode ? '<span class="text-muted">…</span>' : '<span class="text-danger">n/a</span>') +
                 '</span>';
+            var glyphAction = (f.objectNumber >= 0)
+                ? '<button class="btn btn-xs btn-outline-accent font-glyph-detail-btn" ' +
+                    'data-obj="' + f.objectNumber + '" data-gen="' + (f.generationNumber || 0) + '" ' +
+                    'data-code="' + row.code + '" data-unicode="' + escapeHtmlAttr(row.unicode || '') + '" ' +
+                    'title="Open full glyph diagnostics and usage actions"><i class="fas fa-info-circle"></i></button>'
+                : '<span class="text-muted">n/a</span>';
             return '<tr>' +
                 '<td>' + row.code + '</td>' +
                 '<td class="font-glyph-preview-cell">' + glyphPreview + '</td>' +
@@ -283,6 +289,7 @@ PDFalyzer.Tabs = (function ($, P) {
                 '<td>' + (row.width == null ? '' : row.width) + '</td>' +
                 '<td>' + (row.usedCount || 0) + '</td>' +
                 '<td>' + (row.mapped ? '<span class="text-success">yes</span>' : '<span class="text-danger">no</span>') + '</td>' +
+                '<td>' + glyphAction + '</td>' +
                 '</tr>';
         }).join('');
 
@@ -323,7 +330,7 @@ PDFalyzer.Tabs = (function ($, P) {
             '<details open class="mt-2"><summary>Glyph mapping table (' + mappings.length + ')</summary>' +
             '<div class="font-detail-tools"><label class="m-0"><input type="checkbox" id="fontDetailUsedOnly"> show used codes only</label> ' +
             '<input id="fontDetailFilter" class="form-control form-control-sm" placeholder="Filter code, unicode, hex" /></div>' +
-            '<div class="font-detail-table-wrap"><table class="font-detail-table" id="fontDetailMapTable"><thead><tr><th title="Character code used in PDF text operators.">Code</th><th title="Lazy-rendered preview of mapped glyphs.">Glyph</th><th title="Unicode text mapped from this code.">Unicode</th><th title="Unicode code point(s) in U+XXXX format.">Hex</th><th title="Glyph width reported by font metrics.">Width</th><th title="How many times this code appears in extracted text.">Used</th><th title="Whether code maps to Unicode.">Mapped</th></tr></thead><tbody>' +
+            '<div class="font-detail-table-wrap"><table class="font-detail-table" id="fontDetailMapTable"><thead><tr><th title="Character code used in PDF text operators.">Code</th><th title="Lazy-rendered preview of mapped glyphs.">Glyph</th><th title="Unicode text mapped from this code.">Unicode</th><th title="Unicode code point(s) in U+XXXX format.">Hex</th><th title="Glyph width reported by font metrics.">Width</th><th title="How many times this code appears in extracted text.">Used</th><th title="Whether code maps to Unicode.">Mapped</th><th title="Open full diagnostics and actions for this glyph mapping.">Details</th></tr></thead><tbody>' +
             mappingRows +
             '</tbody></table></div></details>' +
             '<details class="mt-2"><summary>Font dictionary (' + Object.keys(dictionary).length + ' keys)</summary>' +
@@ -334,6 +341,127 @@ PDFalyzer.Tabs = (function ($, P) {
         $('#fontDiagDetail').html(html);
         bindFontDetailFilters();
         bindLazyGlyphRendering();
+        bindGlyphHoverTooltips();
+        bindGlyphDetailButtons();
+    }
+
+    function ensureGlyphDetailModal() {
+        if (document.getElementById('fontGlyphDetailModal')) return;
+        var modalHtml = '' +
+            '<div class="modal fade" id="fontGlyphDetailModal" tabindex="-1" aria-hidden="true">' +
+            '  <div class="modal-dialog modal-lg modal-dialog-scrollable">' +
+            '    <div class="modal-content">' +
+            '      <div class="modal-header">' +
+            '        <h5 class="modal-title"><i class="fas fa-font me-2"></i>Glyph diagnostics</h5>' +
+            '        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>' +
+            '      </div>' +
+            '      <div class="modal-body" id="fontGlyphDetailBody"></div>' +
+            '      <div class="modal-footer">' +
+            '        <button type="button" class="btn btn-outline-accent btn-sm" data-bs-dismiss="modal">Close</button>' +
+            '      </div>' +
+            '    </div>' +
+            '  </div>' +
+            '</div>';
+        $('body').append(modalHtml);
+    }
+
+    function bindGlyphDetailButtons() {
+        $('#fontDiagDetail .font-glyph-detail-btn').off('click').on('click', function () {
+            ensureGlyphDetailModal();
+            var obj = parseInt($(this).data('obj'), 10);
+            var gen = parseInt($(this).data('gen'), 10);
+            var code = parseInt($(this).data('code'), 10);
+            var unicode = String($(this).data('unicode') || '');
+            openGlyphDetailModal(obj, gen, code, unicode);
+        });
+    }
+
+    function openGlyphDetailModal(obj, gen, code, unicode) {
+        var $body = $('#fontGlyphDetailBody');
+        if (!$body.length) return;
+
+        var glyphText = unicode || '(unmapped)';
+        $body.html('<div class="text-muted"><span class="spinner-border spinner-border-sm"></span> Loading glyph diagnostics…</div>');
+        var modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('fontGlyphDetailModal'));
+        modal.show();
+
+        P.Utils.apiFetch('/api/fonts/' + P.state.sessionId + '/diagnostics/' + obj + '/' + gen + '/glyph/' + code)
+            .done(function (detail) {
+                renderGlyphDetailModal(detail || {}, obj, gen, code, glyphText);
+            })
+            .fail(function () {
+                $body.html('<div class="text-danger"><i class="fas fa-exclamation-circle me-1"></i>Failed to load glyph diagnostics.</div>');
+            });
+    }
+
+    function renderGlyphDetailModal(detail, obj, gen, code, glyphText) {
+        var glyph = detail.glyph || {};
+        var descriptor = detail.fontDescriptor || {};
+        var encoding = detail.encodingDiagnostics || {};
+        var usagePages = Array.isArray(detail.usagePagesForCode) ? detail.usagePagesForCode : [];
+        var unicodeSamples = Array.isArray(detail.unicodeSamplesForCode) ? detail.unicodeSamplesForCode : [];
+        var hugeGlyph = String(glyph.unicode || glyphText || '').trim();
+        if (!hugeGlyph || hugeGlyph === '(unmapped)') {
+            hugeGlyph = '∅';
+        }
+
+        var html = '' +
+            '<div class="d-flex justify-content-between align-items-start gap-3">' +
+            '  <div class="font-diag-detail-title mb-0"><strong>' + P.Utils.escapeHtml(detail.fontName || '(unknown font)') + '</strong> ' +
+            '  <span class="text-muted">Object ' + P.Utils.escapeHtml(detail.objectRef || (obj + ' ' + gen + ' R')) + '</span></div>' +
+            '  <div title="Large glyph preview" style="font-size:220px;line-height:0.8;min-width:220px;text-align:right;opacity:0.95;user-select:text;">' + P.Utils.escapeHtml(hugeGlyph) + '</div>' +
+            '</div>' +
+            '<div class="font-detail-grid">' +
+            '  <div><strong>Glyph</strong><div class="text-muted" style="font-size:22px;line-height:1.25;">' + P.Utils.escapeHtml(glyphText) + '</div></div>' +
+            '  <div><strong>Code</strong><div class="text-muted">' + P.Utils.escapeHtml(String(glyph.code == null ? code : glyph.code)) + ' (' + P.Utils.escapeHtml(String(glyph.codeHex || '')) + ')</div></div>' +
+            '  <div><strong>Unicode</strong><div class="text-muted">' + P.Utils.escapeHtml(String(glyph.unicode || '')) + ' ' + P.Utils.escapeHtml(String(glyph.unicodeHex || '')) + '</div></div>' +
+            '  <div><strong>Usage</strong><div class="text-muted">Count: ' + P.Utils.escapeHtml(String(glyph.usedCount || 0)) + ' | Pages: ' + P.Utils.escapeHtml(usagePages.map(function (p) { return p + 1; }).join(', ') || '-') + '</div></div>' +
+            '</div>' +
+            '<div class="mt-2">' +
+            '  <button class="btn btn-outline-accent btn-sm me-2" id="fontGlyphHighlightBtn"><i class="fas fa-highlighter me-1"></i>Highlight this glyph usage</button>' +
+            '  <button class="btn btn-outline-accent btn-sm" id="fontGlyphClearHighlightsBtn"><i class="fas fa-eraser me-1"></i>Clear highlights</button>' +
+            '</div>' +
+            '<details open class="mt-2"><summary>Glyph metrics</summary>' +
+            '  <div class="font-detail-table-wrap"><table class="font-detail-table"><tbody>' +
+            '    <tr><td>Width</td><td>' + P.Utils.escapeHtml(String(glyph.width == null ? '' : glyph.width)) + '</td></tr>' +
+            '    <tr><td>Mapped</td><td>' + (glyph.mapped ? '<span class="text-success">yes</span>' : '<span class="text-danger">no</span>') + '</td></tr>' +
+            '    <tr><td>Can encode mapped unicode</td><td>' + (glyph.canEncodeMappedUnicode ? '<span class="text-success">yes</span>' : '<span class="text-danger">no</span>') + '</td></tr>' +
+            '    <tr><td>Displacement</td><td>' + P.Utils.escapeHtml(JSON.stringify(glyph.displacement || {})) + '</td></tr>' +
+            '    <tr><td>Position vector</td><td>' + P.Utils.escapeHtml(JSON.stringify(glyph.positionVector || {})) + '</td></tr>' +
+            '    <tr><td>Unicode samples</td><td>' + P.Utils.escapeHtml(unicodeSamples.join(' | ') || '-') + '</td></tr>' +
+            '  </tbody></table></div>' +
+            '</details>' +
+            '<details class="mt-2"><summary>Font descriptor + rendering metrics</summary>' +
+            '  <div class="font-detail-table-wrap"><table class="font-detail-table"><tbody>' +
+            '    <tr><td>Type / Embedded / Subset</td><td>' + P.Utils.escapeHtml(String(detail.fontType || '')) + ' / ' + (detail.embedded ? 'yes' : 'no') + ' / ' + (detail.subset ? 'yes' : 'no') + '</td></tr>' +
+            '    <tr><td>Encoding</td><td>' + P.Utils.escapeHtml(String(detail.encoding || '')) + '</td></tr>' +
+            '    <tr><td>ToUnicode</td><td>' + (encoding.hasToUnicode ? '<span class="text-success">present</span>' : '<span class="text-danger">missing</span>') + ' ' + P.Utils.escapeHtml(String(encoding.toUnicodeObject || '')) + '</td></tr>' +
+            '    <tr><td>Base / Descendant</td><td>' + P.Utils.escapeHtml(String(encoding.baseFont || '')) + '<br>' + P.Utils.escapeHtml(String(encoding.descendantFont || '')) + '</td></tr>' +
+            '    <tr><td>Ascent / Descent</td><td>' + P.Utils.escapeHtml(String(descriptor.ascent || '')) + ' / ' + P.Utils.escapeHtml(String(descriptor.descent || '')) + '</td></tr>' +
+            '    <tr><td>CapHeight / XHeight</td><td>' + P.Utils.escapeHtml(String(descriptor.capHeight || '')) + ' / ' + P.Utils.escapeHtml(String(descriptor.xHeight || '')) + '</td></tr>' +
+            '    <tr><td>Avg / Max / Missing width</td><td>' + P.Utils.escapeHtml(String(descriptor.avgWidth || '')) + ' / ' + P.Utils.escapeHtml(String(descriptor.maxWidth || '')) + ' / ' + P.Utils.escapeHtml(String(descriptor.missingWidth || '')) + '</td></tr>' +
+            '    <tr><td>Italic angle / StemV / Flags</td><td>' + P.Utils.escapeHtml(String(descriptor.italicAngle || '')) + ' / ' + P.Utils.escapeHtml(String(descriptor.stemV || '')) + ' / ' + P.Utils.escapeHtml(String(descriptor.flags || '')) + '</td></tr>' +
+            '    <tr><td>Font BBox</td><td>' + P.Utils.escapeHtml(String(descriptor.fontBBox || '')) + '</td></tr>' +
+            '    <tr><td>Kerning note</td><td>' + P.Utils.escapeHtml(String(detail.kerningNote || 'n/a')) + '</td></tr>' +
+            '  </tbody></table></div>' +
+            '</details>';
+
+        $('#fontGlyphDetailBody').html(html);
+
+        $('#fontGlyphHighlightBtn').off('click').on('click', function () {
+            P.Utils.apiFetch('/api/fonts/' + P.state.sessionId + '/usage/' + obj + '/' + gen + '/glyph/' + code)
+                .done(function (areas) {
+                    var usage = showFontUsageHighlights(areas || []);
+                    P.Utils.toast('Found: ' + usage.found + ' | Highlighted: ' + usage.highlighted, usage.highlighted ? 'info' : 'warning');
+                })
+                .fail(function () {
+                    P.Utils.toast('Failed to load glyph usage overlays', 'danger');
+                });
+        });
+
+        $('#fontGlyphClearHighlightsBtn').off('click').on('click', function () {
+            clearFontUsageHighlights();
+        });
     }
 
     function ensureDiagnosticsFontFace(fontFamily, obj, gen) {
@@ -415,6 +543,44 @@ PDFalyzer.Tabs = (function ($, P) {
         }, 1200);
     }
 
+    function bindGlyphHoverTooltips() {
+        var $scope = $('#fontDiagDetail');
+        if (!$scope.length) return;
+
+        $scope.off('.glyphtooltip');
+        $(document).off('mousemove.glyphtooltip');
+
+        function removeTooltip() {
+            $('.glyph-tooltip-preview').remove();
+            $(document).off('mousemove.glyphtooltip');
+        }
+
+        $scope.on('mouseenter.glyphtooltip', '.font-glyph-preview', function (e) {
+            removeTooltip();
+
+            var glyphText = $(this).text() || '';
+            if (!glyphText.trim()) return;
+
+            var computed = window.getComputedStyle(this);
+            var fontFamily = computed && computed.fontFamily ? computed.fontFamily : "'Segoe UI Symbol', 'Segoe UI', sans-serif";
+
+            var $tooltip = $('<div>', { 'class': 'glyph-tooltip-preview' });
+            var $glyph = $('<div>', { 'class': 'glyph-tooltip-char', text: glyphText });
+            $glyph.css('font-family', fontFamily);
+            $tooltip.append($glyph).appendTo('body');
+
+            var updatePos = function (ev) {
+                $tooltip.css({ left: (ev.pageX + 16) + 'px', top: (ev.pageY + 16) + 'px' });
+            };
+            updatePos(e);
+            $(document).on('mousemove.glyphtooltip', updatePos);
+        });
+
+        $scope.on('mouseleave.glyphtooltip', '.font-glyph-preview', function () {
+            removeTooltip();
+        });
+    }
+
     function escapeHtmlAttr(value) {
         return String(value == null ? '' : value)
             .replace(/&/g, '&amp;')
@@ -445,12 +611,15 @@ PDFalyzer.Tabs = (function ($, P) {
 
     function showFontUsageHighlights(areas) {
         clearFontUsageHighlights();
-        if (!areas || !areas.length) return;
+        var found = 0;
+        var highlighted = 0;
+        if (!areas || !areas.length) return { found: 0, highlighted: 0 };
         areas.forEach(function (area) {
             var pageIndex = area.pageIndex;
             var bbox = area.bbox;
+            found += (area.glyphCount || 1);
             if (typeof pageIndex !== 'number' || !bbox || bbox.length < 4) return;
-            var $wrapper = $('[data-page="' + pageIndex + '"]');
+            var $wrapper = $('#pdfViewer .pdf-page-wrapper[data-page="' + pageIndex + '"]');
             var viewport = P.state.pageViewports[pageIndex];
             if (!$wrapper.length || !viewport) return;
             $('<div>', { 'class': 'pdf-font-usage' }).css({
@@ -459,7 +628,9 @@ PDFalyzer.Tabs = (function ($, P) {
                 width: bbox[2] * viewport.scale + 'px',
                 height: bbox[3] * viewport.scale + 'px'
             }).appendTo($wrapper);
+            highlighted += 1;
         });
+        return { found: found, highlighted: highlighted };
     }
 
     // ======================== VALIDATION TAB ========================

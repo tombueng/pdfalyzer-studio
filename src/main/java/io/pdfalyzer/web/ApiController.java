@@ -179,6 +179,16 @@ public class ApiController {
                 pdfService.getSessionPdfBytes(sessionId), objNum, genNum));
     }
 
+        @GetMapping("/fonts/{sessionId}/usage/{objNum}/{genNum}/glyph/{code}")
+        public ResponseEntity<List<Map<String, Object>>> getGlyphUsage(
+            @PathVariable("sessionId") String sessionId,
+            @PathVariable("objNum") int objNum,
+            @PathVariable("genNum") int genNum,
+            @PathVariable("code") int code) throws IOException {
+        return ResponseEntity.ok(fontInspectorService.getGlyphUsageAreas(
+            pdfService.getSessionPdfBytes(sessionId), objNum, genNum, code));
+        }
+
         @GetMapping("/fonts/{sessionId}/diagnostics")
         public ResponseEntity<FontDiagnostics> getFontDiagnostics(
             @PathVariable("sessionId") String sessionId) throws IOException {
@@ -193,6 +203,16 @@ public class ApiController {
             @PathVariable("genNum") int genNum) throws IOException {
         return ResponseEntity.ok(fontInspectorService.analyzeFontIssueDetail(
             pdfService.getSessionPdfBytes(sessionId), objNum, genNum));
+        }
+
+        @GetMapping("/fonts/{sessionId}/diagnostics/{objNum}/{genNum}/glyph/{code}")
+        public ResponseEntity<Map<String, Object>> getFontGlyphDiagnosticsDetail(
+            @PathVariable("sessionId") String sessionId,
+            @PathVariable("objNum") int objNum,
+            @PathVariable("genNum") int genNum,
+            @PathVariable("code") int code) throws IOException {
+        return ResponseEntity.ok(fontInspectorService.analyzeGlyphDetail(
+            pdfService.getSessionPdfBytes(sessionId), objNum, genNum, code));
         }
 
     @GetMapping("/fonts/{sessionId}/extract/{objNum}/{genNum}")
