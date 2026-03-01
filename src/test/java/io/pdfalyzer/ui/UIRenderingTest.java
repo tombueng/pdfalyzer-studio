@@ -5,14 +5,18 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.openqa.selenium.By;
+import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.chrome.ChromeDriver;
 import org.openqa.selenium.chrome.ChromeOptions;
+import org.openqa.selenium.support.ui.ExpectedConditions;
+import org.openqa.selenium.support.ui.WebDriverWait;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -169,5 +173,82 @@ public class UIRenderingTest {
         } else {
             System.out.println("No tree label elements found - test skipped (valid state for empty PDF)");
         }
+    }
+
+    @Test
+    public void testPage1ImageStreamsHaveWorkingViewAndDownloadButtons() {
+        if (driver == null) {
+            System.out.println("Skipping testPage1ImageStreamsHaveWorkingViewAndDownloadButtons - ChromeDriver not available");
+            return;
+        }
+
+        driver.get(baseUrl);
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(30));
+
+        wait.until(ExpectedConditions.or(
+                ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
+                ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
+        ));
+
+        expandNode(wait, "pages");
+        expandNode(wait, "page-0");
+        expandNode(wait, "page-0-resources");
+        expandNode(wait, "page-0-images");
+
+        List<WebElement> imageNodes = wait.until(d -> {
+            List<WebElement> nodes = d.findElements(By.cssSelector(".tree-node[data-node-id^='page-0-img-']"));
+            return nodes.isEmpty() ? null : nodes;
+        });
+
+        assertFalse(imageNodes.isEmpty(), "Expected page 1 image nodes in tree");
+
+        ((JavascriptExecutor) driver).executeScript(
+                "window.__pdfalyzerOpenCalls = [];" +
+                "window.__pdfalyzerOriginalOpen = window.open;" +
+                "window.open = function(url, target){ window.__pdfalyzerOpenCalls.push(url); return null; };"
+        );
+
+        for (WebElement node : new ArrayList<>(imageNodes)) {
+            WebElement previewBtn = node.findElement(By.cssSelector(".resource-open-btn"));
+            WebElement downloadBtn = node.findElement(By.cssSelector(".resource-download-btn"));
+
+            assertNotNull(previewBtn, "Preview button must exist for image node");
+            assertNotNull(downloadBtn, "Download button must exist for image node");
+
+            ((JavascriptExecutor) driver).executeScript("arguments[0].click();", downloadBtn);
+        }
+
+        WebElement firstPreviewBtn = imageNodes.get(0).findElement(By.cssSelector(".resource-open-btn"));
+        ((JavascriptExecutor) driver).executeScript("arguments[0].click();", firstPreviewBtn);
+        wait.until(ExpectedConditions.visibilityOfElementLocated(By.cssSelector("#resourcePreviewModal.show")));
+        wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector("#resourcePreviewBody img")));
+
+        ((JavascriptExecutor) driver).executeScript(
+            "var el=document.getElementById('resourcePreviewModal');" +
+            "if(el){el.classList.remove('show');el.style.display='none';}" +
+            "document.querySelectorAll('.modal-backdrop').forEach(function(b){b.remove();});" +
+            "document.body.classList.remove('modal-open');"
+        );
+
+        Object callCount = ((JavascriptExecutor) driver).executeScript("return window.__pdfalyzerOpenCalls.length;");
+        assertEquals(imageNodes.size(), ((Number) callCount).intValue(), "Each image node should trigger one download open call");
+
+        Object lastUrl = ((JavascriptExecutor) driver).executeScript("return window.__pdfalyzerOpenCalls[window.__pdfalyzerOpenCalls.length - 1];");
+        assertNotNull(lastUrl, "Expected a download URL to be captured");
+        assertTrue(lastUrl.toString().contains("/api/resource/"), "Download URL should point to resource endpoint");
+
+        ((JavascriptExecutor) driver).executeScript("if (window.__pdfalyzerOriginalOpen) { window.open = window.__pdfalyzerOriginalOpen; }");
+    }
+
+    private void expandNode(WebDriverWait wait, String nodeId) {
+        By nodeSel = By.cssSelector(".tree-node[data-node-id='" + nodeId + "']");
+        WebElement node = wait.until(ExpectedConditions.presenceOfElementLocated(nodeSel));
+        List<WebElement> children = node.findElements(By.cssSelector(":scope > .tree-children > .tree-node"));
+        if (!children.isEmpty()) {
+            return;
+        }
+        WebElement toggle = node.findElement(By.cssSelector(":scope > .tree-node-header > .tree-toggle"));
+        ((JavascriptExecutor) driver).executeScript("arguments[0].click();", toggle);
+        wait.until(d -> !node.findElements(By.cssSelector(":scope > .tree-children > .tree-node")).isEmpty());
     }
 }
