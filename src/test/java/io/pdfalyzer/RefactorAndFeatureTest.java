@@ -1,5 +1,6 @@
 package io.pdfalyzer;
 
+import io.pdfalyzer.model.FontDiagnostics;
 import io.pdfalyzer.model.FontInfo;
 import io.pdfalyzer.model.FormFieldRequest;
 import io.pdfalyzer.model.PdfNode;
@@ -408,6 +409,35 @@ public class RefactorAndFeatureTest {
         byte[] pdf = createSimplePdf(1);
         Map<String, String> map = fontService.getCharacterMap(pdf, 0, "F1");
         assertNotNull(map); // may be empty - just assert no exception
+    }
+
+    @Test
+    void fontDiagnosticsSummaryReturnsModel() throws IOException {
+        byte[] pdf = createSimplePdf(1);
+        FontDiagnostics diagnostics = fontService.analyzeFontIssues(pdf);
+        assertNotNull(diagnostics);
+        assertNotNull(diagnostics.getFonts());
+        assertEquals(diagnostics.getFonts().size(), diagnostics.getTotalFonts());
+    }
+
+    @Test
+    void fontDiagnosticsDetailReturnsForKnownObject() throws IOException {
+        byte[] pdf = createSimplePdf(1);
+        FontDiagnostics diagnostics = fontService.analyzeFontIssues(pdf);
+        FontDiagnostics.FontDiagnosticsEntry target = diagnostics.getFonts().stream()
+                .filter(f -> f.getObjectNumber() >= 0)
+                .findFirst()
+                .orElse(null);
+        if (target == null) {
+            return;
+        }
+
+        FontDiagnostics.FontDiagnosticsDetail detail = fontService.analyzeFontIssueDetail(
+                pdf, target.getObjectNumber(), target.getGenerationNumber());
+        assertNotNull(detail);
+        assertNotNull(detail.getFont());
+        assertNotNull(detail.getGlyphMappings());
+        assertNotNull(detail.getFontDictionary());
     }
 
     // ======================== RAW COS TREE ========================

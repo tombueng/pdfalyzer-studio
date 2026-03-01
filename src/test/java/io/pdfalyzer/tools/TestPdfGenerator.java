@@ -1,6 +1,7 @@
 package io.pdfalyzer.tools;
 
 import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDDocumentCatalog;
 import org.apache.pdfbox.pdmodel.PDDocumentInformation;
@@ -46,6 +47,7 @@ import java.awt.geom.Ellipse2D;
 import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
@@ -58,24 +60,83 @@ import java.nio.file.Paths;
 import java.time.Duration;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Comparator;
 import java.util.GregorianCalendar;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 import java.util.zip.ZipOutputStream;
 
 public class TestPdfGenerator {
 
     private static final float PAGE_MARGIN = 36f;
 
+    private record EmbeddedFontSet(
+        PDFont heading,
+        PDFont body,
+        PDFont freeSans,
+        PDFont lato,
+        PDFont sourceSans,
+        PDFont notoSerif,
+        boolean sourceSansAvailable
+    ) {}
+
+    private enum FontAssetType {
+        TRUE_TYPE,
+        OPEN_TYPE,
+        TRUE_TYPE_COLLECTION,
+        TYPE1_PFB,
+        TYPE1_AFM,
+        UNKNOWN
+    }
+
+    private record FontEmbeddingResult(
+        Map<String, PDFont> embeddedFontsByFilename,
+        List<String> reportLines,
+        List<Path> discoveredFiles
+    ) {
+        PDFont get(String filename) {
+            if (filename == null) {
+                return null;
+            }
+            return embeddedFontsByFilename.get(filename.toLowerCase());
+        }
+
+        PDFont firstEmbeddedFont() {
+            if (embeddedFontsByFilename.isEmpty()) {
+                return null;
+            }
+            return embeddedFontsByFilename.values().iterator().next();
+        }
+    }
+
     public static void main(String[] args) throws Exception {
-        Path outDir = args.length > 0
-                ? Paths.get(args[0]).toAbsolutePath().normalize()
-                : Paths.get("target", "generated-test-assets").toAbsolutePath().normalize();
+        boolean hasOutputArg = args.length > 0;
+        Path outDir = hasOutputArg
+            ? Paths.get(args[0]).toAbsolutePath().normalize()
+            : Paths.get("src", "main","resources").toAbsolutePath().normalize();
+        Path resourcesDir = hasOutputArg
+            ? outDir
+            : Paths.get("src", "main/resources").toAbsolutePath().normalize();
 
         Files.createDirectories(outDir);
+        Files.createDirectories(resourcesDir);
+
+        Path testResourcesDir = Paths.get("src", "test", "resources")
+            .toAbsolutePath().normalize();
+        Files.createDirectories(testResourcesDir);
+
+        Path testResourcesFontsDir = Paths.get("src", "test", "resources", "fonts")
+            .toAbsolutePath().normalize();
+        Files.createDirectories(testResourcesFontsDir);
 
         Path fontsDir = outDir.resolve("fonts");
         Path imagesDir = outDir.resolve("images");
@@ -84,15 +145,46 @@ public class TestPdfGenerator {
         Files.createDirectories(imagesDir);
         Files.createDirectories(attachmentsDir);
 
-        Path freeSans = ensureFont(fontsDir.resolve("FreeSans.ttf"),
+        Path freeSans = ensureFont(testResourcesFontsDir.resolve("FreeSans.ttf"),
                 Arrays.asList(
-                        "https://raw.githubusercontent.com/gnu-mirror-unofficial/freefont/master/freefont-ttf/FreeSans.ttf",
                         "https://ftp.gnu.org/gnu/freefont/freefont-ttf-20120503.zip"
-                ));
-        Path lato = ensureFont(fontsDir.resolve("Lato-Regular.ttf"),
+            ));
+        Path lato = ensureFont(testResourcesFontsDir.resolve("Lato-Regular.ttf"),
                 Arrays.asList("https://raw.githubusercontent.com/google/fonts/main/ofl/lato/Lato-Regular.ttf"));
-        Path sourceSans = ensureFont(fontsDir.resolve("SourceSans3-Regular.otf"),
-                Arrays.asList("https://raw.githubusercontent.com/adobe-fonts/source-sans/release/OTF/SourceSans3-Regular.otf"));
+        Path sourceSans = ensureFont(testResourcesFontsDir.resolve("SourceSans3-Regular.ttf"),
+            Arrays.asList("https://raw.githubusercontent.com/google/fonts/main/ofl/sourcesans3/SourceSans3-Regular.ttf"));
+        Path notoSerif = ensureFont(testResourcesFontsDir.resolve("NotoSerif-Regular.ttf"),
+            Arrays.asList("https://raw.githubusercontent.com/googlefonts/noto-fonts/main/hinted/ttf/NotoSerif/NotoSerif-Regular.ttf"));
+
+        Path urwBase35Zip = ensureBinary(testResourcesFontsDir.resolve("urw-base35.zip"),
+            Arrays.asList("https://mirrors.ctan.org/fonts/urw/base35.zip"));
+        Path urwType1Pfb = ensureZipEntry(
+            testResourcesFontsDir.resolve("utmr8a.pfb"),
+            urwBase35Zip,
+            "base35/pfb/utmr8a.pfb"
+        );
+        Path urwType1Afm = ensureZipEntry(
+            testResourcesFontsDir.resolve("utmr8a.afm"),
+            urwBase35Zip,
+            "base35/afm/utmr8a.afm"
+        );
+
+        mirrorDirectoryTree(testResourcesDir, outDir);
+        copyIfPresent(freeSans, fontsDir.resolve("FreeSans.ttf"));
+        copyIfPresent(lato, fontsDir.resolve("Lato-Regular.ttf"));
+        copyIfPresent(sourceSans, fontsDir.resolve("SourceSans3-Regular.ttf"));
+        copyIfPresent(notoSerif, fontsDir.resolve("NotoSerif-Regular.ttf"));
+        copyIfPresent(urwType1Pfb, fontsDir.resolve("utmr8a.pfb"));
+        copyIfPresent(urwType1Afm, fontsDir.resolve("utmr8a.afm"));
+
+        Path freeSansForPdf = fontsDir.resolve("FreeSans.ttf");
+        if (!Files.exists(freeSansForPdf)) freeSansForPdf = freeSans;
+        Path latoForPdf = fontsDir.resolve("Lato-Regular.ttf");
+        if (!Files.exists(latoForPdf)) latoForPdf = lato;
+        Path sourceSansForPdf = fontsDir.resolve("SourceSans3-Regular.ttf");
+        if (!Files.exists(sourceSansForPdf)) sourceSansForPdf = sourceSans;
+        Path notoSerifForPdf = fontsDir.resolve("NotoSerif-Regular.ttf");
+        if (!Files.exists(notoSerifForPdf)) notoSerifForPdf = notoSerif;
 
         Path jpg = createJpg(imagesDir.resolve("sample-photo.jpg"));
         Path png = createTransparentPng(imagesDir.resolve("sample-transparent.png"));
@@ -106,10 +198,10 @@ public class TestPdfGenerator {
         }
 
         Path zipAttachment = createZipAttachment(attachmentsDir.resolve("sample.zip"));
-        Path pdfAttachment = createAttachmentPdf(attachmentsDir.resolve("sample-attachment.pdf"));
+        Path pdfAttachment = createAttachmentPdf(attachmentsDir.resolve("sample-attachment.pdf"), freeSansForPdf);
         Path xlsAttachment = createAttachmentXls(attachmentsDir.resolve("sample.xls"));
 
-        Path outputPdf = outDir.resolve("test.pdf");
+        Path outputPdf = resourcesDir.resolve("test.pdf");
         try (PDDocument doc = new PDDocument()) {
             PDPage page1 = new PDPage(PDRectangle.LETTER);
             PDPage page2 = new PDPage(PDRectangle.LETTER);
@@ -120,21 +212,81 @@ public class TestPdfGenerator {
             doc.addPage(page3);
             doc.addPage(page4);
 
-            renderPage1Images(doc, page1, jpg, png, jp2);
-            renderPage2Fonts(doc, page2, freeSans, lato, sourceSans);
-            renderPage3LinksAndAttachments(doc, page3, page2, zipAttachment, pdfAttachment, xlsAttachment);
-            renderPage4Forms(doc, page4);
+            FontEmbeddingResult embeddingResult = embedFontsFromDirectory(doc, fontsDir);
+
+            PDFont headingFont = pickEmbeddedFont(
+                embeddingResult,
+                "NotoSerif-Regular.ttf",
+                "Lato-Regular.ttf",
+                "FreeSans.ttf"
+            );
+            PDFont bodyFont = pickEmbeddedFont(
+                embeddingResult,
+                "FreeSans.ttf",
+                "Lato-Regular.ttf",
+                "NotoSerif-Regular.ttf"
+            );
+            PDFont freeSansFont = pickEmbeddedFont(embeddingResult, "FreeSans.ttf");
+            PDFont latoFont = pickEmbeddedFont(embeddingResult, "Lato-Regular.ttf");
+            PDFont notoSerifFont = pickEmbeddedFont(embeddingResult, "NotoSerif-Regular.ttf");
+            PDFont optionalSourceSans = embeddingResult.get("SourceSans3-Regular.ttf");
+
+            if (headingFont == null) {
+                headingFont = new PDType1Font(Standard14Fonts.FontName.HELVETICA_BOLD);
+            }
+            if (bodyFont == null) {
+                bodyFont = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
+            }
+            if (freeSansFont == null) {
+                freeSansFont = bodyFont;
+            }
+            if (latoFont == null) {
+                latoFont = bodyFont;
+            }
+            if (notoSerifFont == null) {
+                notoSerifFont = headingFont;
+            }
+
+            EmbeddedFontSet fonts = new EmbeddedFontSet(
+                headingFont,
+                bodyFont,
+                freeSansFont,
+                latoFont,
+                optionalSourceSans != null ? optionalSourceSans : notoSerifFont,
+                notoSerifFont,
+                optionalSourceSans != null
+            );
+
+            renderPage1Images(doc, page1, jpg, png, jp2, fonts.heading(), fonts.body());
+            renderPage2Fonts(doc, page2, fonts, embeddingResult.reportLines());
+            renderPage3LinksAndAttachments(
+                doc,
+                page3,
+                page2,
+                zipAttachment,
+                pdfAttachment,
+                xlsAttachment,
+                fontsDir,
+                embeddingResult.discoveredFiles(),
+                fonts.heading(),
+                fonts.body()
+            );
+            renderPage4Forms(doc, page4, fonts.heading(), fonts.body());
             addBookmarks(doc, page1, page2, page3, page4);
             applyDocumentMetadata(doc);
 
             doc.save(outputPdf.toFile());
         }
 
+        verifyEmbeddedFontFiles(outputPdf, fontsDir);
+
         System.out.println("Generated PDF: " + outputPdf);
         System.out.println("Assets folder : " + outDir);
+        System.out.println("Resources dir : " + resourcesDir);
+        System.out.println("Font cache    : " + testResourcesFontsDir);
     }
 
-    private static void renderPage1Images(PDDocument doc, PDPage page, Path jpg, Path png, Path jp2) throws IOException {
+    private static void renderPage1Images(PDDocument doc, PDPage page, Path jpg, Path png, Path jp2, PDFont headingFont, PDFont bodyFont) throws IOException {
         PDImageXObject jpgImage = PDImageXObject.createFromFileByContent(jpg.toFile(), doc);
         PDImageXObject pngImage = PDImageXObject.createFromFileByContent(png.toFile(), doc);
         PDImageXObject alphaImage = LosslessFactory.createFromImage(doc, createAlphaMaskImage());
@@ -149,59 +301,75 @@ public class TestPdfGenerator {
         }
 
         try (PDPageContentStream cs = new PDPageContentStream(doc, page)) {
-            writeHeading(cs, "Page 1: Images + Transparency / SMask", page.getMediaBox().getHeight() - 36);
+            writeHeading(cs, headingFont, "Page 1: Images + Transparency / SMask", page.getMediaBox().getHeight() - 36);
 
             cs.drawImage(jpgImage, PAGE_MARGIN, 500, 230, 160);
-            drawCaption(cs, PAGE_MARGIN, 488, "JPEG image (opaque)");
+            drawCaption(cs, bodyFont, PAGE_MARGIN, 488, "JPEG image (opaque)");
 
             cs.drawImage(pngImage, PAGE_MARGIN + 250, 500, 230, 160);
-            drawCaption(cs, PAGE_MARGIN + 250, 488, "PNG image (alpha transparency)");
+            drawCaption(cs, bodyFont, PAGE_MARGIN + 250, 488, "PNG image (alpha transparency)");
 
             cs.drawImage(alphaImage, PAGE_MARGIN, 280, 230, 160);
-            drawCaption(cs, PAGE_MARGIN, 268, "Lossless ARGB image (soft mask)");
+            drawCaption(cs, bodyFont, PAGE_MARGIN, 268, "Lossless ARGB image (soft mask)");
 
             if (jp2Image != null) {
                 cs.drawImage(jp2Image, PAGE_MARGIN + 250, 280, 230, 160);
-                drawCaption(cs, PAGE_MARGIN + 250, 268, "JPEG2000 image (JPX decode)");
+            drawCaption(cs, bodyFont, PAGE_MARGIN + 250, 268, "JPEG2000 image (JPX decode)");
             } else {
                 drawBox(cs, PAGE_MARGIN + 250, 280, 230, 160);
-                drawCaption(cs, PAGE_MARGIN + 258, 350, "JPEG2000 test asset present, renderer unavailable on this JVM");
-                drawCaption(cs, PAGE_MARGIN + 258, 333, "(see images/sample-jpeg2000.jp2)");
+            drawCaption(cs, bodyFont, PAGE_MARGIN + 258, 350, "JPEG2000 test asset present, renderer unavailable on this JVM");
+            drawCaption(cs, bodyFont, PAGE_MARGIN + 258, 333, "(see images/sample-jpeg2000.jp2)");
             }
         }
     }
 
-    private static void renderPage2Fonts(PDDocument doc, PDPage page, Path freeSans, Path lato, Path sourceSans) throws IOException {
-        PDFont helvetica = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
-        PDFont freeSansFont = loadEmbeddedFontOrFallback(doc, freeSans, helvetica);
-        PDFont latoFont = loadEmbeddedFontOrFallback(doc, lato, helvetica);
-        PDFont sourceSansFont = loadEmbeddedFontOrFallback(doc, sourceSans, helvetica);
-
+    private static void renderPage2Fonts(PDDocument doc, PDPage page, EmbeddedFontSet fonts, List<String> embeddingReport) throws IOException {
         try (PDPageContentStream cs = new PDPageContentStream(doc, page)) {
-            writeHeading(cs, "Page 2: Fonts (embedded + non-embedded)", page.getMediaBox().getHeight() - 36);
+            writeHeading(cs, fonts.heading(), "Page 2: Fonts (all embedded)", page.getMediaBox().getHeight() - 36);
 
-            drawTextLine(cs, helvetica, 13, PAGE_MARGIN, 700,
-                    "Non-embedded Standard 14 font: Helvetica (built-in)");
-            drawTextLine(cs, helvetica, 11, PAGE_MARGIN, 682,
-                    "ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz 0123456789");
+            drawTextLine(cs, fonts.body(), 13, PAGE_MARGIN, 700,
+                "Embedded TTF: FreeSans.ttf (UI default)");
+            drawTextLine(cs, fonts.body(), 11, PAGE_MARGIN, 682,
+                "ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz 0123456789");
 
-            drawTextLine(cs, freeSansFont, 15, PAGE_MARGIN, 640,
+            drawTextLine(cs, fonts.freeSans(), 15, PAGE_MARGIN, 640,
                     "Embedded TTF: FreeSans.ttf");
-            drawTextLine(cs, freeSansFont, 12, PAGE_MARGIN, 622,
+            drawTextLine(cs, fonts.freeSans(), 12, PAGE_MARGIN, 622,
                     "The quick brown fox jumps over the lazy dog. 1234567890");
 
-            drawTextLine(cs, latoFont, 15, PAGE_MARGIN, 580,
+            drawTextLine(cs, fonts.lato(), 15, PAGE_MARGIN, 580,
                     "Embedded TTF: Lato-Regular.ttf");
-            drawTextLine(cs, latoFont, 12, PAGE_MARGIN, 562,
+            drawTextLine(cs, fonts.lato(), 12, PAGE_MARGIN, 562,
                     "Sphinx of black quartz, judge my vow. ÀÉÍÕÜ ñ ç");
 
-            drawTextLine(cs, sourceSansFont, 15, PAGE_MARGIN, 520,
-                    "Embedded OTF: SourceSans3-Regular.otf");
-            drawTextLine(cs, sourceSansFont, 12, PAGE_MARGIN, 502,
+                if (fonts.sourceSansAvailable()) {
+                drawTextLine(cs, fonts.sourceSans(), 15, PAGE_MARGIN, 520,
+                    "Embedded TTF: SourceSans3-Regular.ttf");
+                drawTextLine(cs, fonts.sourceSans(), 12, PAGE_MARGIN, 502,
                     "Pack my box with five dozen liquor jugs. € £ ¥");
+                } else {
+                drawTextLine(cs, fonts.notoSerif(), 12, PAGE_MARGIN, 502,
+                    "SourceSans3-Regular.ttf unavailable locally; embedded fonts still include all available TTF assets.");
+                }
 
-            drawTextLine(cs, helvetica, 10, PAGE_MARGIN, 460,
-                    "Font assets are stored in /fonts next to the generated PDF.");
+            drawTextLine(cs, fonts.notoSerif(), 15, PAGE_MARGIN, 460,
+                "Embedded TTF: NotoSerif-Regular.ttf");
+            drawTextLine(cs, fonts.notoSerif(), 12, PAGE_MARGIN, 442,
+                "Voix ambiguë d’un cœur qui, au zéphyr, préfère les jattes de kiwis.");
+
+            drawTextLine(cs, fonts.body(), 10, PAGE_MARGIN, 406,
+                "All listed fonts are embedded from /fonts next to the generated PDF.");
+
+            drawTextLine(cs, fonts.body(), 10, PAGE_MARGIN, 384,
+                "Auto-discovery report from /fonts:");
+            float y = 368;
+            for (String line : embeddingReport) {
+                if (y < 54) {
+                    break;
+                }
+                drawTextLine(cs, fonts.body(), 8.5f, PAGE_MARGIN, y, line);
+                y -= 12;
+            }
         }
     }
 
@@ -211,15 +379,19 @@ public class TestPdfGenerator {
             PDPage jumpTargetPage,
             Path zipAttachment,
             Path pdfAttachment,
-            Path xlsAttachment
+            Path xlsAttachment,
+                Path fontsRootDir,
+            List<Path> fontFiles,
+            PDFont headingFont,
+            PDFont bodyFont
     ) throws IOException {
         try (PDPageContentStream cs = new PDPageContentStream(doc, page)) {
-            writeHeading(cs, "Page 3: Links, Bookmarks, Attachments", page.getMediaBox().getHeight() - 36);
-            drawTextLine(cs, new PDType1Font(Standard14Fonts.FontName.HELVETICA), 12, PAGE_MARGIN, 700,
+                writeHeading(cs, headingFont, "Page 3: Links, Bookmarks, Attachments", page.getMediaBox().getHeight() - 36);
+                drawTextLine(cs, bodyFont, 12, PAGE_MARGIN, 700,
                     "External link: https://www.example.com");
-            drawTextLine(cs, new PDType1Font(Standard14Fonts.FontName.HELVETICA), 12, PAGE_MARGIN, 670,
+                drawTextLine(cs, bodyFont, 12, PAGE_MARGIN, 670,
                     "Internal link: jump to Page 2");
-            drawTextLine(cs, new PDType1Font(Standard14Fonts.FontName.HELVETICA), 12, PAGE_MARGIN, 640,
+                drawTextLine(cs, bodyFont, 12, PAGE_MARGIN, 640,
                     "Embedded attachments: sample.zip, sample-attachment.pdf, sample.xls");
         }
 
@@ -230,6 +402,12 @@ public class TestPdfGenerator {
         embedded.put("sample.zip", buildEmbeddedFile(doc, zipAttachment, "application/zip"));
         embedded.put("sample-attachment.pdf", buildEmbeddedFile(doc, pdfAttachment, "application/pdf"));
         embedded.put("sample.xls", buildEmbeddedFile(doc, xlsAttachment, "application/vnd.ms-excel"));
+        for (Path fontFile : fontFiles) {
+            String entryName = toEmbeddedFontEntryName(fontsRootDir, fontFile);
+            if (!embedded.containsKey(entryName)) {
+                embedded.put(entryName, buildEmbeddedFile(doc, fontFile, entryName, detectFontMimeType(fontFile)));
+            }
+        }
 
         PDDocumentNameDictionary names = new PDDocumentNameDictionary(doc.getDocumentCatalog());
         PDEmbeddedFilesNameTreeNode tree = new PDEmbeddedFilesNameTreeNode();
@@ -242,24 +420,22 @@ public class TestPdfGenerator {
         addAttachmentAnnotation(page, embedded.get("sample.xls"), PAGE_MARGIN + 40, 600);
     }
 
-    private static void renderPage4Forms(PDDocument doc, PDPage page) throws IOException {
-        PDFont helvetica = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
-
+    private static void renderPage4Forms(PDDocument doc, PDPage page, PDFont headingFont, PDFont bodyFont) throws IOException {
         try (PDPageContentStream cs = new PDPageContentStream(doc, page)) {
-            writeHeading(cs, "Page 4: AcroForm Fields", page.getMediaBox().getHeight() - 36);
-            drawTextLine(cs, helvetica, 12, PAGE_MARGIN, 720, "Text (required), text (readonly), multiline text");
-            drawTextLine(cs, helvetica, 12, PAGE_MARGIN, 680, "Checkbox, radio, combo box, list box, signature field, JS validation fields");
+            writeHeading(cs, headingFont, "Page 4: AcroForm Fields", page.getMediaBox().getHeight() - 36);
+            drawTextLine(cs, bodyFont, 12, PAGE_MARGIN, 720, "Text (required), text (readonly), multiline text");
+            drawTextLine(cs, bodyFont, 12, PAGE_MARGIN, 680, "Checkbox, radio, combo box, list box, signature field, JS validation fields");
 
-            drawTextLine(cs, helvetica, 10, PAGE_MARGIN, 646, "Name (required):");
-            drawTextLine(cs, helvetica, 10, PAGE_MARGIN, 616, "Account (readonly):");
-            drawTextLine(cs, helvetica, 10, PAGE_MARGIN, 586, "Notes (multiline):");
-            drawTextLine(cs, helvetica, 10, PAGE_MARGIN, 496, "Agree checkbox:");
-            drawTextLine(cs, helvetica, 10, PAGE_MARGIN, 466, "Radio option:");
-            drawTextLine(cs, helvetica, 10, PAGE_MARGIN, 436, "Combo (country):");
-            drawTextLine(cs, helvetica, 10, PAGE_MARGIN, 406, "List (priority):");
-            drawTextLine(cs, helvetica, 10, PAGE_MARGIN, 348, "Age (18-99, JS validate):");
-            drawTextLine(cs, helvetica, 10, PAGE_MARGIN, 318, "Date (YYYY-MM-DD, JS validate):");
-            drawTextLine(cs, helvetica, 10, PAGE_MARGIN, 278, "Signature:");
+            drawTextLine(cs, bodyFont, 10, PAGE_MARGIN, 646, "Name (required):");
+            drawTextLine(cs, bodyFont, 10, PAGE_MARGIN, 616, "Account (readonly):");
+            drawTextLine(cs, bodyFont, 10, PAGE_MARGIN, 586, "Notes (multiline):");
+            drawTextLine(cs, bodyFont, 10, PAGE_MARGIN, 496, "Agree checkbox:");
+            drawTextLine(cs, bodyFont, 10, PAGE_MARGIN, 466, "Radio option:");
+            drawTextLine(cs, bodyFont, 10, PAGE_MARGIN, 436, "Combo (country):");
+            drawTextLine(cs, bodyFont, 10, PAGE_MARGIN, 406, "List (priority):");
+            drawTextLine(cs, bodyFont, 10, PAGE_MARGIN, 348, "Age (18-99, JS validate):");
+            drawTextLine(cs, bodyFont, 10, PAGE_MARGIN, 318, "Date (YYYY-MM-DD, JS validate):");
+            drawTextLine(cs, bodyFont, 10, PAGE_MARGIN, 278, "Signature:");
         }
 
         PDAcroForm form = new PDAcroForm(doc);
@@ -267,7 +443,7 @@ public class TestPdfGenerator {
         form.setNeedAppearances(true);
 
         PDResources resources = new PDResources();
-        COSName fontName = resources.add(helvetica);
+        COSName fontName = resources.add(bodyFont);
         form.setDefaultResources(resources);
         form.setDefaultAppearance("/" + fontName.getName() + " 10 Tf 0 g");
 
@@ -519,31 +695,242 @@ public class TestPdfGenerator {
     }
 
     private static PDComplexFileSpecification buildEmbeddedFile(PDDocument doc, Path file, String mimeType) throws IOException {
+        return buildEmbeddedFile(doc, file, file.getFileName().toString(), mimeType);
+    }
+
+    private static PDComplexFileSpecification buildEmbeddedFile(PDDocument doc, Path file, String displayName, String mimeType) throws IOException {
         byte[] data = Files.readAllBytes(file);
         PDEmbeddedFile embeddedFile = new PDEmbeddedFile(doc, new ByteArrayInputStream(data));
         embeddedFile.setSubtype(mimeType);
         embeddedFile.setSize(data.length);
 
         PDComplexFileSpecification spec = new PDComplexFileSpecification();
-        spec.setFile(file.getFileName().toString());
+        spec.setFile(displayName);
         spec.setEmbeddedFile(embeddedFile);
         return spec;
     }
 
-    private static PDFont loadEmbeddedFontOrFallback(PDDocument doc, Path fontPath, PDFont fallback) {
-        if (fontPath == null || !Files.exists(fontPath)) {
-            return fallback;
+    private static FontEmbeddingResult embedFontsFromDirectory(PDDocument doc, Path fontsDir) throws IOException {
+        List<Path> fontFiles = discoverFontFiles(fontsDir);
+        Map<String, PDFont> embeddedFonts = new LinkedHashMap<>();
+        List<String> report = new ArrayList<>();
+        Map<String, Boolean> hasPfbByStem = new HashMap<>();
+        Map<String, Boolean> hasAfmByStem = new HashMap<>();
+
+        for (Path fontFile : fontFiles) {
+            FontAssetType type = detectFontAssetType(fontFile);
+            String fileName = toEmbeddedFontEntryName(fontsDir, fontFile);
+            switch (type) {
+                case TRUE_TYPE, OPEN_TYPE, TRUE_TYPE_COLLECTION -> {
+                    try (InputStream inputStream = Files.newInputStream(fontFile)) {
+                        PDFont font = PDType0Font.load(doc, inputStream, false);
+                        embeddedFonts.put(fileName.toLowerCase(), font);
+                        report.add(fileName + " => " + type + " -> embedded as PDF font");
+                    } catch (Exception ex) {
+                        report.add(fileName + " => " + type + " -> embed failed, kept as attachment asset");
+                    }
+                }
+                case TYPE1_PFB -> {
+                    hasPfbByStem.put(fileStem(fileName), true);
+                    report.add(fileName + " => TYPE1_PFB -> embedded as attachment asset");
+                }
+                case TYPE1_AFM -> {
+                    hasAfmByStem.put(fileStem(fileName), true);
+                    report.add(fileName + " => TYPE1_AFM -> embedded as attachment asset");
+                }
+                case UNKNOWN -> report.add(fileName + " => UNKNOWN -> embedded as attachment asset");
+            }
         }
-        try {
-            return PDType0Font.load(doc, fontPath.toFile());
-        } catch (Exception ex) {
-            return fallback;
+
+        for (Map.Entry<String, Boolean> entry : hasPfbByStem.entrySet()) {
+            String stem = entry.getKey();
+            if (Boolean.TRUE.equals(entry.getValue()) && Boolean.TRUE.equals(hasAfmByStem.get(stem))) {
+                report.add(stem + ".pfb + " + stem + ".afm => Type1 pair detected, embedded via attachment strategy");
+            }
+        }
+
+        if (fontFiles.isEmpty()) {
+            report.add("No files found in /fonts");
+        }
+
+        return new FontEmbeddingResult(embeddedFonts, report, fontFiles);
+    }
+
+    private static List<Path> discoverFontFiles(Path fontsDir) throws IOException {
+        if (fontsDir == null || !Files.isDirectory(fontsDir)) {
+            return List.of();
+        }
+        try (var stream = Files.walk(fontsDir)) {
+            return stream
+                .filter(Files::isRegularFile)
+                .sorted(Comparator.comparing(path -> path.toString().toLowerCase()))
+                .toList();
         }
     }
 
-    private static void writeHeading(PDPageContentStream cs, String text, float y) throws IOException {
+    private static FontAssetType detectFontAssetType(Path fontFile) {
+        if (fontFile == null) {
+            return FontAssetType.UNKNOWN;
+        }
+        String name = fontFile.getFileName().toString().toLowerCase();
+        if (name.endsWith(".ttf")) {
+            return FontAssetType.TRUE_TYPE;
+        }
+        if (name.endsWith(".otf")) {
+            return FontAssetType.OPEN_TYPE;
+        }
+        if (name.endsWith(".ttc")) {
+            return FontAssetType.TRUE_TYPE_COLLECTION;
+        }
+        if (name.endsWith(".pfb")) {
+            return FontAssetType.TYPE1_PFB;
+        }
+        if (name.endsWith(".pfa") || name.endsWith(".t1")) {
+            return FontAssetType.TYPE1_PFB;
+        }
+        if (name.endsWith(".afm")) {
+            return FontAssetType.TYPE1_AFM;
+        }
+
+        try {
+            byte[] header = Files.readAllBytes(fontFile);
+            if (looksLikeOpenType(header)) {
+                return FontAssetType.TRUE_TYPE;
+            }
+        } catch (Exception ignored) {
+        }
+        return FontAssetType.UNKNOWN;
+    }
+
+    private static PDFont pickEmbeddedFont(FontEmbeddingResult embeddingResult, String... preferredFilenames) {
+        if (embeddingResult == null) {
+            return null;
+        }
+        for (String filename : preferredFilenames) {
+            PDFont font = embeddingResult.get(filename);
+            if (font != null) {
+                return font;
+            }
+        }
+        return embeddingResult.firstEmbeddedFont();
+    }
+
+    private static String detectFontMimeType(Path fontFile) {
+        if (fontFile == null) {
+            return "application/octet-stream";
+        }
+        String name = fontFile.getFileName().toString().toLowerCase();
+        if (name.endsWith(".ttf")) {
+            return "font/ttf";
+        }
+        if (name.endsWith(".otf")) {
+            return "font/otf";
+        }
+        if (name.endsWith(".ttc")) {
+            return "font/collection";
+        }
+        if (name.endsWith(".pfb")) {
+            return "application/x-font-type1";
+        }
+        if (name.endsWith(".pfa") || name.endsWith(".t1")) {
+            return "application/x-font-type1";
+        }
+        if (name.endsWith(".afm")) {
+            return "application/x-font-afm";
+        }
+        return "application/octet-stream";
+    }
+
+    private static String toEmbeddedFontEntryName(Path fontsRootDir, Path fontFile) {
+        if (fontFile == null) {
+            return "";
+        }
+        if (fontsRootDir == null) {
+            return fontFile.getFileName().toString();
+        }
+        try {
+            Path relative = fontsRootDir.relativize(fontFile);
+            return relative.toString().replace('\\', '/');
+        } catch (Exception ignored) {
+            return fontFile.getFileName().toString();
+        }
+    }
+
+    private static String fileStem(String filename) {
+        if (filename == null) {
+            return "";
+        }
+        int dot = filename.lastIndexOf('.');
+        if (dot <= 0) {
+            return filename.toLowerCase();
+        }
+        return filename.substring(0, dot).toLowerCase();
+    }
+
+    private static void verifyEmbeddedFontFiles(Path pdfPath, Path fontsDir) throws IOException {
+        List<Path> discoveredFonts = discoverFontFiles(fontsDir);
+        Set<String> expectedNames = new LinkedHashSet<>();
+        for (Path fontPath : discoveredFonts) {
+            expectedNames.add(toEmbeddedFontEntryName(fontsDir, fontPath));
+        }
+
+        Set<String> embeddedNames = new HashSet<>();
+        try (PDDocument document = Loader.loadPDF(pdfPath.toFile())) {
+            PDDocumentNameDictionary names = document.getDocumentCatalog().getNames();
+            if (names != null) {
+                PDEmbeddedFilesNameTreeNode embeddedFiles = names.getEmbeddedFiles();
+                if (embeddedFiles != null) {
+                    Map<String, PDComplexFileSpecification> fileMap = embeddedFiles.getNames();
+                    if (fileMap != null) {
+                        embeddedNames.addAll(fileMap.keySet());
+                    }
+                }
+            }
+        }
+
+        List<String> missing = new ArrayList<>();
+        for (String expected : expectedNames) {
+            if (!embeddedNames.contains(expected)) {
+                missing.add(expected);
+            }
+        }
+
+        if (!missing.isEmpty()) {
+            throw new IOException("Missing embedded font file entries in PDF: " + String.join(", ", missing));
+        }
+
+        System.out.println("Embedded font files verified: " + expectedNames.size() + " present in Embedded Files name tree.");
+    }
+
+    private static PDFont loadRequiredEmbeddedFont(PDDocument doc, Path fontPath, String fontLabel) throws IOException {
+        if (fontPath == null || !Files.exists(fontPath)) {
+            throw new IOException("Required font not found for embedding: " + fontLabel + " (" + fontPath + ")");
+        }
+        try {
+            try (InputStream inputStream = Files.newInputStream(fontPath)) {
+                return PDType0Font.load(doc, inputStream, false);
+            }
+        } catch (Exception ex) {
+            throw new IOException("Could not load embedded font: " + fontLabel + " from " + fontPath, ex);
+        }
+    }
+
+    private static PDFont loadOptionalEmbeddedFont(PDDocument doc, Path fontPath, String fontLabel) {
+        if (fontPath == null || !Files.exists(fontPath)) {
+            return null;
+        }
+        try {
+            try (InputStream inputStream = Files.newInputStream(fontPath)) {
+                return PDType0Font.load(doc, inputStream, false);
+            }
+        } catch (Exception ignored) {
+            return null;
+        }
+    }
+
+    private static void writeHeading(PDPageContentStream cs, PDFont headingFont, String text, float y) throws IOException {
         cs.beginText();
-        cs.setFont(new PDType1Font(Standard14Fonts.FontName.HELVETICA_BOLD), 16);
+        cs.setFont(headingFont, 16);
         cs.newLineAtOffset(PAGE_MARGIN, y);
         cs.showText(text);
         cs.endText();
@@ -557,8 +944,8 @@ public class TestPdfGenerator {
         cs.endText();
     }
 
-    private static void drawCaption(PDPageContentStream cs, float x, float y, String text) throws IOException {
-        drawTextLine(cs, new PDType1Font(Standard14Fonts.FontName.HELVETICA), 10, x, y, text);
+    private static void drawCaption(PDPageContentStream cs, PDFont bodyFont, float x, float y, String text) throws IOException {
+        drawTextLine(cs, bodyFont, 10, x, y, text);
     }
 
     private static void drawBox(PDPageContentStream cs, float x, float y, float w, float h) throws IOException {
@@ -628,10 +1015,11 @@ public class TestPdfGenerator {
         return path;
     }
 
-    private static Path createAttachmentPdf(Path path) throws IOException {
+    private static Path createAttachmentPdf(Path path, Path bodyFontPath) throws IOException {
         try (PDDocument attachmentDoc = new PDDocument()) {
             PDPage p = new PDPage(PDRectangle.A6);
             attachmentDoc.addPage(p);
+            PDFont bodyFont = loadRequiredEmbeddedFont(attachmentDoc, bodyFontPath, "AttachmentBodyFont");
             attachmentDoc.setDocumentInformation(createDocumentInformation(
                 "PDFalyzer Embedded Attachment",
                 "PDFalyzer",
@@ -640,9 +1028,9 @@ public class TestPdfGenerator {
                 ZonedDateTime.now()
             ));
             try (PDPageContentStream cs = new PDPageContentStream(attachmentDoc, p)) {
-                drawTextLine(cs, new PDType1Font(Standard14Fonts.FontName.HELVETICA_BOLD), 12, 24, 380,
+                drawTextLine(cs, bodyFont, 12, 24, 380,
                         "Embedded Attachment PDF");
-                drawTextLine(cs, new PDType1Font(Standard14Fonts.FontName.HELVETICA), 10, 24, 360,
+                drawTextLine(cs, bodyFont, 10, 24, 360,
                         "Created by TestPdfGenerator");
             }
             attachmentDoc.save(path.toFile());
@@ -666,7 +1054,31 @@ public class TestPdfGenerator {
         if (Files.exists(target)) {
             return target;
         }
-        return ensureBinary(target, urls);
+        Path downloaded = ensureBinary(target, urls);
+        if (downloaded != null && Files.exists(downloaded)) {
+            String lower = target.getFileName().toString().toLowerCase();
+            if (lower.endsWith(".ttf") || lower.endsWith(".otf")) {
+                try {
+                    byte[] head = Files.readAllBytes(downloaded);
+                    if (!looksLikeOpenType(head)) {
+                        Path extracted = extractFontFromZip(downloaded, target);
+                        if (extracted != null) return extracted;
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+        }
+        return downloaded;
+    }
+
+    private static Path ensureZipEntry(Path target, Path zipFile, String zipEntryName) {
+        if (Files.exists(target)) return target;
+        if (zipFile == null || !Files.exists(zipFile)) return null;
+        try {
+            return extractSpecificZipEntry(zipFile, zipEntryName, target);
+        } catch (Exception ignored) {
+            return null;
+        }
     }
 
     private static Path ensureBinary(Path target, List<String> urls) {
@@ -701,5 +1113,80 @@ public class TestPdfGenerator {
             return true;
         }
         return false;
+    }
+
+    private static void copyIfPresent(Path source, Path target) {
+        if (source == null || !Files.exists(source)) return;
+        try {
+            if (target.getParent() != null) {
+                Files.createDirectories(target.getParent());
+            }
+            Files.copy(source, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static void mirrorDirectoryTree(Path sourceRoot, Path targetRoot) {
+        if (sourceRoot == null || targetRoot == null || !Files.isDirectory(sourceRoot)) {
+            return;
+        }
+        try (var stream = Files.walk(sourceRoot)) {
+            stream
+                .filter(Files::isRegularFile)
+                .forEach(source -> {
+                    try {
+                        Path relative = sourceRoot.relativize(source);
+                        Path target = targetRoot.resolve(relative);
+                        if (target.getParent() != null) {
+                            Files.createDirectories(target.getParent());
+                        }
+                        Files.copy(source, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                    } catch (Exception ignored) {
+                    }
+                });
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static boolean looksLikeOpenType(byte[] bytes) {
+        if (bytes == null || bytes.length < 4) return false;
+        int b0 = bytes[0] & 0xFF;
+        int b1 = bytes[1] & 0xFF;
+        int b2 = bytes[2] & 0xFF;
+        int b3 = bytes[3] & 0xFF;
+        if (b0 == 0x00 && b1 == 0x01 && b2 == 0x00 && b3 == 0x00) return true; // TTF
+        if (b0 == 'O' && b1 == 'T' && b2 == 'T' && b3 == 'O') return true; // OTF
+        if (b0 == 't' && b1 == 't' && b2 == 'c' && b3 == 'f') return true; // TTC
+        return false;
+    }
+
+    private static Path extractFontFromZip(Path zipPath, Path target) {
+        String targetName = target.getFileName().toString().toLowerCase();
+        try (ZipInputStream zin = new ZipInputStream(Files.newInputStream(zipPath))) {
+            ZipEntry entry;
+            while ((entry = zin.getNextEntry()) != null) {
+                if (entry.isDirectory()) continue;
+                String name = Paths.get(entry.getName()).getFileName().toString().toLowerCase();
+                if (!name.equals(targetName)) continue;
+                Files.copy(zin, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                return target;
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    private static Path extractSpecificZipEntry(Path zipPath, String zipEntryName, Path target) throws IOException {
+        String wanted = zipEntryName.replace('\\', '/');
+        try (ZipInputStream zin = new ZipInputStream(Files.newInputStream(zipPath))) {
+            ZipEntry entry;
+            while ((entry = zin.getNextEntry()) != null) {
+                if (entry.isDirectory()) continue;
+                if (!entry.getName().replace('\\', '/').equals(wanted)) continue;
+                Files.copy(zin, target, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+                return target;
+            }
+        }
+        return null;
     }
 }

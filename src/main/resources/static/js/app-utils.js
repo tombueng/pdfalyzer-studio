@@ -84,6 +84,21 @@ PDFalyzer.Utils = (function ($) {
         return $('<div>').text(text).html();
     }
 
+    function formatBytes(bytes) {
+        var value = Number(bytes);
+        if (!isFinite(value) || value < 0) return '0 B';
+        if (value < 1024) return Math.round(value) + ' B';
+        var units = ['KB', 'MB', 'GB', 'TB'];
+        var unitIndex = -1;
+        while (value >= 1024 && unitIndex < units.length - 1) {
+            value = value / 1024;
+            unitIndex += 1;
+        }
+        var decimals = value >= 10 ? 1 : 2;
+        var text = value.toFixed(decimals).replace(/\.0+$/, '').replace(/(\.\d*[1-9])0+$/, '$1');
+        return text + ' ' + units[unitIndex];
+    }
+
     function reportClientError(payload) {
         if (!payload) return;
         var body = JSON.stringify(payload);
@@ -108,7 +123,32 @@ PDFalyzer.Utils = (function ($) {
         }
     }
 
+    function refreshAfterMutation(updatedTree) {
+        var P = window.PDFalyzer;
+        if (!P || !P.state) return;
+
+        if (updatedTree) {
+            P.state.treeData = updatedTree;
+        }
+
+        if (P.state.treeData) {
+            if (P.Tabs && P.Tabs.switchTab && P.state.currentTab) {
+                P.Tabs.switchTab(P.state.currentTab);
+            } else if (P.Tree && P.Tree.render) {
+                P.Tree.render(P.state.treeData);
+            }
+        }
+
+        if (P.Viewer && P.Viewer.loadPdf && P.state.sessionId) {
+            P.Viewer.loadPdf(P.state.sessionId, {
+                preserveView: true,
+                smoothSwap: true
+            });
+        }
+    }
+
     return { showLoading: showLoading, hideLoading: hideLoading,
              toast: toast, apiFetch: apiFetch, escapeHtml: escapeHtml,
-             reportClientError: reportClientError };
+             reportClientError: reportClientError, formatBytes: formatBytes,
+             refreshAfterMutation: refreshAfterMutation };
 })(jQuery);

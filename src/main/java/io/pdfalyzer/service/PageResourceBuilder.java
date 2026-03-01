@@ -5,14 +5,21 @@ import org.apache.pdfbox.cos.*;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDResources;
 import org.apache.pdfbox.pdmodel.font.PDFont;
+import org.apache.pdfbox.pdmodel.graphics.image.PDImage;
 import org.apache.pdfbox.pdmodel.graphics.PDXObject;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
+import org.apache.pdfbox.contentstream.PDFGraphicsStreamEngine;
+import org.apache.pdfbox.util.Matrix;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
+import java.awt.geom.Point2D;
+import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Builds the Fonts and Images sub-nodes for a single page's Resources node.
@@ -77,6 +84,7 @@ public class PageResourceBuilder {
     /** Build an "Images (N)" folder node for a page, or null if no images. */
     public PdfNode buildPageImagesNode(PDPage page, PDResources resources,
                                         int pageIndex, CosNodeBuilder.ParseContext ctx) {
+        Map<String, double[]> imageBoundsByKey = extractImageBoundsByObjectKey(page, ctx);
         int pageObjNum = -1;
         int pageGenNum = 0;
         try {
@@ -110,6 +118,13 @@ public class PageResourceBuilder {
                     imgNode.addProperty("BitsPerComponent", String.valueOf(img.getBitsPerComponent()));
                     imgNode.setCosType("COSStream");
                     resolveImageObjectNumber(img, imgNode, pageObjNum, pageGenNum, ctx);
+                    String imageKey = toObjectKey(imgNode.getObjectNumber(), imgNode.getGenerationNumber());
+                    if (imageKey != null) {
+                        double[] bounds = imageBoundsByKey.get(imageKey);
+                        if (bounds != null) {
+                            imgNode.setBoundingBox(bounds);
+                        }
+                    }
                     if (pageObjNum >= 0) {
                         List<String> kp = new ArrayList<>();
                         kp.add("Resources"); kp.add("XObject");
@@ -159,5 +174,138 @@ public class PageResourceBuilder {
             imgNode.setObjectNumber(fallbackObjNum);
             imgNode.setGenerationNumber(fallbackGenNum);
         }
+    }
+
+    private Map<String, double[]> extractImageBoundsByObjectKey(PDPage page,
+                                                                  CosNodeBuilder.ParseContext ctx) {
+        Map<String, double[]> boundsByKey = new HashMap<>();
+        try {
+            new PDFGraphicsStreamEngine(page) {
+                @Override
+                public void drawImage(PDImage pdImage) throws IOException {
+                    int objNum = -1;
+                    int genNum = 0;
+                    COSBase cosObj = null;
+
+                    if (pdImage instanceof PDImageXObject) {
+                        cosObj = ((PDImageXObject) pdImage).getCOSObject();
+                    }
+
+                    if (cosObj instanceof COSObject) {
+                        objNum = (int) ((COSObject) cosObj).getObjectNumber();
+                        genNum = (int) ((COSObject) cosObj).getGenerationNumber();
+                    } else if (cosObj instanceof COSStream) {
+                        COSObjectKey key = null;
+                        try {
+                            key = ((COSStream) cosObj).getKey();
+                        } catch (Exception ignored) {
+                        }
+                        if (key == null) {
+                            key = cosBuilder.findObjectKeyInDocument(cosObj, ctx.doc);
+                        }
+                        if (key != null) {
+                            objNum = (int) key.getNumber();
+                            genNum = (int) key.getGeneration();
+                        }
+                    }
+
+                    String key = toObjectKey(objNum, genNum);
+                    if (key == null) return;
+
+                    Matrix ctm = getGraphicsState().getCurrentTransformationMatrix();
+                    Point2D.Float p0 = ctm.transformPoint(0, 0);
+                    Point2D.Float p1 = ctm.transformPoint(1, 0);
+                    Point2D.Float p2 = ctm.transformPoint(1, 1);
+                    Point2D.Float p3 = ctm.transformPoint(0, 1);
+
+                    double minX = Math.min(Math.min(p0.x, p1.x), Math.min(p2.x, p3.x));
+                    double maxX = Math.max(Math.max(p0.x, p1.x), Math.max(p2.x, p3.x));
+                    double minY = Math.min(Math.min(p0.y, p1.y), Math.min(p2.y, p3.y));
+                    double maxY = Math.max(Math.max(p0.y, p1.y), Math.max(p2.y, p3.y));
+
+                    double[] box = new double[] {
+                            minX,
+                            minY,
+                            Math.max(0, maxX - minX),
+                            Math.max(0, maxY - minY)
+                    };
+
+                    if (box[2] <= 0 || box[3] <= 0) return;
+
+                    double[] existing = boundsByKey.get(key);
+                    if (existing == null) {
+                        boundsByKey.put(key, box);
+                    } else {
+                        double unionMinX = Math.min(existing[0], box[0]);
+                        double unionMinY = Math.min(existing[1], box[1]);
+                        double unionMaxX = Math.max(existing[0] + existing[2], box[0] + box[2]);
+                        double unionMaxY = Math.max(existing[1] + existing[3], box[1] + box[3]);
+                        boundsByKey.put(key, new double[] {
+                                unionMinX,
+                                unionMinY,
+                                Math.max(0, unionMaxX - unionMinX),
+                                Math.max(0, unionMaxY - unionMinY)
+                        });
+                    }
+                }
+
+                @Override
+                public void appendRectangle(Point2D p0, Point2D p1, Point2D p2, Point2D p3) {
+                }
+
+                @Override
+                public void clip(int windingRule) {
+                }
+
+                @Override
+                public void moveTo(float x, float y) {
+                }
+
+                @Override
+                public void lineTo(float x, float y) {
+                }
+
+                @Override
+                public void curveTo(float x1, float y1, float x2, float y2, float x3, float y3) {
+                }
+
+                @Override
+                public Point2D getCurrentPoint() {
+                    return new Point2D.Float(0, 0);
+                }
+
+                @Override
+                public void closePath() {
+                }
+
+                @Override
+                public void endPath() {
+                }
+
+                @Override
+                public void strokePath() {
+                }
+
+                @Override
+                public void fillPath(int windingRule) {
+                }
+
+                @Override
+                public void fillAndStrokePath(int windingRule) {
+                }
+
+                @Override
+                public void shadingFill(COSName shadingName) {
+                }
+            }.processPage(page);
+        } catch (Exception e) {
+            log.debug("Could not extract image bounds for page", e);
+        }
+        return boundsByKey;
+    }
+
+    private String toObjectKey(int objNum, int genNum) {
+        if (objNum < 0) return null;
+        return objNum + ":" + Math.max(0, genNum);
     }
 }

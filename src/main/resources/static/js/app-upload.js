@@ -38,8 +38,9 @@ PDFalyzer.Upload = (function ($, P) {
         .done(function (data) {
             P.state.sessionId = data.sessionId;
             P.state.treeData  = data.tree;
+            var humanSize = P.Utils.formatBytes(file && file.size ? file.size : 0);
             $('#statusFilename').html('<i class="fas fa-file-pdf"></i> ' + data.filename);
-            $('#statusPages').html('<i class="fas fa-copy"></i> ' + data.pageCount + ' pages');
+            $('#statusPages').html('<i class="fas fa-copy"></i> ' + data.pageCount + ' pages • ' + humanSize);
             $('#statusSession').html('<i class="fas fa-clock"></i> Session active');
             $('#searchInput').prop('disabled', false);
             $('#downloadBtn').prop('disabled', false);
@@ -68,14 +69,36 @@ PDFalyzer.Upload = (function ($, P) {
 
     function loadSampleOnInit() {
         if (P.state.sessionId || _inFlight) return;
-        fetch('/test.pdf', { cache: 'no-store' })
-            .then(function (resp) {
-                if (!resp.ok) throw new Error('not found');
-                return resp.blob();
-            })
-            .then(function (blob) {
+
+        var sampleCandidates = [
+            '/api/sample/latest',
+            '/test.pdf'
+        ];
+
+        function tryLoadSample(index) {
+            if (index >= sampleCandidates.length) {
+                return Promise.reject(new Error('no sample available'));
+            }
+
+            var baseUrl = sampleCandidates[index];
+            var cacheBust = (baseUrl.indexOf('?') >= 0 ? '&' : '?') + 'v=' + Date.now();
+            return fetch(baseUrl + cacheBust, { cache: 'no-store' })
+                .then(function (resp) {
+                    if (!resp.ok) throw new Error('not found');
+                    return resp.blob().then(function (blob) {
+                        var name = baseUrl.substring(baseUrl.lastIndexOf('/') + 1) || 'sample.pdf';
+                        return { blob: blob, fileName: name };
+                    });
+                })
+                .catch(function () {
+                    return tryLoadSample(index + 1);
+                });
+        }
+
+        tryLoadSample(0)
+            .then(function (result) {
                 if (P.state.sessionId || _inFlight) return;
-                upload(new File([blob], 'test.pdf', { type: 'application/pdf' }));
+                upload(new File([result.blob], result.fileName, { type: 'application/pdf' }));
             })
             .catch(function () {});
     }
