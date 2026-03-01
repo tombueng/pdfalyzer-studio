@@ -1,0 +1,97 @@
+package io.pdfalyzer.web;
+
+import io.pdfalyzer.model.*;
+import io.pdfalyzer.service.*;
+import org.springframework.http.ResponseEntity;
+import org.springframework.web.bind.annotation.*;
+
+import java.io.IOException;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * Handles all PDF-editing endpoints: COS attribute updates, form-field CRUD, etc.
+ */
+@RestController
+@RequestMapping("/api")
+public class EditApiController {
+
+    private final PdfService pdfService;
+    private final CosEditService cosEditService;
+    private final PdfEditService pdfEditService;
+
+    public EditApiController(PdfService pdfService,
+                              CosEditService cosEditService,
+                              PdfEditService pdfEditService) {
+        this.pdfService = pdfService;
+        this.cosEditService = cosEditService;
+        this.pdfEditService = pdfEditService;
+    }
+
+    @PostMapping("/cos/{sessionId}/update")
+    public ResponseEntity<Map<String, Object>> updateCosValue(
+            @PathVariable String sessionId,
+            @RequestBody CosUpdateRequest request) throws IOException {
+        byte[] bytes = pdfService.getSessionPdfBytes(sessionId);
+        byte[] modified = cosEditService.updateCosValue(bytes, request);
+        pdfService.updateSessionPdf(sessionId, modified);
+        return treeResponse(sessionId);
+    }
+
+    @PostMapping("/edit/{sessionId}/add-field")
+    public ResponseEntity<Map<String, Object>> addFormField(
+            @PathVariable String sessionId,
+            @RequestBody FormFieldRequest request) throws IOException {
+        byte[] bytes = pdfService.getSessionPdfBytes(sessionId);
+        byte[] modified = pdfEditService.addFormField(bytes, request);
+        pdfService.updateSessionPdf(sessionId, modified);
+        return treeResponse(sessionId);
+    }
+
+    @DeleteMapping("/edit/{sessionId}/field/{fieldName}")
+    public ResponseEntity<Map<String, Object>> deleteFormField(
+            @PathVariable String sessionId,
+            @PathVariable String fieldName) throws IOException {
+        byte[] bytes = pdfService.getSessionPdfBytes(sessionId);
+        byte[] modified = pdfEditService.deleteFormField(bytes, fieldName);
+        pdfService.updateSessionPdf(sessionId, modified);
+        return treeResponse(sessionId);
+    }
+
+    @PostMapping("/edit/{sessionId}/field/{fieldName}/value")
+    public ResponseEntity<Map<String, Object>> setFieldValue(
+            @PathVariable String sessionId,
+            @PathVariable String fieldName,
+            @RequestBody Map<String, String> body) throws IOException {
+        String value = body.getOrDefault("value", "");
+        byte[] bytes = pdfService.getSessionPdfBytes(sessionId);
+        byte[] modified = pdfEditService.setFormFieldValue(bytes, fieldName, value);
+        pdfService.updateSessionPdf(sessionId, modified);
+        return treeResponse(sessionId);
+    }
+
+    @PostMapping("/edit/{sessionId}/field/{fieldName}/choices")
+    public ResponseEntity<Map<String, Object>> setComboChoices(
+            @PathVariable String sessionId,
+            @PathVariable String fieldName,
+            @RequestBody Map<String, List<String>> body) throws IOException {
+        List<String> choices = body.get("choices");
+        if (choices == null) {
+            return ResponseEntity.badRequest().<Map<String, Object>>build();
+        }
+        byte[] bytes = pdfService.getSessionPdfBytes(sessionId);
+        byte[] modified = pdfEditService.setComboChoices(bytes, fieldName, choices);
+        pdfService.updateSessionPdf(sessionId, modified);
+        return treeResponse(sessionId);
+    }
+
+    private ResponseEntity<Map<String, Object>> treeResponse(String sessionId) {
+        PdfSession session = pdfService.getSession(sessionId);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("sessionId", sessionId);
+        result.put("pageCount", session.getPageCount());
+        result.put("tree", session.getTreeRoot());
+        return ResponseEntity.ok(result);
+    }
+}
