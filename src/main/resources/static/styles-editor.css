@@ -243,8 +243,20 @@
     box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
 }
 
+.field-create-modal .modal-content {
+    border: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(15, 52, 96, 0.96), rgba(22, 33, 62, 0.98));
+    box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
+}
+
 .field-options-modal .modal-header,
 .field-options-modal .modal-footer {
+    border-color: var(--border);
+    background: rgba(0, 0, 0, 0.12);
+}
+
+.field-create-modal .modal-header,
+.field-create-modal .modal-footer {
     border-color: var(--border);
     background: rgba(0, 0, 0, 0.12);
 }
@@ -254,7 +266,19 @@
     font-size: 1rem;
 }
 
+.field-create-modal .modal-title {
+    color: var(--accent);
+    font-size: 1rem;
+}
+
 .field-option-block {
+    border: 1px solid rgba(0, 212, 255, 0.22);
+    border-radius: 8px;
+    padding: 8px 10px;
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.field-create-block {
     border: 1px solid rgba(0, 212, 255, 0.22);
     border-radius: 8px;
     padding: 8px 10px;
@@ -288,8 +312,21 @@
     color: var(--text);
 }
 
+.field-create-modal .form-control,
+.field-create-modal textarea {
+    border-color: var(--border);
+    background: rgba(0, 0, 0, 0.24);
+    color: var(--text);
+}
+
 .field-options-modal .form-control:focus,
 .field-options-modal textarea:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-dim);
+}
+
+.field-create-modal .form-control:focus,
+.field-create-modal textarea:focus {
     border-color: var(--accent);
     box-shadow: 0 0 0 2px var(--accent-dim);
 }
