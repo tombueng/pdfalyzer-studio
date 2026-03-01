@@ -37,5 +37,8 @@
     at v.handle (jquery.min.js:2:38006)
 
 - add a way to catch JS-errors in the browser when running UIRendering tests and also for the application send JS-Erros to the backen for logging on the backend log.
+- when adding new form field, do not use browser-question but use the "options" dialog (augment it for missing data like ID)
+- on acroform, page and image node in the tree, teh info block is not remove when node is collapsed
+
 
 
