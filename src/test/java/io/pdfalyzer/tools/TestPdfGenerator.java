@@ -1,5 +1,7 @@
 package io.pdfalyzer.tools;
 
+import ch.qos.logback.classic.Level;
+import ch.qos.logback.classic.Logger;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -37,6 +39,7 @@ import org.apache.pdfbox.pdmodel.PDResources;
 import org.apache.pdfbox.pdmodel.common.PDMetadata;
 import org.apache.pdfbox.pdmodel.PDDocumentNameDictionary;
 import org.apache.pdfbox.pdmodel.PDEmbeddedFilesNameTreeNode;
+import org.slf4j.LoggerFactory;
 
 import javax.imageio.ImageIO;
 import java.awt.Color;
@@ -138,6 +141,9 @@ public class TestPdfGenerator {
             + "■ □ ▢ ▣ ▤ ▥ ▦ ▧ ▨ ▩ ▲ △ ▼ ▽ ◆ ◇ ○ ● ◐ ◑ ◒ ◓ ◔ ◕ ◎ ◉ ◌.";
 
     public static void main(String[] args) throws Exception {
+        Logger pdfType0FontLogger = (Logger) LoggerFactory.getLogger("org.apache.pdfbox.pdmodel.font.PDType0Font");
+        pdfType0FontLogger.setLevel(Level.ERROR);
+
         boolean hasOutputArg = args.length > 0;
         Path outDir = hasOutputArg
             ? Paths.get(args[0]).toAbsolutePath().normalize()
