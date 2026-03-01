@@ -74,11 +74,10 @@
             <div class="tree-tabs">
                 <button class="tab-btn active" data-tab="structure"><i class="fas fa-sitemap me-1"></i>Structure</button>
                 <button class="tab-btn" data-tab="forms"><i class="fas fa-wpforms me-1"></i>Forms</button>
-                <button class="tab-btn" data-tab="bookmarks"><i class="fas fa-bookmark me-1"></i>Bookmarks</button>
-                <button class="tab-btn" data-tab="pages"><i class="fas fa-copy me-1"></i>Pages</button>
                 <button class="tab-btn" data-tab="fonts"><i class="fas fa-font me-1"></i>Fonts</button>
                 <button class="tab-btn" data-tab="validation"><i class="fas fa-check-circle me-1"></i>Validation</button>
                 <button class="tab-btn" data-tab="rawcos"><i class="fas fa-database me-1"></i>Raw COS</button>
+                <button class="tab-btn" data-tab="bookmarks"><i class="fas fa-bookmark me-1"></i>Bookmarks</button>
             </div>
             <div id="treeContent">
                 <div class="text-muted text-center mt-5" style="font-size:13px;">
@@ -100,6 +99,21 @@
 
     <!-- Toast Container -->
     <div id="toastContainer"></div>
+
+    <!-- Resource preview modal -->
+    <div class="modal fade" id="resourcePreviewModal" tabindex="-1" aria-labelledby="resourcePreviewLabel" aria-hidden="true">
+      <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title" id="resourcePreviewLabel">Resource Preview</h5>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+          </div>
+          <div class="modal-body" id="resourcePreviewBody">
+            <!-- injected content -->
+          </div>
+        </div>
+      </div>
+    </div>
 
     <!-- pdf.js -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
