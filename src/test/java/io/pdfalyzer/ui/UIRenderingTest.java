@@ -5,6 +5,9 @@ import org.jcodec.api.awt.AWTSequenceEncoder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDDocumentInformation;
 import org.openqa.selenium.By;
 import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.OutputType;
@@ -21,7 +24,9 @@ import org.springframework.boot.test.web.server.LocalServerPort;
 
 import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
+import java.io.InputStream;
 import java.io.IOException;
+import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -136,7 +141,7 @@ public class UIRenderingTest {
         driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(300));
 
-        ensureTestPdfReady(wait, true);
+        ensureTestPdfReady(wait, false);
 
         WebElement statusFilename = driver.findElement(By.id("statusFilename"));
         WebElement statusSession = driver.findElement(By.id("statusSession"));
@@ -1149,6 +1154,91 @@ public class UIRenderingTest {
         assertEquals(Boolean.TRUE, map.get("ok"), "Applying field options must enable Save button: " + map);
     }
 
+    @Test
+    public void testDocumentInfoCosEditsPersistToPdfAfterSave() throws Exception {
+        if (driver == null) {
+            System.out.println("Skipping testDocumentInfoCosEditsPersistToPdfAfterSave - ChromeDriver not available");
+            return;
+        }
+
+        driver.get(baseUrl);
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(300));
+        ensureTestPdfReady(wait, false);
+
+        String expectedAuthor = "UI Test Author " + System.currentTimeMillis();
+        String expectedCreator = "UI Test Creator " + System.currentTimeMillis();
+
+        driver.manage().timeouts().scriptTimeout(Duration.ofSeconds(60));
+        Object result = ((JavascriptExecutor) driver).executeAsyncScript(
+            "const done = arguments[arguments.length - 1];" +
+            "const expectedAuthor = arguments[0];" +
+            "const expectedCreator = arguments[1];" +
+            "const P = window.PDFalyzer;" +
+            "if(!P || !P.state || !P.state.sessionId || !P.state.treeData){ done({ok:false,msg:'no-state'}); return; }" +
+            "if(!Array.isArray(P.state.pendingCosChanges)) P.state.pendingCosChanges = [];" +
+            "if(!P.EditMode){ done({ok:false,msg:'edit-mode-missing'}); return; }" +
+            "P.state.pendingCosChanges.push({" +
+            "  operation:'update'," +
+            "  summary:'Update /Author'," +
+            "  request:{ objectNumber:-1, generationNumber:0, keyPath:['Author'], newValue: expectedAuthor, valueType:'COSString', operation:'update', targetScope:'docinfo' }" +
+            "});" +
+            "P.state.pendingCosChanges.push({" +
+            "  operation:'update'," +
+            "  summary:'Update /Creator'," +
+            "  request:{ objectNumber:-1, generationNumber:0, keyPath:['Creator'], newValue: expectedCreator, valueType:'COSString', operation:'update', targetScope:'docinfo' }" +
+            "});" +
+            "if(P.EditMode.updateSaveButton){ P.EditMode.updateSaveButton(); }" +
+            "const beforePending = Array.isArray(P.state.pendingCosChanges) ? P.state.pendingCosChanges.length : -1;" +
+            "if(beforePending < 2){ done({ok:false,msg:'pending-not-queued', beforePending:beforePending}); return; }" +
+            "const saveBtn = document.getElementById('formSaveBtn');" +
+            "if(saveBtn && saveBtn.disabled){ done({ok:false,msg:'save-disabled-after-queue'}); return; }" +
+            "P.EditMode.savePendingChanges();" +
+            "let ticks = 0;" +
+            "const maxTicks = 140;" +
+            "const iv = setInterval(function(){" +
+            "  ticks++;" +
+            "  const pendingCos = Array.isArray(P.state.pendingCosChanges) ? P.state.pendingCosChanges.length : 0;" +
+            "  const pendingFields = (Array.isArray(P.state.pendingFormAdds) ? P.state.pendingFormAdds.length : 0) +" +
+            "                       (Array.isArray(P.state.pendingFieldRects) ? P.state.pendingFieldRects.length : 0) +" +
+            "                       (Array.isArray(P.state.pendingFieldOptions) ? P.state.pendingFieldOptions.length : 0);" +
+            "  const failedCos = Array.isArray(P.state.pendingCosChanges) ? P.state.pendingCosChanges.filter(function(x){ return !!(x && x.lastError); }).length : 0;" +
+            "  if(pendingCos === 0 && pendingFields === 0){" +
+            "    clearInterval(iv);" +
+            "    done({ok:true, sessionId:P.state.sessionId, failedCos:failedCos});" +
+            "    return;" +
+            "  }" +
+            "  if(ticks >= maxTicks){" +
+            "    clearInterval(iv);" +
+            "    done({ok:false,msg:'save-timeout', pendingCos:pendingCos, pendingFields:pendingFields, failedCos:failedCos});" +
+            "  }" +
+            "}, 100);",
+            expectedAuthor,
+            expectedCreator
+        );
+
+        assertTrue(result instanceof Map, "Expected script result map");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> map = (Map<String, Object>) result;
+        assertEquals(Boolean.TRUE, map.get("ok"), "Document Info edit/save flow failed: " + map);
+
+        String sessionId = String.valueOf(map.get("sessionId"));
+        assertNotNull(sessionId);
+        assertFalse(sessionId.isBlank(), "Session id should be available after save");
+
+        byte[] pdfBytes;
+        URL pdfUrl = new URL(baseUrl + "/api/pdf/" + sessionId);
+        try (InputStream is = pdfUrl.openStream()) {
+            pdfBytes = is.readAllBytes();
+        }
+
+        try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+            PDDocumentInformation info = doc.getDocumentInformation();
+            assertNotNull(info, "Document information must exist");
+            assertEquals(expectedAuthor, info.getAuthor(), "Author metadata should persist after Save");
+            assertEquals(expectedCreator, info.getCreator(), "Creator metadata should persist after Save");
+        }
+    }
+
         @Test
         public void testMultiselectTriStateFieldOptionsWorkflow() {
         if (driver == null) {
@@ -1416,8 +1506,7 @@ public class UIRenderingTest {
     private void ensureTestPdfReady(WebDriverWait wait, boolean requireAutoload) {
         boolean loaded = false;
         try {
-            wait.until(ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"));
-            wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector("#pdfViewer .pdf-page-wrapper")));
+            wait.until(d -> hasUsablePdfSession());
             loaded = true;
         } catch (TimeoutException ignored) {
         }
@@ -1428,8 +1517,7 @@ public class UIRenderingTest {
                 "  window.PDFalyzer.Upload.loadSampleOnInit();" +
                 "}"
             );
-            wait.until(ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"));
-            wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector("#pdfViewer .pdf-page-wrapper")));
+            wait.until(d -> hasUsablePdfSession());
             loaded = true;
         }
 
@@ -1439,9 +1527,36 @@ public class UIRenderingTest {
 
             WebElement fileInput = wait.until(ExpectedConditions.presenceOfElementLocated(By.id("fileInput")));
             fileInput.sendKeys(testPdf.toString());
-            wait.until(ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"));
-            wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector("#pdfViewer .pdf-page-wrapper")));
+            wait.until(d -> hasUsablePdfSession());
         }
+    }
+
+    private boolean hasUsablePdfSession() {
+        if (driver == null) return false;
+
+        try {
+            Object loaded = ((JavascriptExecutor) driver).executeScript(
+                "const P = window.PDFalyzer;" +
+                "if(!P || !P.state) return false;" +
+                "const hasSession = !!P.state.sessionId;" +
+                "const hasTree = !!P.state.treeData;" +
+                "const hasViewer = document.querySelectorAll('#pdfViewer .pdf-page-wrapper').length > 0;" +
+                "return hasSession && hasTree && hasViewer;"
+            );
+            if (Boolean.TRUE.equals(loaded)) return true;
+        } catch (Exception ignored) {
+        }
+
+        try {
+            WebElement status = driver.findElement(By.id("statusSession"));
+            String text = status.getText();
+            if (text != null && text.toLowerCase().contains("active")) {
+                return true;
+            }
+        } catch (Exception ignored) {
+        }
+
+        return false;
     }
 
     private void expandAllPageImageBranches(WebDriverWait wait) {

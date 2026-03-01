@@ -109,6 +109,7 @@ public class FontInspectorService {
 
     public List<Map<String, Object>> getFontUsageAreas(byte[] pdfBytes, int objNum, int genNum) throws IOException {
         try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+            Map<COSBase, COSObjectKey> objectKeyIndex = buildObjectKeyIndex(doc);
             List<Map<String, Object>> result = new ArrayList<>();
             for (int pageIndex = 0; pageIndex < doc.getNumberOfPages(); pageIndex++) {
                 Map<String, double[]> usage = new LinkedHashMap<>();
@@ -130,6 +131,9 @@ public class FontInspectorService {
                         try {
                             key = font.getCOSObject().getKey();
                         } catch (Exception ignored) {
+                        }
+                        if (key == null && font.getCOSObject() != null) {
+                            key = objectKeyIndex.get(font.getCOSObject());
                         }
                         if (key == null || key.getNumber() != objNum || key.getGeneration() != genNum) {
                             super.processTextPosition(text);
@@ -165,6 +169,183 @@ public class FontInspectorService {
                 }
             }
             return result;
+        }
+    }
+
+    public List<Map<String, Object>> getGlyphUsageAreas(byte[] pdfBytes, int objNum, int genNum, int glyphCode) throws IOException {
+        try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+            Map<COSBase, COSObjectKey> objectKeyIndex = buildObjectKeyIndex(doc);
+            List<Map<String, Object>> result = new ArrayList<>();
+
+            for (int pageIndex = 0; pageIndex < doc.getNumberOfPages(); pageIndex++) {
+                final int targetPage = pageIndex;
+                PDFTextStripper stripper = new PDFTextStripper() {
+                    {
+                        setStartPage(targetPage + 1);
+                        setEndPage(targetPage + 1);
+                    }
+
+                    @Override
+                    protected void processTextPosition(TextPosition text) {
+                        PDFont font = text.getFont();
+                        if (font == null) {
+                            super.processTextPosition(text);
+                            return;
+                        }
+
+                        COSObjectKey key = null;
+                        try {
+                            key = font.getCOSObject().getKey();
+                        } catch (Exception ignored) {
+                        }
+                        if (key == null && font.getCOSObject() != null) {
+                            key = objectKeyIndex.get(font.getCOSObject());
+                        }
+                        if (key == null || key.getNumber() != objNum || key.getGeneration() != genNum) {
+                            super.processTextPosition(text);
+                            return;
+                        }
+
+                        int[] codes = text.getCharacterCodes();
+                        if (codes == null || codes.length == 0) {
+                            super.processTextPosition(text);
+                            return;
+                        }
+                        boolean match = false;
+                        for (int code : codes) {
+                            if (code == glyphCode) {
+                                match = true;
+                                break;
+                            }
+                        }
+                        if (!match) {
+                            super.processTextPosition(text);
+                            return;
+                        }
+
+                        double x = text.getXDirAdj();
+                        double y = text.getYDirAdj();
+                        double w = text.getWidthDirAdj();
+                        double h = text.getHeightDir();
+                        if (w <= 0 || h <= 0) {
+                            super.processTextPosition(text);
+                            return;
+                        }
+
+                        Map<String, Object> row = new LinkedHashMap<>();
+                        row.put("fontName", safeFontName(font));
+                        row.put("pageIndex", targetPage);
+                        row.put("bbox", Arrays.asList(x, y - h, w, h));
+                        row.put("glyphCode", glyphCode);
+                        row.put("unicode", text.getUnicode());
+                        row.put("fontSize", text.getFontSizeInPt());
+                        result.add(row);
+
+                        super.processTextPosition(text);
+                    }
+                };
+                stripper.getText(doc);
+            }
+            return result;
+        }
+    }
+
+    public Map<String, Object> analyzeGlyphDetail(byte[] pdfBytes, int objNum, int genNum, int glyphCode) throws IOException {
+        try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+            Map<COSBase, COSObjectKey> objectKeyIndex = buildObjectKeyIndex(doc);
+            Map<String, FontRefAggregate> fonts = collectAllFonts(doc, objectKeyIndex);
+            String targetKey = objNum + ":" + genNum;
+            FontRefAggregate aggregate = fonts.get(targetKey);
+            if (aggregate == null) {
+                throw new IllegalArgumentException("Font object not found: " + objNum + " " + genNum);
+            }
+
+            Map<String, UsageStats> usage = collectUsageByFont(doc, targetKey, objectKeyIndex);
+            UsageStats stats = usage.getOrDefault(targetKey, new UsageStats());
+            PDFont font = aggregate.font;
+
+            String unicode = safeToUnicode(font, glyphCode);
+            Integer width = safeWidth(font, glyphCode);
+
+            Map<String, Object> detail = new LinkedHashMap<>();
+            detail.put("objectRef", objNum + " " + genNum + " R");
+            detail.put("fontName", safeFontName(font));
+            detail.put("fontType", font.getClass().getSimpleName().replace("PD", ""));
+            detail.put("embedded", font.isEmbedded());
+            detail.put("subset", isSubset(font));
+            detail.put("encoding", readEncoding(font));
+
+            FontDiagnostics.EncodingDiagnostics encodingDiagnostics = buildEncodingDiagnostics(font);
+            Map<String, Object> encoding = new LinkedHashMap<>();
+            encoding.put("hasToUnicode", encodingDiagnostics.isHasToUnicode());
+            encoding.put("encodingObject", encodingDiagnostics.getEncodingObject());
+            encoding.put("toUnicodeObject", encodingDiagnostics.getToUnicodeObject());
+            encoding.put("subtype", encodingDiagnostics.getSubtype());
+            encoding.put("baseFont", encodingDiagnostics.getBaseFont());
+            encoding.put("descendantFont", encodingDiagnostics.getDescendantFont());
+            detail.put("encodingDiagnostics", encoding);
+
+            Map<String, Object> glyph = new LinkedHashMap<>();
+            glyph.put("code", glyphCode);
+            glyph.put("codeHex", String.format("0x%X", glyphCode));
+            glyph.put("unicode", unicode == null ? "" : unicode);
+            glyph.put("unicodeHex", unicodeHex(unicode));
+            glyph.put("mapped", unicode != null && !unicode.isEmpty());
+            glyph.put("usedCount", stats.usedCodes.getOrDefault(glyphCode, 0));
+            glyph.put("width", width);
+            glyph.put("canEncodeMappedUnicode", unicode == null || unicode.isEmpty() || canEncode(font, unicode));
+
+            try {
+                org.apache.pdfbox.util.Vector displacement = font.getDisplacement(glyphCode);
+                if (displacement != null) {
+                    Map<String, Object> disp = new LinkedHashMap<>();
+                    disp.put("x", displacement.getX());
+                    disp.put("y", displacement.getY());
+                    glyph.put("displacement", disp);
+                }
+            } catch (Exception ignored) {
+            }
+            try {
+                org.apache.pdfbox.util.Vector positionVector = font.getPositionVector(glyphCode);
+                if (positionVector != null) {
+                    Map<String, Object> pos = new LinkedHashMap<>();
+                    pos.put("x", positionVector.getX());
+                    pos.put("y", positionVector.getY());
+                    glyph.put("positionVector", pos);
+                }
+            } catch (Exception ignored) {
+            }
+            detail.put("glyph", glyph);
+
+            PDFontDescriptor descriptor = font.getFontDescriptor();
+            if (descriptor != null) {
+                Map<String, Object> descriptorMap = new LinkedHashMap<>();
+                descriptorMap.put("fontName", descriptor.getFontName());
+                descriptorMap.put("fontFamily", descriptor.getFontFamily());
+                descriptorMap.put("flags", descriptor.getFlags());
+                descriptorMap.put("italicAngle", descriptor.getItalicAngle());
+                descriptorMap.put("ascent", descriptor.getAscent());
+                descriptorMap.put("descent", descriptor.getDescent());
+                descriptorMap.put("capHeight", descriptor.getCapHeight());
+                descriptorMap.put("xHeight", descriptor.getXHeight());
+                descriptorMap.put("stemV", descriptor.getStemV());
+                descriptorMap.put("avgWidth", descriptor.getAverageWidth());
+                descriptorMap.put("maxWidth", descriptor.getMaxWidth());
+                descriptorMap.put("missingWidth", descriptor.getMissingWidth());
+                if (descriptor.getFontBoundingBox() != null) {
+                    descriptorMap.put("fontBBox", descriptor.getFontBoundingBox().toString());
+                }
+                detail.put("fontDescriptor", descriptorMap);
+            }
+
+            List<Integer> pages = new ArrayList<>(new TreeSet<>(aggregate.pages));
+            detail.put("pagesUsed", pages);
+            detail.put("usageContexts", new ArrayList<>(new TreeSet<>(aggregate.contexts)));
+            detail.put("usagePagesForCode", new ArrayList<>(stats.usedCodePages.getOrDefault(glyphCode, Collections.emptySet())));
+            detail.put("unicodeSamplesForCode", stats.usedCodeUnicodeSamples.getOrDefault(glyphCode, List.of()));
+            detail.put("kerningNote", "Pair-kerning extraction is font-format specific and not always exposed by PDFBox. Displacement/position vectors and descriptor metrics are provided when available.");
+
+            return detail;
         }
     }
 
@@ -423,6 +604,7 @@ public class FontInspectorService {
                 if (codes != null) {
                     for (int code : codes) {
                         usage.usedCodes.merge(code, 1, Integer::sum);
+                        usage.usedCodePages.computeIfAbsent(code, k -> new LinkedHashSet<>()).add(getCurrentPageNo() - 1);
                     }
                 }
 
@@ -430,6 +612,13 @@ public class FontInspectorService {
                 if (unicode == null || unicode.isEmpty()) {
                     usage.positionsWithoutUnicode++;
                 } else {
+                    if (codes != null && codes.length == 1) {
+                        int code = codes[0];
+                        List<String> samples = usage.usedCodeUnicodeSamples.computeIfAbsent(code, k -> new ArrayList<>());
+                        if (samples.size() < 8 && !samples.contains(unicode)) {
+                            samples.add(unicode);
+                        }
+                    }
                     for (int offset = 0; offset < unicode.length(); ) {
                         int cp = unicode.codePointAt(offset);
                         String ch = new String(Character.toChars(cp));
@@ -683,6 +872,8 @@ public class FontInspectorService {
         private int glyphCount;
         private int positionsWithoutUnicode;
         private final Map<Integer, Integer> usedCodes = new LinkedHashMap<>();
+        private final Map<Integer, Set<Integer>> usedCodePages = new LinkedHashMap<>();
+        private final Map<Integer, List<String>> usedCodeUnicodeSamples = new LinkedHashMap<>();
         private final Map<String, Integer> usedChars = new LinkedHashMap<>();
         private final Set<Integer> pages = new LinkedHashSet<>();
     }

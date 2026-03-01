@@ -5,7 +5,8 @@ PDFalyzer.Zoom = (function ($, P) {
     'use strict';
 
     var pendingWheelScale = null;
-    var wheelZoomScheduled = false;
+    var wheelZoomTimer = null;
+    var WHEEL_ZOOM_DEBOUNCE_MS = 90;
 
     function clampScale(scale) {
         return Math.max(0.1, Math.min(8, scale));
@@ -13,17 +14,18 @@ PDFalyzer.Zoom = (function ($, P) {
 
     function scheduleWheelZoom(scale) {
         pendingWheelScale = clampScale(scale);
-        if (wheelZoomScheduled) return;
+        if (wheelZoomTimer) {
+            window.clearTimeout(wheelZoomTimer);
+        }
 
-        wheelZoomScheduled = true;
-        window.requestAnimationFrame(function () {
-            wheelZoomScheduled = false;
+        wheelZoomTimer = window.setTimeout(function () {
+            wheelZoomTimer = null;
             var next = pendingWheelScale;
             pendingWheelScale = null;
             if (typeof next === 'number' && P.Viewer && P.Viewer.setScale) {
                 P.Viewer.setScale(next);
             }
-        });
+        }, WHEEL_ZOOM_DEBOUNCE_MS);
     }
 
     function init() {

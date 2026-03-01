@@ -16,6 +16,7 @@ var PDFalyzer = (function () {
             pendingFormAdds: [],
             pendingFieldRects: [],
             pendingFieldOptions: [],
+            pendingCosChanges: [],
             pendingFieldDeletes: {},
             selectedFieldNames: [],
             selectedImageNodeIds: [],
