@@ -318,7 +318,6 @@ public class PdfEditService {
             }
 
             // Remove from AcroForm fields via direct COS array manipulation for reliability
-            COSName fieldsKey = COSName.FIELDS;
             COSDictionary parentCos = target.getParent() != null
                     ? target.getParent().getCOSObject()
                     : acroForm.getCOSObject();

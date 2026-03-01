@@ -10,6 +10,8 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpMethod;
+import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.util.StreamUtils;
@@ -28,7 +30,7 @@ class ApiFlowIntegrationTest {
 
     @Test
     void uploadThenFetchPdfBySessionIdReturnsPdfBytes() throws IOException {
-        ResponseEntity<Map> uploadResp = uploadTestPdf();
+        ResponseEntity<Map<String, Object>> uploadResp = uploadTestPdf();
         assertEquals(HttpStatus.OK, uploadResp.getStatusCode());
         assertNotNull(uploadResp.getBody());
 
@@ -54,9 +56,9 @@ class ApiFlowIntegrationTest {
                 "Unknown sessions should be 404, not 400");
     }
 
-    private ResponseEntity<Map> uploadTestPdf() throws IOException {
+    private ResponseEntity<Map<String, Object>> uploadTestPdf() throws IOException {
         byte[] pdfBytes;
-        try (var in = new ClassPathResource("test.pdf").getInputStream()) {
+        try (java.io.InputStream in = new ClassPathResource("test.pdf").getInputStream()) {
             pdfBytes = StreamUtils.copyToByteArray(in);
         }
 
@@ -74,6 +76,6 @@ class ApiFlowIntegrationTest {
         body.add("file", filePart);
 
         HttpEntity<MultiValueMap<String, Object>> request = new HttpEntity<>(body, headers);
-        return restTemplate.postForEntity("/api/upload", request, Map.class);
+        return restTemplate.exchange("/api/upload", HttpMethod.POST, request, new ParameterizedTypeReference<Map<String, Object>>() {});
     }
 }
