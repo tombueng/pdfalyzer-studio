@@ -260,6 +260,43 @@ public class RefactorAndFeatureTest {
         assertEquals(30.0, target.getBoundingBox()[3], 0.5);
     }
 
+    @Test
+    void applyFieldOptionsUpdatesMultipleFields() throws IOException {
+        byte[] pdf = createSimplePdf(1);
+
+        FormFieldRequest first = new FormFieldRequest();
+        first.setFieldType("text");
+        first.setFieldName("optA");
+        first.setPageIndex(0);
+        first.setX(50); first.setY(700); first.setWidth(160); first.setHeight(20);
+
+        FormFieldRequest second = new FormFieldRequest();
+        second.setFieldType("text");
+        second.setFieldName("optB");
+        second.setPageIndex(0);
+        second.setX(50); second.setY(660); second.setWidth(160); second.setHeight(20);
+
+        byte[] withFields = editService.addFormFields(pdf, Arrays.asList(first, second));
+        Map<String, Object> options = new HashMap<>();
+        options.put("required", true);
+        options.put("readonly", true);
+        byte[] modified = editService.applyFieldOptions(withFields, Arrays.asList("optA", "optB"), options);
+
+        PdfSession session = pdfService.uploadAndParse("opts.pdf", modified);
+        PdfNode acroForm = findByCategory(session.getTreeRoot(), "acroform");
+        assertNotNull(acroForm);
+        long requiredCount = acroForm.getChildren().stream()
+                .filter(n -> n.getName() != null && (n.getName().contains("optA") || n.getName().contains("optB")))
+                .filter(n -> "true".equalsIgnoreCase(String.valueOf(n.getProperties().get("Required"))))
+                .count();
+        long readonlyCount = acroForm.getChildren().stream()
+                .filter(n -> n.getName() != null && (n.getName().contains("optA") || n.getName().contains("optB")))
+                .filter(n -> "true".equalsIgnoreCase(String.valueOf(n.getProperties().get("ReadOnly"))))
+                .count();
+        assertEquals(2, requiredCount);
+        assertEquals(2, readonlyCount);
+    }
+
     // ======================== COS EDIT (end-to-end) ========================
 
     @Test

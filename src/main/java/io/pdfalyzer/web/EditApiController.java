@@ -114,6 +114,23 @@ public class EditApiController {
         return treeResponse(sessionId);
     }
 
+    @PostMapping("/edit/{sessionId}/fields/options")
+    public ResponseEntity<Map<String, Object>> applyFieldOptions(
+            @PathVariable String sessionId,
+            @RequestBody Map<String, Object> body) throws IOException {
+        @SuppressWarnings("unchecked")
+        List<String> fieldNames = (List<String>) body.get("fieldNames");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> options = (Map<String, Object>) body.get("options");
+        if (fieldNames == null || fieldNames.isEmpty() || options == null) {
+            return ResponseEntity.badRequest().build();
+        }
+        byte[] bytes = pdfService.getSessionPdfBytes(sessionId);
+        byte[] modified = pdfEditService.applyFieldOptions(bytes, fieldNames, options);
+        pdfService.updateSessionPdf(sessionId, modified);
+        return treeResponse(sessionId);
+    }
+
     private ResponseEntity<Map<String, Object>> treeResponse(String sessionId) {
         PdfSession session = pdfService.getSession(sessionId);
         Map<String, Object> result = new LinkedHashMap<>();

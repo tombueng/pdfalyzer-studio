@@ -291,6 +291,65 @@ public class UIRenderingTest {
         assertTrue(dangerToasts.isEmpty(), "No danger toast should be shown during attribute modify/delete workflow");
     }
 
+        @Test
+        public void testMultiselectTriStateFieldOptionsWorkflow() {
+        if (driver == null) {
+            System.out.println("Skipping testMultiselectTriStateFieldOptionsWorkflow - ChromeDriver not available");
+            return;
+        }
+
+        driver.get(baseUrl);
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
+        wait.until(ExpectedConditions.or(
+            ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
+            ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
+        ));
+
+        wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(".form-field-handle")));
+
+        driver.manage().timeouts().scriptTimeout(Duration.ofSeconds(40));
+        Object applyResult = ((JavascriptExecutor) driver).executeAsyncScript(
+            "const done = arguments[arguments.length - 1];" +
+            "const P = window.PDFalyzer;" +
+            "if(!P || !P.state || !P.state.sessionId){ done({ok:false,msg:'no-session'}); return; }" +
+            "const hs = Array.from(document.querySelectorAll('.form-field-handle'));" +
+            "if(hs.length < 2){ done({ok:false,msg:'not-enough-handles'}); return; }" +
+            "const names = hs.slice(0,2).map(h => h.getAttribute('data-field-name')).filter(Boolean);" +
+            "if(names.length < 2){ done({ok:false,msg:'missing-field-names'}); return; }" +
+            "P.state.selectedFieldNames = names;" +
+            "$.ajax({" +
+            " url:'/api/edit/' + P.state.sessionId + '/fields/options'," +
+            " method:'POST', contentType:'application/json'," +
+            " data: JSON.stringify({ fieldNames:names, options:{ required:true } })" +
+            "})" +
+            ".then(function(resp){ P.state.treeData = resp.tree; done({ok:true, count:names.length}); })" +
+            ".catch(function(err){ done({ok:false,msg:(err&&err.statusText)||'ajax-failed'}); });"
+        );
+        assertTrue(applyResult instanceof Map, "Expected apply result map");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> applyMap = (Map<String, Object>) applyResult;
+        assertEquals(Boolean.TRUE, applyMap.get("ok"), "Multiselect options apply failed: " + applyMap);
+
+        Object requiredCountObj = ((JavascriptExecutor) driver).executeScript(
+            "const P = window.PDFalyzer;" +
+            "if(!P || !P.state || !P.state.selectedFieldNames) return 0;" +
+            "const selected = new Set(P.state.selectedFieldNames);" +
+            "let count = 0;" +
+            "function walk(n){" +
+            " if(!n) return;" +
+            " if(n.nodeCategory==='field' && n.properties && selected.has(n.properties.FullName)){" +
+            "   if(String(n.properties.Required).toLowerCase()==='true') count++;" +
+            " }" +
+            " if(n.children) n.children.forEach(walk);" +
+            "}" +
+            "walk(P.state.treeData);" +
+            "return count;"
+        );
+        assertTrue(requiredCountObj instanceof Number, "Expected numeric required count");
+        assertTrue(((Number) requiredCountObj).intValue() >= 2,
+            "Both selected fields should have Required=true after tri-state apply");
+        }
+
     private void expandNode(WebDriverWait wait, String nodeId) {
         By nodeSel = By.cssSelector(".tree-node[data-node-id='" + nodeId + "']");
         WebElement node = wait.until(ExpectedConditions.presenceOfElementLocated(nodeSel));

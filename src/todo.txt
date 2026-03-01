@@ -19,7 +19,7 @@ Insert field seem to be "incomplete",may the widget or appearance is missing? si
 ✓ DONE: editor mode always active, remove button and move editor toolbar into top menubar. 
 ✓ DONE: adding new fields should not auto save and reload. add a "save" button instead.
 ✓ DONE: All form-fields should have an "options" popup with all possible settings for this field.
-on multiselect, options popup controls become three way controls.
+✓ DONE: on multiselect, options popup controls become three way controls.
 ✓ DONE: Existing Form fields shall have a handle to move or resize them. 
 ✓ DONE: When adding a field it will apear to the last field ("next line")
 ✓ DONE: Field value must be changeable in the tree (setFormFieldValue endpoint + via COS edit)
