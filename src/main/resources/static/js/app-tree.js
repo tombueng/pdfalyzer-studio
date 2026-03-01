@@ -59,9 +59,10 @@ PDFalyzer.Tree = (function ($, P) {
 
     function showPropertiesPanel(node, $headerEl) {
         $headerEl.siblings('.node-properties').remove();
-        if (!node.properties || Object.keys(node.properties).length === 0) return;
+        var displayProps = collectDisplayProperties(node);
+        if (Object.keys(displayProps).length === 0) return;
         var $props = $('<div>', { 'class': 'node-properties' });
-        Object.entries(node.properties).forEach(function (kv) {
+        Object.entries(displayProps).forEach(function (kv) {
             var $row = $('<div>', { 'class': 'prop-row' });
             $row.append($('<span>', { 'class': 'prop-key', text: kv[0] + ':' }));
             var $val = $('<span>', { 'class': 'prop-val' });
@@ -84,6 +85,35 @@ PDFalyzer.Tree = (function ($, P) {
         $headerEl.after($props);
     }
 
+    function collectDisplayProperties(node) {
+        var merged = {};
+        if (node.properties) {
+            Object.entries(node.properties).forEach(function (kv) {
+                merged[kv[0]] = kv[1];
+            });
+        }
+        if (node.nodeCategory && merged.Category === undefined) {
+            merged.Category = node.nodeCategory;
+        }
+        if (node.type && merged.Type === undefined) {
+            merged.Type = node.type;
+        }
+        if (node.pageIndex >= 0 && merged.Page === undefined) {
+            merged.Page = String(node.pageIndex + 1);
+        }
+        if (node.objectNumber >= 0 && merged.Object === undefined) {
+            var gen = node.generationNumber >= 0 ? node.generationNumber : 0;
+            merged.Object = node.objectNumber + ' ' + gen + ' R';
+        }
+        if (node.boundingBox && node.boundingBox.length === 4 && merged.BoundingBox === undefined) {
+            merged.BoundingBox = node.boundingBox.map(function (n) { return Number(n).toFixed(1); }).join(', ');
+        }
+        if (node.children && node.children.length && merged.Children === undefined) {
+            merged.Children = String(node.children.length);
+        }
+        return merged;
+    }
+
     // ======================== NODE ELEMENT BUILDER ========================
 
     function buildNodeEl(node, depth) {
@@ -93,8 +123,11 @@ PDFalyzer.Tree = (function ($, P) {
 
         // Toggle
         var hasChildren = node.children && node.children.length > 0;
+        var shouldAutoExpand = hasChildren && depth === 0;
         var $toggle = $('<span>', { 'class': 'tree-toggle' });
-        if (hasChildren) $toggle.html('<i class="fas fa-chevron-right"></i>');
+        if (hasChildren) {
+            $toggle.html('<i class="fas ' + (shouldAutoExpand ? 'fa-chevron-down' : 'fa-chevron-right') + '"></i>');
+        }
         $header.append($toggle);
 
         // Icon
@@ -151,8 +184,17 @@ PDFalyzer.Tree = (function ($, P) {
         });
 
         // Children container (lazy, initially hidden)
-        var $childrenEl = $('<div>', { 'class': 'tree-children', css: { display: 'none' } });
+        var $childrenEl = $('<div>', {
+            'class': 'tree-children',
+            css: { display: shouldAutoExpand ? 'block' : 'none' }
+        });
         $wrapper.append($childrenEl);
+
+        if (shouldAutoExpand) {
+            node.children.forEach(function (c) {
+                $childrenEl.append(buildNodeEl(c, depth + 1));
+            });
+        }
 
         return $wrapper;
     }

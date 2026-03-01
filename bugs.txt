@@ -1,18 +1,18 @@
 Bugs - FIXED (2026-03-01):
-✓ Attachment preview -> now has both preview and download buttons
-✓ Tree "<" and ">" chevrons -> fixed toggle logic (removed rotation conflict)
-✓ When closing a node, the node info block is now properly removed
-✓ Structure tree is now closed on init (no auto-expand)
-✓ Nodes open with single click (fixed toggle logic)
-✓ Click form field now highlights it in tree
-✓ Multiselect form field highlighting works (already implemented)
-✓ Options button for selected form fields works (already implemented)
-✓ Form fields now have options and delete buttons attached to the handle
-✓ Image preview shown as tooltip when hovering an image in the tree
-✓ Clicking form field no longer reloads the entire PDF view (only re-renders handles)
+✓ Tree action icons now use a consistent monochrome icon style with no button background.
+✓ Root Document node is expanded on startup, while subnodes stay collapsed.
+✓ Node info panel now shows useful metadata consistently (including for Document Info and other applicable nodes).
+✓ Form field delete no longer shows a confirmation warning.
+✓ Form field delete no longer forces a full PDF reload / page jump to page 1.
+✓ Deleting a field now marks it as removed (hatched) with an Undo action before final deletion.
+✓ Toolbar icon/button sizing for form-field controls was aligned with the rest of the toolbar.
+✓ Field-handle interactions were hardened so button clicks do not interfere with handle selection behavior.
+✓ Tree sidebar default width is now 50% of the window on startup.
 
 Open Bugs:
-new checkbox inserted: checkmark to small, should fill the field
-add vera pdf maven dependencies so not external verapdf is needed for validation
-update readme to reflect new realities
+none
+Problem: CHECKveraPDF not available - veraPDF CLI is not available. Install veraPDF and add it to PATH. Make that work by using included verapdf from pom.xml
+when opening and closing an image node, the info block is not removed from the node
+
+
 

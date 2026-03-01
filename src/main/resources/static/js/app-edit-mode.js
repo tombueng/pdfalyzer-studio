@@ -17,6 +17,7 @@ PDFalyzer.EditMode = (function ($, P) {
         $('#editToolbar').addClass('active');
         P.state.editMode = true;
         P.state.selectedFieldNames = [];
+        if (!P.state.pendingFieldDeletes) P.state.pendingFieldDeletes = {};
 
         $('.edit-field-btn').on('click', function () {
             if (!hasSession()) {
@@ -306,15 +307,24 @@ PDFalyzer.EditMode = (function ($, P) {
                 html: '<i class="fas fa-trash-alt"></i>'
             }).on('click', function(e) {
                 e.stopPropagation();
-                if (confirm('Delete field "' + fullName + '"?')) {
-                    deleteField(fullName);
-                }
+                queueFieldDelete(fullName);
             });
             
-            var $resize = $('<div>', { 'class': 'form-field-resize' });
-            $handle.append($optBtn, $delBtn, $resize).appendTo(wrapperEl);
-
-            bindDragResize($handle, $resize, fieldNode, viewport);
+            if (isFieldDeletePending(fullName)) {
+                var $undoBtn = $('<button>', {
+                    'class': 'field-handle-btn field-handle-undo',
+                    'title': 'Undo remove',
+                    html: '<i class="fas fa-undo"></i>'
+                }).on('click', function (e) {
+                    e.stopPropagation();
+                    undoFieldDelete(fullName);
+                });
+                $handle.addClass('removed').append($undoBtn).appendTo(wrapperEl);
+            } else {
+                var $resize = $('<div>', { 'class': 'form-field-resize' });
+                $handle.append($optBtn, $delBtn, $resize).appendTo(wrapperEl);
+                bindDragResize($handle, $resize, fieldNode, viewport);
+            }
         });
         refreshSelectionButtons();
     }
@@ -325,7 +335,7 @@ PDFalyzer.EditMode = (function ($, P) {
         var start = {};
 
         $handle.on('mousedown', function (e) {
-            if ($(e.target).closest('.form-field-resize').length) return;
+            if ($(e.target).closest('.form-field-resize, .field-handle-btn').length) return;
             e.preventDefault();
             e.stopPropagation();
 
@@ -551,16 +561,59 @@ PDFalyzer.EditMode = (function ($, P) {
      * Delete a form field by fully-qualified name.
      */
     function deleteField(fieldName) {
+        queueFieldDelete(fieldName);
+    }
+
+    function isFieldDeletePending(fieldName) {
+        return !!(P.state.pendingFieldDeletes && P.state.pendingFieldDeletes[fieldName]);
+    }
+
+    function queueFieldDelete(fieldName) {
+        if (!P.state.sessionId || !fieldName) return;
+        if (!P.state.pendingFieldDeletes) P.state.pendingFieldDeletes = {};
+        if (P.state.pendingFieldDeletes[fieldName]) return;
+
+        var timerId = window.setTimeout(function () {
+            finalizeFieldDelete(fieldName);
+        }, 5000);
+        P.state.pendingFieldDeletes[fieldName] = { timerId: timerId };
+
+        if (P.state.selectedFieldNames) {
+            P.state.selectedFieldNames = P.state.selectedFieldNames.filter(function (n) {
+                return n !== fieldName;
+            });
+        }
+        renderFieldHandlesForAllPages();
+        P.Utils.toast('Field "' + fieldName + '" marked for removal (Undo available)', 'warning');
+    }
+
+    function undoFieldDelete(fieldName) {
+        if (!P.state.pendingFieldDeletes || !P.state.pendingFieldDeletes[fieldName]) return;
+        window.clearTimeout(P.state.pendingFieldDeletes[fieldName].timerId);
+        delete P.state.pendingFieldDeletes[fieldName];
+        renderFieldHandlesForAllPages();
+        P.Utils.toast('Removal cancelled for "' + fieldName + '"', 'info');
+    }
+
+    function finalizeFieldDelete(fieldName) {
         if (!P.state.sessionId) return;
+        if (!P.state.pendingFieldDeletes || !P.state.pendingFieldDeletes[fieldName]) return;
+
+        window.clearTimeout(P.state.pendingFieldDeletes[fieldName].timerId);
+        delete P.state.pendingFieldDeletes[fieldName];
+
         P.Utils.apiFetch('/api/edit/' + P.state.sessionId + '/field/' +
                           encodeURIComponent(fieldName), { method: 'DELETE' })
             .done(function (data) {
                 P.state.treeData = data.tree;
                 P.Tree.render(P.state.treeData);
-                P.Viewer.loadPdf(P.state.sessionId);
+                renderFieldHandlesForAllPages();
                 P.Utils.toast('Field "' + fieldName + '" deleted', 'success');
             })
-            .fail(function () { P.Utils.toast('Delete field failed', 'danger'); });
+            .fail(function () {
+                P.Utils.toast('Delete field failed', 'danger');
+                renderFieldHandlesForAllPages();
+            });
     }
 
     /**
