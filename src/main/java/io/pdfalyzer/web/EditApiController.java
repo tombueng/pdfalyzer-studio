@@ -31,7 +31,7 @@ public class EditApiController {
 
     @PostMapping("/cos/{sessionId}/update")
     public ResponseEntity<Map<String, Object>> updateCosValue(
-            @PathVariable String sessionId,
+            @PathVariable("sessionId") String sessionId,
             @RequestBody CosUpdateRequest request) throws IOException {
         byte[] bytes = pdfService.getSessionPdfBytes(sessionId);
         byte[] modified = cosEditService.updateCosValue(bytes, request);
@@ -41,7 +41,7 @@ public class EditApiController {
 
     @PostMapping("/edit/{sessionId}/add-field")
     public ResponseEntity<Map<String, Object>> addFormField(
-            @PathVariable String sessionId,
+            @PathVariable("sessionId") String sessionId,
             @RequestBody FormFieldRequest request) throws IOException {
         byte[] bytes = pdfService.getSessionPdfBytes(sessionId);
         byte[] modified = pdfEditService.addFormField(bytes, request);
@@ -51,7 +51,7 @@ public class EditApiController {
 
     @PostMapping("/edit/{sessionId}/add-fields")
     public ResponseEntity<Map<String, Object>> addFormFields(
-            @PathVariable String sessionId,
+            @PathVariable("sessionId") String sessionId,
             @RequestBody List<FormFieldRequest> requests) throws IOException {
         byte[] bytes = pdfService.getSessionPdfBytes(sessionId);
         byte[] modified = pdfEditService.addFormFields(bytes, requests);
@@ -61,8 +61,8 @@ public class EditApiController {
 
     @DeleteMapping("/edit/{sessionId}/field/{fieldName}")
     public ResponseEntity<Map<String, Object>> deleteFormField(
-            @PathVariable String sessionId,
-            @PathVariable String fieldName) throws IOException {
+            @PathVariable("sessionId") String sessionId,
+            @PathVariable("fieldName") String fieldName) throws IOException {
         byte[] bytes = pdfService.getSessionPdfBytes(sessionId);
         byte[] modified = pdfEditService.deleteFormField(bytes, fieldName);
         pdfService.updateSessionPdf(sessionId, modified);
@@ -71,8 +71,8 @@ public class EditApiController {
 
     @PostMapping("/edit/{sessionId}/field/{fieldName}/value")
     public ResponseEntity<Map<String, Object>> setFieldValue(
-            @PathVariable String sessionId,
-            @PathVariable String fieldName,
+            @PathVariable("sessionId") String sessionId,
+            @PathVariable("fieldName") String fieldName,
             @RequestBody Map<String, String> body) throws IOException {
         String value = body.getOrDefault("value", "");
         byte[] bytes = pdfService.getSessionPdfBytes(sessionId);
@@ -83,8 +83,8 @@ public class EditApiController {
 
     @PostMapping("/edit/{sessionId}/field/{fieldName}/choices")
     public ResponseEntity<Map<String, Object>> setComboChoices(
-            @PathVariable String sessionId,
-            @PathVariable String fieldName,
+            @PathVariable("sessionId") String sessionId,
+            @PathVariable("fieldName") String fieldName,
             @RequestBody Map<String, List<String>> body) throws IOException {
         List<String> choices = body.get("choices");
         if (choices == null) {
@@ -98,8 +98,8 @@ public class EditApiController {
 
     @PostMapping("/edit/{sessionId}/field/{fieldName}/rect")
     public ResponseEntity<Map<String, Object>> updateFieldRect(
-            @PathVariable String sessionId,
-            @PathVariable String fieldName,
+            @PathVariable("sessionId") String sessionId,
+            @PathVariable("fieldName") String fieldName,
             @RequestBody Map<String, Double> body) throws IOException {
         Double x = body.get("x");
         Double y = body.get("y");
@@ -116,7 +116,7 @@ public class EditApiController {
 
     @PostMapping("/edit/{sessionId}/fields/options")
     public ResponseEntity<Map<String, Object>> applyFieldOptions(
-            @PathVariable String sessionId,
+            @PathVariable("sessionId") String sessionId,
             @RequestBody Map<String, Object> body) throws IOException {
         @SuppressWarnings("unchecked")
         List<String> fieldNames = (List<String>) body.get("fieldNames");

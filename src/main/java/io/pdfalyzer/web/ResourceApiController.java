@@ -35,9 +35,9 @@ public class ResourceApiController {
 
     @GetMapping("/resource/{sessionId}/{objNum}/{genNum}")
     public ResponseEntity<byte[]> getResource(
-            @PathVariable String sessionId,
-            @PathVariable int objNum,
-            @PathVariable int genNum,
+            @PathVariable("sessionId") String sessionId,
+            @PathVariable("objNum") int objNum,
+            @PathVariable("genNum") int genNum,
             @RequestParam(name = "keyPath", required = false) String keyPath,
             @RequestParam(name = "inline", defaultValue = "false") boolean inline)
             throws IOException {
@@ -56,8 +56,8 @@ public class ResourceApiController {
 
     @GetMapping("/attachment/{sessionId}/{fileName}")
     public ResponseEntity<byte[]> getAttachment(
-            @PathVariable String sessionId,
-            @PathVariable String fileName) throws IOException {
+            @PathVariable("sessionId") String sessionId,
+            @PathVariable("fileName") String fileName) throws IOException {
         PdfSession session = pdfService.getSession(sessionId);
         try (PDDocument doc = Loader.loadPDF(session.getPdfBytes())) {
             PDDocumentCatalog catalog = doc.getDocumentCatalog();
