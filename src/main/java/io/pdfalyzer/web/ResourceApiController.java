@@ -57,7 +57,8 @@ public class ResourceApiController {
     @GetMapping("/attachment/{sessionId}/{fileName}")
     public ResponseEntity<byte[]> getAttachment(
             @PathVariable("sessionId") String sessionId,
-            @PathVariable("fileName") String fileName) throws IOException {
+            @PathVariable("fileName") String fileName,
+            @RequestParam(name = "inline", defaultValue = "false") boolean inline) throws IOException {
         PdfSession session = pdfService.getSession(sessionId);
         try (PDDocument doc = Loader.loadPDF(session.getPdfBytes())) {
             PDDocumentCatalog catalog = doc.getDocumentCatalog();
@@ -79,11 +80,12 @@ public class ResourceApiController {
                 data = is.readAllBytes();
             }
 
-            String mime = ef.getSubtype() != null ? ef.getSubtype() : "application/octet-stream";
+                String mime = ef.getSubtype() != null ? ef.getSubtype() : guessMimeFromFilename(fileName);
+                String disposition = inline ? "inline" : "attachment";
             return ResponseEntity.ok()
                     .contentType(MediaType.parseMediaType(mime))
                     .header(HttpHeaders.CONTENT_DISPOSITION,
-                            "attachment; filename=\"" + sanitizeFilename(fileName) + "\"")
+                        disposition + "; filename=\"" + sanitizeFilename(fileName) + "\"")
                     .contentLength(data.length)
                     .body(data);
         }
@@ -176,5 +178,18 @@ public class ResourceApiController {
 
     private String sanitizeFilename(String name) {
         return name.replaceAll("[^a-zA-Z0-9._\\-]", "_");
+    }
+
+    private String guessMimeFromFilename(String fileName) {
+        String lower = fileName == null ? "" : fileName.toLowerCase();
+        if (lower.endsWith(".pdf")) return "application/pdf";
+        if (lower.endsWith(".png")) return "image/png";
+        if (lower.endsWith(".jpg") || lower.endsWith(".jpeg")) return "image/jpeg";
+        if (lower.endsWith(".gif")) return "image/gif";
+        if (lower.endsWith(".webp")) return "image/webp";
+        if (lower.endsWith(".svg")) return "image/svg+xml";
+        if (lower.endsWith(".txt")) return "text/plain";
+        if (lower.endsWith(".xml")) return "application/xml";
+        return "application/octet-stream";
     }
 }

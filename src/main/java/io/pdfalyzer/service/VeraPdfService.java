@@ -36,8 +36,8 @@ public class VeraPdfService {
             ProcessorConfig config = ProcessorFactory.defaultConfig();
             BatchProcessor processor = ProcessorFactory.fileBatchProcessor(config);
             ByteArrayOutputStream out = new ByteArrayOutputStream();
-            BatchProcessingHandler handler =
-                    ProcessorFactory.getHandler(FormatOption.TEXT, true, out, false);
+                BatchProcessingHandler handler =
+                    ProcessorFactory.getHandler(FormatOption.HTML, true, out, false);
             BatchSummary summary = processor.process(Collections.singletonList(tempPdf.toFile()), handler);
 
             ValidationBatchSummary validationSummary = summary == null ? null : summary.getValidationSummary();
@@ -48,7 +48,9 @@ public class VeraPdfService {
             int outOfMemory = summary == null ? 0 : summary.getOutOfMemory();
 
             String output = out.toString(StandardCharsets.UTF_8);
+            String reportFormat = "html";
             if (output == null || output.isBlank()) {
+                reportFormat = "text";
                 output = "veraPDF embedded validation finished. " +
                         "Jobs=" + (summary == null ? 0 : summary.getTotalJobs()) +
                         ", compliant=" + compliant +
@@ -67,12 +69,14 @@ public class VeraPdfService {
             result.put("failedParsing", failedParsing);
             result.put("exceptions", exceptions);
             result.put("report", output == null ? "" : output);
+            result.put("reportFormat", reportFormat);
             return result;
         } catch (Exception ex) {
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("available", false);
             result.put("success", false);
             result.put("report", "Embedded veraPDF validation failed: " + ex.getMessage());
+            result.put("reportFormat", "text");
             log.warn("Embedded veraPDF validation failed", ex);
             return result;
         } finally {

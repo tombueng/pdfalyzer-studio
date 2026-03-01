@@ -1,15 +1,41 @@
-Bugs - FIXED (2026-03-01):
-✓ veraPDF now runs using embedded Maven dependencies (no external PATH CLI requirement).
-✓ Closing an image node now removes the node info block correctly.
-✓ Form fields can be selected by clicking in PDF view; toolbar options activation and Ctrl/Shift multi-select work.
-✓ Applying form-field options no longer reloads the PDF view or jumps back to page 1.
+- Embedded veraPDF validation failed: Unmarshalling exception when streaming releaseDetails. trace:
+        io.pdfalyzer.service.VeraPdfService      : Embedded veraPDF validation failed
+        org.verapdf.core.VeraPDFException: Unmarshalling exception when streaming releaseDetails.
+        at org.verapdf.processor.AbstractXmlHandler.wrapMarshallException(AbstractXmlHandler.java:117) ~[core-1.26.1.jar:na]
+        at org.verapdf.processor.AbstractXmlHandler.serializeElement(AbstractXmlHandler.java:74) ~[core-1.26.1.jar:na]
+        at org.verapdf.processor.MrrHandler.addReleaseDetails(MrrHandler.java:87) ~[core-1.26.1.jar:na]
+        at org.verapdf.processor.MrrHandler.handleBatchStart(MrrHandler.java:76) ~[core-1.26.1.jar:na]
+        at org.verapdf.processor.AbstractBatchProcessor.process(AbstractBatchProcessor.java:103) ~[core-1.26.1.jar:na]
+        at io.pdfalyzer.service.VeraPdfService.validate(VeraPdfService.java:41) ~[classes/:na]    
+        at io.pdfalyzer.web.ApiController.validateWithVeraPdf(ApiController.java:144) ~[classes/:na]
+        at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke0(Native Method) ~[na:na]
+        at java.base/jdk.internal.reflect.NativeMethodAccessorImpl.invoke(NativeMethodAccessorImpl.java:77) ~[na:na]
+        at java.base/jdk.internal.reflect.DelegatingMethodAccessorImpl.invoke(DelegatingMethodAccessorImpl.java:43) ~[na:na]
+        at java.base/java.lang.reflect.Method.invoke(Method.java:569) ~[na:na]
+        at org.springframework.web.method.support.InvocableHandlerMethod.doInvoke(InvocableHandlerMethod.java:258) ~[spring-web-6.2.16.jar:6.2.16]
+        at org.springframework.web.method.support.InvocableHandlerMethod.invokeForRequest(InvocableHandlerMethod.java:191) ~[spring-web-6.2.16.jar:6.2.16]
+        at org.springframework.web.servlet.mvc.method.annotation.ServletInvocableHandlerMethod.invokeAndHandle(ServletInvocableHandlerMethod.java:118) ~[spring-webmvc-6.2.16.jar:6.2.16]
+        at org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter.invokeHandlerMethod(RequestMappingHandlerAdapter.java:991) ~[spring-webmvc-6.2.16.jar:6.2.16]
+        at org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerAdapter.handleInternal(RequestMappingHandlerAdapter.java:896) ~[spring-webmvc-6.2.16.jar:6.2.16]
+        at org.springframework.web.servlet.mvc.method.AbstractHandlerMethodAdapter.handle(AbstractHandlerMethodAdapter.java:87) ~[spring-webmvc-6.2.16.jar:6.2.16]
+        at org.springframework.web.servlet.DispatcherServlet.doDispatch(DispatcherServlet.java:1089) ~[spring-webmvc-6.2.16.jar:6.2.16]
+        at org.springframework.web.servlet.DispatcherServlet.doService(DispatcherServlet.java:979) ~[spring-webmvc-6.2.16.jar:6.2.16]
+        at org.springframework.web.servlet.FrameworkServlet.processRequest(FrameworkServlet.java:1014) ~[spring-webmvc-6.2.16.jar:6.2.16]
+        at org.springframework.web.servlet.FrameworkServlet.doGet(FrameworkServlet.java:903) ~[spring-webmvc-6.2.16.jar:6.2.16]
+        at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:564) ~[tomcat-embed-core-10.1.52.jar:6.0]
+        at org.springframework.web.servlet.FrameworkServlet.service(FrameworkServlet.java:885) ~[spring-webmvc-6.2.16.jar:6.2.16]
+        at jakarta.servlet.http.HttpServlet.service(HttpServlet.java:658) ~[tomcat-embed-core-10.1.52.jar:6.0]
+        at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:193) ~[tomcat-embed-core-10.1.52.jar:10.1.52]
+        at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:138) ~[tomcat-embed-core-10.1.52.jar:10.1.52]
+        at org.apache.tomcat.websocket.server.WsFilter.doFilter(WsFilter.java:51) ~[tomcat-embed-websocket-10.1.52.jar:10.1.52]
+        at org.apache.catalina.core.ApplicationFilterChain.internalDoFilter(ApplicationFilterChain.java:162) ~[tomcat-embed-core-10.1.52.jar:10.1.52]
+        at org.apache.catalina.core.ApplicationFilterChain.doFilter(ApplicationFilterChain.java:138) ~[tomcat-embed-core-10.1.52.jar:10.1.52]
 
-Open Bugs:
-none
-- attachment preview (pdf/img) should not open the "save as popup" but display in browser tab directly withou downloading. make it display inline in new tab.
-- height and icon size of toolbar buttons still inconsistent, the form-add-field-buttons are to small.
-- Form fields can still not be made "selected" by clicking in PDF view; toolbar options activation and Ctrl/Shift multi-select work.
-- on the logger: o.a.p.p.i.form.PDSignatureField          : Appearance generation for signature fields not implemented here. You need to generate/update that manually, see the CreateVisibleSignature*.java files in the examples subproject of the source code download
+- Click on form-field in the pdf-view gives JS errors: app-edit-mode.js:342 Uncaught TypeError: Cannot read properties of undefined (reading 'properties')
+    at HTMLDivElement.<anonymous> (app-edit-mode.js:342:34)
+    at HTMLDivElement.dispatch (jquery.min.js:2:40035)
+    at v.handle (jquery.min.js:2:38006)
 
+- add a way to catch JS-errors in the browser when running UIRendering tests and also for the application send JS-Erros to the backen for logging on the backend log.
 
 

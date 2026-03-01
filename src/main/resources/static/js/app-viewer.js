@@ -121,7 +121,6 @@ PDFalyzer.Viewer = (function ($, P) {
     }
 
     function handleClick(e, pageIndex) {
-        if (P.state.editMode && P.state.editFieldType) return;
         if (!P.state.treeData || !P.state.pageViewports[pageIndex]) return;
         var canvas = P.state.pageCanvases[pageIndex];
         if (!canvas) return;
