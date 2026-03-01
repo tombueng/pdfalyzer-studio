@@ -80,10 +80,8 @@
     color: var(--text-muted);
     text-align: center;
     flex-shrink: 0;
-    transition: transform 0.2s;
+    transition: color 0.2s;
 }
-
-.tree-toggle.expanded { transform: rotate(90deg); }
 
 .tree-icon {
     font-size: 13px;
@@ -234,3 +232,23 @@
     100% { transform: translateX(100%); }
 }
 
+/* === Image Tooltip Preview === */
+.image-tooltip-preview {
+    position: fixed;
+    z-index: 9999;
+    pointer-events: none;
+    background: rgba(0, 0, 0, 0.95);
+    border: 2px solid var(--accent);
+    border-radius: 6px;
+    padding: 4px;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+    max-width: 400px;
+    max-height: 400px;
+}
+
+.image-tooltip-preview img {
+    max-width: 100%;
+    max-height: 100%;
+    display: block;
+    border-radius: 4px;
+}

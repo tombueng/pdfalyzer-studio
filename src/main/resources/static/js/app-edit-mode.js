@@ -286,8 +286,33 @@ PDFalyzer.EditMode = (function ($, P) {
             if ((P.state.selectedFieldNames || []).indexOf(fullName) >= 0) {
                 $handle.addClass('selected');
             }
+            
+            // Add options button to handle
+            var $optBtn = $('<button>', { 
+                'class': 'field-handle-btn field-handle-options',
+                'title': 'Options',
+                html: '<i class="fas fa-cog"></i>'
+            }).on('click', function(e) {
+                e.stopPropagation();
+                P.state.selectedFieldNames = [fullName];
+                renderFieldHandlesForAllPages();
+                openOptionsPopup();
+            });
+            
+            // Add delete button to handle
+            var $delBtn = $('<button>', { 
+                'class': 'field-handle-btn field-handle-delete',
+                'title': 'Delete',
+                html: '<i class="fas fa-trash-alt"></i>'
+            }).on('click', function(e) {
+                e.stopPropagation();
+                if (confirm('Delete field "' + fullName + '"?')) {
+                    deleteField(fullName);
+                }
+            });
+            
             var $resize = $('<div>', { 'class': 'form-field-resize' });
-            $handle.append($resize).appendTo(wrapperEl);
+            $handle.append($optBtn, $delBtn, $resize).appendTo(wrapperEl);
 
             bindDragResize($handle, $resize, fieldNode, viewport);
         });
@@ -311,7 +336,12 @@ PDFalyzer.EditMode = (function ($, P) {
                 } else {
                     P.state.selectedFieldNames = [name];
                 }
-                P.Viewer.renderAllPages();
+                // Re-render only the handles, not the entire PDF
+                renderFieldHandlesForAllPages();
+                
+                // Highlight the field in the tree
+                var fieldNode = findFieldNodeByName(name);
+                if (fieldNode) P.Tree.selectNode(fieldNode);
             }
 
             dragging = true;
@@ -372,6 +402,28 @@ PDFalyzer.EditMode = (function ($, P) {
         if (idx >= 0) P.state.selectedFieldNames.splice(idx, 1);
         else P.state.selectedFieldNames.push(fieldName);
         refreshSelectionButtons();
+    }
+
+    function findFieldNodeByName(fullName) {
+        var found = null;
+        function walk(node) {
+            if (!node) return;
+            if (node.nodeCategory === 'field' && node.properties && node.properties.FullName === fullName) {
+                found = node;
+                return;
+            }
+            if (node.children) node.children.forEach(walk);
+        }
+        walk(P.state.treeData);
+        return found;
+    }
+
+    function renderFieldHandlesForAllPages() {
+        if (!P.state.pdfDoc) return;
+        for (var i = 0; i < P.state.pdfDoc.numPages; i++) {
+            var wrapper = $('[data-page="' + i + '"]')[0];
+            if (wrapper) renderFieldHandles(i, wrapper);
+        }
     }
 
     function openOptionsPopup() {
