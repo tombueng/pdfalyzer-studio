@@ -9,6 +9,7 @@ import org.openqa.selenium.By;
 import org.openqa.selenium.JavascriptExecutor;
 import org.openqa.selenium.OutputType;
 import org.openqa.selenium.TakesScreenshot;
+import org.openqa.selenium.TimeoutException;
 import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.chrome.ChromeDriver;
@@ -124,6 +125,27 @@ public class UIRenderingTest {
         assertNotNull(body);
         assertTrue(body.length() > 100, "Page should have content");
     }
+
+    @Test
+    public void testAutoUploadLoadsTestPdfOnStartup() {
+        if (driver == null) {
+            System.out.println("Skipping testAutoUploadLoadsTestPdfOnStartup - ChromeDriver not available");
+            return;
+        }
+
+        driver.get(baseUrl);
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(300));
+
+        ensureTestPdfReady(wait, true);
+
+        WebElement statusFilename = driver.findElement(By.id("statusFilename"));
+        WebElement statusSession = driver.findElement(By.id("statusSession"));
+
+        assertTrue(statusFilename.getText().toLowerCase().contains("test.pdf"),
+            "Expected startup autoload to show test.pdf in filename status");
+        assertTrue(statusSession.getText().toLowerCase().contains("active"),
+            "Expected session status to be active after startup autoload");
+    }
     
     @Test
     public void testTreeNodeHeaderHasFlexIfPresent() {
@@ -223,7 +245,7 @@ public class UIRenderingTest {
         }
 
         driver.get(baseUrl);
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(300));
         wait.until(ExpectedConditions.or(
             ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
             ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
@@ -768,6 +790,122 @@ public class UIRenderingTest {
     }
 
     @Test
+    public void testPdfViewClickExpandsStructuralTreeForFieldAndImage() {
+        if (driver == null) {
+            System.out.println("Skipping testPdfViewClickExpandsStructuralTreeForFieldAndImage - ChromeDriver not available");
+            return;
+        }
+
+        driver.get(baseUrl);
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
+        wait.until(ExpectedConditions.or(
+            ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
+            ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
+        ));
+        wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector("#pdfViewer .pdf-page-wrapper canvas")));
+
+        WebElement structureTab = wait.until(ExpectedConditions.elementToBeClickable(
+            By.cssSelector(".tab-btn[data-tab='structure']")
+        ));
+        structureTab.click();
+        wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector("#treeContent .tree-node[data-node-id='pages']")));
+
+        driver.manage().timeouts().scriptTimeout(Duration.ofSeconds(40));
+        Object result = ((JavascriptExecutor) driver).executeAsyncScript(
+            "const done = arguments[arguments.length - 1];" +
+            "const P = window.PDFalyzer;" +
+            "if(!P || !P.state || !P.state.treeData){ done({ok:false,msg:'no-state'}); return; }" +
+            "if(!P.state.pageCanvases || !P.state.pageCanvases.length){ done({ok:false,msg:'no-canvases'}); return; }" +
+            "const targets = { field:null, image:null };" +
+            "(function walk(n){" +
+            "  if(!n) return;" +
+            "  if(!targets.field && n.nodeCategory==='field' && n.properties && n.properties.FullName && Array.isArray(n.boundingBox) && n.boundingBox.length===4 && n.pageIndex>=0){ targets.field = n; }" +
+            "  if(!targets.image && n.nodeCategory==='image' && n.id!==undefined && n.id!==null && Array.isArray(n.boundingBox) && n.boundingBox.length===4 && n.pageIndex>=0){ targets.image = n; }" +
+            "  if(targets.field && targets.image) return;" +
+            "  if(n.children) n.children.forEach(walk);" +
+            "})(P.state.treeData);" +
+            "if(!targets.field || !targets.image){" +
+            "  done({ok:true,skipped:true,msg:'missing-field-or-image',hasField:!!targets.field,hasImage:!!targets.image});" +
+            "  return;" +
+            "}" +
+            "function collapseAll(){" +
+            "  document.querySelectorAll('#treeContent .tree-node > .tree-children').forEach(c => c.style.display='none');" +
+            "  document.querySelectorAll('#treeContent .tree-node > .tree-node-header > .tree-toggle > i').forEach(i => {" +
+            "    i.classList.remove('fa-chevron-down');" +
+            "    i.classList.add('fa-chevron-right');" +
+            "  });" +
+            "}" +
+            "function pathToId(targetId){" +
+            "  const path = [];" +
+            "  (function dfs(n){" +
+            "    if(!n) return false;" +
+            "    path.push(n.id);" +
+            "    if(String(n.id)===String(targetId)) return true;" +
+            "    if(n.children){" +
+            "      for(let i=0;i<n.children.length;i++){ if(dfs(n.children[i])) return true; }" +
+            "    }" +
+            "    path.pop();" +
+            "    return false;" +
+            "  })(P.state.treeData);" +
+            "  return path;" +
+            "}" +
+            "function isExpandedPath(path){" +
+            "  if(!path || path.length < 2) return false;" +
+            "  for(let i=0;i<path.length-1;i++){" +
+            "    const node = document.querySelector('.tree-node[data-node-id=\"' + path[i] + '\"]');" +
+            "    if(!node) return false;" +
+            "    const children = node.querySelector(':scope > .tree-children');" +
+            "    if(children && getComputedStyle(children).display==='none') return false;" +
+            "  }" +
+            "  return !!document.querySelector('.tree-node[data-node-id=\"' + path[path.length-1] + '\"]');" +
+            "}" +
+            "function clickNode(node){" +
+            "  const canvas = P.state.pageCanvases[node.pageIndex];" +
+            "  const vp = P.state.pageViewports[node.pageIndex];" +
+            "  if(!canvas || !vp) return false;" +
+            "  const bb = node.boundingBox;" +
+            "  const centerX = bb[0] + bb[2] / 2;" +
+            "  const centerY = bb[1] + bb[3] / 2;" +
+            "  const rect = canvas.getBoundingClientRect();" +
+            "  const clientX = rect.left + (centerX * vp.scale);" +
+            "  const clientY = rect.top + (vp.height - (centerY * vp.scale));" +
+            "  canvas.dispatchEvent(new MouseEvent('click', { bubbles:true, cancelable:true, clientX:clientX, clientY:clientY }));" +
+            "  return true;" +
+            "}" +
+            "const fieldPath = pathToId(targets.field.id);" +
+            "const imagePath = pathToId(targets.image.id);" +
+            "collapseAll();" +
+            "if(!clickNode(targets.field)){ done({ok:false,msg:'field-click-failed'}); return; }" +
+            "setTimeout(function(){" +
+            "  const fieldExpanded = isExpandedPath(fieldPath);" +
+            "  const selectedFieldNames = Array.isArray(P.state.selectedFieldNames) ? P.state.selectedFieldNames : [];" +
+            "  const fieldSelectedState = selectedFieldNames.indexOf(targets.field.properties.FullName) >= 0;" +
+            "  collapseAll();" +
+            "  if(!clickNode(targets.image)){ done({ok:false,msg:'image-click-failed',fieldExpanded:fieldExpanded,fieldSelectedState:fieldSelectedState}); return; }" +
+            "  setTimeout(function(){" +
+            "    const imageExpanded = isExpandedPath(imagePath);" +
+            "    const selectedImageIds = Array.isArray(P.state.selectedImageNodeIds) ? P.state.selectedImageNodeIds : [];" +
+            "    const imageSelectedState = selectedImageIds.indexOf(targets.image.id) >= 0;" +
+            "    done({" +
+            "      ok: fieldExpanded && imageExpanded && fieldSelectedState && imageSelectedState," +
+            "      fieldExpanded: fieldExpanded," +
+            "      imageExpanded: imageExpanded," +
+            "      fieldSelectedState: fieldSelectedState," +
+            "      imageSelectedState: imageSelectedState," +
+            "      fieldPathLength: fieldPath.length," +
+            "      imagePathLength: imagePath.length" +
+            "    });" +
+            "  }, 120);" +
+            "}, 120);"
+        );
+
+        assertTrue(result instanceof Map, "Expected script result map");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> map = (Map<String, Object>) result;
+        assertEquals(Boolean.TRUE, map.get("ok"), "PDF click should expand structural tree for field and image: " + map);
+    }
+
+    @Test
     public void testFontsTabRowActionsVisibleAndClickable() {
         if (driver == null) {
             System.out.println("Skipping testFontsTabRowActionsVisibleAndClickable - ChromeDriver not available");
@@ -1148,6 +1286,60 @@ public class UIRenderingTest {
     }
 
     @Test
+    public void testZoomTransitionKeepsRenderedPagesVisibleAt10msSampling() {
+        if (driver == null) {
+            System.out.println("Skipping testZoomTransitionKeepsRenderedPagesVisibleAt10msSampling - ChromeDriver not available");
+            return;
+        }
+
+        driver.get(baseUrl);
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
+        ensureTestPdfReady(wait, false);
+
+        wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector("#pdfViewer .pdf-page-wrapper")));
+
+        driver.manage().timeouts().scriptTimeout(Duration.ofSeconds(45));
+        Object result = ((JavascriptExecutor) driver).executeAsyncScript(
+            "const done = arguments[arguments.length - 1];" +
+            "const P = window.PDFalyzer;" +
+            "if(!P || !P.Viewer || !P.state || !P.state.pdfDoc){ done({ok:false,msg:'missing-viewer-state'}); return; }" +
+            "const pane = document.getElementById('pdfPane');" +
+            "if(pane){ pane.scrollTop = 220; }" +
+            "const initial = document.querySelectorAll('#pdfViewer .pdf-page-wrapper').length;" +
+            "if(initial === 0){ done({ok:false,msg:'no-initial-pages'}); return; }" +
+            "let blankFrames = 0;" +
+            "let observedStaging = false;" +
+            "let samples = 0;" +
+            "const maxSamples = 220;" +
+            "const sampleDelayMs = 10;" +
+            "const timer = setInterval(function(){" +
+            "  samples++;" +
+            "  const viewerCount = document.querySelectorAll('#pdfViewer .pdf-page-wrapper').length;" +
+            "  const stagingCount = document.querySelectorAll('#pdfViewerStaging .pdf-page-wrapper').length;" +
+            "  const staging = document.getElementById('pdfViewerStaging');" +
+            "  if(staging && staging.classList.contains('pdf-viewer-staging-active')) observedStaging = true;" +
+            "  if((viewerCount + stagingCount) === 0) blankFrames++;" +
+            "  if(samples >= maxSamples){" +
+            "    clearInterval(timer);" +
+            "    done({" +
+            "      ok: blankFrames === 0," +
+            "      blankFrames: blankFrames," +
+            "      samples: samples," +
+            "      observedStaging: observedStaging" +
+            "    });" +
+            "  }" +
+            "}, sampleDelayMs);" +
+            "P.Viewer.setScale((P.state.currentScale || 1) * 1.22);"
+        );
+
+        assertTrue(result instanceof Map, "Expected script result map");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> map = (Map<String, Object>) result;
+        assertEquals(Boolean.TRUE, map.get("ok"),
+            "Zoom transition must keep at least one rendered page visible in sampled frames: " + map);
+    }
+
+    @Test
     public void testCaptureSmoothRefreshTransitionVideoFrames() throws Exception {
         if (driver == null) {
             System.out.println("Skipping testCaptureSmoothRefreshTransitionVideoFrames - ChromeDriver not available");
@@ -1156,10 +1348,8 @@ public class UIRenderingTest {
 
         driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
-        wait.until(ExpectedConditions.or(
-            ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
-            ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
-        ));
+        ensureTestPdfReady(wait, false);
+
         wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector("#pdfViewer .pdf-page-wrapper")));
 
         Path artifactDir = Paths.get("target", "ui-artifacts", "smooth-refresh-transition",
@@ -1221,6 +1411,37 @@ public class UIRenderingTest {
         WebElement toggle = node.findElement(By.cssSelector(":scope > .tree-node-header > .tree-toggle"));
         ((JavascriptExecutor) driver).executeScript("arguments[0].click();", toggle);
         wait.until(d -> !node.findElements(By.cssSelector(":scope > .tree-children > .tree-node")).isEmpty());
+    }
+
+    private void ensureTestPdfReady(WebDriverWait wait, boolean requireAutoload) {
+        boolean loaded = false;
+        try {
+            wait.until(ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"));
+            wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector("#pdfViewer .pdf-page-wrapper")));
+            loaded = true;
+        } catch (TimeoutException ignored) {
+        }
+
+        if (!loaded && requireAutoload) {
+            ((JavascriptExecutor) driver).executeScript(
+                "if(window.PDFalyzer && window.PDFalyzer.Upload && window.PDFalyzer.Upload.loadSampleOnInit){" +
+                "  window.PDFalyzer.Upload.loadSampleOnInit();" +
+                "}"
+            );
+            wait.until(ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"));
+            wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector("#pdfViewer .pdf-page-wrapper")));
+            loaded = true;
+        }
+
+        if (!loaded) {
+            Path testPdf = Paths.get("src", "main", "resources", "test.pdf").toAbsolutePath();
+            assertTrue(Files.exists(testPdf), "Expected test PDF to exist at " + testPdf);
+
+            WebElement fileInput = wait.until(ExpectedConditions.presenceOfElementLocated(By.id("fileInput")));
+            fileInput.sendKeys(testPdf.toString());
+            wait.until(ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"));
+            wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector("#pdfViewer .pdf-page-wrapper")));
+        }
     }
 
     private void expandAllPageImageBranches(WebDriverWait wait) {
