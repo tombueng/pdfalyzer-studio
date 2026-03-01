@@ -35,12 +35,26 @@ public class VeraPdfService {
 
             ProcessorConfig config = ProcessorFactory.defaultConfig();
             BatchProcessor processor = ProcessorFactory.fileBatchProcessor(config);
+            BatchSummary summary;
+            String output;
+            String reportFormat;
+
+            try {
                 ByteArrayOutputStream out = new ByteArrayOutputStream();
                 BatchProcessingHandler handler =
-                    ProcessorFactory.getHandler(FormatOption.TEXT, false, out, false);
-                BatchSummary summary = processor.process(Collections.singletonList(tempPdf.toFile()), handler);
-                String output = out.toString(StandardCharsets.UTF_8);
-                String reportFormat = "text";
+                        ProcessorFactory.getHandler(FormatOption.HTML, false, out, false);
+                summary = processor.process(Collections.singletonList(tempPdf.toFile()), handler);
+                output = out.toString(StandardCharsets.UTF_8);
+                reportFormat = "html";
+            } catch (Exception htmlEx) {
+                log.warn("veraPDF HTML report generation failed, retrying with text report", htmlEx);
+                ByteArrayOutputStream fallbackOut = new ByteArrayOutputStream();
+                BatchProcessingHandler fallbackHandler =
+                        ProcessorFactory.getHandler(FormatOption.TEXT, false, fallbackOut, false);
+                summary = processor.process(Collections.singletonList(tempPdf.toFile()), fallbackHandler);
+                output = fallbackOut.toString(StandardCharsets.UTF_8);
+                reportFormat = "text";
+            }
 
             ValidationBatchSummary validationSummary = summary == null ? null : summary.getValidationSummary();
             int compliant = validationSummary == null ? 0 : validationSummary.getCompliantPdfaCount();
