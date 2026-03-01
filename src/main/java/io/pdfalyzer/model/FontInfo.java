@@ -15,6 +15,8 @@ public class FontInfo {
     private String objectId;
     private int objectNumber = -1;
     private int generationNumber = -1;
+    private String usageContext;
+    private String fixSuggestion;
 
     public FontInfo() {}
 
@@ -52,4 +54,10 @@ public class FontInfo {
 
     public int getGenerationNumber() { return generationNumber; }
     public void setGenerationNumber(int generationNumber) { this.generationNumber = generationNumber; }
+
+    public String getUsageContext() { return usageContext; }
+    public void setUsageContext(String usageContext) { this.usageContext = usageContext; }
+
+    public String getFixSuggestion() { return fixSuggestion; }
+    public void setFixSuggestion(String fixSuggestion) { this.fixSuggestion = fixSuggestion; }
 }

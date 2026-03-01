@@ -29,6 +29,7 @@ PDFalyzer.Tabs = (function ($, P) {
     // ======================== FONTS TAB ========================
 
     function loadFonts() {
+        clearFontUsageHighlights();
         P.Utils.apiFetch('/api/fonts/' + P.state.sessionId)
             .done(function (fonts) { renderFontTable(fonts); })
             .fail(function () { P.Utils.toast('Font analysis error', 'danger'); });
@@ -62,6 +63,9 @@ PDFalyzer.Tabs = (function ($, P) {
                     'href="/api/fonts/' + P.state.sessionId + '/charmap/' + f.pageIndex +
                     '/' + encodeURIComponent(f.objectId) + '" title="Character Map">' +
                     '<i class="fas fa-table"></i></a>';
+                actions += '<button class="btn btn-xs btn-outline-accent me-1 font-usage-btn" ' +
+                    'data-obj="' + f.objectNumber + '" data-gen="' + (f.generationNumber || 0) + '" ' +
+                    'title="Visualize usage"><i class="fas fa-highlighter"></i></button>';
                 if (f.embedded) {
                     actions += '<a class="btn btn-xs btn-outline-accent" target="_blank" ' +
                         'href="/api/fonts/' + P.state.sessionId + '/extract/' +
@@ -69,16 +73,58 @@ PDFalyzer.Tabs = (function ($, P) {
                         '" title="Extract font file"><i class="fas fa-download"></i></a>';
                 }
             }
+            var issueDetail = '';
+            if (f.usageContext || f.fixSuggestion) {
+                var issueParts = [];
+                if (f.usageContext) issueParts.push('Context: ' + P.Utils.escapeHtml(f.usageContext));
+                if (f.fixSuggestion) issueParts.push('Fix: ' + P.Utils.escapeHtml(f.fixSuggestion));
+                issueDetail = '<div class="text-muted" style="font-size:11px;">' + issueParts.join('<br>') + '</div>';
+            }
             html += '<tr>' +
                 '<td>' + P.Utils.escapeHtml(f.fontName || '(unknown)') + '</td>' +
                 '<td>' + P.Utils.escapeHtml(f.fontType || '') + '</td>' +
                 '<td>' + embIcon + '</td><td>' + subIcon + '</td>' +
                 '<td>' + (f.pageIndex + 1) + '</td>' +
-                '<td>' + issueHtml + '</td>' +
+                '<td>' + issueHtml + issueDetail + '</td>' +
                 '<td>' + actions + '</td></tr>';
         });
         html += '</tbody></table>';
         $c.html(html);
+        $c.find('.font-usage-btn').on('click', function () {
+            var obj = parseInt($(this).data('obj'), 10);
+            var gen = parseInt($(this).data('gen'), 10);
+            P.Utils.apiFetch('/api/fonts/' + P.state.sessionId + '/usage/' + obj + '/' + gen)
+                .done(function (areas) {
+                    showFontUsageHighlights(areas || []);
+                    P.Utils.toast('Font usage areas: ' + ((areas || []).length), 'info');
+                })
+                .fail(function () {
+                    P.Utils.toast('Failed to load font usage', 'danger');
+                });
+        });
+    }
+
+    function clearFontUsageHighlights() {
+        $('.pdf-font-usage').remove();
+    }
+
+    function showFontUsageHighlights(areas) {
+        clearFontUsageHighlights();
+        if (!areas || !areas.length) return;
+        areas.forEach(function (area) {
+            var pageIndex = area.pageIndex;
+            var bbox = area.bbox;
+            if (typeof pageIndex !== 'number' || !bbox || bbox.length < 4) return;
+            var $wrapper = $('[data-page="' + pageIndex + '"]');
+            var viewport = P.state.pageViewports[pageIndex];
+            if (!$wrapper.length || !viewport) return;
+            $('<div>', { 'class': 'pdf-font-usage' }).css({
+                left: bbox[0] * viewport.scale + 'px',
+                top: viewport.height - (bbox[1] + bbox[3]) * viewport.scale + 'px',
+                width: bbox[2] * viewport.scale + 'px',
+                height: bbox[3] * viewport.scale + 'px'
+            }).appendTo($wrapper);
+        });
     }
 
     // ======================== VALIDATION TAB ========================
@@ -89,6 +135,8 @@ PDFalyzer.Tabs = (function ($, P) {
             '<div class="text-center mt-3">' +
             '<button class="btn btn-accent btn-sm me-2" id="runValidateBtn">' +
             '<i class="fas fa-play me-1"></i>Run Validation</button>' +
+            '<button class="btn btn-outline-accent btn-sm me-2" id="runVeraPdfBtn">' +
+            '<i class="fas fa-file-alt me-1"></i>Run veraPDF</button>' +
             '<button class="btn btn-outline-accent btn-sm" id="exportValidateBtn" disabled>' +
             '<i class="fas fa-download me-1"></i>Export Report</button></div>');
 
@@ -102,6 +150,35 @@ PDFalyzer.Tabs = (function ($, P) {
         $('#exportValidateBtn').on('click', function () {
             window.open('/api/validate/' + P.state.sessionId + '/export', '_blank');
         });
+
+        $('#runVeraPdfBtn').on('click', function () {
+            $c.html('<div class="text-muted text-center mt-3">' +
+                '<span class="spinner-border spinner-border-sm"></span> Running veraPDF...</div>');
+            P.Utils.apiFetch('/api/validate/' + P.state.sessionId + '/verapdf')
+                .done(function (result) {
+                    renderVeraPdf(result || {});
+                })
+                .fail(function () {
+                    P.Utils.toast('veraPDF validation error', 'danger');
+                });
+        });
+    }
+
+    function renderVeraPdf(result) {
+        var available = !!result.available;
+        var success = !!result.success;
+        var report = result.report || '';
+        var header = '<div class="mb-2" style="padding:8px;">' +
+            '<span class="badge ' + (success ? 'bg-success' : 'bg-secondary') + ' me-2">' +
+            (success ? 'PASS' : 'CHECK') + '</span>' +
+            '<span class="text-muted">veraPDF ' + (available ? 'result' : 'not available') + '</span></div>';
+        $('#treeContent').html(
+            header +
+            '<div style="padding:8px;">' +
+            '<pre style="white-space:pre-wrap;max-height:480px;overflow:auto;">' +
+            P.Utils.escapeHtml(report || 'No report output') +
+            '</pre></div>'
+        );
     }
 
     function renderValidation(issues) {

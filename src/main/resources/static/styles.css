@@ -127,6 +127,14 @@ html, body {
     animation: highlightPulse 1.5s ease-in-out infinite;
 }
 
+.pdf-font-usage {
+    position: absolute;
+    border: 2px dashed var(--warning);
+    background: var(--accent-dim);
+    border-radius: 2px;
+    pointer-events: none;
+}
+
 /* Upload splash */
 #uploadSplash {
     display: flex;
