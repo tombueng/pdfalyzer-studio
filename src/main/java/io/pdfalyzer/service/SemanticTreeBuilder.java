@@ -6,9 +6,6 @@ import org.apache.pdfbox.pdmodel.*;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.common.filespecification.PDComplexFileSpecification;
 import org.apache.pdfbox.pdmodel.common.filespecification.PDEmbeddedFile;
-import org.apache.pdfbox.pdmodel.font.PDFont;
-import org.apache.pdfbox.pdmodel.graphics.PDXObject;
-import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotation;
 import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDDocumentOutline;
 import org.apache.pdfbox.pdmodel.interactive.documentnavigation.outline.PDOutlineItem;
@@ -23,7 +20,8 @@ import java.util.*;
 
 /**
  * Builds the high-level semantic tree for a PDF document.
- * Delegates COS subtree construction to {@link CosNodeBuilder}.
+ * Delegates COS subtree construction to {@link CosNodeBuilder} and
+ * per-page resource (fonts/images) construction to {@link PageResourceBuilder}.
  */
 @Component
 public class SemanticTreeBuilder {
@@ -31,9 +29,11 @@ public class SemanticTreeBuilder {
     private static final Logger log = LoggerFactory.getLogger(SemanticTreeBuilder.class);
 
     private final CosNodeBuilder cosBuilder;
+    private final PageResourceBuilder pageResourceBuilder;
 
-    public SemanticTreeBuilder(CosNodeBuilder cosBuilder) {
-        this.cosBuilder = cosBuilder;
+    public SemanticTreeBuilder(CosNodeBuilder cosBuilder, PageResourceBuilder pageResourceBuilder) {
+        this.cosBuilder          = cosBuilder;
+        this.pageResourceBuilder = pageResourceBuilder;
     }
 
     public PdfNode buildTree(PDDocument doc) {
@@ -179,128 +179,14 @@ public class SemanticTreeBuilder {
 
     private PdfNode buildPageFontsNode(PDResources resources, int pageIndex,
                                         CosNodeBuilder.ParseContext ctx) {
-        List<PdfNode> fontNodes = new ArrayList<>();
-        try {
-            for (COSName fontName : resources.getFontNames()) {
-                try {
-                    PDFont font = resources.getFont(fontName);
-                    PdfNode fontNode = new PdfNode(
-                            "page-" + pageIndex + "-font-" + fontName.getName(),
-                            fontName.getName() + ": " + font.getName(),
-                            "font", "fa-font", "#20c997");
-                    fontNode.setNodeCategory("font");
-                    fontNode.setPageIndex(pageIndex);
-                    fontNode.addProperty("Name", font.getName());
-                    fontNode.addProperty("Type", font.getClass().getSimpleName().replace("PD", ""));
-                    fontNode.addProperty("Embedded", String.valueOf(font.isEmbedded()));
-                    String name = font.getName();
-                    if (name != null && name.length() > 7 && name.charAt(6) == '+') {
-                        fontNode.addProperty("Subset", "true");
-                        fontNode.addProperty("Base Name", name.substring(7));
-                    }
-                    try {
-                        cosBuilder.attachCosChildren(fontNode, font.getCOSObject(),
-                                "page-" + pageIndex + "-font-" + fontName.getName() + "-cos", ctx, 0);
-                    } catch (Exception e) {
-                        log.debug("Error attaching COS to font {}", fontName.getName(), e);
-                    }
-                    fontNodes.add(fontNode);
-                } catch (Exception e) {
-                    log.debug("Could not parse font {}", fontName.getName(), e);
-                }
-            }
-        } catch (Exception e) { log.debug("Error iterating fonts for page {}", pageIndex, e); }
-        if (fontNodes.isEmpty()) return null;
-        PdfNode folder = new PdfNode("page-" + pageIndex + "-fonts",
-                "Fonts (" + fontNodes.size() + ")", "folder", "fa-font", "#20c997");
-        folder.setNodeCategory("fonts");
-        folder.setPageIndex(pageIndex);
-        fontNodes.forEach(folder::addChild);
-        return folder;
+        return pageResourceBuilder.buildPageFontsNode(resources, pageIndex, ctx);
     }
 
     // ======================== IMAGES (per page) ========================
 
     private PdfNode buildPageImagesNode(PDPage page, PDResources resources,
                                          int pageIndex, CosNodeBuilder.ParseContext ctx) {
-        List<PdfNode> imageNodes = new ArrayList<>();
-        int pageObjNum = -1;
-        int pageGenNum = 0;
-        try {
-            COSBase pageObj = page.getCOSObject();
-            if (pageObj instanceof COSDictionary) {
-                COSObjectKey key = null;
-                try { key = ((COSDictionary) pageObj).getKey(); } catch (Exception ignored) {}
-                if (key == null) key = cosBuilder.findObjectKeyInDocument(pageObj, ctx.doc);
-                if (key != null) {
-                    pageObjNum = (int) key.getNumber();
-                    pageGenNum = (int) key.getGeneration();
-                }
-            }
-        } catch (Exception e) { log.debug("Error extracting page object number", e); }
-
-        try {
-            for (COSName xobjName : resources.getXObjectNames()) {
-                try {
-                    PDXObject xobj = resources.getXObject(xobjName);
-                    if (!(xobj instanceof PDImageXObject)) continue;
-                    PDImageXObject img = (PDImageXObject) xobj;
-                    PdfNode imgNode = new PdfNode(
-                            "page-" + pageIndex + "-img-" + xobjName.getName(),
-                            xobjName.getName() + " (" + img.getWidth() + "x" + img.getHeight() + ")",
-                            "image", "fa-image", "#e83e8c");
-                    imgNode.setNodeCategory("image");
-                    imgNode.setPageIndex(pageIndex);
-                    imgNode.addProperty("Width", String.valueOf(img.getWidth()));
-                    imgNode.addProperty("Height", String.valueOf(img.getHeight()));
-                    imgNode.addProperty("Color Space", img.getColorSpace().getName());
-                    imgNode.addProperty("BitsPerComponent", String.valueOf(img.getBitsPerComponent()));
-                    imgNode.setCosType("COSStream");
-
-                    COSBase cosObj = img.getCOSObject();
-                    if (cosObj instanceof COSObject) {
-                        imgNode.setObjectNumber((int) ((COSObject) cosObj).getObjectNumber());
-                        imgNode.setGenerationNumber((int) ((COSObject) cosObj).getGenerationNumber());
-                    } else if (cosObj instanceof COSStream) {
-                        COSObjectKey key = null;
-                        try { key = ((COSStream) cosObj).getKey(); } catch (Exception ignored) {}
-                        if (key == null) key = cosBuilder.findObjectKeyInDocument(cosObj, ctx.doc);
-                        if (key != null) {
-                            imgNode.setObjectNumber((int) key.getNumber());
-                            imgNode.setGenerationNumber((int) key.getGeneration());
-                        }
-                    }
-                    if (imgNode.getObjectNumber() < 0 && pageObjNum >= 0) {
-                        imgNode.setObjectNumber(pageObjNum);
-                        imgNode.setGenerationNumber(pageGenNum);
-                    }
-                    if (pageObjNum >= 0) {
-                        List<String> kp = new ArrayList<>();
-                        kp.add("Resources");
-                        kp.add("XObject");
-                        kp.add("/" + xobjName.getName());
-                        imgNode.setKeyPath(cosBuilder.keyPathToJson(kp));
-                    }
-                    try {
-                        cosBuilder.attachCosChildren(imgNode, img.getCOSObject(),
-                                "page-" + pageIndex + "-img-" + xobjName.getName() + "-cos", ctx, 0);
-                    } catch (Exception e) {
-                        log.debug("Error attaching COS to image {}", xobjName.getName(), e);
-                    }
-                    imageNodes.add(imgNode);
-                } catch (Exception e) {
-                    log.debug("Could not parse XObject {}", xobjName.getName(), e);
-                }
-            }
-        } catch (Exception e) { log.debug("Error iterating XObjects for page {}", pageIndex, e); }
-
-        if (imageNodes.isEmpty()) return null;
-        PdfNode folder = new PdfNode("page-" + pageIndex + "-images",
-                "Images (" + imageNodes.size() + ")", "folder", "fa-images", "#e83e8c");
-        folder.setNodeCategory("images");
-        folder.setPageIndex(pageIndex);
-        imageNodes.forEach(folder::addChild);
-        return folder;
+        return pageResourceBuilder.buildPageImagesNode(page, resources, pageIndex, ctx);
     }
 
     // ======================== ANNOTATIONS ========================
