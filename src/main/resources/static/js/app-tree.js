@@ -178,6 +178,7 @@ PDFalyzer.Tree = (function ($, P) {
                 } else {
                     // Collapsing - remove properties panel
                     $header.siblings('.node-properties').remove();
+                    return;
                 }
             }
             selectNode(node);

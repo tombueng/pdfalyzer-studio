@@ -1,16 +1,25 @@
 package io.pdfalyzer.service;
 
+import org.verapdf.gf.foundry.VeraGreenfieldFoundryProvider;
+import org.verapdf.processor.BatchProcessingHandler;
+import org.verapdf.processor.BatchProcessor;
+import org.verapdf.processor.FormatOption;
+import org.verapdf.processor.ProcessorConfig;
+import org.verapdf.processor.ProcessorFactory;
+import org.verapdf.processor.reports.BatchSummary;
+import org.verapdf.processor.reports.ValidationBatchSummary;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 
 @Service
 public class VeraPdfService {
@@ -22,41 +31,49 @@ public class VeraPdfService {
         Files.write(tempPdf, pdfBytes);
 
         try {
-            Process process = new ProcessBuilder("verapdf", "--format", "text", tempPdf.toAbsolutePath().toString())
-                    .redirectErrorStream(true)
-                    .start();
+            VeraGreenfieldFoundryProvider.initialise();
 
-            boolean finished;
-            try {
-                finished = process.waitFor(30, TimeUnit.SECONDS);
-            } catch (InterruptedException ex) {
-                Thread.currentThread().interrupt();
-                throw new IOException("veraPDF execution interrupted", ex);
+            ProcessorConfig config = ProcessorFactory.defaultConfig();
+            BatchProcessor processor = ProcessorFactory.fileBatchProcessor(config);
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            BatchProcessingHandler handler =
+                    ProcessorFactory.getHandler(FormatOption.TEXT, true, out, false);
+            BatchSummary summary = processor.process(Collections.singletonList(tempPdf.toFile()), handler);
+
+            ValidationBatchSummary validationSummary = summary == null ? null : summary.getValidationSummary();
+            int compliant = validationSummary == null ? 0 : validationSummary.getCompliantPdfaCount();
+            int nonCompliant = validationSummary == null ? 0 : validationSummary.getNonCompliantPdfaCount();
+            int failedParsing = summary == null ? 0 : summary.getFailedParsingJobs();
+            int exceptions = summary == null ? 0 : summary.getVeraExceptions();
+            int outOfMemory = summary == null ? 0 : summary.getOutOfMemory();
+
+            String output = out.toString(StandardCharsets.UTF_8);
+            if (output == null || output.isBlank()) {
+                output = "veraPDF embedded validation finished. " +
+                        "Jobs=" + (summary == null ? 0 : summary.getTotalJobs()) +
+                        ", compliant=" + compliant +
+                        ", nonCompliant=" + nonCompliant +
+                        ", failedParsing=" + failedParsing +
+                        ", exceptions=" + exceptions +
+                        ", outOfMemory=" + outOfMemory + ".";
             }
 
+            boolean success = failedParsing == 0 && exceptions == 0 && outOfMemory == 0 && nonCompliant == 0;
             Map<String, Object> result = new LinkedHashMap<>();
-            if (!finished) {
-                process.destroyForcibly();
-                result.put("available", true);
-                result.put("success", false);
-                result.put("report", "veraPDF timed out after 30 seconds.");
-                return result;
-            }
-
-            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-            int exit = process.exitValue();
-
             result.put("available", true);
-            result.put("success", exit == 0);
-            result.put("exitCode", exit);
+            result.put("success", success);
+            result.put("compliant", compliant);
+            result.put("nonCompliant", nonCompliant);
+            result.put("failedParsing", failedParsing);
+            result.put("exceptions", exceptions);
             result.put("report", output == null ? "" : output);
             return result;
-        } catch (IOException cmdEx) {
+        } catch (Exception ex) {
             Map<String, Object> result = new LinkedHashMap<>();
             result.put("available", false);
             result.put("success", false);
-            result.put("report", "veraPDF CLI is not available. Install veraPDF and add it to PATH.");
-            log.debug("veraPDF command not available", cmdEx);
+            result.put("report", "Embedded veraPDF validation failed: " + ex.getMessage());
+            log.warn("Embedded veraPDF validation failed", ex);
             return result;
         } finally {
             try {

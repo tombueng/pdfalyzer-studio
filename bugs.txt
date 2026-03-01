@@ -1,18 +1,14 @@
 Bugs - FIXED (2026-03-01):
-✓ Tree action icons now use a consistent monochrome icon style with no button background.
-✓ Root Document node is expanded on startup, while subnodes stay collapsed.
-✓ Node info panel now shows useful metadata consistently (including for Document Info and other applicable nodes).
-✓ Form field delete no longer shows a confirmation warning.
-✓ Form field delete no longer forces a full PDF reload / page jump to page 1.
-✓ Deleting a field now marks it as removed (hatched) with an Undo action before final deletion.
-✓ Toolbar icon/button sizing for form-field controls was aligned with the rest of the toolbar.
-✓ Field-handle interactions were hardened so button clicks do not interfere with handle selection behavior.
-✓ Tree sidebar default width is now 50% of the window on startup.
+✓ veraPDF now runs using embedded Maven dependencies (no external PATH CLI requirement).
+✓ Closing an image node now removes the node info block correctly.
+✓ Form fields can be selected by clicking in PDF view; toolbar options activation and Ctrl/Shift multi-select work.
+✓ Applying form-field options no longer reloads the PDF view or jumps back to page 1.
 
 Open Bugs:
 none
-Problem: CHECKveraPDF not available - veraPDF CLI is not available. Install veraPDF and add it to PATH. Make that work by using included verapdf from pom.xml
-when opening and closing an image node, the info block is not removed from the node
+- attachment preview (pdf/img) should not open the "save as popup" but display in browser tab directly withou downloading. make it display inline in new tab.
+- height and icon size of toolbar buttons still inconsistent, the form-add-field-buttons are to small.
+- Form fields can still not be made "selected" by clicking in PDF view; toolbar options activation and Ctrl/Shift multi-select work.
 
 
 
