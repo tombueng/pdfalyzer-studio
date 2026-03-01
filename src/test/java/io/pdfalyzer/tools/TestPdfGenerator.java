@@ -357,15 +357,13 @@ public class TestPdfGenerator {
         ZonedDateTime now = ZonedDateTime.now();
         String nowIso = now.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
 
-        PDDocumentInformation info = new PDDocumentInformation();
-        info.setTitle("PDFalyzer Test PDF");
-        info.setAuthor("PDFalyzer");
-        info.setCreator("TestPdfGenerator");
-        info.setProducer("Apache PDFBox");
-        info.setSubject("Feature-rich sample PDF for UI and parser validation");
-        info.setKeywords("pdfalyzer,test,sample,images,fonts,forms,attachments,metadata,xmp");
-        info.setCreationDate(GregorianCalendar.from(now));
-        info.setModificationDate(GregorianCalendar.from(now));
+        PDDocumentInformation info = createDocumentInformation(
+            "PDFalyzer Test PDF",
+            "PDFalyzer",
+            "Feature-rich sample PDF for UI and parser validation",
+            "pdfalyzer,test,sample,images,fonts,forms,attachments,metadata,xmp",
+            now
+        );
         info.setCustomMetadataValue("GeneratorVersion", "1.0");
         info.setCustomMetadataValue("SampleType", "UI-Regression-Fixture");
         doc.setDocumentInformation(info);
@@ -382,6 +380,25 @@ public class TestPdfGenerator {
             os.write(xmp.getBytes(StandardCharsets.UTF_8));
         }
         catalog.setMetadata(metadata);
+    }
+
+    private static PDDocumentInformation createDocumentInformation(
+            String title,
+            String author,
+            String subject,
+            String keywords,
+            ZonedDateTime timestamp
+    ) {
+        PDDocumentInformation info = new PDDocumentInformation();
+        info.setTitle(title);
+        info.setAuthor(author);
+        info.setCreator("TestPdfGenerator");
+        info.setProducer("Apache PDFBox");
+        info.setSubject(subject);
+        info.setKeywords(keywords);
+        info.setCreationDate(GregorianCalendar.from(timestamp));
+        info.setModificationDate(GregorianCalendar.from(timestamp));
+        return info;
     }
 
     private static String buildXmpPacket(String isoDate, String title, String creator, String subject, String keywords) {
@@ -570,6 +587,13 @@ public class TestPdfGenerator {
         try (PDDocument attachmentDoc = new PDDocument()) {
             PDPage p = new PDPage(PDRectangle.A6);
             attachmentDoc.addPage(p);
+            attachmentDoc.setDocumentInformation(createDocumentInformation(
+                "PDFalyzer Embedded Attachment",
+                "PDFalyzer",
+                "Attachment payload generated for PDF embedding tests",
+                "pdfalyzer,test,attachment,pdf",
+                ZonedDateTime.now()
+            ));
             try (PDPageContentStream cs = new PDPageContentStream(attachmentDoc, p)) {
                 drawTextLine(cs, new PDType1Font(Standard14Fonts.FontName.HELVETICA_BOLD), 12, 24, 380,
                         "Embedded Attachment PDF");
