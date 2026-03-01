@@ -79,8 +79,8 @@ class ApiFlowIntegrationTest {
         String report = String.valueOf(validateResp.getBody().getOrDefault("report", ""));
         assertFalse(report.contains("Unmarshalling exception when streaming releaseDetails"),
             "veraPDF report should not include releaseDetails unmarshalling failure");
-        assertTrue(validateResp.getBody().containsKey("reportFormat"),
-            "veraPDF response should include report format");
+        assertEquals("html", String.valueOf(validateResp.getBody().get("reportFormat")).toLowerCase(),
+            "veraPDF response should provide HTML report format for UI rendering");
         }
 
         @Test
