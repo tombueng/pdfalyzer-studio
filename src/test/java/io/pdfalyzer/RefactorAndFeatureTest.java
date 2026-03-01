@@ -1,21 +1,39 @@
 package io.pdfalyzer;
 
-import io.pdfalyzer.model.*;
-import io.pdfalyzer.service.*;
+import io.pdfalyzer.model.FontInfo;
+import io.pdfalyzer.model.FormFieldRequest;
+import io.pdfalyzer.model.PdfNode;
+import io.pdfalyzer.model.PdfSession;
+import io.pdfalyzer.service.CosEditService;
+import io.pdfalyzer.service.CosNodeBuilder;
+import io.pdfalyzer.service.FontInspectorService;
+import io.pdfalyzer.service.PageResourceBuilder;
+import io.pdfalyzer.service.PdfEditService;
+import io.pdfalyzer.service.PdfService;
+import io.pdfalyzer.service.PdfStructureParser;
+import io.pdfalyzer.service.SemanticTreeBuilder;
+import io.pdfalyzer.service.SessionService;
 import io.pdfalyzer.web.EditApiController;
 import io.pdfalyzer.web.ResourceApiController;
-import org.apache.pdfbox.cos.*;
-import org.apache.pdfbox.pdmodel.*;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDDocumentInformation;
+import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationWidget;
-import org.apache.pdfbox.pdmodel.interactive.form.*;
+import org.apache.pdfbox.pdmodel.interactive.form.PDAcroForm;
+import org.apache.pdfbox.pdmodel.interactive.form.PDComboBox;
+import org.apache.pdfbox.pdmodel.interactive.form.PDTextField;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.ResponseEntity;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -327,7 +345,6 @@ public class RefactorAndFeatureTest {
     void cosEditEndpointUpdatesAndTree() throws IOException {
         byte[] pdf = createSimplePdf(1);
         PdfSession session = pdfService.uploadAndParse("test.pdf", pdf);
-        CosNodeBuilder cosNode = new CosNodeBuilder();
         PdfNode root = session.getTreeRoot();
 
         // Find a COS node with editable=true and valid objectNumber
@@ -390,7 +407,7 @@ public class RefactorAndFeatureTest {
         req.setPageIndex(0); req.setX(50); req.setY(50);
         req.setWidth(150); req.setHeight(25);
         ResponseEntity<Map<String, Object>> resp = editCtrl.addFormField(session.getId(), req);
-        assertEquals(200, resp.getStatusCodeValue());
+        assertEquals(200, resp.getStatusCode().value());
         assertNotNull(resp.getBody());
         assertNotNull(resp.getBody().get("tree"));
     }
@@ -401,7 +418,7 @@ public class RefactorAndFeatureTest {
         PdfSession session = pdfService.uploadAndParse("test.pdf", pdf);
         ResourceApiController resCtrl = new ResourceApiController(pdfService);
         ResponseEntity<byte[]> resp = resCtrl.getResource(session.getId(), 99999, 0, null, false);
-        assertEquals(404, resp.getStatusCodeValue());
+        assertEquals(404, resp.getStatusCode().value());
     }
 
     // ======================== HELPERS ========================
