@@ -248,7 +248,7 @@ public class TestPdfGenerator {
         try (PDPageContentStream cs = new PDPageContentStream(doc, page)) {
             writeHeading(cs, "Page 4: AcroForm Fields", page.getMediaBox().getHeight() - 36);
             drawTextLine(cs, helvetica, 12, PAGE_MARGIN, 720, "Text (required), text (readonly), multiline text");
-            drawTextLine(cs, helvetica, 12, PAGE_MARGIN, 680, "Checkbox, radio, combo box, list box, signature field");
+            drawTextLine(cs, helvetica, 12, PAGE_MARGIN, 680, "Checkbox, radio, combo box, list box, signature field, JS validation fields");
 
             drawTextLine(cs, helvetica, 10, PAGE_MARGIN, 646, "Name (required):");
             drawTextLine(cs, helvetica, 10, PAGE_MARGIN, 616, "Account (readonly):");
@@ -257,7 +257,9 @@ public class TestPdfGenerator {
             drawTextLine(cs, helvetica, 10, PAGE_MARGIN, 466, "Radio option:");
             drawTextLine(cs, helvetica, 10, PAGE_MARGIN, 436, "Combo (country):");
             drawTextLine(cs, helvetica, 10, PAGE_MARGIN, 406, "List (priority):");
-            drawTextLine(cs, helvetica, 10, PAGE_MARGIN, 348, "Signature:");
+            drawTextLine(cs, helvetica, 10, PAGE_MARGIN, 348, "Age (18-99, JS validate):");
+            drawTextLine(cs, helvetica, 10, PAGE_MARGIN, 318, "Date (YYYY-MM-DD, JS validate):");
+            drawTextLine(cs, helvetica, 10, PAGE_MARGIN, 278, "Signature:");
         }
 
         PDAcroForm form = new PDAcroForm(doc);
@@ -320,11 +322,54 @@ public class TestPdfGenerator {
         list.setValue("High");
         fields.add(list);
 
+        PDTextField ageValidated = new PDTextField(form);
+        ageValidated.setPartialName("age_min_max_js");
+        addWidget(ageValidated.getWidgets().get(0), page, 160, 342, 120, 18);
+        ageValidated.setValue("25");
+        setValidationJavaScript(ageValidated,
+                "if (event.value !== '') { " +
+                        "var n = Number(event.value); " +
+                        "if (isNaN(n) || n < 18 || n > 99) { " +
+                        "app.alert('Age must be between 18 and 99'); " +
+                        "event.rc = false; " +
+                        "}" +
+                        "}");
+        fields.add(ageValidated);
+
+        PDTextField dateValidated = new PDTextField(form);
+        dateValidated.setPartialName("date_format_js");
+        addWidget(dateValidated.getWidgets().get(0), page, 160, 312, 140, 18);
+        dateValidated.setValue("2026-03-01");
+        setValidationJavaScript(dateValidated,
+                "if (event.value !== '' && !/^\\d{4}-\\d{2}-\\d{2}$/.test(event.value)) { " +
+                        "app.alert('Use YYYY-MM-DD date format'); " +
+                        "event.rc = false; " +
+                        "}");
+        fields.add(dateValidated);
+
         PDSignatureField signature = new PDSignatureField(form);
         signature.setPartialName("signature_field");
         signature.setRequired(true);
-        addWidget(signature.getWidgets().get(0), page, 160, 330, 250, 26);
+        addWidget(signature.getWidgets().get(0), page, 160, 260, 250, 26);
         fields.add(signature);
+    }
+
+    private static void setValidationJavaScript(org.apache.pdfbox.pdmodel.interactive.form.PDField field,
+                                                String javascriptCode) {
+        if (javascriptCode == null) {
+            return;
+        }
+        org.apache.pdfbox.cos.COSDictionary fieldDict = field.getCOSObject();
+        org.apache.pdfbox.cos.COSDictionary aa =
+                (org.apache.pdfbox.cos.COSDictionary) fieldDict.getDictionaryObject(org.apache.pdfbox.cos.COSName.AA);
+        if (aa == null) {
+            aa = new org.apache.pdfbox.cos.COSDictionary();
+            fieldDict.setItem(org.apache.pdfbox.cos.COSName.AA, aa);
+        }
+        org.apache.pdfbox.cos.COSDictionary validateAction = new org.apache.pdfbox.cos.COSDictionary();
+        validateAction.setName(org.apache.pdfbox.cos.COSName.S, "JavaScript");
+        validateAction.setString(org.apache.pdfbox.cos.COSName.JS, javascriptCode);
+        aa.setItem(org.apache.pdfbox.cos.COSName.V, validateAction);
     }
 
     private static void addWidget(PDAnnotationWidget widget, PDPage page, float x, float y, float width, float height) throws IOException {

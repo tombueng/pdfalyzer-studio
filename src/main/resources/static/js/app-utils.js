@@ -8,19 +8,60 @@ PDFalyzer.Utils = (function ($) {
     function hideLoading() { $('#statusLoading').hide(); }
 
     function toast(msg, type) {
+        var normalizedType = type || 'info';
         var iconMap = {
             success: 'fa-check-circle',
             danger:  'fa-exclamation-circle',
             warning: 'fa-exclamation-triangle',
             info:    'fa-info-circle'
         };
-        var iconClass = iconMap[type] || 'fa-info-circle';
-        var $icon = $('<i>', { 'class': 'fas ' + iconClass + ' toast-icon-' + type });
-        var $text = $('<span>', { text: msg, 'class': 'toast-text-' + type });
-        var $el   = $('<div>', { 'class': 'toast-msg' + (type ? ' text-' + type : '') });
-        $el.append($icon).append(' ').append($text);
+        var durationMap = {
+            success: 10000,
+            positive: 10000,
+            info: 15000,
+            informative: 15000,
+            warning: 15000,
+            danger: 30000,
+            error: 30000
+        };
+        var durationMs = durationMap[normalizedType] || 15000;
+        var cssType = normalizedType;
+
+        if (normalizedType === 'positive') cssType = 'success';
+        if (normalizedType === 'informative') cssType = 'info';
+        if (normalizedType === 'error') cssType = 'danger';
+
+        var iconClass = iconMap[cssType] || 'fa-info-circle';
+
+        var $icon = $('<i>', { 'class': 'fas ' + iconClass + ' toast-icon-' + cssType });
+        var $text = $('<span>', { text: msg, 'class': 'toast-text-' + cssType });
+        var $countdown = $('<div>', { 'class': 'toast-countdown' });
+        var $el   = $('<div>', { 'class': 'toast-msg text-' + cssType });
+        var fadeDurationMs = 200;
+        var fadeDelayMs = Math.max(durationMs - fadeDurationMs, 0);
+        $el.css('--toast-duration-ms', durationMs + 'ms');
+        $el.css('--toast-fade-delay-ms', fadeDelayMs + 'ms');
+        $el.append($icon).append(' ').append($text).append($countdown);
         $('#toastContainer').append($el);
-        $el.on('click', function () { $el.remove(); });
+
+        function dismissToast() {
+            $el.addClass('toast-dismiss');
+            setTimeout(function () { $el.remove(); }, 180);
+        }
+
+        var dismissed = false;
+        var timerId = setTimeout(function () {
+            if (dismissed) return;
+            dismissed = true;
+            dismissToast();
+        }, durationMs);
+
+        $el.on('click', function () {
+            if (dismissed) return;
+            dismissed = true;
+            clearTimeout(timerId);
+            dismissToast();
+        });
     }
 
     function apiFetch(url, opts) {

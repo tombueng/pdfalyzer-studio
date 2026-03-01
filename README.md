@@ -1,264 +1,193 @@
 # PDFalyzer UI
 
-A Spring Boot web application for deep inspection, analysis, validation, and editing of PDF documents through a rich graphical interface.
+PDFalyzer UI is a Spring Boot web application for inspecting, validating, and editing PDF internals through an interactive browser UI.
 
 ## Quick Start
 
 ### Prerequisites
 
-- Java 17 or later
+- Java 21+
 - Maven 3.8+
 
-### Build & Run
+### Run locally
 
 ```bash
-cd pdfalyzer-ui
 mvn spring-boot:run
 ```
 
-Open `http://localhost:8080` in a browser and upload a PDF file.
+Open `http://localhost:8080`.
 
-### Run Tests
+### Build and test
 
 ```bash
-mvn test
+mvn clean verify
 ```
 
----
+## Tech Stack (Current)
 
-## Technology Stack
+| Area | Technology |
+|------|------------|
+| Backend | Spring Boot 3.5.11, Spring MVC |
+| Java | Java 21 |
+| PDF parsing/editing | Apache PDFBox 3.0.0, OpenPDF 1.3.30 |
+| PDF/A validation | veraPDF libraries 1.26.1 |
+| UI shell | Thymeleaf |
+| Frontend | Vanilla JavaScript modules + jQuery |
+| Rendering | pdf.js 3.11.174 (CDN) |
+| Styling | Bootswatch Cyborg (Bootstrap 5.3.x), Font Awesome 6.4.0 |
 
-| Component | Technology | Version |
-|-----------|-----------|---------|
-| Backend | Spring Boot (Java, Spring MVC) | 3.1.0 |
-| Template Engine | Thymeleaf | (via Spring Boot) |
-| PDF Parsing | Apache PDFBox | 3.0.0 |
-| PDF Editing | Apache PDFBox + OpenPDF | 3.0.0 / 1.3.30 |
-| Client-side PDF Rendering | pdf.js | 3.11.174 (CDN) |
-| CSS Framework | Bootstrap 5 (Bootswatch Cyborg dark theme) | 5.3.0 |
-| Icons | Font Awesome | 6.4.0 |
-| Frontend | Vanilla JavaScript (no framework) | ES5 |
+## Architecture
 
-### Architecture
+- Single-page style UI served from `/` (Thymeleaf template).
+- REST API under `/api/*`.
+- PDF data is stored in in-memory sessions (UUID-based session id).
+- No database.
 
-The application uses a hybrid rendering approach:
+## Current Features
 
-- **Thymeleaf** serves the initial HTML shell (single page at `/`)
-- **REST API** (`/api/*`) returns JSON for all dynamic data
-- **Client-side JavaScript** handles all user interaction, tree rendering, PDF viewing, and state management
-- **In-memory sessions** store uploaded PDFs keyed by UUID (no database required)
+### Upload and viewer
 
----
+- Upload from file picker or drag-and-drop.
+- 100 MB upload limit (client + server constraints).
+- Renders all pages using pdf.js in a scrollable canvas viewer.
+- If `src/main/resources/static/test.pdf` exists, it auto-loads on startup.
 
-## Features
+### Structural tree and inspection
 
-### 1. PDF Upload & Viewing
+- Rich hierarchical tree with icons, per-node metadata panel, and lazy expansion.
+- Search (`/api/tree/{sessionId}/search`) across node names and properties.
+- Tree node selection can scroll/highlight matching PDF areas when geometry is available.
+- PDF click can map back to tree node/field selection.
 
-Upload a PDF via the navbar button, the splash screen button, or drag-and-drop onto the viewer pane.
+### Tabs (7)
 
-**What it does:**
-- Accepts PDF files up to 100 MB
-- Validates file type both client-side (extension/MIME) and server-side (`.pdf` extension required)
-- Renders all pages sequentially using pdf.js with fade-in animation
-- Each page is displayed as a separate canvas element in a scrollable viewer
-- Page labels appear at the bottom-right corner of each page
+| Tab | Key | Behavior |
+|-----|-----|----------|
+| Structure | `1` | Full semantic tree |
+| Forms | `2` | Form/field subtree |
+| Fonts | `3` | Font analyzer table + actions |
+| Validation | `4` | Internal validator + veraPDF run/export |
+| Raw COS | `5` | Raw COS tree |
+| Bookmarks | `6` | Bookmark subtree |
+| Attachments | `7` | Embedded file list/actions |
 
-**What it cannot do:**
-- Does not support password-protected/encrypted PDFs (PDFBox will throw an error)
-- Does not render PDFs server-side; all rendering is client-side via pdf.js
-- Does not support loading PDFs from URLs or cloud storage (upload only)
-- Adjustable rendering scale with manual zoom (Ctrl+wheel) and auto-fit modes
+### Font inspector
 
-### 2. PDF Structure Tree
+- Lists fonts with type, embedded/subset flags, and issues.
+- Supports charmap view, usage-area visualization, and embedded font extraction.
 
-After upload, the right panel displays the full internal structure of the PDF parsed from its COS (Carousel Object System) object graph.
+### Validation
 
-**Tree hierarchy:**
-```
-Document Catalog
-├── Document Info (title, author, creator, producer, dates)
-├── Pages (N)
-│   └── Page 1
-│       ├── Resources
-│       │   ├── Fonts (with name, type, embedded status, subset info)
-│       │   └── Images (with dimensions, color space, BPC)
-│       └── Annotations (with subtype, bounding box, contents)
-├── AcroForm (form fields with type, name, value, required/readonly)
-└── Bookmarks (hierarchical outline items)
-```
+- Built-in rule-based validator with exportable text report.
+- Optional veraPDF execution via API with in-UI rendering (HTML/XML/plain output handling).
+- veraPDF report can be exported to HTML/PDF from the Validation tab.
 
-**What it does:**
-- Parses the complete PDF structure using PDFBox's COS-level API
-- Displays type-specific icons and colors for each node type
-- Shows metadata properties in a collapsible detail panel per node
-- Nodes are expandable/collapsible with smooth toggle animation (circular reference nodes include a jump link that navigates to the original object)
-- Clicking a node with a bounding box (annotations, form fields) highlights the corresponding rectangle on the PDF page and scrolls the viewer to that page
-- Clicking a node associated with a page (fonts, images, resources) scrolls the viewer to that page
-- Handles cyclic references in the COS object graph safely
-- Dictionary/array entries in the tree can now be added or removed via inline forms; primitive values are editable inline (click pencil icon)
+### Editing capabilities
 
-**What it cannot do:**
-- Does not parse raw COS dictionary/array structures beyond the high-level objects (catalog, pages, fonts, images, annotations, forms, bookmarks)
-- Does not display content streams (the actual drawing operators)
-- Does not parse cross-reference tables or show revision history
-- Does not support incremental update/revision filtering (all revisions shown as merged)
+- Form field creation workflow (Text, Checkbox, Combo, Radio, Signature).
+- Draw rectangle on page, configure field id/options, queue changes, then save in batch.
+- Field options updates for selected fields.
+- Field rectangle updates and field deletion API support.
+- COS editing from tree:
+  - edit primitive values,
+  - add dictionary/array entries,
+  - remove entries,
+  - remove image/resource dictionary entries.
 
-### 3. Shortcut Tabs
+### Resource and attachment handling
 
-Six tabs above the tree panel provide quick access to specific sections:
+- Preview/download stream resources (`/api/resource/...`).
+- Preview/download embedded attachments (`/api/attachment/...`).
 
-| Tab | Key | What it shows |
-|-----|-----|--------------|
-| Structure | `1` | Full tree (default) |
-| Forms | `2` | AcroForm subtree only (form fields hierarchy) |
-| Bookmarks | `3` | Document outline / bookmarks |
-| Pages | `4` | Pages subtree with per-page resources |
-| Fonts | `5` | Font analysis table (see Font Inspector) |
-| Validation | `6` | Validation results (see Validator) |
-
-### 4. Search
-
-The search bar in the navbar filters tree nodes by name or property values.
-
-**What it does:**
-- Debounced (300ms) to avoid excessive API calls while typing
-- Searches across node names and all property values (case-insensitive)
-- Displays matching nodes as a flat list with result count
-- Clearing the search restores the full tree
-
-**What it cannot do:**
-- Does not search inside PDF text content (only structural metadata)
-- Does not highlight search terms within the tree
-- Does not search within font tables or validation results
-
-### 5. Interactive Selection (PDF <-> Tree)
-
-**Tree -> PDF:** Clicking a tree node that has a `boundingBox` (annotations, form widgets) draws a pulsing highlight rectangle over the corresponding location on the PDF page and scrolls the viewer to that page.
-
-**PDF -> Tree:** Clicking on the PDF viewer checks if the click coordinates fall inside any tree node's bounding box. If a match is found, that node is selected and scrolled into view in the tree panel.
-
-**What it cannot do:**
-- Cannot highlight arbitrary objects that don't have explicit bounding boxes (e.g., fonts, images referenced in content streams)
-- Coordinate mapping depends on the annotation/widget having a valid Rectangle entry
-
-### 6. Font Inspector
-
-Accessible via the **Fonts** tab. Calls `GET /api/fonts/{sessionId}` which analyzes all fonts across all pages.
-
-**Analysis includes:**
-- Font name and type (Type1Font, TrueTypeFont, Type0Font, Type3Font, CIDFont)
-- Embedded status (green check or red X)
-- Subset status (detected by 6-letter prefix + `+` in font name)
-- Encoding information (from COS dictionary)
-- Page number where the font is used
-- Issue detection:
-  - Non-embedded fonts flagged with warning
-  - Type3 fonts flagged for potential cross-platform rendering issues
-
-**What it cannot do:**
-- Does not display the actual character map or glyph table
-- Does not detect specific missing glyphs (would require rendering each character)
-- Does not visualize font usage areas on the page
-- Does not provide font repair or re-embedding tools
-- Fonts used in XObject Form content may not be detected (only page-level resources are scanned)
-
-### 7. Super Validator
-
-Accessible via the **Validation** tab. Click "Run Validation" to analyze the PDF.
-
-**Validation rules:**
-
-| Rule ID | Severity | What it checks |
-|---------|----------|---------------|
-| META-001 | WARNING | XMP metadata stream presence (PDF/A requirement) |
-| META-002 | INFO | Document title presence |
-| META-003 | INFO | Producer information presence |
-| FONT-001 | ERROR | Font embedding (PDF/A requires all fonts embedded) |
-| FONT-002 | WARNING | ToUnicode CMap presence (needed for text extraction) |
-| FONT-ERR | ERROR | Font loading failures |
-| PAGE-001 | ERROR | Document has zero pages |
-| PAGE-002 | ERROR | Page missing MediaBox |
-| ANNOT-001 | WARNING | Annotation missing rectangle |
-| ANNOT-002 | WARNING | Annotation missing appearance stream (PDF/A requirement) |
-
-**Results display:**
-- Grouped by severity (errors, then warnings, then info)
-- Summary counts at the top
-- Each issue shows rule ID, message, spec reference, and location
-- Exportable as a text report via the "Export Report" button
-
-**What it cannot do:**
-- Does not perform full PDF/A or PDF/X conformance validation (would require VeraPDF or PDFBox Preflight)
-- Does not validate color spaces, ICC profiles, or transparency
-- Does not validate digital signatures
-- Does not check for linearization or tagged PDF structure
-- Does not highlight issues inline on the PDF viewer
-
-### 8. PDF Editing (Form Fields)
-
-Toggle edit mode with the pencil button in the navbar (or `Ctrl+E`).
-
-**Workflow:**
-1. Click the edit button to enter edit mode
-2. Select a field type from the toolbar (Text, Checkbox, Combo, Radio, Signature)
-3. Draw a rectangle on the PDF page where you want the field
-4. Fill in field details in the Add Field dialog (Field ID + options JSON)
-5. The PDF is modified server-side, re-rendered, and the tree refreshed
-
-**Supported field types:**
-- **Text** -- PDTextField with Helvetica 10pt default appearance
-- **Checkbox** -- PDCheckBox with appearance stream
-- **Combo** -- PDComboBox (comma-separated choices via options)
-- **Radio** -- PDRadioButton with appearance stream
-- **Signature** -- PDSignatureField (empty, ready for signing)
-
-**What it does:**
-- Creates proper PDF form fields using PDFBox's PDAcroForm API
-- Sets up default resources (Helvetica font) if no AcroForm exists
-- Generates appearance streams for visibility in PDF viewers
-- Validates field ID, page index, and dimensions before creation
-- Uses an in-app modal dialog (not browser prompt) for field creation
-- Supports field options editing for selected existing fields via the Options dialog
-- Downloads the modified PDF via the download button
-
-**What it cannot do:**
-- Cannot add non-form annotations (stamps, highlights, comments)
-- Cannot edit page content (text, images, graphics)
-- Cannot set up actual digital signatures (only creates the field placeholder)
-
-### 9. Export & Download
-
-| Action | Button | Shortcut | Endpoint |
-|--------|--------|----------|----------|
-| Download PDF | Download icon in navbar | `Ctrl+S` | `GET /api/pdf/{id}/download` |
-| Download resource | click download icon next to tree node | n/a | `GET /api/resource/{id}/{obj}/{gen}` (attachment or inline) |
-| Export tree as JSON | Export icon in navbar | -- | `GET /api/tree/{id}/export` |
-| Export validation report | Button in Validation tab | -- | `GET /api/validate/{id}/export` |
-
-The download feature is especially useful after editing: add form fields, then download the modified PDF.
-
-### 10. Keyboard Shortcuts
+### Keyboard shortcuts
 
 | Shortcut | Action |
 |----------|--------|
-| `Ctrl+O` | Open file picker |
-| `Ctrl+F` | Focus search bar |
+| `Ctrl+O` | Open PDF picker |
+| `Ctrl+F` | Focus search |
 | `Ctrl+S` | Download current PDF |
-| `Ctrl+E` | Toggle edit mode |
-| `Escape` | Exit edit mode or clear search |
-| `1`-`6` | Switch between tabs |
+| `Ctrl+E` | Preselect Text field placement mode |
+| `Esc` | Clear focused search input |
+| `1`..`7` | Switch tabs |
 
-### 11. UI Features
+## Main API Endpoints
 
-- **Dark theme** -- Bootswatch Cyborg with custom CSS variables
-- **Resizable split pane** -- Drag the divider between PDF viewer and tree panel
-- **Drag-and-drop upload** -- Drop PDF files onto the viewer area
-- **Loading skeletons** -- Automatically shown after 1-second delay on any API request
-- **Toast notifications** -- Appear for upload success/failure, validation results, edit confirmations
-- **Status bar** -- Shows filename, page count, session status, and loading indicator
-- **Responsive layout** -- Stacks vertically on screens under 768px
-- **Custom SVG logo** -- Magnifying glass over PDF document
+### Session and tree
+
+- `POST /api/upload`
+- `GET /api/tree/{sessionId}`
+- `GET /api/tree/{sessionId}/search?q=...`
+- `GET /api/tree/{sessionId}/export`
+- `GET /api/tree/{sessionId}/raw-cos`
+
+### PDF bytes/download
+
+- `GET /api/pdf/{sessionId}`
+- `GET /api/pdf/{sessionId}/download`
+
+### Fonts
+
+- `GET /api/fonts/{sessionId}`
+- `GET /api/fonts/{sessionId}/page/{pageNum}`
+- `GET /api/fonts/{sessionId}/charmap/{pageNum}/{fontObjectId}`
+- `GET /api/fonts/{sessionId}/usage/{objNum}/{genNum}`
+- `GET /api/fonts/{sessionId}/extract/{objNum}/{genNum}`
+
+### Validation
+
+- `GET /api/validate/{sessionId}`
+- `GET /api/validate/{sessionId}/verapdf`
+- `GET /api/validate/{sessionId}/export`
+
+### Editing
+
+- `POST /api/cos/{sessionId}/update`
+- `POST /api/edit/{sessionId}/add-field`
+- `POST /api/edit/{sessionId}/add-fields`
+- `DELETE /api/edit/{sessionId}/field/{fieldName}`
+- `POST /api/edit/{sessionId}/field/{fieldName}/value`
+- `POST /api/edit/{sessionId}/field/{fieldName}/choices`
+- `POST /api/edit/{sessionId}/field/{fieldName}/rect`
+- `POST /api/edit/{sessionId}/fields/options`
+
+### Resources and diagnostics
+
+- `GET /api/resource/{sessionId}/{objNum}/{genNum}`
+- `GET /api/attachment/{sessionId}/{fileName}`
+- `POST /api/client-errors`
+
+## Known Limitations
+
+- Session storage is in-memory only (no persistence across restart).
+- Not all PDF features are fully editable; focus is forms + COS-level manipulations.
+- Some complex content-stream level mappings may be partial depending on PDF structure.
+
+## Project Layout
+
+- Backend: `src/main/java/io/pdfalyzer/...`
+- Frontend static assets: `src/main/resources/static/...`
+- Thymeleaf template: `src/main/resources/templates/index.html`
+
+## Notes
+
+- `requirements.md` captures early/aspirational requirements and is not always identical to current implementation.
 - **Client JS error capture** -- Browser runtime errors are captured and sent to backend logs via `/api/client-errors`
+
+## Roadmap
+
+See [ideas.md](ideas.md) for the full backlog.
+
+Effort legend:
+- **S** = small (about 1-3 days)
+- **M** = medium (about 1-2 weeks)
+- **L** = large (multi-week / multi-sprint)
+
+Suggested next items:
+- **S** Undo/redo for pending edits
+- **S** Diff summary after save
+- **M** Dual-PDF compare mode
+- **M** Content-stream inspector
+- **L** Rule packs + CLI companion
 
 ---
 

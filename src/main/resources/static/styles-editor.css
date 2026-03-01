@@ -60,18 +60,57 @@
     pointer-events: none;
 }
 
+#pdfPane.place-mode-active .pdf-page-wrapper,
+#pdfPane.place-mode-active .pdf-page-wrapper canvas {
+    cursor: crosshair;
+}
+
 .form-field-handle {
     position: absolute;
-    border: 1px dashed rgba(0, 212, 255, 0.9);
+    border: 2px dashed rgba(0, 212, 255, 0.9);
     background: rgba(0, 212, 255, 0.08);
     box-sizing: border-box;
     cursor: move;
     z-index: 4;
+    overflow: visible;
 }
 
 .form-field-handle.selected {
-    border: 2px solid var(--warning);
     background: var(--accent-dim);
+}
+
+.form-field-handle.selected::after {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    border: 3px solid var(--warning);
+    border-radius: 1px;
+    pointer-events: none;
+    animation: selectedBorderPulse 1.1s ease-in-out infinite;
+}
+
+.form-field-handle.pending {
+    border: 2px dashed var(--warning);
+    background: rgba(255, 193, 7, 0.12);
+    cursor: default;
+}
+
+.form-field-handle.required {
+    box-shadow: inset 0 0 0 3px var(--danger);
+}
+
+.form-field-pending-label {
+    position: absolute;
+    left: 2px;
+    top: 2px;
+    font-size: 10px;
+    line-height: 1;
+    padding: 2px 4px;
+    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.72);
+    color: var(--warning);
+    border: 1px solid var(--warning);
+    pointer-events: none;
 }
 
 .form-field-resize {
@@ -86,17 +125,17 @@
 
 .field-handle-btn {
     position: absolute;
-    top: 2px;
+    top: -22px;
     background: rgba(0, 0, 0, 0.75);
     border: 1px solid var(--accent);
     color: var(--accent);
-    padding: 2px 5px;
-    font-size: 10px;
+    padding: 2px 6px;
+    font-size: 11px;
     cursor: pointer;
     border-radius: 3px;
-    opacity: 0;
+    opacity: 0.92;
     transition: opacity 0.2s, background 0.2s;
-    z-index: 10;
+    z-index: 12;
 }
 
 .field-handle-btn:hover {
@@ -106,15 +145,15 @@
 }
 
 .form-field-handle:hover .field-handle-btn {
-    opacity: 0.8;
+    opacity: 1;
 }
 
 .field-handle-options {
-    right: 18px;
+    right: 26px;
 }
 
 .field-handle-delete {
-    right: 2px;
+    right: 0;
     border-color: var(--danger);
     color: var(--danger);
 }
@@ -125,7 +164,7 @@
 }
 
 .field-handle-undo {
-    right: 2px;
+    right: 0;
     border-color: var(--success);
     color: var(--success);
 }
@@ -136,7 +175,7 @@
 }
 
 .form-field-handle.removed {
-    border: 1px dashed var(--danger);
+    border: 2px dashed var(--danger);
     background-image: repeating-linear-gradient(
         -45deg,
         rgba(220, 53, 69, 0.22) 0,
@@ -151,6 +190,114 @@
     opacity: 0.9;
 }
 
+.pending-fields-panel {
+    margin: 8px 10px 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--warning);
+    border-radius: 6px;
+    background: rgba(255, 193, 7, 0.08);
+}
+
+.pending-fields-title {
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: var(--warning);
+}
+
+.pending-fields-list {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.pending-fields-list li {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+    font-size: 11px;
+}
+
+.pending-field-name {
+    color: #fff;
+    font-weight: 600;
+}
+
+.pending-field-meta {
+    color: var(--text-muted);
+}
+
+.pending-fields-hint {
+    margin-top: 6px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.field-options-modal .modal-content {
+    border: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(15, 52, 96, 0.96), rgba(22, 33, 62, 0.98));
+    box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
+}
+
+.field-options-modal .modal-header,
+.field-options-modal .modal-footer {
+    border-color: var(--border);
+    background: rgba(0, 0, 0, 0.12);
+}
+
+.field-options-modal .modal-title {
+    color: var(--accent);
+    font-size: 1rem;
+}
+
+.field-option-block {
+    border: 1px solid rgba(0, 212, 255, 0.22);
+    border-radius: 8px;
+    padding: 8px 10px;
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.field-option-radios {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.field-option-radios .form-check {
+    margin: 0;
+}
+
+.field-option-radios .form-check-input:checked {
+    background-color: var(--accent);
+    border-color: var(--accent);
+}
+
+.field-option-radios .form-check-label {
+    font-size: 12px;
+    color: var(--text);
+}
+
+.field-options-modal .form-control,
+.field-options-modal textarea {
+    border-color: var(--border);
+    background: rgba(0, 0, 0, 0.24);
+    color: var(--text);
+}
+
+.field-options-modal .form-control:focus,
+.field-options-modal textarea:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-dim);
+}
+
+.field-option-hidden {
+    display: none !important;
+}
+
 
 /* === Animations === */
 @keyframes fadeInUp {
@@ -161,6 +308,11 @@
 @keyframes highlightPulse {
     0%, 100% { opacity: 1; }
     50% { opacity: 0.5; }
+}
+
+@keyframes selectedBorderPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.55; }
 }
 
 @keyframes fadeIn {
@@ -219,9 +371,18 @@
     background: var(--bg-card);
     border: 1px solid var(--border);
     box-shadow: 0 4px 16px rgba(0,0,0,0.4);
-    animation: fadeIn 0.3s;
+    animation: fadeIn 0.3s, toastFadeOut 0.2s linear var(--toast-fade-delay-ms, 14800ms) forwards;
     max-width: 340px;
     cursor: pointer;
+    position: relative;
+    overflow: hidden;
+}
+
+.toast-msg.toast-dismiss {
+    animation: none;
+    opacity: 0;
+    transform: translateY(4px);
+    transition: opacity 0.18s ease, transform 0.18s ease;
 }
 .toast-msg.text-danger,
 .toast-msg.text-warning,
@@ -244,6 +405,31 @@
 .toast-text-danger { color: var(--danger); }
 .toast-text-warning { color: var(--warning); }
 .toast-text-info { color: var(--accent); }
+
+.toast-countdown {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    width: 100%;
+    height: 3px;
+    background: currentColor;
+    opacity: 0.35;
+    transform-origin: left center;
+    animation-name: toastCountdown;
+    animation-duration: var(--toast-duration-ms, 15000ms);
+    animation-timing-function: linear;
+    animation-fill-mode: forwards;
+}
+
+@keyframes toastCountdown {
+    from { transform: scaleX(1); }
+    to { transform: scaleX(0); }
+}
+
+@keyframes toastFadeOut {
+    from { opacity: 1; }
+    to { opacity: 0; }
+}
 
 /* === COS Type Badges === */
 .cos-type-badge {

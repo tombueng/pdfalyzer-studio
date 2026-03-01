@@ -17,6 +17,7 @@ PDFalyzer.Tree = (function ($, P) {
         if (!data) return;
         var $container = $('#treeContent').empty();
         $container.append(buildNodeEl(data, 0));
+        appendPendingFieldPanel($container);
         applySelectionClasses();
     }
 
@@ -25,9 +26,11 @@ PDFalyzer.Tree = (function ($, P) {
         var nodes = findAllByCategory(rootData, category);
         if (nodes.length === 0) {
             $container.html('<div class="text-muted text-center mt-3">No items found</div>');
+            appendPendingFieldPanel($container, category);
             return;
         }
         nodes.forEach(function (n) { $container.append(buildNodeEl(n, 0)); });
+        appendPendingFieldPanel($container, category);
         applySelectionClasses();
     }
 
@@ -38,7 +41,27 @@ PDFalyzer.Tree = (function ($, P) {
             return;
         }
         results.forEach(function (n) { $container.append(buildNodeEl(n, 0)); });
+        appendPendingFieldPanel($container);
         applySelectionClasses();
+    }
+
+    function appendPendingFieldPanel($container, category) {
+        var pending = P.state.pendingFormAdds || [];
+        if (!pending.length) return;
+        if (category && category !== 'acroform' && category !== 'field') return;
+
+        var html = '<div class="pending-fields-panel">' +
+            '<div class="pending-fields-title">Pending new fields (' + pending.length + ')</div>' +
+            '<ul class="pending-fields-list">';
+        pending.forEach(function (item) {
+            html += '<li><span class="pending-field-name">' + P.Utils.escapeHtml(item.fieldName || '(unnamed)') + '</span>' +
+                '<span class="pending-field-meta">' +
+                P.Utils.escapeHtml((item.fieldType || 'field') + ' · Page ' + ((item.pageIndex || 0) + 1)) +
+                '</span></li>';
+        });
+        html += '</ul><div class="pending-fields-hint">Click Save to persist to PDF</div></div>';
+
+        $container.prepend($(html));
     }
 
     // ======================== SELECT NODE ========================
