@@ -19,14 +19,20 @@
 #editToolbar.active { display: flex; }
 
 .edit-field-btn {
-    padding: 4px 10px;
-    font-size: 11px;
+    padding: 0.25rem 0.5rem;
+    font-size: 0.875rem;
+    line-height: 1.2;
     border-radius: 4px;
     border: 1px solid var(--border);
-    background: rgba(255,255,255,0.05);
-    color: var(--text);
+    background: transparent;
+    color: var(--accent);
     cursor: pointer;
     transition: all 0.2s;
+}
+
+.edit-field-btn i {
+    width: 14px;
+    text-align: center;
 }
 
 .edit-field-btn:hover {
@@ -109,6 +115,33 @@
 .field-handle-delete:hover {
     background: var(--danger);
     color: #fff;
+}
+
+.field-handle-undo {
+    right: 2px;
+    border-color: var(--success);
+    color: var(--success);
+}
+
+.field-handle-undo:hover {
+    background: var(--success);
+    color: #000;
+}
+
+.form-field-handle.removed {
+    border: 1px dashed var(--danger);
+    background-image: repeating-linear-gradient(
+        -45deg,
+        rgba(220, 53, 69, 0.22) 0,
+        rgba(220, 53, 69, 0.22) 6px,
+        rgba(220, 53, 69, 0.06) 6px,
+        rgba(220, 53, 69, 0.06) 12px
+    );
+    cursor: not-allowed;
+}
+
+.form-field-handle.removed .field-handle-btn {
+    opacity: 0.9;
 }
 
 
@@ -232,44 +265,55 @@
 /* COS Inline Edit Button */
 .cos-edit-btn {
     margin-left: 6px;
-    opacity: 0;
-    cursor: pointer;
-    color: var(--accent);
-    font-size: 11px;
-    padding: 2px 4px;
 }
 .cos-add-btn, .cos-delete-btn {
     margin-left: 6px;
-    cursor: pointer;
-    color: var(--accent);
-    opacity: 0;
-    font-size: 11px;
-    padding: 2px 4px;
-    transition: opacity 0.2s;
 }
 .resource-download-btn, .resource-open-btn, .resource-delete-btn {
     margin-left: 6px;
+}
+.ref-jump-btn {
+    margin-left: 6px;
+}
+
+.tree-node-header .cos-edit-btn,
+.tree-node-header .cos-add-btn,
+.tree-node-header .cos-delete-btn,
+.tree-node-header .resource-download-btn,
+.tree-node-header .resource-open-btn,
+.tree-node-header .resource-delete-btn,
+.tree-node-header .ref-jump-btn {
+    background: none;
+    border: none;
     cursor: pointer;
-    color: var(--accent);
-    opacity: 0.65;
+    color: var(--text-muted);
+    opacity: 0.7;
     font-size: 11px;
     padding: 2px 4px;
-    transition: opacity 0.2s;
+    line-height: 1;
+    border-radius: 3px;
+    transition: opacity 0.2s, color 0.2s, background 0.2s;
 }
+
 .tree-node-header:hover .cos-add-btn,
 .tree-node-header:hover .cos-delete-btn,
 .tree-node-header:hover .resource-download-btn,
 .tree-node-header:hover .resource-open-btn,
 .tree-node-header:hover .resource-delete-btn,
+.tree-node-header:hover .cos-edit-btn,
 .tree-node-header:hover .ref-jump-btn {
-    opacity: 0.6;
+    opacity: 0.9;
 }
 .tree-node-header:hover .cos-add-btn:hover,
 .tree-node-header:hover .cos-delete-btn:hover,
 .tree-node-header:hover .resource-download-btn:hover,
 .tree-node-header:hover .resource-open-btn:hover,
-.tree-node-header:hover .resource-delete-btn:hover {
+.tree-node-header:hover .resource-delete-btn:hover,
+.tree-node-header:hover .cos-edit-btn:hover,
+.tree-node-header:hover .ref-jump-btn:hover {
     opacity: 1;
+    color: var(--accent);
+    background: rgba(255, 255, 255, 0.05);
 }
 
 .resource-delete-btn {
@@ -278,8 +322,6 @@
 .resource-delete-btn:hover {
     color: #ff4d4d !important;
 }
-.tree-node-header:hover .cos-edit-btn { opacity: 0.7; }
-.cos-edit-btn:hover { opacity: 1 !important; }
 
 /* COS Inline Editor */
 .cos-inline-editor,

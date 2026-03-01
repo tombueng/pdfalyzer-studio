@@ -15,6 +15,7 @@ var PDFalyzer = (function () {
             editFieldType: null,
             pendingFormAdds: [],
             pendingFieldRects: [],
+            pendingFieldDeletes: {},
             selectedFieldNames: [],
             pageViewports: [],
             pageCanvases: [],

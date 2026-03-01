@@ -1,8 +1,8 @@
 /* === Tree Pane === */
 #treePane {
-    width: 420px;
+    width: 50vw;
     min-width: 250px;
-    max-width: 60vw;
+    max-width: 70vw;
     background: var(--bg-panel);
     display: flex;
     flex-direction: column;
