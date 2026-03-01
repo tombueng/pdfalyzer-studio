@@ -1,7 +1,6 @@
 package io.pdfalyzer.service;
 
 import io.pdfalyzer.model.PdfNode;
-import org.apache.pdfbox.cos.*;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.springframework.stereotype.Component;
 
