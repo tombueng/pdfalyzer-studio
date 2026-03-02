@@ -30,6 +30,16 @@ class ApiFlowIntegrationTest {
     private TestRestTemplate restTemplate;
 
     @Test
+    void licenseOverviewPageReturnsOk() {
+        ResponseEntity<String> response = restTemplate.getForEntity("/license", String.class);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertTrue(response.getBody().contains("Licenses and Notices"),
+                "License overview page should render expected heading");
+    }
+
+    @Test
     void uploadThenFetchPdfBySessionIdReturnsPdfBytes() throws IOException {
         ResponseEntity<Map<String, Object>> uploadResp = uploadTestPdf();
         assertEquals(HttpStatus.OK, uploadResp.getStatusCode());

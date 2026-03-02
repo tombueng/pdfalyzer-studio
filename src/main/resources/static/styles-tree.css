@@ -646,6 +646,7 @@
     align-items: stretch;
     gap: 8px;
     min-height: 0;
+    overflow: hidden;
 }
 
 .font-glyph-hero-toolbar-right {
