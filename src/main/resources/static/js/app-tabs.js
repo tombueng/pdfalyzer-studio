@@ -163,7 +163,7 @@ PDFalyzer.Tabs = (function ($, P) {
             html += '<div class="font-diag-stats">' +
                 metricCard('Fonts', model.totalFonts || model.fonts.length, 'fa-font', 'Total unique fonts found across all page and XObject resources.') +
                 metricCard('With issues', model.fontsWithIssues || 0, 'fa-exclamation-triangle', 'Fonts flagged with one or more potential rendering, mapping, or embedding problems.') +
-                metricCard('Missing glyphs', model.fontsWithMissingGlyphs || 0, 'fa-question-circle', 'Fonts with missing used characters. Character-level metric derived from used text characters that are not covered by used code-to-Unicode mappings.') +
+                metricCard('Missing glyphs', model.fontsWithMissingGlyphs || 0, 'fa-question-circle', 'Fonts with missing glyph chars. This metric counts used character codes that have no Unicode mapping.') +
                 metricCard('Encoding issues', model.fontsWithEncodingProblems || 0, 'fa-code', 'Fonts where used character codes have no Unicode mapping (typically ToUnicode/encoding gaps).') +
                 '</div>' +
                 '<div class="font-diag-controls"></div>';
@@ -230,7 +230,7 @@ PDFalyzer.Tabs = (function ($, P) {
                     '<td><span class="badge text-bg-secondary" title="Glyphs used: number of distinct character codes used with this font in extracted text.">' + usedGlyphs + '</span></td>' +
                     '<td><div class="text-muted" style="font-size:11px;">Pages: ' + P.Utils.escapeHtml(pageText) + '</div></td>' +
                     '<td><span class="badge ' + ((f.unmappedUsedCodes || 0) > 0 ? 'text-bg-danger' : 'text-bg-success') + '" title="Coverage = mapped used codes / distinct used codes. Mapped means the used code has a Unicode mapping.">Mapped ' + P.Utils.escapeHtml(coverage) + '</span>' +
-                    ((f.unencodableUsedChars || 0) > 0 ? '<div class="text-warning" style="font-size:11px;" title="Missing glyph chars: distinct used text characters not covered by the used code→Unicode mappings for this font.">Missing glyph chars: ' + f.unencodableUsedChars + '</div>' : '') +
+                    ((f.unencodableUsedChars || 0) > 0 ? '<div class="text-warning" style="font-size:11px;" title="Missing glyph chars: used character codes that have no Unicode mapping for this font.">Missing glyph chars: ' + f.unencodableUsedChars + '</div>' : '') +
                     '</td>' +
                     '<td>' + issueHtml + issueDetail + '</td>' +
                     '<td>' + actions + '</td></tr>';
