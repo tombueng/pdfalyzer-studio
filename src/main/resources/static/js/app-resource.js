@@ -4,7 +4,92 @@
 PDFalyzer.Resource = (function ($, P) {
     'use strict';
 
-    function preview(url) {
+    function firstDefined(obj, keys) {
+        if (!obj) return null;
+        for (var i = 0; i < keys.length; i += 1) {
+            var key = keys[i];
+            if (obj[key] !== undefined && obj[key] !== null && obj[key] !== '') return obj[key];
+        }
+        return null;
+    }
+
+    function parsePositiveNumber(value) {
+        var parsed = Number(value);
+        return isFinite(parsed) && parsed > 0 ? Math.round(parsed) : null;
+    }
+
+    function cleanPdfName(value) {
+        if (value === undefined || value === null) return '';
+        return String(value).replace(/^\//, '');
+    }
+
+    function detectImageType(contentType, fileName, imageProps) {
+        var ct = (contentType || '').toLowerCase();
+        if (ct.indexOf('image/') === 0) {
+            return ct.split('/')[1].split(';')[0].trim() || 'image';
+        }
+
+        var name = String(fileName || '');
+        var extMatch = name.match(/\.([a-z0-9]+)$/i);
+        if (extMatch) return extMatch[1].toLowerCase();
+
+        var filter = cleanPdfName(firstDefined(imageProps, ['Filter', 'filter'])).toLowerCase();
+        var filterMap = {
+            dctdecode: 'jpg',
+            jpxdecode: 'jpx',
+            jbig2decode: 'jbig2',
+            flatedecode: 'png',
+            ccittfaxdecode: 'tiff'
+        };
+        return filterMap[filter] || 'image';
+    }
+
+    function createMetaRow(label, value) {
+        return $('<div>', { 'class': 'image-meta-row' })
+            .append($('<span>', { 'class': 'image-meta-label', text: label }))
+            .append($('<span>', { 'class': 'image-meta-value', text: value || 'n/a' }));
+    }
+
+    function buildImageMetaBox(meta) {
+        var $box = $('<div>', { 'class': 'image-meta-box image-meta-box-modal' });
+        $box.append($('<div>', { 'class': 'image-meta-title', text: 'Image Info' }));
+        $box
+            .append(createMetaRow('Type', meta.type))
+            .append(createMetaRow('File size', meta.sizeText))
+            .append(createMetaRow('Pixel size', meta.pixelSize));
+
+        if (meta.filter) $box.append(createMetaRow('Filter', meta.filter));
+        if (meta.colorSpace) $box.append(createMetaRow('Color space', meta.colorSpace));
+        if (meta.bitsPerComponent) $box.append(createMetaRow('Bits/component', meta.bitsPerComponent));
+        if (meta.objectRef) $box.append(createMetaRow('Object', meta.objectRef));
+        return $box;
+    }
+
+    function wireModalFocusSafety(modalEl) {
+        if (!modalEl || modalEl.__pdfalyzerFocusSafetyBound) return;
+
+        modalEl.addEventListener('hide.bs.modal', function () {
+            var active = document.activeElement;
+            if (active && modalEl.contains(active) && typeof active.blur === 'function') {
+                active.blur();
+            }
+        });
+
+        modalEl.addEventListener('hidden.bs.modal', function () {
+            var returnFocusEl = modalEl.__pdfalyzerReturnFocusEl;
+            modalEl.__pdfalyzerReturnFocusEl = null;
+            if (!returnFocusEl || !document.contains(returnFocusEl) || returnFocusEl.disabled) return;
+            if (typeof returnFocusEl.focus === 'function') {
+                returnFocusEl.focus({ preventScroll: true });
+            }
+        });
+
+        modalEl.__pdfalyzerFocusSafetyBound = true;
+    }
+
+    function preview(url, context) {
+        var previewContext = context || {};
+        var imageProps = previewContext.properties || null;
         P.Utils.showLoading();
         fetch(url)
             .then(function (resp) {
@@ -15,10 +100,57 @@ PDFalyzer.Resource = (function ($, P) {
             .then(function (r) {
                 var ct = r.ct.toLowerCase();
                 var $body = $('#resourcePreviewBody').empty();
+                $body.removeClass('resource-preview-image');
                 if (ct.startsWith('image/')) {
                     var objUrl = URL.createObjectURL(r.blob);
-                    $body.append($('<img>', { src: objUrl, css: { 'max-width': '100%', height: 'auto' } }));
-                    $('#resourcePreviewLabel').text('Image Preview');
+                    $body.addClass('resource-preview-image');
+                    var $imageWrap = $('<div>', { 'class': 'resource-preview-image-wrap' });
+                    var $img = $('<img>', {
+                        src: objUrl,
+                        alt: 'Resource image preview',
+                        css: { 'max-width': '100%', height: 'auto' }
+                    });
+                    $imageWrap.append($img);
+                    $body.append($imageWrap);
+
+                    var fileType = detectImageType(ct, previewContext.name, imageProps);
+                    var fileSizeText = P.Utils.formatBytes(r.blob.size) + ' (' + r.blob.size + ' B)';
+                    var fallbackWidth = parsePositiveNumber(firstDefined(imageProps, ['Width', 'width']));
+                    var fallbackHeight = parsePositiveNumber(firstDefined(imageProps, ['Height', 'height']));
+                    var bitsPerComponent = firstDefined(imageProps, ['BitsPerComponent', 'bitsPerComponent']);
+                    var colorSpace = cleanPdfName(firstDefined(imageProps, ['ColorSpace', 'colorSpace']));
+                    var filter = cleanPdfName(firstDefined(imageProps, ['Filter', 'filter']));
+                    var objectRef = (previewContext.objectNumber >= 0)
+                        ? (String(previewContext.objectNumber) + ' ' + String(previewContext.generationNumber || 0) + ' R')
+                        : '';
+
+                    var renderMeta = function (width, height) {
+                        var pixelWidth = parsePositiveNumber(width) || fallbackWidth;
+                        var pixelHeight = parsePositiveNumber(height) || fallbackHeight;
+                        var pixelSize = (pixelWidth && pixelHeight)
+                            ? (pixelWidth + ' × ' + pixelHeight)
+                            : 'n/a';
+
+                        var $meta = buildImageMetaBox({
+                            type: fileType,
+                            sizeText: fileSizeText,
+                            pixelSize: pixelSize,
+                            filter: filter,
+                            colorSpace: colorSpace,
+                            bitsPerComponent: bitsPerComponent != null ? String(bitsPerComponent) : '',
+                            objectRef: objectRef
+                        });
+                        $body.append($meta);
+                    };
+
+                    $img.on('load', function () {
+                        renderMeta(this.naturalWidth, this.naturalHeight);
+                    });
+                    $img.on('error', function () {
+                        renderMeta(null, null);
+                    });
+
+                    $('#resourcePreviewLabelText').text('Image Preview');
                 } else if (ct.indexOf('xml') !== -1 || ct.indexOf('json') !== -1 || ct.startsWith('text/')) {
                     var reader = new FileReader();
                     reader.onload = function (evt) {
@@ -30,12 +162,15 @@ PDFalyzer.Resource = (function ($, P) {
                         );
                     };
                     reader.readAsText(r.blob);
-                    $('#resourcePreviewLabel').text('Text Preview');
+                    $('#resourcePreviewLabelText').text('Text Preview');
                 } else {
                     window.open(url, '_blank');
                     return;
                 }
-                new bootstrap.Modal(document.getElementById('resourcePreviewModal')).show();
+                var modalEl = document.getElementById('resourcePreviewModal');
+                wireModalFocusSafety(modalEl);
+                modalEl.__pdfalyzerReturnFocusEl = document.activeElement;
+                bootstrap.Modal.getOrCreateInstance(modalEl).show();
             })
             .catch(function () {
                 P.Utils.hideLoading();

@@ -223,3 +223,37 @@ html, body {
     background: var(--accent);
 }
 
+.modal .modal-header.draggable-modal-handle {
+    cursor: grab;
+    user-select: none;
+}
+
+.modal .modal-content {
+    border: 1px solid var(--border);
+}
+
+.modal .modal-header {
+    background: rgba(255, 255, 255, 0.06);
+    border-bottom: 1px solid var(--border);
+    padding: 0.45rem 0.7rem;
+}
+
+.modal .modal-title {
+    font-size: 14px;
+    line-height: 1.15;
+}
+
+.modal .modal-title i {
+    font-size: 0.95em;
+}
+
+.modal .modal-header .btn-close {
+    padding: 0.35rem;
+    margin: -0.1rem -0.1rem -0.1rem auto;
+    background-size: 0.75em;
+}
+
+body.draggable-modal-dragging .modal .modal-header.draggable-modal-handle {
+    cursor: grabbing;
+}
+
