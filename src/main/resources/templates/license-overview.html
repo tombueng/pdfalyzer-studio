@@ -223,7 +223,7 @@
                                 th:attr="data-href=${doc.href},data-name=${doc.displayPath},data-ext=${doc.extension}">
                             <i class="fas fa-eye me-1"></i>Preview
                         </button>
-                        <a class="btn btn-outline-accent btn-sm" th:href="${doc.href}" th:attr="download=${#strings.substringAfterLast(doc.displayPath, '/')}" target="_blank" rel="noopener">
+                        <a class="btn btn-outline-accent btn-sm" th:href="${doc.href}" th:attr="download=${doc.downloadName}" target="_blank" rel="noopener">
                             <i class="fas fa-download me-1"></i>Download
                         </a>
                     </td>

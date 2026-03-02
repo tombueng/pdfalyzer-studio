@@ -57,7 +57,8 @@ public class LicenseController {
                 displayPath,
                 "/license/" + relativePath,
                 categoryOf(displayPath),
-                extensionOf(displayPath)
+                extensionOf(displayPath),
+                fileNameOf(displayPath)
             ));
         }
         documents.sort(Comparator
@@ -95,6 +96,17 @@ public class LicenseController {
         return fileName.substring(dot + 1).toLowerCase(Locale.ROOT);
     }
 
+    private String fileNameOf(String displayPath) {
+        int slash = displayPath.lastIndexOf('/');
+        if (slash < 0) {
+            return displayPath;
+        }
+        if (slash == displayPath.length() - 1) {
+            return "";
+        }
+        return displayPath.substring(slash + 1);
+    }
+
     private String decodePathForDisplay(String relativePath) {
         try {
             URI uri = URI.create("https://local/" + relativePath);
@@ -104,5 +116,5 @@ public class LicenseController {
         }
     }
 
-    public record LicenseDoc(String displayPath, String href, String category, String extension) {}
+    public record LicenseDoc(String displayPath, String href, String category, String extension, String downloadName) {}
 }
