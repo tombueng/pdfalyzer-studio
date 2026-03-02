@@ -8,6 +8,7 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDResources;
 import org.apache.pdfbox.pdmodel.font.*;
+import org.apache.pdfbox.pdmodel.font.encoding.GlyphList;
 import org.apache.pdfbox.pdmodel.graphics.PDXObject;
 import org.apache.pdfbox.pdmodel.graphics.form.PDFormXObject;
 import org.apache.pdfbox.text.PDFTextStripper;
@@ -17,6 +18,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 @Service
@@ -126,8 +129,12 @@ public class FontInspectorService {
             detail.setEncoding(buildEncodingDiagnostics(aggregate.font));
             detail.setFontDictionary(buildFontDictionary(aggregate.font));
             detail.setUsedCharacterIssues(buildUsedCharacterIssues(stats));
-            detail.setGlyphMappings(buildGlyphMappings(aggregate.font, stats));
-            detail.setMissingUsedGlyphMappings(buildMissingUsedGlyphMappings(aggregate.font, stats));
+            List<FontDiagnostics.GlyphMapping> allMappings = buildGlyphMappings(aggregate.font, stats);
+            detail.setGlyphMappings(allMappings);
+            detail.setMissingUsedGlyphMappings(
+                allMappings.stream()
+                    .filter(m -> m.getUsedCount() > 0 && !m.isMapped())
+                    .collect(java.util.stream.Collectors.toList()));
             return detail;
         }
     }
@@ -802,6 +809,7 @@ public class FontInspectorService {
     private FontDiagnostics.FontDiagnosticsEntry buildDiagnosticsEntry(FontRefAggregate aggregate, UsageStats stats) {
         FontDiagnostics.FontDiagnosticsEntry entry = new FontDiagnostics.FontDiagnosticsEntry();
         PDFont font = aggregate.font;
+        boolean forceUnmappedFromEmptyToUnicode = hasExplicitEmptyToUnicodeMap(font);
 
         entry.setFontName(safeFontName(font));
         entry.setFontType(font.getClass().getSimpleName().replace("PD", ""));
@@ -818,20 +826,31 @@ public class FontInspectorService {
         int mappedUsedCodes = 0;
         int unmappedUsedCodes = 0;
         for (int code : stats.usedCodes.keySet()) {
-            String unicode = safeToUnicode(font, code);
+            String unicode = safeToUnicode(font, code, forceUnmappedFromEmptyToUnicode);
             if (unicode == null || unicode.isEmpty()) unmappedUsedCodes++;
             else mappedUsedCodes++;
         }
         entry.setMappedUsedCodes(mappedUsedCodes);
         entry.setUnmappedUsedCodes(unmappedUsedCodes);
 
-        int unencodableChars = countMissingUsedCharacters(stats, font);
+        int unencodableChars = unmappedUsedCodes;
         entry.setUnencodableUsedChars(unencodableChars);
 
         List<Integer> pages = new ArrayList<>(new TreeSet<>(aggregate.pages));
         List<String> contexts = new ArrayList<>(new TreeSet<>(aggregate.contexts));
         entry.setPagesUsed(pages);
         entry.setUsageContexts(contexts);
+
+        // subsetComplete: true if all used codes have a glyph present in the font
+        boolean allUsedGlyphsPresent = true;
+        for (int code : stats.usedCodes.keySet()) {
+            String gName = safeGlyphName(font, code);
+            if (!isGlyphPresent(font, code, gName)) {
+                allUsedGlyphsPresent = false;
+                break;
+            }
+        }
+        entry.setSubsetComplete(allUsedGlyphsPresent);
 
         if (!font.isEmbedded()) {
             entry.getIssues().add("Font is not embedded");
@@ -850,7 +869,7 @@ public class FontInspectorService {
             }
         }
         if (entry.getUnencodableUsedChars() > 0) {
-            entry.getIssues().add("Used text contains characters not encodable by this font: " + entry.getUnencodableUsedChars());
+            entry.getIssues().add("Used codes without Unicode mapping (missing glyph chars): " + entry.getUnencodableUsedChars());
             if (entry.getFixSuggestion() == null) {
                 entry.setFixSuggestion("Use a font that covers all required glyphs or split text across fallback fonts.");
             }
@@ -874,9 +893,56 @@ public class FontInspectorService {
         encoding.setSubtype(safeName(dict.getCOSName(COSName.SUBTYPE)));
         encoding.setBaseFont(safeName(dict.getCOSName(COSName.BASE_FONT)));
 
+        // CMap name for composite (Type0) fonts
+        COSBase encodingEntry = dict.getDictionaryObject(COSName.ENCODING);
+        if (encodingEntry instanceof COSName cmapCosName) {
+            encoding.setCmapName(cmapCosName.getName());
+        } else if (encodingEntry instanceof COSStream) {
+            encoding.setCmapName("(embedded CMap stream)");
+        }
+        // Fallback: get CMap name from PDType0Font.getCMap() if not yet set
+        if (encoding.getCmapName() == null && font instanceof PDType0Font type0Font) {
+            try {
+                var cmap = type0Font.getCMap();
+                if (cmap != null && cmap.getName() != null) {
+                    encoding.setCmapName(cmap.getName());
+                }
+            } catch (Exception ignored) {}
+        }
+
         COSBase descendants = dict.getDictionaryObject(COSName.DESCENDANT_FONTS);
-        if (descendants instanceof COSArray && ((COSArray) descendants).size() > 0) {
-            encoding.setDescendantFont(summarizeCos(((COSArray) descendants).getObject(0)));
+        if (descendants instanceof COSArray descArray && descArray.size() > 0) {
+            COSBase firstDesc = descArray.getObject(0);
+            encoding.setDescendantFont(summarizeCos(firstDesc));
+            COSDictionary descDict = null;
+            if (firstDesc instanceof COSDictionary d) {
+                descDict = d;
+            } else if (firstDesc instanceof COSObject cosObj && cosObj.getObject() instanceof COSDictionary d) {
+                descDict = d;
+            }
+            if (descDict != null) {
+                COSName descSubtype = descDict.getCOSName(COSName.SUBTYPE);
+                if (descSubtype != null) {
+                    encoding.setDescendantSubtype(descSubtype.getName());
+                }
+            }
+        }
+        // Fallback: get descendant subtype from PDType0Font API
+        if (encoding.getDescendantSubtype() == null && font instanceof PDType0Font type0Font2) {
+            try {
+                var desc = type0Font2.getDescendantFont();
+                if (desc != null) {
+                    COSName descSubtype = desc.getCOSObject().getCOSName(COSName.SUBTYPE);
+                    if (descSubtype != null) {
+                        encoding.setDescendantSubtype(descSubtype.getName());
+                    }
+                    if (encoding.getDescendantFont() == null) {
+                        encoding.setDescendantFont(summarizeCos(desc.getCOSObject()));
+                    }
+                }
+            } catch (Exception e) {
+                log.debug("Failed to get descendant font info for {}: {}", font.getName(), e.getMessage());
+            }
         }
         return encoding;
     }
@@ -911,11 +977,12 @@ public class FontInspectorService {
     }
 
     private List<FontDiagnostics.GlyphMapping> buildGlyphMappings(PDFont font, UsageStats stats) {
+        boolean forceUnmappedFromEmptyToUnicode = hasExplicitEmptyToUnicodeMap(font);
         Map<Integer, FontDiagnostics.GlyphMapping> mappings = new LinkedHashMap<>();
 
         int maxCode = (font instanceof PDType0Font) ? 65535 : 255;
         for (int code = 0; code <= maxCode; code++) {
-            String unicode = safeToUnicode(font, code);
+            String unicode = safeToUnicode(font, code, forceUnmappedFromEmptyToUnicode);
             int usedCount = stats.usedCodes.getOrDefault(code, 0);
             if ((unicode == null || unicode.isEmpty()) && usedCount == 0) continue;
 
@@ -926,19 +993,30 @@ public class FontInspectorService {
             mapping.setUsedCount(usedCount);
             mapping.setMapped(unicode != null && !unicode.isEmpty());
             mapping.setWidth(safeWidth(font, code));
+            String gName = safeGlyphName(font, code);
+            mapping.setGlyphName(gName);
+            boolean present = isGlyphPresent(font, code, gName);
+            mapping.setGlyphPresent(present);
+            applyDiagnosticStatuses(mapping, mapping.isMapped(), present, gName, font, code, unicode);
             mappings.put(code, mapping);
         }
 
         for (Map.Entry<Integer, Integer> used : stats.usedCodes.entrySet()) {
             if (mappings.containsKey(used.getKey())) continue;
+            int usedCode = used.getKey();
             FontDiagnostics.GlyphMapping mapping = new FontDiagnostics.GlyphMapping();
-            mapping.setCode(used.getKey());
+            mapping.setCode(usedCode);
             mapping.setUnicode(null);
             mapping.setUnicodeHex("");
             mapping.setUsedCount(used.getValue());
             mapping.setMapped(false);
-            mapping.setWidth(safeWidth(font, used.getKey()));
-            mappings.put(used.getKey(), mapping);
+            mapping.setWidth(safeWidth(font, usedCode));
+            String gName = safeGlyphName(font, usedCode);
+            mapping.setGlyphName(gName);
+            boolean present = isGlyphPresent(font, usedCode, gName);
+            mapping.setGlyphPresent(present);
+            applyDiagnosticStatuses(mapping, false, present, gName, font, usedCode, null);
+            mappings.put(usedCode, mapping);
         }
 
         List<FontDiagnostics.GlyphMapping> list = new ArrayList<>(mappings.values());
@@ -946,58 +1024,39 @@ public class FontInspectorService {
         return list;
     }
 
-    private List<FontDiagnostics.GlyphMapping> buildMissingUsedGlyphMappings(PDFont font, UsageStats stats) {
-        List<FontDiagnostics.GlyphMapping> list = new ArrayList<>();
-        for (Map.Entry<Integer, Integer> used : stats.usedCodes.entrySet()) {
-            int code = used.getKey();
-            int usedCount = used.getValue() == null ? 0 : used.getValue();
-            if (usedCount <= 0) continue;
-
-            String unicode = safeToUnicode(font, code);
-            boolean mapped = unicode != null && !unicode.isEmpty();
-            boolean missing = !mapped;
-            if (!missing) continue;
-
-            FontDiagnostics.GlyphMapping mapping = new FontDiagnostics.GlyphMapping();
-            mapping.setCode(code);
-            mapping.setUnicode(unicode);
-            mapping.setUnicodeHex(unicodeHex(unicode));
-            mapping.setUsedCount(usedCount);
-            mapping.setMapped(mapped);
-            mapping.setWidth(safeWidth(font, code));
-            list.add(mapping);
-        }
-        list.sort(Comparator.comparingInt(FontDiagnostics.GlyphMapping::getCode));
-        return list;
-    }
-
-    private int countMissingUsedCharacters(UsageStats stats, PDFont font) {
-        Set<String> mappedChars = new LinkedHashSet<>();
-        for (int code : stats.usedCodes.keySet()) {
-            String unicode = safeToUnicode(font, code);
-            if (unicode == null || unicode.isEmpty()) continue;
-            for (int offset = 0; offset < unicode.length(); ) {
-                int cp = unicode.codePointAt(offset);
-                mappedChars.add(new String(Character.toChars(cp)));
-                offset += Character.charCount(cp);
-            }
-        }
-
-        int missing = 0;
-        for (String usedChar : stats.usedChars.keySet()) {
-            if (usedChar == null || usedChar.isEmpty()) continue;
-            if (!mappedChars.contains(usedChar)) {
-                missing += 1;
-            }
-        }
-        return missing;
-    }
-
     private String safeToUnicode(PDFont font, int code) {
+        return safeToUnicode(font, code, false);
+    }
+
+    private String safeToUnicode(PDFont font, int code, boolean forceUnmappedFromEmptyToUnicode) {
+        if (forceUnmappedFromEmptyToUnicode) {
+            return null;
+        }
         try {
             return font.toUnicode(code);
         } catch (Exception ignored) {
             return null;
+        }
+    }
+
+    private boolean hasExplicitEmptyToUnicodeMap(PDFont font) {
+        if (font == null || font.getCOSObject() == null) {
+            return false;
+        }
+        COSBase toUnicode = font.getCOSObject().getDictionaryObject(COSName.TO_UNICODE);
+        if (!(toUnicode instanceof COSStream stream)) {
+            return false;
+        }
+        try (InputStream inputStream = stream.createInputStream()) {
+            byte[] bytes = inputStream.readAllBytes();
+            if (bytes.length == 0) {
+                return true;
+            }
+            String content = new String(bytes, StandardCharsets.US_ASCII).toLowerCase(Locale.ROOT);
+            boolean hasMappings = content.contains("beginbfchar") || content.contains("beginbfrange");
+            return !hasMappings;
+        } catch (Exception ignored) {
+            return false;
         }
     }
 
@@ -1007,6 +1066,97 @@ public class FontInspectorService {
         } catch (Exception ignored) {
             return null;
         }
+    }
+
+    private String safeGlyphName(PDFont font, int code) {
+        try {
+            if (font instanceof PDSimpleFont simpleFont) {
+                var encoding = simpleFont.getEncoding();
+                if (encoding != null) {
+                    String name = encoding.getName(code);
+                    if (name != null) return name;
+                }
+            }
+            if (font instanceof PDType0Font) {
+                return "CID+" + code;
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    private boolean isGlyphPresent(PDFont font, int code, String glyphName) {
+        try {
+            if (".notdef".equals(glyphName)) return false;
+
+            // For Type1 fonts, hasGlyph(name) is authoritative
+            if (font instanceof PDType1Font type1Font && glyphName != null) {
+                return type1Font.hasGlyph(glyphName);
+            }
+
+            // For TrueType and Type0 fonts, width > 0 is the best heuristic.
+            // TrueType fonts use GIDs internally, so hasGlyph(name) is unreliable.
+            if (font instanceof PDType0Font && !font.isEmbedded()) return false;
+
+            float width = font.getWidth(code);
+            return width > 0;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    private void applyDiagnosticStatuses(FontDiagnostics.GlyphMapping mapping,
+            boolean mapped, boolean glyphPresent, String glyphName,
+            PDFont font, int code, String unicode) {
+        boolean isNotdef = ".notdef".equals(glyphName);
+
+        // --- Render status: is the glyph visually paintable? ---
+        FontDiagnostics.RenderStatus renderStatus;
+        if (!font.isEmbedded()) {
+            renderStatus = FontDiagnostics.RenderStatus.NOT_EMBEDDED;
+        } else if (!glyphPresent || isNotdef) {
+            renderStatus = FontDiagnostics.RenderStatus.GLYPH_MISSING;
+        } else {
+            renderStatus = FontDiagnostics.RenderStatus.OK;
+        }
+        mapping.setRenderStatus(renderStatus);
+
+        // --- Extraction status: can text be extracted as Unicode? ---
+        FontDiagnostics.ExtractionStatus extractionStatus;
+        if (mapped) {
+            // Check encoding mismatch for simple fonts
+            boolean mismatch = false;
+            if (font instanceof PDSimpleFont && unicode != null && !unicode.isEmpty() && glyphName != null) {
+                try {
+                    String aglUnicode = GlyphList.getAdobeGlyphList().toUnicode(glyphName);
+                    if (aglUnicode != null && !aglUnicode.isEmpty() && !aglUnicode.equals(unicode)) {
+                        mismatch = true;
+                    }
+                } catch (Exception ignored) {
+                }
+            }
+            extractionStatus = mismatch
+                ? FontDiagnostics.ExtractionStatus.ENCODING_MISMATCH
+                : FontDiagnostics.ExtractionStatus.OK;
+        } else {
+            extractionStatus = FontDiagnostics.ExtractionStatus.NO_UNICODE_MAPPING;
+        }
+        mapping.setExtractionStatus(extractionStatus);
+
+        // --- Combined diagnostic status (backward compat) ---
+        FontDiagnostics.DiagnosticStatus combined;
+        if (mapped && glyphPresent && !isNotdef) {
+            combined = (extractionStatus == FontDiagnostics.ExtractionStatus.ENCODING_MISMATCH)
+                ? FontDiagnostics.DiagnosticStatus.ENCODING_MISMATCH
+                : FontDiagnostics.DiagnosticStatus.OK;
+        } else if (!mapped && glyphPresent && !isNotdef) {
+            combined = FontDiagnostics.DiagnosticStatus.NO_UNICODE_MAPPING;
+        } else if (!glyphPresent || isNotdef) {
+            combined = FontDiagnostics.DiagnosticStatus.GLYPH_NOT_IN_FONT;
+        } else {
+            combined = FontDiagnostics.DiagnosticStatus.UNKNOWN;
+        }
+        mapping.setDiagnosticStatus(combined);
     }
 
     private String summarizeCos(COSBase base) {

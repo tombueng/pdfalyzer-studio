@@ -42,6 +42,7 @@ public class FontDiagnostics {
         private int unencodableUsedChars;
         private List<Integer> pagesUsed = new ArrayList<>();
         private List<String> usageContexts = new ArrayList<>();
+        private boolean subsetComplete;
         private List<String> issues = new ArrayList<>();
         private String fixSuggestion;
 
@@ -90,6 +91,9 @@ public class FontDiagnostics {
         public List<String> getIssues() { return issues; }
         public void setIssues(List<String> issues) { this.issues = issues; }
 
+        public boolean isSubsetComplete() { return subsetComplete; }
+        public void setSubsetComplete(boolean subsetComplete) { this.subsetComplete = subsetComplete; }
+
         public String getFixSuggestion() { return fixSuggestion; }
         public void setFixSuggestion(String fixSuggestion) { this.fixSuggestion = fixSuggestion; }
     }
@@ -128,6 +132,8 @@ public class FontDiagnostics {
         private String subtype;
         private String baseFont;
         private String descendantFont;
+        private String cmapName;
+        private String descendantSubtype;
 
         public boolean isHasToUnicode() { return hasToUnicode; }
         public void setHasToUnicode(boolean hasToUnicode) { this.hasToUnicode = hasToUnicode; }
@@ -146,6 +152,49 @@ public class FontDiagnostics {
 
         public String getDescendantFont() { return descendantFont; }
         public void setDescendantFont(String descendantFont) { this.descendantFont = descendantFont; }
+
+        public String getCmapName() { return cmapName; }
+        public void setCmapName(String cmapName) { this.cmapName = cmapName; }
+
+        public String getDescendantSubtype() { return descendantSubtype; }
+        public void setDescendantSubtype(String descendantSubtype) { this.descendantSubtype = descendantSubtype; }
+    }
+
+    public enum RenderStatus {
+        OK, GLYPH_MISSING, NOT_EMBEDDED, UNKNOWN;
+        public String label() {
+            return switch (this) {
+                case OK -> "OK";
+                case GLYPH_MISSING -> "Glyph missing from font";
+                case NOT_EMBEDDED -> "Font not embedded";
+                default -> "Unknown";
+            };
+        }
+    }
+
+    public enum ExtractionStatus {
+        OK, NO_UNICODE_MAPPING, ENCODING_MISMATCH, UNKNOWN;
+        public String label() {
+            return switch (this) {
+                case OK -> "OK";
+                case NO_UNICODE_MAPPING -> "No Unicode mapping";
+                case ENCODING_MISMATCH -> "Encoding mismatch";
+                default -> "Unknown";
+            };
+        }
+    }
+
+    public enum DiagnosticStatus {
+        OK, NO_UNICODE_MAPPING, GLYPH_NOT_IN_FONT, ENCODING_MISMATCH, UNKNOWN;
+        public String label() {
+            return switch (this) {
+                case OK -> "OK";
+                case NO_UNICODE_MAPPING -> "No Unicode mapping";
+                case GLYPH_NOT_IN_FONT -> "Glyph not in font";
+                case ENCODING_MISMATCH -> "Encoding mismatch";
+                default -> "Unknown";
+            };
+        }
     }
 
     public static class GlyphMapping {
@@ -155,6 +204,11 @@ public class FontDiagnostics {
         private Integer width;
         private int usedCount;
         private boolean mapped;
+        private String glyphName;
+        private boolean glyphPresent;
+        private DiagnosticStatus diagnosticStatus = DiagnosticStatus.UNKNOWN;
+        private RenderStatus renderStatus = RenderStatus.UNKNOWN;
+        private ExtractionStatus extractionStatus = ExtractionStatus.UNKNOWN;
 
         public int getCode() { return code; }
         public void setCode(int code) { this.code = code; }
@@ -173,6 +227,21 @@ public class FontDiagnostics {
 
         public boolean isMapped() { return mapped; }
         public void setMapped(boolean mapped) { this.mapped = mapped; }
+
+        public String getGlyphName() { return glyphName; }
+        public void setGlyphName(String glyphName) { this.glyphName = glyphName; }
+
+        public boolean isGlyphPresent() { return glyphPresent; }
+        public void setGlyphPresent(boolean glyphPresent) { this.glyphPresent = glyphPresent; }
+
+        public DiagnosticStatus getDiagnosticStatus() { return diagnosticStatus; }
+        public void setDiagnosticStatus(DiagnosticStatus diagnosticStatus) { this.diagnosticStatus = diagnosticStatus; }
+
+        public RenderStatus getRenderStatus() { return renderStatus; }
+        public void setRenderStatus(RenderStatus renderStatus) { this.renderStatus = renderStatus; }
+
+        public ExtractionStatus getExtractionStatus() { return extractionStatus; }
+        public void setExtractionStatus(ExtractionStatus extractionStatus) { this.extractionStatus = extractionStatus; }
     }
 
     public static class UsedCharacterIssue {
