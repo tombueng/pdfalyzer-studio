@@ -50,7 +50,7 @@ html, body {
     color: #000 !important;
 }
 
-#searchInput {
+.navbar #searchInput {
     background: rgba(255,255,255,0.08);
     border: 1px solid var(--border);
     color: var(--text);
@@ -60,7 +60,7 @@ html, body {
     transition: all 0.3s;
 }
 
-#searchInput:focus {
+.navbar #searchInput:focus {
     background: rgba(255,255,255,0.12);
     border-color: var(--accent);
     box-shadow: 0 0 0 2px var(--accent-dim);
@@ -68,7 +68,7 @@ html, body {
     width: 280px;
 }
 
-#searchInput::placeholder { color: var(--text-muted); }
+.navbar #searchInput::placeholder { color: var(--text-muted); }
 
 /* === Main Layout === */
 #appContainer {

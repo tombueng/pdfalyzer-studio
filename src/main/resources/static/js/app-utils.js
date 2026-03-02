@@ -161,8 +161,84 @@ PDFalyzer.Utils = (function ($) {
         }
     }
 
+    function isSearchOrFilterInput($input) {
+        if (!$input || !$input.length) return false;
+        if ($input.is(':hidden')) return false;
+        if ($input.is('[data-disable-clear]')) return false;
+
+        var id = String($input.attr('id') || '').toLowerCase();
+        var cls = String($input.attr('class') || '').toLowerCase();
+        var placeholder = String($input.attr('placeholder') || '').toLowerCase();
+        return id.indexOf('search') >= 0 || id.indexOf('filter') >= 0 ||
+            cls.indexOf('table-filter-input') >= 0 ||
+            placeholder.indexOf('search') >= 0 || placeholder.indexOf('filter') >= 0;
+    }
+
+    function toggleInputClearButton($input) {
+        if (!$input || !$input.length) return;
+        var $btn = $input.siblings('.input-clear-btn').first();
+        if (!$btn.length) return;
+
+        var hasValue = String($input.val() || '').length > 0;
+        var disabled = $input.prop('disabled') || $input.prop('readonly');
+        $btn.toggleClass('d-none', !hasValue || !!disabled);
+        $btn.prop('disabled', !!disabled);
+    }
+
+    function ensureInputClearButton(inputEl) {
+        var $input = $(inputEl);
+        if (!isSearchOrFilterInput($input)) return;
+
+        var $wrap = $input.parent('.input-clear-wrap');
+        if (!$wrap.length) {
+            $input.wrap('<span class="input-clear-wrap"></span>');
+            $wrap = $input.parent('.input-clear-wrap');
+        }
+        if (!$wrap.find('.input-clear-btn').length) {
+            var $btn = $('<button type="button" class="input-clear-btn d-none" aria-label="Clear input" title="Clear"><i class="fas fa-times"></i></button>');
+            $input.after($btn);
+        }
+        $input.addClass('has-input-clear');
+        toggleInputClearButton($input);
+    }
+
+    function initClearableInputs() {
+        var selector = 'input[type="text"], input:not([type])';
+
+        $(selector).each(function () {
+            ensureInputClearButton(this);
+        });
+
+        $(document).off('focusin.inputclear').on('focusin.inputclear', selector, function () {
+            ensureInputClearButton(this);
+            toggleInputClearButton($(this));
+        });
+
+        $(document).off('input.inputclear change.inputclear').on('input.inputclear change.inputclear', selector, function () {
+            if (!isSearchOrFilterInput($(this))) return;
+            toggleInputClearButton($(this));
+        });
+
+        $(document).off('click.inputclear', '.input-clear-btn').on('click.inputclear', '.input-clear-btn', function (ev) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            var $btn = $(this);
+            var $input = $btn.siblings('input').first();
+            if (!$input.length) return;
+            if ($input.prop('disabled') || $input.prop('readonly')) return;
+            if (!$input.val()) return;
+
+            $input.val('');
+            $input.trigger('input');
+            $input.trigger('change');
+            $input.trigger('focus');
+            toggleInputClearButton($input);
+        });
+    }
+
     return { showLoading: showLoading, hideLoading: hideLoading,
              toast: toast, apiFetch: apiFetch, escapeHtml: escapeHtml,
              reportClientError: reportClientError, formatBytes: formatBytes,
-             refreshAfterMutation: refreshAfterMutation };
+             refreshAfterMutation: refreshAfterMutation,
+             initClearableInputs: initClearableInputs };
 })(jQuery);
