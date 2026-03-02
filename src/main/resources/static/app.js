@@ -498,6 +498,9 @@
     $(function () {
         installClientErrorCapture();
         initDraggableModals();
+        if (P.Utils && P.Utils.initClearableInputs) {
+            P.Utils.initClearableInputs();
+        }
         P.Upload.init();
         P.Search.init();
         P.Tabs.init();

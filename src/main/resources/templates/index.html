@@ -20,8 +20,6 @@
                 <span>PDFalyzer Studio</span>
             </a>
             <div class="d-flex align-items-center gap-2">
-                <input id="searchInput" type="text" class="form-control form-control-sm"
-                       placeholder="Search tree..." disabled />
                 <label class="btn btn-accent btn-sm mb-0" id="uploadBtn">
                     <i class="fas fa-upload me-1"></i> Upload PDF
                     <input type="file" id="fileInput" accept=".pdf" hidden />
@@ -78,13 +76,19 @@
         <!-- Tree Panel -->
         <div id="treePane">
             <div class="tree-tabs">
-                <button class="tab-btn active" data-tab="structure"><i class="fas fa-sitemap me-1"></i>Structure</button>
-                <button class="tab-btn" data-tab="forms"><i class="fas fa-wpforms me-1"></i>Forms</button>
-                <button class="tab-btn" data-tab="fonts"><i class="fas fa-font me-1"></i>Fonts</button>
-                <button class="tab-btn" data-tab="validation"><i class="fas fa-check-circle me-1"></i>Validation</button>
-                <button class="tab-btn" data-tab="rawcos"><i class="fas fa-database me-1"></i>Raw COS</button>
-                <button class="tab-btn" data-tab="bookmarks"><i class="fas fa-bookmark me-1"></i>Bookmarks</button>
-                <button class="tab-btn" data-tab="attachments"><i class="fas fa-paperclip me-1"></i>Attachments</button>
+                <div class="tree-tabs-list">
+                    <button class="tab-btn active" data-tab="structure"><i class="fas fa-sitemap me-1"></i>Structure</button>
+                    <button class="tab-btn" data-tab="forms"><i class="fas fa-wpforms me-1"></i>Forms</button>
+                    <button class="tab-btn" data-tab="fonts"><i class="fas fa-font me-1"></i>Fonts</button>
+                    <button class="tab-btn" data-tab="validation"><i class="fas fa-check-circle me-1"></i>Validation</button>
+                    <button class="tab-btn" data-tab="rawcos"><i class="fas fa-database me-1"></i>Raw COS</button>
+                    <button class="tab-btn" data-tab="bookmarks"><i class="fas fa-bookmark me-1"></i>Bookmarks</button>
+                    <button class="tab-btn" data-tab="attachments"><i class="fas fa-paperclip me-1"></i>Attachments</button>
+                </div>
+                <div class="tree-search-tools">
+                    <input id="searchInput" type="text" class="form-control form-control-sm table-filter-input"
+                           placeholder="Search tree..." disabled />
+                </div>
             </div>
             <div id="treeContent">
                 <div class="text-muted text-center mt-5" style="font-size:13px;">
