@@ -158,9 +158,11 @@
 
     function initDraggableModals() {
         var storagePrefix = 'pdfalyzer.modal.position.';
+        var widthStoragePrefix = 'pdfalyzer.modal.width.';
         var dragging = null;
         var resizeObserver = null;
         var positionCache = Object.create(null);
+        var widthCache = Object.create(null);
 
         function getDialog(modalEl) {
             return modalEl ? modalEl.querySelector('.modal-dialog') : null;
@@ -204,6 +206,35 @@
             }
         }
 
+        function readWidth(modalId) {
+            if (!modalId) return null;
+            if (typeof widthCache[modalId] === 'number' && isFinite(widthCache[modalId])) {
+                return widthCache[modalId];
+            }
+            try {
+                var raw = window.localStorage.getItem(widthStoragePrefix + modalId);
+                if (!raw) return null;
+                var parsed = Number(raw);
+                if (!isFinite(parsed)) return null;
+                widthCache[modalId] = parsed;
+                return parsed;
+            } catch (ignored) {
+                return null;
+            }
+        }
+
+        function writeWidth(modalId, widthPx) {
+            if (!modalId) return;
+            var safeWidth = Number(widthPx);
+            if (!isFinite(safeWidth) || safeWidth <= 120) return;
+            widthCache[modalId] = safeWidth;
+            try {
+                window.localStorage.setItem(widthStoragePrefix + modalId, String(Math.round(safeWidth)));
+            } catch (ignored) {
+                // ignore storage errors (private mode/quota)
+            }
+        }
+
         function clampPosition(dialogEl, left, top) {
             var rect = dialogEl.getBoundingClientRect();
             var keepVisibleX = 80;
@@ -220,25 +251,40 @@
             };
         }
 
-        function captureDialogWidth(dialogEl) {
+        function captureDialogWidth(dialogEl, modalId) {
             if (!dialogEl) return;
             var measuredWidth = dialogEl.getBoundingClientRect().width;
-            if (isFinite(measuredWidth) && measuredWidth > 120) {
+            if (isFinite(measuredWidth) && measuredWidth > 220) {
                 dialogEl.dataset.dragWidth = String(Math.round(measuredWidth));
+                writeWidth(modalId, measuredWidth);
             }
         }
 
-        function applyLockedDialogWidth(dialogEl) {
+        function applyLockedDialogWidth(dialogEl, modalId) {
             if (!dialogEl) return;
             var storedWidth = Number(dialogEl.dataset.dragWidth || 0);
+            if ((!isFinite(storedWidth) || storedWidth <= 120) && modalId) {
+                storedWidth = Number(readWidth(modalId) || 0);
+                if (isFinite(storedWidth) && storedWidth > 120) {
+                    dialogEl.dataset.dragWidth = String(Math.round(storedWidth));
+                }
+            }
+            if (!isFinite(storedWidth) || storedWidth <= 120) {
+                var computedMaxWidth = Number.parseFloat(window.getComputedStyle(dialogEl).maxWidth || '');
+                if (isFinite(computedMaxWidth) && computedMaxWidth > 120) {
+                    storedWidth = computedMaxWidth;
+                    dialogEl.dataset.dragWidth = String(Math.round(storedWidth));
+                    if (modalId) writeWidth(modalId, storedWidth);
+                }
+            }
             if (isFinite(storedWidth) && storedWidth > 120) {
                 dialogEl.style.width = Math.round(storedWidth) + 'px';
                 dialogEl.style.maxWidth = 'none';
             }
         }
 
-        function applyDialogPosition(dialogEl, left, top) {
-            applyLockedDialogWidth(dialogEl);
+        function applyDialogPosition(dialogEl, left, top, modalId) {
+            applyLockedDialogWidth(dialogEl, modalId);
             var clamped = clampPosition(dialogEl, left, top);
             dialogEl.style.position = 'fixed';
             dialogEl.style.margin = '0';
@@ -278,7 +324,7 @@
                     var modalEl = dialogEl.closest('.modal');
                     var rect = dialogEl.getBoundingClientRect();
                     if (!isRectMeasurable(rect)) continue;
-                    var adjusted = applyDialogPosition(dialogEl, rect.left, rect.top);
+                    var adjusted = applyDialogPosition(dialogEl, rect.left, rect.top, modalEl && modalEl.id ? modalEl.id : '');
                     if (modalEl && modalEl.id) {
                         writePosition(modalEl.id, adjusted.left, adjusted.top);
                     }
@@ -294,7 +340,7 @@
             if (!saved) return;
             var rect = dialogEl.getBoundingClientRect();
             if (!isRectMeasurable(rect)) return;
-            applyDialogPosition(dialogEl, saved.left, saved.top);
+            applyDialogPosition(dialogEl, saved.left, saved.top, modalEl.id);
         }
 
         function prepositionDialogFromSaved(modalEl) {
@@ -304,8 +350,7 @@
             var saved = readPosition(modalEl.id);
             if (!saved) return;
 
-            captureDialogWidth(dialogEl);
-            applyLockedDialogWidth(dialogEl);
+            applyLockedDialogWidth(dialogEl, modalEl.id);
 
             dialogEl.style.position = 'fixed';
             dialogEl.style.margin = '0';
@@ -333,7 +378,7 @@
                 return;
             }
 
-            applyDialogPosition(dialogEl, saved.left, saved.top);
+            applyDialogPosition(dialogEl, saved.left, saved.top, modalEl.id);
         }
 
         function makeHeaderDraggable(modalEl) {
@@ -356,12 +401,16 @@
         document.addEventListener('shown.bs.modal', function (event) {
             var modalEl = event && event.target;
             if (!modalEl || !modalEl.classList || !modalEl.classList.contains('modal')) return;
+            var shownDialogEl = getDialog(modalEl);
+            if (shownDialogEl && shownDialogEl.style.position !== 'fixed') {
+                captureDialogWidth(shownDialogEl, modalEl.id || '');
+            }
             restoreDialogPositionDeferred(modalEl, 8);
             var dialogEl = getDialog(modalEl);
             if (!dialogEl || dialogEl.style.position !== 'fixed') return;
             var rect = dialogEl.getBoundingClientRect();
             if (!isRectMeasurable(rect)) return;
-            applyDialogPosition(dialogEl, rect.left, rect.top);
+            applyDialogPosition(dialogEl, rect.left, rect.top, modalEl.id || '');
         });
 
         document.addEventListener('hide.bs.modal', function (event) {
@@ -401,9 +450,9 @@
             if (!dialogEl) return;
 
             event.preventDefault();
-            captureDialogWidth(dialogEl);
+            captureDialogWidth(dialogEl, modalEl.id || '');
             var rect = dialogEl.getBoundingClientRect();
-            var positioned = applyDialogPosition(dialogEl, rect.left, rect.top);
+            var positioned = applyDialogPosition(dialogEl, rect.left, rect.top, modalEl.id || '');
             dragging = {
                 modalId: modalEl.id || '',
                 dialogEl: dialogEl,
@@ -419,14 +468,14 @@
             if (!dragging) return;
             var nextLeft = dragging.originLeft + (event.clientX - dragging.startX);
             var nextTop = dragging.originTop + (event.clientY - dragging.startY);
-            var adjusted = applyDialogPosition(dragging.dialogEl, nextLeft, nextTop);
+            var adjusted = applyDialogPosition(dragging.dialogEl, nextLeft, nextTop, dragging.modalId);
             writePosition(dragging.modalId, adjusted.left, adjusted.top);
         });
 
         document.addEventListener('mouseup', function () {
             if (!dragging) return;
             var rect = dragging.dialogEl.getBoundingClientRect();
-            var finalPosition = applyDialogPosition(dragging.dialogEl, rect.left, rect.top);
+            var finalPosition = applyDialogPosition(dragging.dialogEl, rect.left, rect.top, dragging.modalId);
             writePosition(dragging.modalId, finalPosition.left, finalPosition.top);
             dragging = null;
             document.body.classList.remove('draggable-modal-dragging');
@@ -440,7 +489,7 @@
                 if (!dialogEl) continue;
                 if (dialogEl.style.position !== 'fixed') continue;
                 var rect = dialogEl.getBoundingClientRect();
-                var adjusted = applyDialogPosition(dialogEl, rect.left, rect.top);
+                var adjusted = applyDialogPosition(dialogEl, rect.left, rect.top, modalEl.id || '');
                 writePosition(modalEl.id, adjusted.left, adjusted.top);
             }
         });
