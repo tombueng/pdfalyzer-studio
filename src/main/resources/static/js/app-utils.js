@@ -99,6 +99,50 @@ PDFalyzer.Utils = (function ($) {
         return text + ' ' + units[unitIndex];
     }
 
+    function wireModalFocusSafety(modalEl) {
+        if (!modalEl || modalEl.__pdfalyzerFocusSafetyBound) return;
+
+        modalEl.addEventListener('hide.bs.modal', function () {
+            var active = document.activeElement;
+            if (active && modalEl.contains(active) && typeof active.blur === 'function') {
+                active.blur();
+            }
+        });
+
+        modalEl.addEventListener('hidden.bs.modal', function () {
+            var returnFocusEl = modalEl.__pdfalyzerReturnFocusEl;
+            modalEl.__pdfalyzerReturnFocusEl = null;
+            if (!returnFocusEl || !document.contains(returnFocusEl) || returnFocusEl.disabled) return;
+            if (typeof returnFocusEl.focus === 'function') {
+                returnFocusEl.focus({ preventScroll: true });
+            }
+        });
+
+        modalEl.__pdfalyzerFocusSafetyBound = true;
+    }
+
+    function prepareModal(modalEl) {
+        if (!modalEl || !modalEl.classList || !modalEl.classList.contains('modal')) return;
+        modalEl.classList.add('pdfa-modal');
+
+        var dialogEl = modalEl.querySelector('.modal-dialog');
+        if (dialogEl) dialogEl.classList.add('pdfa-modal-dialog');
+
+        var contentEl = modalEl.querySelector('.modal-content');
+        if (contentEl) contentEl.classList.add('pdfa-modal-content');
+
+        var headerEl = modalEl.querySelector('.modal-header');
+        if (headerEl) headerEl.classList.add('pdfa-modal-header');
+
+        var bodyEl = modalEl.querySelector('.modal-body');
+        if (bodyEl) bodyEl.classList.add('pdfa-modal-body');
+
+        var footerEl = modalEl.querySelector('.modal-footer');
+        if (footerEl) footerEl.classList.add('pdfa-modal-footer');
+
+        wireModalFocusSafety(modalEl);
+    }
+
     function reportClientError(payload) {
         if (!payload) return;
         var body = JSON.stringify(payload);
@@ -239,6 +283,7 @@ PDFalyzer.Utils = (function ($) {
     return { showLoading: showLoading, hideLoading: hideLoading,
              toast: toast, apiFetch: apiFetch, escapeHtml: escapeHtml,
              reportClientError: reportClientError, formatBytes: formatBytes,
+             wireModalFocusSafety: wireModalFocusSafety, prepareModal: prepareModal,
              refreshAfterMutation: refreshAfterMutation,
              initClearableInputs: initClearableInputs };
 })(jQuery);
