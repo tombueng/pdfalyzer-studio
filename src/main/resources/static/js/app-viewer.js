@@ -5,6 +5,17 @@ PDFalyzer.Viewer = (function ($, P) {
     'use strict';
 
     var activeRenderRequestId = 0;
+    var panListenersAttached = false;
+    var panDragState = {
+        active: false,
+        moved: false,
+        suppressClick: false,
+        canvas: null,
+        startClientX: 0,
+        startClientY: 0,
+        startScrollLeft: 0,
+        startScrollTop: 0
+    };
 
     function ensurePdfWorkerConfigured() {
         if (!window.pdfjsLib || !window.pdfjsLib.GlobalWorkerOptions) return;
@@ -21,6 +32,54 @@ PDFalyzer.Viewer = (function ($, P) {
 
     function isRenderRequestActive(requestId) {
         return requestId === activeRenderRequestId;
+    }
+
+    function isPanModeEnabled() {
+        return !!(P.Zoom && P.Zoom.isPanModeActive && P.Zoom.isPanModeActive());
+    }
+
+    function isPlaceModeActive() {
+        return !!(P.state && P.state.editMode && P.state.editFieldType);
+    }
+
+    function ensurePanListenersAttached() {
+        if (panListenersAttached) return;
+        panListenersAttached = true;
+
+        $(document).on('mousemove.pdfviewerpan', function (e) {
+            if (!panDragState.active) return;
+            var pane = $('#pdfPane')[0];
+            if (!pane) return;
+
+            var deltaX = e.clientX - panDragState.startClientX;
+            var deltaY = e.clientY - panDragState.startClientY;
+            if (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3) {
+                panDragState.moved = true;
+            }
+
+            pane.scrollLeft = panDragState.startScrollLeft - deltaX;
+            pane.scrollTop = panDragState.startScrollTop - deltaY;
+            e.preventDefault();
+        });
+
+        function finishPanDrag() {
+            if (!panDragState.active) return;
+            var pane = $('#pdfPane')[0];
+            if (pane) pane.classList.remove('pdf-pane-panning');
+
+            panDragState.active = false;
+            if (panDragState.moved) {
+                panDragState.suppressClick = true;
+            }
+            if (panDragState.canvas && !panDragState.suppressClick) {
+                panDragState.canvas.style.cursor = isPanModeEnabled() ? 'grab' : '';
+            }
+            panDragState.canvas = null;
+            panDragState.moved = false;
+        }
+
+        $(document).on('mouseup.pdfviewerpan', finishPanDrag);
+        $(window).on('blur.pdfviewerpan', finishPanDrag);
     }
 
     function ensureStagingViewer() {
@@ -164,10 +223,21 @@ PDFalyzer.Viewer = (function ($, P) {
             $wrapper.append($('<div>', { 'class': 'pdf-page-label', text: 'Page ' + pageNum }));
             $container.append($wrapper);
 
+            ensurePanListenersAttached();
+
             $(canvas).on('click', function (e) { handleClick(e, pageNum - 1); })
                 .on('mousedown', function (e) {
+                    if (tryStartPanDrag(e, pageNum - 1, canvas)) return;
                     if (P.state.editMode && P.state.editFieldType) {
                         P.EditMode.startDraw(e, pageNum - 1, $wrapper[0]);
+                    }
+                })
+                .on('mousemove', function (e) {
+                    updateCanvasCursor(canvas, pageNum - 1, e);
+                })
+                .on('mouseleave', function () {
+                    if (!panDragState.active) {
+                        canvas.style.cursor = '';
                     }
                 });
 
@@ -289,6 +359,7 @@ PDFalyzer.Viewer = (function ($, P) {
         }
 
         return renderPdfIntoContainer(P.state.pdfDoc, $('#pdfViewer'), nextViewports, nextCanvases, {
+            disableEntryAnimation: true,
             atomicCommit: true,
             isCancelled: function () { return !isRenderRequestActive(requestId); }
         }).then(function () {
@@ -305,7 +376,7 @@ PDFalyzer.Viewer = (function ($, P) {
         if (Math.abs(scale - P.state.currentScale) < 0.01) return;
         P.state.currentScale  = scale;
         P.state.autoZoomMode  = 'off';
-        renderAllPages({ preserveView: true, smoothSwap: false });
+        renderAllPages({ preserveView: true, smoothSwap: true });
         if (P.Zoom && P.Zoom.updateButton) P.Zoom.updateButton();
     }
 
@@ -314,7 +385,7 @@ PDFalyzer.Viewer = (function ($, P) {
         var avail = $('#pdfPane').width() - 40;
         P.state.currentScale = avail / P.state.basePageSize.width;
         P.state.autoZoomMode = 'width';
-        renderAllPages({ preserveView: true, smoothSwap: false });
+        renderAllPages({ preserveView: true, smoothSwap: true });
         if (P.Zoom && P.Zoom.updateButton) P.Zoom.updateButton();
     }
 
@@ -323,7 +394,7 @@ PDFalyzer.Viewer = (function ($, P) {
         var avail = $('#pdfPane').height() - 40;
         P.state.currentScale = avail / P.state.basePageSize.height;
         P.state.autoZoomMode = 'height';
-        renderAllPages({ preserveView: true, smoothSwap: false });
+        renderAllPages({ preserveView: true, smoothSwap: true });
         if (P.Zoom && P.Zoom.updateButton) P.Zoom.updateButton();
     }
 
@@ -353,18 +424,113 @@ PDFalyzer.Viewer = (function ($, P) {
         if (wrapper) wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
 
-    function handleClick(e, pageIndex) {
-        if (!P.state.treeData || !P.state.pageViewports[pageIndex]) return;
+    function getPdfPointForEvent(e, pageIndex) {
+        if (!P.state.pageViewports[pageIndex]) return null;
         var canvas = P.state.pageCanvases[pageIndex];
-        if (!canvas) return;
-        var rect  = canvas.getBoundingClientRect();
-        var vp    = P.state.pageViewports[pageIndex];
+        if (!canvas) return null;
+
+        var rect = canvas.getBoundingClientRect();
+        var vp = P.state.pageViewports[pageIndex];
         var scale = vp.scale;
-        var pdfX  = (e.clientX - rect.left) / scale;
-        var pdfY  = (vp.height - (e.clientY - rect.top)) / scale;
+        return {
+            x: (e.clientX - rect.left) / scale,
+            y: (vp.height - (e.clientY - rect.top)) / scale
+        };
+    }
+
+    function getHitTargetAtPoint(pageIndex, pdfX, pdfY) {
+        if (!P.state.treeData) {
+            return { clickable: false, fieldMatch: null, imageMatch: null, nodeMatch: null };
+        }
+
+        var fieldMatch = findFieldAtPoint(P.state.treeData, pageIndex, pdfX, pdfY);
+        if (fieldMatch) {
+            return { clickable: true, fieldMatch: fieldMatch, imageMatch: null, nodeMatch: null };
+        }
+
+        var imageMatch = findImageAtPoint(P.state.treeData, pageIndex, pdfX, pdfY);
+        if (imageMatch) {
+            return { clickable: true, fieldMatch: null, imageMatch: imageMatch, nodeMatch: null };
+        }
+
+        var nodeMatch = findNodeAtPoint(P.state.treeData, pageIndex, pdfX, pdfY);
+        return {
+            clickable: !!nodeMatch,
+            fieldMatch: null,
+            imageMatch: null,
+            nodeMatch: nodeMatch || null
+        };
+    }
+
+    function updateCanvasCursor(canvas, pageIndex, e) {
+        if (!canvas) return;
+        if (isPlaceModeActive()) {
+            canvas.style.cursor = '';
+            return;
+        }
+        if (!isPanModeEnabled()) {
+            canvas.style.cursor = '';
+            return;
+        }
+        if (panDragState.active && panDragState.canvas === canvas) {
+            canvas.style.cursor = 'grabbing';
+            return;
+        }
+
+        var point = getPdfPointForEvent(e, pageIndex);
+        if (!point) {
+            canvas.style.cursor = 'grab';
+            return;
+        }
+
+        var hit = getHitTargetAtPoint(pageIndex, point.x, point.y);
+        canvas.style.cursor = hit.clickable ? 'default' : 'grab';
+    }
+
+    function tryStartPanDrag(e, pageIndex, canvas) {
+        if (e.button !== 0) return false;
+        if (!isPanModeEnabled()) return false;
+        if (isPlaceModeActive()) return false;
+
+        var pane = $('#pdfPane')[0];
+        if (!pane) return false;
+
+        var point = getPdfPointForEvent(e, pageIndex);
+        if (!point) return false;
+
+        var hit = getHitTargetAtPoint(pageIndex, point.x, point.y);
+        if (hit.clickable) return false;
+
+        panDragState.active = true;
+        panDragState.moved = false;
+        panDragState.canvas = canvas;
+        panDragState.startClientX = e.clientX;
+        panDragState.startClientY = e.clientY;
+        panDragState.startScrollLeft = pane.scrollLeft;
+        panDragState.startScrollTop = pane.scrollTop;
+        pane.classList.add('pdf-pane-panning');
+        canvas.style.cursor = 'grabbing';
+        e.preventDefault();
+        return true;
+    }
+
+    function handleClick(e, pageIndex) {
+        if (panDragState.suppressClick) {
+            panDragState.suppressClick = false;
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
+
+        if (!P.state.treeData || !P.state.pageViewports[pageIndex]) return;
+        var point = getPdfPointForEvent(e, pageIndex);
+        if (!point) return;
+        var pdfX = point.x;
+        var pdfY = point.y;
 
         var additive = !!(e.ctrlKey || e.metaKey || e.shiftKey);
-        var fieldMatch = findFieldAtPoint(P.state.treeData, pageIndex, pdfX, pdfY);
+        var hit = getHitTargetAtPoint(pageIndex, pdfX, pdfY);
+        var fieldMatch = hit.fieldMatch;
         if (fieldMatch) {
             if (P.state.editMode && P.EditMode && P.EditMode.selectFieldFromViewer) {
                 P.EditMode.selectFieldFromViewer(fieldMatch, additive);
@@ -374,13 +540,13 @@ PDFalyzer.Viewer = (function ($, P) {
             return;
         }
 
-        var imageMatch = findImageAtPoint(P.state.treeData, pageIndex, pdfX, pdfY);
+        var imageMatch = hit.imageMatch;
         if (imageMatch) {
             P.Tree.selectNode(imageMatch, additive);
             return;
         }
 
-        var match = findNodeAtPoint(P.state.treeData, pageIndex, pdfX, pdfY);
+        var match = hit.nodeMatch;
         if (!match) return;
 
         P.Tree.selectNode(match, additive);

@@ -4,28 +4,28 @@
 PDFalyzer.Zoom = (function ($, P) {
     'use strict';
 
-    var pendingWheelScale = null;
-    var wheelZoomTimer = null;
-    var WHEEL_ZOOM_DEBOUNCE_MS = 90;
+    var panModeActive = false;
+    var ZOOM_IN_FACTOR = 1.25;
+    var ZOOM_OUT_FACTOR = 0.8;
 
     function clampScale(scale) {
         return Math.max(0.1, Math.min(8, scale));
     }
 
-    function scheduleWheelZoom(scale) {
-        pendingWheelScale = clampScale(scale);
-        if (wheelZoomTimer) {
-            window.clearTimeout(wheelZoomTimer);
-        }
+    function stepZoom(factor) {
+        if (!P.Viewer || !P.Viewer.setScale) return;
+        var baseScale = P.state && typeof P.state.currentScale === 'number' ? P.state.currentScale : 1;
+        P.Viewer.setScale(clampScale(baseScale * factor));
+    }
 
-        wheelZoomTimer = window.setTimeout(function () {
-            wheelZoomTimer = null;
-            var next = pendingWheelScale;
-            pendingWheelScale = null;
-            if (typeof next === 'number' && P.Viewer && P.Viewer.setScale) {
-                P.Viewer.setScale(next);
-            }
-        }, WHEEL_ZOOM_DEBOUNCE_MS);
+    function setPanMode(active) {
+        panModeActive = !!active;
+        $('#panModeBtn').toggleClass('active', panModeActive);
+        $('#pdfPane').toggleClass('pan-mode-active', panModeActive);
+    }
+
+    function togglePanMode() {
+        setPanMode(!panModeActive);
     }
 
     function init() {
@@ -35,16 +35,19 @@ PDFalyzer.Zoom = (function ($, P) {
             else P.Viewer.setScale(P.state.currentScale);
         });
 
+        $('#zoomOutBtn').on('click', function () { stepZoom(ZOOM_OUT_FACTOR); });
+        $('#zoomInBtn').on('click', function () { stepZoom(ZOOM_IN_FACTOR); });
+        $('#panModeBtn').on('click', function () { togglePanMode(); });
+
         $('#pdfPane').on('wheel', function (e) {
             var ev = e.originalEvent;
             if (ev.ctrlKey || ev.metaKey) {
                 e.preventDefault();
-                var baseScale = pendingWheelScale || P.state.currentScale;
-                scheduleWheelZoom(baseScale * (ev.deltaY > 0 ? 0.9 : 1.1));
             }
         });
 
         $(window).on('resize', function () { P.Viewer.applyAutoZoom(); });
+        setPanMode(false);
         updateButton();
     }
 
@@ -59,5 +62,10 @@ PDFalyzer.Zoom = (function ($, P) {
         $btn.toggleClass('active', P.state.autoZoomMode !== 'off');
     }
 
-    return { init: init, updateButton: updateButton };
+    return {
+        init: init,
+        updateButton: updateButton,
+        isPanModeActive: function () { return panModeActive; },
+        setPanMode: setPanMode
+    };
 })(jQuery, PDFalyzer);
