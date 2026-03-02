@@ -579,6 +579,10 @@
     user-select: text;
 }
 
+.font-glyph-preview-canvas {
+    display: block;
+}
+
 .glyph-tooltip-preview {
     position: absolute;
     z-index: 9999;

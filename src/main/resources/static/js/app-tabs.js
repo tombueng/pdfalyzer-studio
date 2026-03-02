@@ -1183,6 +1183,52 @@ PDFalyzer.Tabs = (function ($, P) {
         element.style.lineHeight = '1';
     }
 
+    function drawGlyphPreviewCanvas(canvas, text, fontFamily, widthHintUnits) {
+        if (!canvas || !text) return;
+        var cssWidth = Math.max(24, canvas.clientWidth || 24);
+        var cssHeight = Math.max(24, canvas.clientHeight || 24);
+        var dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
+        canvas.width = Math.floor(cssWidth * dpr);
+        canvas.height = Math.floor(cssHeight * dpr);
+        canvas.style.width = cssWidth + 'px';
+        canvas.style.height = cssHeight + 'px';
+
+        var ctx = canvas.getContext('2d');
+        if (!ctx) return;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+        var inset = 3;
+        var fitWidth = Math.max(1, (cssWidth - inset * 2) * 0.9);
+        var fitHeight = Math.max(1, (cssHeight - inset * 2) * 0.9);
+        var baseSize = 120;
+        var mBase = measureGlyphMetrics(text, fontFamily, baseSize);
+        var bboxWidthBase = mBase.bboxWidth;
+        if (!isNaN(widthHintUnits) && widthHintUnits > 0) {
+            bboxWidthBase = Math.max(bboxWidthBase, baseSize * (widthHintUnits / 1000));
+        }
+        var bboxHeightBase = Math.max(1, mBase.ascent + mBase.descent);
+
+        var sizeByWidth = fitWidth * (baseSize / Math.max(1, bboxWidthBase));
+        var sizeByHeight = fitHeight * (baseSize / Math.max(1, bboxHeightBase));
+        var fontSize = clampNumber(Math.floor(Math.min(sizeByWidth, sizeByHeight)), 8, 220);
+        var m = measureGlyphMetrics(text, fontFamily, fontSize);
+        var bboxWidth = Math.max(1, m.bboxWidth);
+        var bboxHeight = Math.max(1, m.ascent + m.descent);
+
+        var bboxLeft = (cssWidth - bboxWidth) / 2;
+        var bboxTop = (cssHeight - bboxHeight) / 2;
+        var baselineY = bboxTop + m.ascent;
+        var originX = bboxLeft - m.xMin;
+
+        ctx.save();
+        ctx.font = String(fontSize) + 'px ' + fontFamily;
+        ctx.fillStyle = '#ffffff';
+        ctx.textBaseline = 'alphabetic';
+        ctx.fillText(text, originX, baselineY);
+        ctx.restore();
+    }
+
     function drawGlyphDiagnosticsCanvas(canvas, options) {
         if (!canvas) return null;
         var text = String(canvas.getAttribute('data-glyph') || '').trim();
@@ -1191,7 +1237,6 @@ PDFalyzer.Tabs = (function ($, P) {
         var fontFamily = String(canvas.getAttribute('data-font-family') || "'Segoe UI Symbol', 'Segoe UI', sans-serif");
         var widthHintUnits = options && typeof options.widthHintUnits === 'number' ? options.widthHintUnits : NaN;
         var metricsEl = options ? options.metricsEl : null;
-        var glyphScale = options && options.glyphScale ? Math.max(1, options.glyphScale) : 1;
 
         var cssWidth = Math.max(220, (options && options.logicalWidth) || canvas.clientWidth || 300);
         var cssHeight = Math.max(220, (options && options.logicalHeight) || canvas.clientHeight || 260);
@@ -1213,6 +1258,13 @@ PDFalyzer.Tabs = (function ($, P) {
             width: cssWidth - inset * 2,
             height: cssHeight - inset * 2
         };
+        var fitPadding = 0.10;
+        var fitRegion = {
+            x: region.x + (region.width * fitPadding * 0.5),
+            y: region.y + (region.height * fitPadding * 0.5),
+            width: Math.max(1, region.width * (1 - fitPadding)),
+            height: Math.max(1, region.height * (1 - fitPadding))
+        };
 
         var baseSize = 200;
         var mBase = measureGlyphMetrics(text, fontFamily, baseSize);
@@ -1222,17 +1274,16 @@ PDFalyzer.Tabs = (function ($, P) {
         }
         var bboxHeightBase = Math.max(1, mBase.ascent + mBase.descent);
 
-        var sizeByWidth = region.width * (baseSize / Math.max(1, bboxWidthBase));
-        var sizeByHeight = region.height * (baseSize / Math.max(1, bboxHeightBase));
+        var sizeByWidth = fitRegion.width * (baseSize / Math.max(1, bboxWidthBase));
+        var sizeByHeight = fitRegion.height * (baseSize / Math.max(1, bboxHeightBase));
         var fontSize = clampNumber(Math.floor(Math.min(sizeByWidth, sizeByHeight)), 24, 260);
-        fontSize = fontSize * glyphScale;
 
         var m = measureGlyphMetrics(text, fontFamily, fontSize);
         var bboxWidth = Math.max(1, m.bboxWidth);
         var bboxHeight = Math.max(1, m.ascent + m.descent);
 
-        var bboxLeft = region.x + (region.width - bboxWidth) / 2;
-        var bboxTop = region.y + (region.height - bboxHeight) / 2;
+        var bboxLeft = fitRegion.x + (fitRegion.width - bboxWidth) / 2;
+        var bboxTop = fitRegion.y + (fitRegion.height - bboxHeight) / 2;
         var baselineY = bboxTop + m.ascent;
         var originX = bboxLeft - m.xMin;
 
@@ -1245,25 +1296,28 @@ PDFalyzer.Tabs = (function ($, P) {
         ctx.strokeRect(region.x + 0.5, region.y + 0.5, region.width - 1, region.height - 1);
         ctx.setLineDash([]);
 
+        var lineLeft = bboxLeft;
+        var lineRight = bboxLeft + bboxWidth;
+
         ctx.strokeStyle = 'rgba(0,212,255,0.95)';
         ctx.lineWidth = 4;
         ctx.beginPath();
-        ctx.moveTo(region.x, baselineY - m.ascent);
-        ctx.lineTo(region.x + region.width, baselineY - m.ascent);
+        ctx.moveTo(lineLeft, baselineY - m.ascent);
+        ctx.lineTo(lineRight, baselineY - m.ascent);
         ctx.stroke();
 
         ctx.strokeStyle = 'rgba(255,193,7,0.95)';
         ctx.lineWidth = 4;
         ctx.beginPath();
-        ctx.moveTo(region.x, baselineY);
-        ctx.lineTo(region.x + region.width, baselineY);
+        ctx.moveTo(lineLeft, baselineY);
+        ctx.lineTo(lineRight, baselineY);
         ctx.stroke();
 
         ctx.strokeStyle = 'rgba(220,53,69,0.95)';
         ctx.lineWidth = 4;
         ctx.beginPath();
-        ctx.moveTo(region.x, baselineY + m.descent);
-        ctx.lineTo(region.x + region.width, baselineY + m.descent);
+        ctx.moveTo(lineLeft, baselineY + m.descent);
+        ctx.lineTo(lineRight, baselineY + m.descent);
         ctx.stroke();
 
         ctx.strokeStyle = 'rgba(40,167,69,0.95)';
@@ -1297,6 +1351,10 @@ PDFalyzer.Tabs = (function ($, P) {
             contentTop: region.y,
             contentWidth: region.width,
             contentHeight: region.height,
+            fitLeft: lineLeft,
+            fitTop: baselineY - m.ascent,
+            fitWidth: bboxWidth,
+            fitHeight: bboxHeight,
             bboxLeft: bboxLeft,
             bboxTop: bboxTop,
             bboxWidth: bboxWidth,
@@ -1425,8 +1483,8 @@ PDFalyzer.Tabs = (function ($, P) {
 
         function computeFitZoom(layout) {
             if (!layout) return activeGlyphCanvasState.zoom;
-            var contentWidth = Math.max(1, layout.contentWidth);
-            var contentHeight = Math.max(1, layout.contentHeight);
+            var contentWidth = Math.max(1, layout.fitWidth || layout.contentWidth);
+            var contentHeight = Math.max(1, layout.fitHeight || layout.contentHeight);
             var paddedWidth = contentWidth * (1 + activeGlyphCanvasState.fitPaddingRatio);
             var paddedHeight = contentHeight * (1 + activeGlyphCanvasState.fitPaddingRatio);
             var fitByWidth = viewport.clientWidth / paddedWidth;
@@ -1556,18 +1614,20 @@ PDFalyzer.Tabs = (function ($, P) {
             var unicode = node.getAttribute('data-unicode') || '';
             if (!unicode) return;
             var fontFamily = node.getAttribute('data-font-family') || '';
+            var widthHintUnits = parseFloat(node.getAttribute('data-glyph-width'));
 
             node.setAttribute('data-rendered', '1');
             node.innerHTML = '';
 
-            var preview = document.createElement('span');
-            preview.className = 'font-glyph-preview';
-            preview.textContent = unicode;
-            preview.title = 'Rendered glyph preview';
-            if (fontFamily) {
-                preview.style.fontFamily = "'" + fontFamily + "', 'Segoe UI Symbol', 'Segoe UI', sans-serif";
-            }
-            node.appendChild(preview);
+            var previewCanvas = document.createElement('canvas');
+            previewCanvas.className = 'font-glyph-preview font-glyph-preview-canvas';
+            previewCanvas.title = 'Rendered glyph preview';
+            node.appendChild(previewCanvas);
+
+            var resolvedFamily = fontFamily
+                ? ("'" + fontFamily + "', 'Segoe UI Symbol', 'Segoe UI', sans-serif")
+                : "'Segoe UI Symbol', 'Segoe UI', sans-serif";
+            drawGlyphPreviewCanvas(previewCanvas, unicode, resolvedFamily, widthHintUnits);
         }
 
         function renderVisibleBatch() {
