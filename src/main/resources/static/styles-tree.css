@@ -189,15 +189,21 @@
     align-items: center;
 }
 
+.font-diag-controls-focus {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
 .font-table {
     width: 100%;
-    font-size: 12px;
+    font-size: 13px;
     border-collapse: collapse;
 }
 
 .font-table th {
     background: rgba(0,0,0,0.3);
-    padding: 6px 10px;
+    padding: 5px 8px;
     text-align: left;
     color: var(--accent);
     border-bottom: 1px solid var(--border);
@@ -206,11 +212,25 @@
 }
 
 .font-table td {
-    padding: 5px 10px;
+    padding: 4px 8px;
     border-bottom: 1px solid rgba(255,255,255,0.05);
 }
 
 .font-table tr:hover td { background: rgba(255,255,255,0.03); }
+
+.font-table-focus td {
+    vertical-align: top;
+}
+
+.font-focus-info-cell {
+    min-width: 260px;
+    width: 260px;
+}
+
+.font-focus-info-cell details > summary {
+    cursor: pointer;
+    color: var(--accent);
+}
 
 .font-obj-ref {
     font-family: Consolas, monospace;
@@ -254,7 +274,7 @@
 .font-detail-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 11px;
+    font-size: 12px;
 }
 
 .font-detail-table th {
@@ -263,26 +283,26 @@
     background: rgba(0,0,0,0.5);
     color: var(--accent);
     text-align: left;
-    padding: 6px 8px;
+    padding: 5px 7px;
     border-bottom: 1px solid var(--border);
 }
 
 .font-detail-table td {
-    padding: 5px 8px;
+    padding: 4px 7px;
     border-bottom: 1px solid rgba(255,255,255,0.05);
 }
 
 .font-glyph-preview-cell {
-    min-width: 72px;
-    width: 72px;
+    min-width: 108px;
+    width: 108px;
 }
 
 .font-glyph-lazy {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 46px;
-    height: 30px;
+    width: 84px;
+    height: 56px;
     border: 1px solid rgba(255,255,255,0.1);
     border-radius: 4px;
     background: rgba(0,0,0,0.18);
@@ -295,6 +315,7 @@
     justify-content: center;
     width: 100%;
     height: 100%;
+    font-size: 34px;
     text-align: center;
     line-height: 1;
     overflow: hidden;
@@ -323,28 +344,152 @@
     overflow: hidden;
 }
 
+.font-glyph-diag-layout {
+    display: grid;
+    grid-template-columns: 250px 1fr;
+    gap: 10px;
+    align-items: start;
+}
+
+.font-glyph-guide-box {
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px;
+    background: rgba(10,14,20,0.86);
+    padding: 10px;
+}
+
+.font-glyph-guide-title {
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: var(--accent);
+}
+
+.font-glyph-guide-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 5px;
+}
+
+.font-glyph-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    display: inline-block;
+    flex: 0 0 auto;
+}
+
+.font-glyph-dot.ascent { background: rgba(0,212,255,0.95); }
+.font-glyph-dot.baseline { background: rgba(255,193,7,0.95); }
+.font-glyph-dot.descent { background: rgba(220,53,69,0.95); }
+.font-glyph-dot.bbox { background: rgba(40,167,69,0.95); }
+.font-glyph-dot.origin { background: rgba(173,181,189,0.85); }
+
+.font-glyph-extra-grid {
+    display: grid;
+    gap: 4px;
+    max-height: 130px;
+    overflow: auto;
+    padding-right: 2px;
+}
+
 .font-glyph-hero-wrap {
-    width: 220px;
-    height: 220px;
+    width: 100%;
     border: 1px solid rgba(255,255,255,0.12);
     border-radius: 8px;
     background: rgba(0,0,0,0.15);
     display: flex;
-    align-items: center;
-    justify-content: center;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
     overflow: hidden;
     opacity: 0.95;
+    padding: 8px;
+    gap: 6px;
 }
 
-.font-glyph-hero {
-    width: 100%;
-    height: 100%;
-    display: inline-flex;
+.font-glyph-hero-toolbar {
+    display: flex;
     align-items: center;
-    justify-content: center;
-    line-height: 1;
-    user-select: text;
+    gap: 4px;
+}
+
+.font-glyph-canvas-viewport {
+    width: 100%;
+    height: 520px;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 6px;
+    background: rgba(5, 8, 12, 0.9);
+    overflow: auto;
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-start;
+}
+
+.font-glyph-hero-canvas {
+    display: block;
+}
+
+.font-glyph-hero-metrics {
+    width: 100%;
+    font-size: 11px;
+    line-height: 1.25;
+    font-family: Segoe UI, Arial, sans-serif;
+    white-space: normal;
+}
+
+.font-glyph-usage-panel {
+    margin-top: 8px;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 6px;
+    background: rgba(8,12,18,0.55);
+    padding: 8px;
+}
+
+.font-glyph-usage-pages {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.font-glyph-usage-page {
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 5px;
+    background: rgba(255,255,255,0.02);
     overflow: hidden;
+}
+
+.font-glyph-usage-page > summary {
+    cursor: pointer;
+    padding: 6px 8px;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    list-style: none;
+}
+
+.font-glyph-usage-page > summary::-webkit-details-marker {
+    display: none;
+}
+
+.font-glyph-usage-page-body {
+    border-top: 1px solid rgba(255,255,255,0.06);
+    padding: 6px;
+    max-height: 220px;
+    overflow: auto;
+}
+
+@media (max-width: 1100px) {
+    .font-glyph-diag-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .font-glyph-canvas-viewport {
+        height: 420px;
+    }
 }
 
 /* === Validation Results === */
