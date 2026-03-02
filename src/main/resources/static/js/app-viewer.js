@@ -132,6 +132,7 @@ PDFalyzer.Viewer = (function ($, P) {
                     .attr('id', 'pdfViewer')
                     .removeClass('pdf-viewer-staging pdf-viewer-staging-active pdf-viewer-crossfade-in')
                     .css({ visibility: '', pointerEvents: '', opacity: '', zIndex: '', position: '', inset: '', overflow: '' });
+                $(document).trigger('pdfviewer:rendered');
             }, 190);
         });
     }
@@ -236,6 +237,7 @@ PDFalyzer.Viewer = (function ($, P) {
                         swapStagedViewer($staging, viewState);
                     } else {
                         restorePaneViewState(viewState);
+                        $(document).trigger('pdfviewer:rendered');
                     }
                 });
         }).catch(function (err) {
@@ -285,6 +287,7 @@ PDFalyzer.Viewer = (function ($, P) {
             P.state.pageViewports = nextViewports;
             P.state.pageCanvases = nextCanvases;
             restorePaneViewState(viewState);
+            $(document).trigger('pdfviewer:rendered');
         });
     }
 
