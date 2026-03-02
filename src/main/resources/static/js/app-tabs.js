@@ -19,6 +19,9 @@ PDFalyzer.Tabs = (function ($, P) {
     var activeFontDetailState = null;
     var activeGlyphCanvasState = null;
     var activeFontUsageAreas = [];
+    var activeGlyphHighlightSelections = {};
+    var glyphHighlightPalette = ['#ff4d4f', '#fa8c16', '#fadb14', '#52c41a', '#13c2c2', '#1677ff', '#722ed1', '#eb2f96', '#a0d911', '#2f54eb'];
+    var nextGeneratedGlyphColorIndex = glyphHighlightPalette.length;
 
     function init() {
         $('.tab-btn').on('click', function () {
@@ -75,7 +78,7 @@ PDFalyzer.Tabs = (function ($, P) {
     // ======================== FONTS TAB ========================
 
     function loadFonts() {
-        clearFontUsageHighlights();
+        clearFontUsageHighlights({ resetGlyphToggles: true });
         P.Utils.apiFetch('/api/fonts/' + P.state.sessionId + '/diagnostics')
             .done(function (data) {
                 fontDiagnosticsState.data = data || { fonts: [] };
@@ -215,6 +218,7 @@ PDFalyzer.Tabs = (function ($, P) {
         $c.find('.font-usage-btn').on('click', function () {
             var obj = parseInt($(this).data('obj'), 10);
             var gen = parseInt($(this).data('gen'), 10);
+            clearFontUsageHighlights({ resetGlyphToggles: true });
             P.Utils.apiFetch('/api/fonts/' + P.state.sessionId + '/usage/' + obj + '/' + gen)
                 .done(function (areas) {
                     var usage = showFontUsageHighlights(areas || []);
@@ -474,10 +478,13 @@ PDFalyzer.Tabs = (function ($, P) {
         var html = '<div class="font-diag-detail-content">' +
             '<div class="font-diag-detail-title"><strong>Glyph mapping table (' + mappings.length + ')</strong></div>' +
             '<div class="font-detail-map-filter-row">' +
+            '  <div class="font-detail-map-toolbar">' +
+            '    <button id="fontDetailClearHighlightsBtn" class="btn btn-outline-accent btn-sm"><i class="fas fa-eraser me-1"></i>Clear highlights</button>' +
+            '  </div>' +
             '  <input id="fontDetailMapHeaderFilter" class="form-control form-control-sm" placeholder="Filter table..." />' +
             '</div>' +
-            '<div class="font-detail-table-wrap font-detail-table-wrap-fill" id="fontDetailMapWrap"><table class="font-detail-table" id="fontDetailMapTable" data-disable-header-filter="1"><thead><tr><th title="Character code used in PDF text operators.">Code</th><th title="Lazy-rendered preview of mapped glyphs.">Glyph</th><th title="Unicode text mapped from this code.">Unicode</th><th title="Unicode code point(s) in U+XXXX format.">Hex</th><th title="Glyph width reported by font metrics.">Width</th><th title="How many times this code appears in extracted text.">Used</th><th title="Whether code maps to Unicode.">Mapped</th></tr></thead><tbody id="fontDetailMapTableBody">' +
-            '<tr><td colspan="7" class="text-muted">Loading rows…</td></tr>' +
+            '<div class="font-detail-table-wrap font-detail-table-wrap-fill" id="fontDetailMapWrap"><table class="font-detail-table" id="fontDetailMapTable" data-disable-header-filter="1"><thead><tr><th title="Character code used in PDF text operators.">Code</th><th title="Lazy-rendered preview of mapped glyphs.">Glyph</th><th title="Unicode text mapped from this code.">Unicode</th><th title="Unicode code point(s) in U+XXXX format.">Hex</th><th title="Glyph width reported by font metrics.">Width</th><th title="How many times this code appears in extracted text.">Used</th><th title="Whether code maps to Unicode.">Mapped</th><th class="table-no-sort" title="Row actions.">Action</th></tr></thead><tbody id="fontDetailMapTableBody">' +
+            '<tr><td colspan="8" class="text-muted">Loading rows…</td></tr>' +
             '</tbody></table></div>' +
             '</div>';
 
@@ -499,6 +506,19 @@ PDFalyzer.Tabs = (function ($, P) {
             activeFontDetailState.pendingQuery = String($(this).val() || '');
             renderMapTableNow(activeFontDetailState.pendingQuery, activeFontDetailState.pendingUsedOnly);
         });
+        $('#fontDetailClearHighlightsBtn').off('click').on('click', function () {
+            clearFontUsageHighlights({ resetGlyphToggles: true });
+        });
+        $('#fontDiagDetail').off('click', '.font-map-highlight-btn').on('click', '.font-map-highlight-btn', function (ev) {
+            ev.preventDefault();
+            ev.stopPropagation();
+            var $btn = $(this);
+            var obj = parseCodeValue($btn.attr('data-obj'));
+            var gen = parseCodeValue($btn.attr('data-gen'));
+            var code = parseCodeValue($btn.attr('data-code'));
+            toggleGlyphHighlightForCode(obj, gen, code);
+        });
+        syncGlyphHighlightToggleButtons();
         setupDeferredFontDetailRendering();
         applyGlobalDiagnosticsTableInteractions();
     }
@@ -521,6 +541,9 @@ PDFalyzer.Tabs = (function ($, P) {
     }
 
     function buildMappingRowHtml(row, state) {
+        var obj = parseCodeValue(state.font && state.font.objectNumber);
+        var gen = parseCodeValue((state.font && state.font.generationNumber) || 0);
+        var code = parseCodeValue(row.code);
         var unicode = row.unicode ? P.Utils.escapeHtml(row.unicode) : '<span class="text-danger">(unmapped)</span>';
         var glyphPreview = '<span class="font-glyph-lazy" ' +
             'data-unicode="' + escapeHtmlAttr(row.unicode || '') + '" ' +
@@ -537,6 +560,7 @@ PDFalyzer.Tabs = (function ($, P) {
             '<td>' + (row.width == null ? '' : row.width) + '</td>' +
             '<td>' + (row.usedCount || 0) + '</td>' +
             '<td>' + (row.mapped ? '<span class="text-success">yes</span>' : '<span class="text-danger">no</span>') + '</td>' +
+            '<td><button class="btn btn-xs btn-outline-accent font-map-highlight-btn glyph-highlight-toggle" data-obj="' + escapeHtmlAttr(String(obj)) + '" data-gen="' + escapeHtmlAttr(String(gen)) + '" data-code="' + escapeHtmlAttr(String(code)) + '" title="Toggle glyph highlight"><i class="fas fa-brush"></i></button></td>' +
             '</tr>';
     }
 
@@ -586,11 +610,11 @@ PDFalyzer.Tabs = (function ($, P) {
         });
 
         if (!filtered.length) {
-            tbody.innerHTML = '<tr><td colspan="7" class="text-muted">No rows match the current filter.</td></tr>';
+            tbody.innerHTML = '<tr><td colspan="8" class="text-muted">No rows match the current filter.</td></tr>';
             return;
         }
 
-        tbody.innerHTML = '<tr><td colspan="7" class="text-muted">Rendering ' + filtered.length + ' rows… scroll to load more.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" class="text-muted">Rendering ' + filtered.length + ' rows… scroll to load more.</td></tr>';
 
         state.mapRenderContext = {
             token: token,
@@ -615,6 +639,7 @@ PDFalyzer.Tabs = (function ($, P) {
                 bindGlyphMappingRowClicks();
                 bindLazyGlyphRendering();
                 bindGlyphHoverTooltips();
+                syncGlyphHighlightToggleButtons();
             }
         }
 
@@ -689,14 +714,23 @@ PDFalyzer.Tabs = (function ($, P) {
     }
 
     function bindGlyphMappingRowClicks() {
-        $('#fontDiagDetail .font-map-row').off('click').on('click', function () {
+        $('#fontDiagDetail .font-map-row').off('click').on('click', function (ev) {
+            if ($(ev.target).closest('.font-map-highlight-btn').length) {
+                return;
+            }
             ensureGlyphDetailModal();
             var state = activeFontDetailState;
             if (!state || !state.font) return;
+
+            $('#fontDiagDetail .font-map-row').removeClass('is-selected');
+            $(this).addClass('is-selected');
+
             var obj = parseCodeValue(state.font.objectNumber);
             var gen = parseCodeValue(state.font.generationNumber || 0);
             var code = parseCodeValue($(this).attr('data-code'));
             var unicode = String($(this).attr('data-unicode') || '');
+            state.selectedGlyphCode = code;
+            state.selectedGlyphUnicode = unicode;
             if (!(obj >= 0) || !(gen >= 0) || !(code >= 0)) {
                 P.Utils.toast('Invalid glyph selection metadata for diagnostics.', 'warning');
                 return;
@@ -822,7 +856,7 @@ PDFalyzer.Tabs = (function ($, P) {
             '</div></div>' +
             '</div>' +
             '<div class="mt-2">' +
-            '  <button class="btn btn-outline-accent btn-sm me-2" id="fontGlyphHighlightBtn"><i class="fas fa-highlighter me-1"></i>Highlight this glyph usage</button>' +
+            '  <button class="btn btn-outline-accent btn-sm me-2 glyph-highlight-toggle" id="fontGlyphHighlightBtn" data-obj="' + escapeHtmlAttr(String(obj)) + '" data-gen="' + escapeHtmlAttr(String(gen)) + '" data-code="' + escapeHtmlAttr(String(code)) + '"><i class="fas fa-brush me-1"></i>Toggle glyph highlight</button>' +
             '  <button class="btn btn-outline-accent btn-sm" id="fontGlyphClearHighlightsBtn"><i class="fas fa-eraser me-1"></i>Clear highlights</button>' +
             '</div>' +
             '<details class="mt-2" id="fontGlyphUsageSection"><summary>Usage positions by page (deferred)</summary>' +
@@ -863,19 +897,14 @@ PDFalyzer.Tabs = (function ($, P) {
         }
 
         $('#fontGlyphHighlightBtn').off('click').on('click', function () {
-            P.Utils.apiFetch('/api/fonts/' + P.state.sessionId + '/usage/' + obj + '/' + gen + '/glyph/' + code)
-                .done(function (areas) {
-                    var usage = showFontUsageHighlights(areas || []);
-                    P.Utils.toast('Found: ' + usage.found + ' | Highlighted: ' + usage.highlighted, usage.highlighted ? 'info' : 'warning');
-                })
-                .fail(function () {
-                    P.Utils.toast('Failed to load glyph usage overlays', 'danger');
-                });
+            toggleGlyphHighlightForCode(obj, gen, code);
         });
 
         $('#fontGlyphClearHighlightsBtn').off('click').on('click', function () {
-            clearFontUsageHighlights();
+            clearFontUsageHighlights({ resetGlyphToggles: true });
         });
+
+        syncGlyphHighlightToggleButtons();
 
         bindGlyphUsageInspector(obj, gen, code);
         applyGlobalDiagnosticsTableInteractions();
@@ -1683,6 +1712,7 @@ PDFalyzer.Tabs = (function ($, P) {
         $ths.each(function (colIndex) {
             var $th = $(this);
             if ($th.hasClass('table-filter-col')) return;
+            if ($th.hasClass('table-no-sort')) return;
             if ($th.find('.table-header-tools').length) return;
             $th.addClass('table-sortable').attr('title', ($th.attr('title') || '') + ' (click to sort)');
             $th.off('click.tablesort').on('click.tablesort', function (ev) {
@@ -1763,11 +1793,138 @@ PDFalyzer.Tabs = (function ($, P) {
         });
     }
 
+    function makeGlyphHighlightKey(obj, gen, code) {
+        return String(obj) + ':' + String(gen || 0) + ':' + String(code);
+    }
+
+    function getGlyphHighlightColor(index) {
+        if (index < glyphHighlightPalette.length) {
+            return glyphHighlightPalette[index];
+        }
+        var hue = Math.round((index * 137.508) % 360);
+        return 'hsl(' + hue + ', 85%, 52%)';
+    }
+
+    function nextGlyphHighlightColorIndex() {
+        var used = {};
+        Object.keys(activeGlyphHighlightSelections).forEach(function (key) {
+            var item = activeGlyphHighlightSelections[key];
+            if (item && item.colorIndex >= 0) used[item.colorIndex] = true;
+        });
+        for (var idx = 0; idx < glyphHighlightPalette.length; idx += 1) {
+            if (!used[idx]) return idx;
+        }
+        while (used[nextGeneratedGlyphColorIndex]) {
+            nextGeneratedGlyphColorIndex += 1;
+        }
+        var generated = nextGeneratedGlyphColorIndex;
+        nextGeneratedGlyphColorIndex += 1;
+        return generated;
+    }
+
+    function getGlyphHighlightEntry(obj, gen, code) {
+        if (!(obj >= 0) || !(gen >= 0) || !(code >= 0)) return null;
+        return activeGlyphHighlightSelections[makeGlyphHighlightKey(obj, gen, code)] || null;
+    }
+
+    function applyGlyphHighlightButtonState($btn, entry) {
+        if (!$btn || !$btn.length) return;
+        if (entry && entry.color) {
+            $btn.addClass('is-active');
+            $btn.css({ borderColor: entry.color, color: entry.color, backgroundColor: 'rgba(255,255,255,0.05)' });
+        } else {
+            $btn.removeClass('is-active');
+            $btn.css({ borderColor: '', color: '', backgroundColor: '' });
+        }
+    }
+
+    function syncGlyphHighlightToggleButtons() {
+        $('#fontDiagDetail .font-map-highlight-btn').each(function () {
+            var $btn = $(this);
+            var obj = parseCodeValue($btn.attr('data-obj'));
+            var gen = parseCodeValue($btn.attr('data-gen'));
+            var code = parseCodeValue($btn.attr('data-code'));
+            var entry = getGlyphHighlightEntry(obj, gen, code);
+            applyGlyphHighlightButtonState($btn, entry);
+        });
+
+        var $popupBtn = $('#fontGlyphHighlightBtn');
+        if ($popupBtn.length) {
+            var pobj = parseCodeValue($popupBtn.attr('data-obj'));
+            var pgen = parseCodeValue($popupBtn.attr('data-gen'));
+            var pcode = parseCodeValue($popupBtn.attr('data-code'));
+            applyGlyphHighlightButtonState($popupBtn, getGlyphHighlightEntry(pobj, pgen, pcode));
+        }
+    }
+
+    function rebuildGlyphToggleHighlights() {
+        var merged = [];
+        Object.keys(activeGlyphHighlightSelections).forEach(function (key) {
+            var entry = activeGlyphHighlightSelections[key];
+            if (!entry || !entry.areas || !entry.areas.length) return;
+            entry.areas.forEach(function (area) {
+                merged.push($.extend({}, area, { _hlColor: entry.color, _hlKey: key }));
+            });
+        });
+
+        if (!merged.length) {
+            clearFontUsageHighlights({ resetState: true, resetGlyphToggles: false });
+            syncGlyphHighlightToggleButtons();
+            return { found: 0, highlighted: 0 };
+        }
+
+        var usage = showFontUsageHighlights(merged, { clearExisting: true, persist: true });
+        syncGlyphHighlightToggleButtons();
+        return usage;
+    }
+
+    function toggleGlyphHighlightForCode(obj, gen, code) {
+        if (!(obj >= 0) || !(gen >= 0) || !(code >= 0)) {
+            return;
+        }
+
+        var key = makeGlyphHighlightKey(obj, gen, code);
+        if (activeGlyphHighlightSelections[key]) {
+            delete activeGlyphHighlightSelections[key];
+            rebuildGlyphToggleHighlights();
+            return;
+        }
+
+        P.Utils.apiFetch('/api/fonts/' + P.state.sessionId + '/usage/' + obj + '/' + gen + '/glyph/' + code)
+            .done(function (areas) {
+                var list = Array.isArray(areas) ? areas.slice() : [];
+                if (!list.length) {
+                    P.Utils.toast('No usage positions found for this glyph.', 'warning');
+                    return;
+                }
+                var colorIndex = nextGlyphHighlightColorIndex();
+                activeGlyphHighlightSelections[key] = {
+                    obj: obj,
+                    gen: gen,
+                    code: code,
+                    colorIndex: colorIndex,
+                    color: getGlyphHighlightColor(colorIndex),
+                    areas: list
+                };
+                var usage = rebuildGlyphToggleHighlights();
+                P.Utils.toast('Found: ' + usage.found + ' | Highlighted: ' + usage.highlighted, usage.highlighted ? 'info' : 'warning');
+            })
+            .fail(function () {
+                P.Utils.toast('Failed to load glyph usage overlays', 'danger');
+            });
+    }
+
     function clearFontUsageHighlights(options) {
         var resetState = !options || options.resetState !== false;
+        var resetGlyphToggles = !!(options && options.resetGlyphToggles);
         $('.pdf-font-usage').remove();
         if (resetState) {
             activeFontUsageAreas = [];
+        }
+        if (resetGlyphToggles) {
+            activeGlyphHighlightSelections = {};
+            nextGeneratedGlyphColorIndex = glyphHighlightPalette.length;
+            syncGlyphHighlightToggleButtons();
         }
     }
 
@@ -1791,11 +1948,13 @@ PDFalyzer.Tabs = (function ($, P) {
             var $wrapper = $('#pdfViewer .pdf-page-wrapper[data-page="' + pageIndex + '"]');
             var viewport = P.state.pageViewports[pageIndex];
             if (!$wrapper.length || !viewport) return;
+            var outlineColor = String(area._hlColor || '#dc3545');
             $('<div>', { 'class': 'pdf-font-usage' }).css({
                 left: bbox[0] * viewport.scale + 'px',
                 top: bbox[1] * viewport.scale + 'px',
                 width: bbox[2] * viewport.scale + 'px',
-                height: bbox[3] * viewport.scale + 'px'
+                height: bbox[3] * viewport.scale + 'px',
+                outlineColor: outlineColor
             }).appendTo($wrapper);
             highlighted += 1;
         });
