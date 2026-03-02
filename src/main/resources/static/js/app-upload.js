@@ -52,6 +52,9 @@ PDFalyzer.Upload = (function ($, P) {
         $('#downloadBtn').prop('disabled', false);
         $('#exportTreeBtn').prop('disabled', false);
         $('#zoomModeBtn').prop('disabled', false);
+        $('#zoomInBtn').prop('disabled', false);
+        $('#zoomOutBtn').prop('disabled', false);
+        $('#panModeBtn').prop('disabled', false);
         if (opts.resetPending !== false && P.EditMode && P.EditMode.resetPending) {
             P.EditMode.resetPending();
         }
