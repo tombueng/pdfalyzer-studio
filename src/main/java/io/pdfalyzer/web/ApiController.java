@@ -106,6 +106,18 @@ public class ApiController {
         return ResponseEntity.ok(result);
     }
 
+    @GetMapping("/session/{sessionId}/restore")
+    public ResponseEntity<Map<String, Object>> restoreSession(@PathVariable("sessionId") String sessionId) {
+        PdfSession session = pdfService.getSession(sessionId);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("sessionId", session.getId());
+        result.put("filename", session.getFilename());
+        result.put("pageCount", session.getPageCount());
+        result.put("fileSize", session.getPdfBytes() == null ? 0 : session.getPdfBytes().length);
+        result.put("tree", session.getTreeRoot());
+        return ResponseEntity.ok(result);
+    }
+
     private byte[] loadSamplePdfBytes() throws IOException {
         Path sourceFile = Paths.get("src", "main", "resources", "test.pdf")
                 .toAbsolutePath().normalize();

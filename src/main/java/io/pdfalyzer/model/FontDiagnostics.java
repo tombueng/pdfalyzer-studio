@@ -98,6 +98,7 @@ public class FontDiagnostics {
         private FontDiagnosticsEntry font;
         private EncodingDiagnostics encoding = new EncodingDiagnostics();
         private List<GlyphMapping> glyphMappings = new ArrayList<>();
+        private List<GlyphMapping> missingUsedGlyphMappings = new ArrayList<>();
         private List<UsedCharacterIssue> usedCharacterIssues = new ArrayList<>();
         private Map<String, String> fontDictionary = new LinkedHashMap<>();
 
@@ -109,6 +110,9 @@ public class FontDiagnostics {
 
         public List<GlyphMapping> getGlyphMappings() { return glyphMappings; }
         public void setGlyphMappings(List<GlyphMapping> glyphMappings) { this.glyphMappings = glyphMappings; }
+
+        public List<GlyphMapping> getMissingUsedGlyphMappings() { return missingUsedGlyphMappings; }
+        public void setMissingUsedGlyphMappings(List<GlyphMapping> missingUsedGlyphMappings) { this.missingUsedGlyphMappings = missingUsedGlyphMappings; }
 
         public List<UsedCharacterIssue> getUsedCharacterIssues() { return usedCharacterIssues; }
         public void setUsedCharacterIssues(List<UsedCharacterIssue> usedCharacterIssues) { this.usedCharacterIssues = usedCharacterIssues; }

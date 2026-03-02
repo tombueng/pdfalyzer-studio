@@ -407,6 +407,9 @@ PDFalyzer.EditMode = (function ($, P) {
         if (P.Tree && P.Tree.refreshPendingPanel) {
             P.Tree.refreshPendingPanel();
         }
+        if (P.Storage && P.Storage.saveDraft) {
+            P.Storage.saveDraft(P.state);
+        }
     }
 
     function updateFailedCosBadge() {

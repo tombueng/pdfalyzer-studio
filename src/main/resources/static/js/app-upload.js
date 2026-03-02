@@ -6,6 +6,19 @@ PDFalyzer.Upload = (function ($, P) {
 
     var _inFlight = false;
 
+    function selectActiveTab(tab) {
+        var nextTab = tab || 'structure';
+        $('.tab-btn').removeClass('active');
+        $('.tab-btn[data-tab="' + nextTab + '"]').addClass('active');
+    }
+
+    function restorePendingDraftForSession() {
+        if (!P.Storage || !P.state.sessionId) return;
+        var draft = P.Storage.loadDraft(P.state.sessionId);
+        if (!draft) return;
+        P.Storage.applyDraftToState(P.state, draft);
+    }
+
     function renderIdleButton() {
         $('#uploadBtn').html(
             '<i class="fas fa-upload me-1"></i> Upload PDF' +
@@ -18,11 +31,18 @@ PDFalyzer.Upload = (function ($, P) {
             '<input type="file" id="fileInput" accept=".pdf" hidden disabled />');
     }
 
-    function applyUploadSuccess(data, bytesSize) {
+    function applyUploadSuccess(data, bytesSize, options) {
+        var opts = options || {};
         P.state.sessionId = data.sessionId;
         P.state.treeData  = data.tree;
         P.state.rawCosTreeData = null;
         P.state.tabTreeViewStates = {};
+        if (P.Storage && P.Storage.setCurrentSessionId) {
+            P.Storage.setCurrentSessionId(P.state.sessionId);
+        }
+        if (opts.restoreDraft !== false) {
+            restorePendingDraftForSession();
+        }
         var sizeValue = typeof bytesSize === 'number' ? bytesSize : 0;
         var humanSize = P.Utils.formatBytes(sizeValue);
         $('#statusFilename').html('<i class="fas fa-file-pdf"></i> ' + data.filename);
@@ -32,12 +52,22 @@ PDFalyzer.Upload = (function ($, P) {
         $('#downloadBtn').prop('disabled', false);
         $('#exportTreeBtn').prop('disabled', false);
         $('#zoomModeBtn').prop('disabled', false);
-        $('#formSaveBtn').prop('disabled', true);
-        if (P.EditMode && P.EditMode.resetPending) {
+        if (opts.resetPending !== false && P.EditMode && P.EditMode.resetPending) {
             P.EditMode.resetPending();
         }
         P.Tree.render(P.state.treeData);
         P.Viewer.loadPdf(P.state.sessionId);
+        var nextTab = P.state.currentTab || 'structure';
+        selectActiveTab(nextTab);
+        if (P.Tabs && P.Tabs.switchTab) {
+            P.Tabs.switchTab(nextTab);
+        }
+        if (P.EditMode && P.EditMode.updateSaveButton) {
+            P.EditMode.updateSaveButton();
+        }
+        if (P.Storage && P.Storage.saveDraft) {
+            P.Storage.saveDraft(P.state);
+        }
     }
 
     function upload(file) {
@@ -58,7 +88,10 @@ PDFalyzer.Upload = (function ($, P) {
             processData: false, contentType: false, dataType: 'json'
         })
         .done(function (data) {
-            applyUploadSuccess(data, file && file.size ? file.size : 0);
+            applyUploadSuccess(data, file && file.size ? file.size : 0, {
+                restoreDraft: false,
+                resetPending: true
+            });
             P.Utils.toast('PDF loaded: ' + data.filename + ' (' + data.pageCount + ' pages)', 'success');
         })
         .fail(function (xhr) {
@@ -87,13 +120,58 @@ PDFalyzer.Upload = (function ($, P) {
             .done(function (data) {
                 if (P.state.sessionId) return;
                 var sampleSize = typeof data.fileSize === 'number' ? data.fileSize : 0;
-                applyUploadSuccess(data, sampleSize);
+                applyUploadSuccess(data, sampleSize, {
+                    restoreDraft: false,
+                    resetPending: true
+                });
                 P.Utils.toast('PDF loaded: ' + data.filename + ' (' + data.pageCount + ' pages)', 'success');
             })
             .always(function () {
                 _inFlight = false;
                 renderIdleButton();
             });
+    }
+
+    function restoreSessionOnInit() {
+        if (_inFlight || P.state.sessionId || !P.Storage || !P.Storage.getCurrentSessionId) {
+            return $.Deferred().resolve(false).promise();
+        }
+
+        var storedSessionId = P.Storage.getCurrentSessionId();
+        if (!storedSessionId) {
+            return $.Deferred().resolve(false).promise();
+        }
+
+        _inFlight = true;
+        renderUploadingButton();
+
+        var deferred = $.Deferred();
+        P.Utils.apiFetch('/api/session/' + encodeURIComponent(storedSessionId) + '/restore', {
+            method: 'GET',
+            dataType: 'json'
+        })
+            .done(function (data) {
+                var size = typeof data.fileSize === 'number' ? data.fileSize : 0;
+                applyUploadSuccess(data, size, {
+                    restoreDraft: true,
+                    resetPending: false
+                });
+                P.Utils.toast('Restored previous session', 'success');
+                deferred.resolve(true);
+            })
+            .fail(function () {
+                if (P.Storage) {
+                    P.Storage.clearDraft(storedSessionId);
+                    P.Storage.clearCurrentSessionId();
+                }
+                deferred.resolve(false);
+            })
+            .always(function () {
+                _inFlight = false;
+                renderIdleButton();
+            });
+
+        return deferred.promise();
     }
 
     function init() {
@@ -119,5 +197,10 @@ PDFalyzer.Upload = (function ($, P) {
         });
     }
 
-    return { init: init, upload: upload, loadSampleOnInit: loadSampleOnInit };
+    return {
+        init: init,
+        upload: upload,
+        loadSampleOnInit: loadSampleOnInit,
+        restoreSessionOnInit: restoreSessionOnInit
+    };
 })(jQuery, PDFalyzer);
