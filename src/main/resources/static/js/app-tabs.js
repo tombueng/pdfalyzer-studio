@@ -57,8 +57,17 @@ PDFalyzer.Tabs = (function ($, P) {
         return P.state.tabTreeViewStates[tab] || null;
     }
 
+    function dismissTransientHoverPopups() {
+        $('.image-tooltip-preview').remove();
+        $('.glyph-tooltip-preview').remove();
+        $(document).off('mousemove.imgtooltip');
+        $(document).off('mousemove.glyphtooltip');
+    }
+
     function switchTab(tab) {
         if (!P.state.treeData || !P.state.sessionId) return;
+
+        dismissTransientHoverPopups();
 
         var previousTab = P.state.currentTab;
         captureTreeViewStateForTab(previousTab);
@@ -743,6 +752,28 @@ PDFalyzer.Tabs = (function ($, P) {
         renderMapTableNow(state.pendingQuery, state.pendingUsedOnly);
     }
 
+    function wireModalFocusSafety(modalEl) {
+        if (!modalEl || modalEl.__pdfalyzerFocusSafetyBound) return;
+
+        modalEl.addEventListener('hide.bs.modal', function () {
+            var active = document.activeElement;
+            if (active && modalEl.contains(active) && typeof active.blur === 'function') {
+                active.blur();
+            }
+        });
+
+        modalEl.addEventListener('hidden.bs.modal', function () {
+            var returnFocusEl = modalEl.__pdfalyzerReturnFocusEl;
+            modalEl.__pdfalyzerReturnFocusEl = null;
+            if (!returnFocusEl || !document.contains(returnFocusEl) || returnFocusEl.disabled) return;
+            if (typeof returnFocusEl.focus === 'function') {
+                returnFocusEl.focus({ preventScroll: true });
+            }
+        });
+
+        modalEl.__pdfalyzerFocusSafetyBound = true;
+    }
+
     function ensureGlyphDetailModal() {
         if (document.getElementById('fontGlyphDetailModal')) return;
         var modalHtml = '' +
@@ -761,6 +792,7 @@ PDFalyzer.Tabs = (function ($, P) {
             '  </div>' +
             '</div>';
         $('body').append(modalHtml);
+        wireModalFocusSafety(document.getElementById('fontGlyphDetailModal'));
     }
 
     function bindGlyphMappingRowClicks() {
@@ -814,7 +846,10 @@ PDFalyzer.Tabs = (function ($, P) {
 
         var glyphText = unicode || '(unmapped)';
         $body.html('<div class="text-muted"><span class="spinner-border spinner-border-sm"></span> Loading glyph diagnostics…</div>');
-        var modal = bootstrap.Modal.getOrCreateInstance(document.getElementById('fontGlyphDetailModal'));
+        var modalEl = document.getElementById('fontGlyphDetailModal');
+        wireModalFocusSafety(modalEl);
+        modalEl.__pdfalyzerReturnFocusEl = document.activeElement;
+        var modal = bootstrap.Modal.getOrCreateInstance(modalEl);
         modal.show();
 
         P.Utils.apiFetch('/api/fonts/' + P.state.sessionId + '/diagnostics/' + obj + '/' + gen + '/glyph/' + code)
@@ -2157,39 +2192,56 @@ PDFalyzer.Tabs = (function ($, P) {
 
     // ======================== VALIDATION TAB ========================
 
-    function loadValidation() {
-        var $c = $('#treeContent');
-        $c.html(
-            '<div class="text-center mt-3">' +
+    function getValidationControlsHtml(disableExport) {
+        return '<div class="text-center mt-3">' +
             '<button class="btn btn-accent btn-sm me-2" id="runValidateBtn">' +
-            '<i class="fas fa-play me-1"></i>Run Validation</button>' +
+            '<i class="fas fa-play me-1"></i>Run Standard Validation</button>' +
             '<button class="btn btn-outline-accent btn-sm me-2" id="runVeraPdfBtn">' +
             '<i class="fas fa-file-alt me-1"></i>Run veraPDF</button>' +
-            '<button class="btn btn-outline-accent btn-sm" id="exportValidateBtn" disabled>' +
-            '<i class="fas fa-download me-1"></i>Export Report</button></div>');
+            '<button class="btn btn-outline-accent btn-sm" id="exportValidateBtn"' + (disableExport ? ' disabled' : '') + '>' +
+            '<i class="fas fa-download me-1"></i>Export Report</button></div>';
+    }
 
-        $('#runValidateBtn').on('click', function () {
-            $c.html('<div class="text-muted text-center mt-3">' +
-                '<span class="spinner-border spinner-border-sm"></span> Validating...</div>');
-            P.Utils.apiFetch('/api/validate/' + P.state.sessionId)
-                .done(function (issues) { renderValidation(issues); })
-                .fail(function () { P.Utils.toast('Validation error', 'danger'); });
+    function runStandardValidation() {
+        var $c = $('#treeContent');
+        $c.html('<div class="text-muted text-center mt-3">' +
+            '<span class="spinner-border spinner-border-sm"></span> Running standard validation...</div>');
+        P.Utils.apiFetch('/api/validate/' + P.state.sessionId)
+            .done(function (issues) { renderValidation(issues); })
+            .fail(function () { P.Utils.toast('Validation error', 'danger'); });
+    }
+
+    function runVeraPdfValidation() {
+        var $c = $('#treeContent');
+        $c.html('<div class="text-muted text-center mt-3">' +
+            '<span class="spinner-border spinner-border-sm"></span> Running veraPDF...</div>');
+        P.Utils.apiFetch('/api/validate/' + P.state.sessionId + '/verapdf')
+            .done(function (result) {
+                renderVeraPdf(result || {});
+            })
+            .fail(function () {
+                P.Utils.toast('veraPDF validation error', 'danger');
+            });
+    }
+
+    function bindValidationControls() {
+        $('#runValidateBtn').off('click').on('click', function () {
+            runStandardValidation();
         });
-        $('#exportValidateBtn').on('click', function () {
+        $('#exportValidateBtn').off('click').on('click', function () {
             window.open('/api/validate/' + P.state.sessionId + '/export', '_blank');
         });
-
-        $('#runVeraPdfBtn').on('click', function () {
-            $c.html('<div class="text-muted text-center mt-3">' +
-                '<span class="spinner-border spinner-border-sm"></span> Running veraPDF...</div>');
-            P.Utils.apiFetch('/api/validate/' + P.state.sessionId + '/verapdf')
-                .done(function (result) {
-                    renderVeraPdf(result || {});
-                })
-                .fail(function () {
-                    P.Utils.toast('veraPDF validation error', 'danger');
-                });
+        $('#runVeraPdfBtn').off('click').on('click', function () {
+            runVeraPdfValidation();
         });
+    }
+
+    function loadValidation() {
+        var $c = $('#treeContent');
+        $c.html(getValidationControlsHtml(true));
+        bindValidationControls();
+
+        runStandardValidation();
     }
 
     function renderVeraPdf(result) {
@@ -2506,21 +2558,19 @@ PDFalyzer.Tabs = (function ($, P) {
 
     function renderValidation(issues) {
         var $c = $('#treeContent');
-        var exportBtn = '<div class="text-end mb-2" style="padding:4px 8px;">' +
-            '<button class="btn btn-outline-accent btn-sm" onclick="window.open(\'/api/validate/' +
-            P.state.sessionId + '/export\', \'_blank\')">' +
-            '<i class="fas fa-download me-1"></i>Export Report</button></div>';
+        var controls = getValidationControlsHtml(false);
 
         if (!issues.length) {
-            $c.html(exportBtn + '<div class="text-center mt-3">' +
+            $c.html(controls + '<div class="text-center mt-3">' +
                 '<i class="fas fa-check-circle text-success fa-2x"></i>' +
                 '<p class="mt-2 text-success">No issues found!</p></div>');
+            bindValidationControls();
             return;
         }
         var order = { 'ERROR': 0, 'WARNING': 1, 'INFO': 2 };
         issues.sort(function (a, b) { return (order[a.severity] || 3) - (order[b.severity] || 3); });
 
-        var html   = exportBtn + '<div style="padding:8px;">';
+        var html   = controls + '<div style="padding:8px;">';
         var counts = {};
         issues.forEach(function (i) { counts[i.severity] = (counts[i.severity] || 0) + 1; });
         html += '<div class="mb-2" style="font-size:12px;">' +
@@ -2545,6 +2595,7 @@ PDFalyzer.Tabs = (function ($, P) {
         });
         html += '</div>';
         $c.html(html);
+        bindValidationControls();
     }
 
     // ======================== RAW COS TAB ========================

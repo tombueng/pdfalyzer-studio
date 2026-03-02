@@ -6,6 +6,14 @@ PDFalyzer.Viewer = (function ($, P) {
 
     var activeRenderRequestId = 0;
 
+    function ensurePdfWorkerConfigured() {
+        if (!window.pdfjsLib || !window.pdfjsLib.GlobalWorkerOptions) return;
+        var options = window.pdfjsLib.GlobalWorkerOptions;
+        if (options.workerSrc) return;
+        var version = window.pdfjsLib.version || '3.11.174';
+        options.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/' + version + '/pdf.worker.min.js';
+    }
+
     function beginRenderRequest() {
         activeRenderRequestId += 1;
         return activeRenderRequestId;
@@ -203,6 +211,7 @@ PDFalyzer.Viewer = (function ($, P) {
     }
 
     function loadPdf(sid, options) {
+        ensurePdfWorkerConfigured();
         var opts = options || {};
         var url = '/api/pdf/' + sid;
         var $viewer = $('#pdfViewer').show();
