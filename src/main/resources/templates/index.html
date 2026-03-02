@@ -148,7 +148,7 @@
                             <label class="form-label form-label-sm"><i class="fas fa-fingerprint me-1"></i>Field ID</label>
                             <input class="form-control form-control-sm" id="createFieldId" placeholder="field_id" />
                         </div>
-                        <div class="col-6 field-config-block field-create-block" id="createRequiredBlock">
+                        <div class="col-6 field-config-block field-create-block field-bool-block" id="createRequiredBlock">
                             <label class="form-label form-label-sm"><i class="fas fa-asterisk me-1"></i>Required</label>
                             <div class="field-option-radios" data-option="create-required">
                                 <div class="form-check form-check-sm">
@@ -161,7 +161,7 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="col-6 field-config-block field-create-block" id="createReadonlyBlock">
+                        <div class="col-6 field-config-block field-create-block field-bool-block" id="createReadonlyBlock">
                             <label class="form-label form-label-sm"><i class="fas fa-lock me-1"></i>Read only</label>
                             <div class="field-option-radios" data-option="create-readonly">
                                 <div class="form-check form-check-sm">
@@ -174,7 +174,7 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="col-6 field-config-block field-create-block" id="createMultilineBlock">
+                        <div class="col-6 field-config-block field-create-block field-bool-block" id="createMultilineBlock">
                             <label class="form-label form-label-sm"><i class="fas fa-align-left me-1"></i>Multiline</label>
                             <div class="field-option-radios" data-option="create-multiline">
                                 <div class="form-check form-check-sm">
@@ -187,7 +187,7 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="col-6 field-config-block field-create-block" id="createEditableBlock">
+                        <div class="col-6 field-config-block field-create-block field-bool-block" id="createEditableBlock">
                             <label class="form-label form-label-sm"><i class="fas fa-pen me-1"></i>Editable (combo)</label>
                             <div class="field-option-radios" data-option="create-editable">
                                 <div class="form-check form-check-sm">
@@ -200,7 +200,7 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="col-6 field-config-block field-create-block" id="createCheckedBlock">
+                        <div class="col-6 field-config-block field-create-block field-bool-block" id="createCheckedBlock">
                             <label class="form-label form-label-sm"><i class="fas fa-check-square me-1"></i>Checked (checkbox)</label>
                             <div class="field-option-radios" data-option="create-checked">
                                 <div class="form-check form-check-sm">
@@ -259,10 +259,18 @@
                         <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
                     </div>
                     <div class="modal-body">
-                        <div class="field-options-meta field-options-meta-primary" id="fieldOptionsSelectionInfo"></div>
-                        <div class="field-options-meta mb-3" id="fieldOptionsScopeHint"></div>
+                        <div class="field-options-meta-card mb-3">
+                            <div class="field-options-meta-row field-options-meta-primary">
+                                <i class="fas fa-pen-to-square"></i>
+                                <span id="fieldOptionsSelectionInfo"></span>
+                            </div>
+                            <div class="field-options-meta-row field-options-meta-secondary">
+                                <i class="fas fa-circle-info"></i>
+                                <span id="fieldOptionsScopeHint"></span>
+                            </div>
+                        </div>
                         <div class="row g-3 field-options-grid">
-                            <div class="col-6 field-config-block field-option-block" id="optRequiredBlock">
+                            <div class="col-6 field-config-block field-option-block field-bool-block" id="optRequiredBlock">
                                 <label class="form-label form-label-sm"><i class="fas fa-asterisk me-1"></i>Required</label>
                                 <div class="field-option-radios" data-option="required">
                                     <div class="form-check form-check-sm tri-keep">
@@ -279,7 +287,7 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="col-6 field-config-block field-option-block" id="optReadonlyBlock">
+                            <div class="col-6 field-config-block field-option-block field-bool-block" id="optReadonlyBlock">
                                 <label class="form-label form-label-sm"><i class="fas fa-lock me-1"></i>Read only</label>
                                 <div class="field-option-radios" data-option="readonly">
                                     <div class="form-check form-check-sm tri-keep">
@@ -296,7 +304,7 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="col-6 field-config-block field-option-block" id="optMultilineBlock">
+                            <div class="col-6 field-config-block field-option-block field-bool-block" id="optMultilineBlock">
                                 <label class="form-label form-label-sm"><i class="fas fa-align-left me-1"></i>Multiline</label>
                                 <div class="field-option-radios" data-option="multiline">
                                     <div class="form-check form-check-sm tri-keep">
@@ -313,7 +321,7 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="col-6 field-config-block field-option-block" id="optEditableBlock">
+                            <div class="col-6 field-config-block field-option-block field-bool-block" id="optEditableBlock">
                                 <label class="form-label form-label-sm"><i class="fas fa-pen me-1"></i>Editable (combo)</label>
                                 <div class="field-option-radios" data-option="editable">
                                     <div class="form-check form-check-sm tri-keep">
@@ -330,7 +338,7 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="col-6 field-config-block field-option-block" id="optCheckedBlock">
+                            <div class="col-6 field-config-block field-option-block field-bool-block" id="optCheckedBlock">
                                 <label class="form-label form-label-sm"><i class="fas fa-check-square me-1"></i>Checked (checkbox)</label>
                                 <div class="field-option-radios" data-option="checked">
                                     <div class="form-check form-check-sm tri-keep">
