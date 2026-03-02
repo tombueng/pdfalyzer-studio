@@ -127,6 +127,7 @@ public class FontInspectorService {
             detail.setFontDictionary(buildFontDictionary(aggregate.font));
             detail.setUsedCharacterIssues(buildUsedCharacterIssues(stats));
             detail.setGlyphMappings(buildGlyphMappings(aggregate.font, stats));
+            detail.setMissingUsedGlyphMappings(buildMissingUsedGlyphMappings(aggregate.font, stats));
             return detail;
         }
     }
@@ -824,16 +825,7 @@ public class FontInspectorService {
         entry.setMappedUsedCodes(mappedUsedCodes);
         entry.setUnmappedUsedCodes(unmappedUsedCodes);
 
-        int unencodableChars = 0;
-        List<String> unencodableSamples = new ArrayList<>();
-        for (String character : stats.usedChars.keySet()) {
-            if (!canEncode(font, character)) {
-                unencodableChars += 1;
-                if (unencodableSamples.size() < 6) {
-                    unencodableSamples.add(character + " (" + unicodeHex(character) + ")");
-                }
-            }
-        }
+        int unencodableChars = countMissingUsedCharacters(stats, font);
         entry.setUnencodableUsedChars(unencodableChars);
 
         List<Integer> pages = new ArrayList<>(new TreeSet<>(aggregate.pages));
@@ -952,6 +944,53 @@ public class FontInspectorService {
         List<FontDiagnostics.GlyphMapping> list = new ArrayList<>(mappings.values());
         list.sort(Comparator.comparingInt(FontDiagnostics.GlyphMapping::getCode));
         return list;
+    }
+
+    private List<FontDiagnostics.GlyphMapping> buildMissingUsedGlyphMappings(PDFont font, UsageStats stats) {
+        List<FontDiagnostics.GlyphMapping> list = new ArrayList<>();
+        for (Map.Entry<Integer, Integer> used : stats.usedCodes.entrySet()) {
+            int code = used.getKey();
+            int usedCount = used.getValue() == null ? 0 : used.getValue();
+            if (usedCount <= 0) continue;
+
+            String unicode = safeToUnicode(font, code);
+            boolean mapped = unicode != null && !unicode.isEmpty();
+            boolean missing = !mapped;
+            if (!missing) continue;
+
+            FontDiagnostics.GlyphMapping mapping = new FontDiagnostics.GlyphMapping();
+            mapping.setCode(code);
+            mapping.setUnicode(unicode);
+            mapping.setUnicodeHex(unicodeHex(unicode));
+            mapping.setUsedCount(usedCount);
+            mapping.setMapped(mapped);
+            mapping.setWidth(safeWidth(font, code));
+            list.add(mapping);
+        }
+        list.sort(Comparator.comparingInt(FontDiagnostics.GlyphMapping::getCode));
+        return list;
+    }
+
+    private int countMissingUsedCharacters(UsageStats stats, PDFont font) {
+        Set<String> mappedChars = new LinkedHashSet<>();
+        for (int code : stats.usedCodes.keySet()) {
+            String unicode = safeToUnicode(font, code);
+            if (unicode == null || unicode.isEmpty()) continue;
+            for (int offset = 0; offset < unicode.length(); ) {
+                int cp = unicode.codePointAt(offset);
+                mappedChars.add(new String(Character.toChars(cp)));
+                offset += Character.charCount(cp);
+            }
+        }
+
+        int missing = 0;
+        for (String usedChar : stats.usedChars.keySet()) {
+            if (usedChar == null || usedChar.isEmpty()) continue;
+            if (!mappedChars.contains(usedChar)) {
+                missing += 1;
+            }
+        }
+        return missing;
     }
 
     private String safeToUnicode(PDFont font, int code) {

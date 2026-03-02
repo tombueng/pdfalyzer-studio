@@ -100,6 +100,9 @@ PDFalyzer.Tabs = (function ($, P) {
         }
 
         P.state.currentTab = tab;
+        if (P.Storage && P.Storage.saveDraft) {
+            P.Storage.saveDraft(P.state);
+        }
     }
 
     // ======================== FONTS TAB ========================
@@ -160,8 +163,8 @@ PDFalyzer.Tabs = (function ($, P) {
             html += '<div class="font-diag-stats">' +
                 metricCard('Fonts', model.totalFonts || model.fonts.length, 'fa-font', 'Total unique fonts found across all page and XObject resources.') +
                 metricCard('With issues', model.fontsWithIssues || 0, 'fa-exclamation-triangle', 'Fonts flagged with one or more potential rendering, mapping, or embedding problems.') +
-                metricCard('Missing glyphs', model.fontsWithMissingGlyphs || 0, 'fa-question-circle', 'Fonts where extracted text indicates characters that this font may not encode reliably.') +
-                metricCard('Encoding issues', model.fontsWithEncodingProblems || 0, 'fa-code', 'Fonts where used character codes are missing Unicode mapping entries (often ToUnicode issues).') +
+                metricCard('Missing glyphs', model.fontsWithMissingGlyphs || 0, 'fa-question-circle', 'Fonts with missing used characters. Character-level metric derived from used text characters that are not covered by used code-to-Unicode mappings.') +
+                metricCard('Encoding issues', model.fontsWithEncodingProblems || 0, 'fa-code', 'Fonts where used character codes have no Unicode mapping (typically ToUnicode/encoding gaps).') +
                 '</div>' +
                 '<div class="font-diag-controls"></div>';
         } else {
@@ -223,11 +226,11 @@ PDFalyzer.Tabs = (function ($, P) {
                     '<span title="Subset fonts include only some glyphs.">' + subIcon + ' subset</span><br>' +
                     P.Utils.escapeHtml(f.encoding || '(no encoding)') +
                     '</div></td>' +
-                    '<td><span class="badge text-bg-secondary" title="Count of text positions observed with this font in extracted text flow.">' + glyphCount + '</span></td>' +
-                    '<td><span class="badge text-bg-secondary" title="Distinct used character codes observed for this font.">' + usedGlyphs + '</span></td>' +
+                    '<td><span class="badge text-bg-secondary" title="Glyphs: total text positions observed with this font (includes repeated occurrences).">' + glyphCount + '</span></td>' +
+                    '<td><span class="badge text-bg-secondary" title="Glyphs used: number of distinct character codes used with this font in extracted text.">' + usedGlyphs + '</span></td>' +
                     '<td><div class="text-muted" style="font-size:11px;">Pages: ' + P.Utils.escapeHtml(pageText) + '</div></td>' +
-                    '<td><span class="badge ' + ((f.unmappedUsedCodes || 0) > 0 ? 'text-bg-danger' : 'text-bg-success') + '" title="Mapped used codes / distinct used codes.">Mapped ' + P.Utils.escapeHtml(coverage) + '</span>' +
-                    ((f.unencodableUsedChars || 0) > 0 ? '<div class="text-warning" style="font-size:11px;" title="Distinct used characters that cannot be encoded by this font.">Missing glyph chars: ' + f.unencodableUsedChars + '</div>' : '') +
+                    '<td><span class="badge ' + ((f.unmappedUsedCodes || 0) > 0 ? 'text-bg-danger' : 'text-bg-success') + '" title="Coverage = mapped used codes / distinct used codes. Mapped means the used code has a Unicode mapping.">Mapped ' + P.Utils.escapeHtml(coverage) + '</span>' +
+                    ((f.unencodableUsedChars || 0) > 0 ? '<div class="text-warning" style="font-size:11px;" title="Missing glyph chars: distinct used text characters not covered by the used code→Unicode mappings for this font.">Missing glyph chars: ' + f.unencodableUsedChars + '</div>' : '') +
                     '</td>' +
                     '<td>' + issueHtml + issueDetail + '</td>' +
                     '<td>' + actions + '</td></tr>';
@@ -511,8 +514,30 @@ PDFalyzer.Tabs = (function ($, P) {
         var f = detail.font || {};
         var encoding = detail.encoding || {};
         var mappings = Array.isArray(detail.glyphMappings) ? detail.glyphMappings : [];
+        var missingUsedGlyphMappings = Array.isArray(detail.missingUsedGlyphMappings) ? detail.missingUsedGlyphMappings : [];
         var issues = Array.isArray(detail.usedCharacterIssues) ? detail.usedCharacterIssues : [];
         var dictionary = detail.fontDictionary || {};
+        var missingMappings = missingUsedGlyphMappings.length ? missingUsedGlyphMappings : mappings.filter(function (row) {
+            return (row && row.usedCount > 0 && !row.mapped);
+        });
+        var missingCodes = {};
+        missingMappings.forEach(function (row) {
+            if (!row) return;
+            missingCodes[String(row.code)] = true;
+        });
+        var displayMappings = mappings.filter(function (row) {
+            if (!row) return false;
+            return !missingCodes[String(row.code)];
+        });
+        var hasMissingGlyphError = missingMappings.length > 0 || (f.unencodableUsedChars || 0) > 0 || (Array.isArray(f.issues) && f.issues.some(function (msg) {
+            return String(msg || '').toLowerCase().indexOf('not encodable by this font') !== -1;
+        }));
+        var detailTabsHtml = hasMissingGlyphError
+            ? ('<div class="font-detail-tabs mb-2">' +
+                '  <button class="btn btn-outline-accent btn-sm font-detail-tab-btn is-active" data-detail-tab="map" title="All code mappings except rows listed as missing.">Glyph mapping table (' + displayMappings.length + ')</button>' +
+                '  <button class="btn btn-outline-accent btn-sm font-detail-tab-btn" data-detail-tab="missing" title="Used codes with missing Unicode mapping.">Missing glyph mapping table (' + missingMappings.length + ')</button>' +
+                '</div>')
+            : '';
 
         var fontFamily = (f.objectNumber >= 0) ? ('pdfdiagfont_' + f.objectNumber + '_' + (f.generationNumber || 0)) : '';
         if (f.embedded && f.objectNumber >= 0) {
@@ -520,16 +545,8 @@ PDFalyzer.Tabs = (function ($, P) {
         }
 
         var html = '<div class="font-diag-detail-content">' +
-            '<div class="font-diag-detail-title"><strong>Glyph mapping table (' + mappings.length + ')</strong></div>' +
-            '<div class="font-detail-map-filter-row">' +
-            '  <div class="font-detail-map-toolbar">' +
-            '    <button id="fontDetailClearHighlightsBtn" class="btn btn-outline-accent btn-sm"><i class="fas fa-eraser me-1"></i>Clear highlights</button>' +
-            '  </div>' +
-            '  <input id="fontDetailMapHeaderFilter" class="form-control form-control-sm table-filter-input" placeholder="Filter table..." />' +
-            '</div>' +
-            '<div class="font-detail-table-wrap font-detail-table-wrap-fill" id="fontDetailMapWrap"><table class="font-detail-table" id="fontDetailMapTable" data-disable-header-filter="1"><thead><tr><th title="Character code used in PDF text operators.">Code</th><th title="Lazy-rendered preview of mapped glyphs.">Glyph</th><th title="Unicode text mapped from this code.">Unicode</th><th title="Unicode code point(s) in U+XXXX format.">Hex</th><th title="Glyph width reported by font metrics.">Width</th><th title="How many times this code appears in extracted text.">Used</th><th title="Whether code maps to Unicode.">Mapped</th><th class="table-no-sort" title="Row actions.">Action</th></tr></thead><tbody id="fontDetailMapTableBody">' +
-            '<tr><td colspan="8" class="text-muted">Loading rows…</td></tr>' +
-            '</tbody></table></div>' +
+            detailTabsHtml +
+            '<div id="fontDetailTabContent" class="font-detail-tab-content"></div>' +
             '</div>';
 
         $('#fontDiagDetail').html(html);
@@ -538,23 +555,29 @@ PDFalyzer.Tabs = (function ($, P) {
             activeFontDetailState.observer.disconnect();
         }
         activeFontDetailState = {
-            mappings: mappings,
+            mappings: displayMappings,
+            missingMappings: missingMappings,
+            hasMissingGlyphError: hasMissingGlyphError,
             issues: issues,
             font: f,
             fontFamily: fontFamily,
             pendingQuery: '',
+            missingPendingQuery: '',
             pendingUsedOnly: false,
             mapRenderToken: 0,
             mapRenderContext: null,
+            missingRenderToken: 0,
+            missingRenderContext: null,
+            activeDetailTab: 'map',
             observer: null
         };
-        $('#fontDetailMapHeaderFilter').off('input').on('input', function () {
+        $('#fontDiagDetail').off('click', '.font-detail-tab-btn').on('click', '.font-detail-tab-btn', function (ev) {
+            ev.preventDefault();
+            var tab = String($(this).attr('data-detail-tab') || 'map');
             if (!activeFontDetailState) return;
-            activeFontDetailState.pendingQuery = String($(this).val() || '');
-            renderMapTableNow(activeFontDetailState.pendingQuery, activeFontDetailState.pendingUsedOnly);
-        });
-        $('#fontDetailClearHighlightsBtn').off('click').on('click', function () {
-            clearFontUsageHighlights({ resetGlyphToggles: true });
+            if (tab !== 'map' && tab !== 'missing') return;
+            activeFontDetailState.activeDetailTab = tab;
+            renderFontDetailActiveTab();
         });
         $('#fontDiagDetail').off('click', '.font-map-highlight-btn').on('click', '.font-map-highlight-btn', function (ev) {
             ev.preventDefault();
@@ -567,6 +590,73 @@ PDFalyzer.Tabs = (function ($, P) {
         });
         syncGlyphHighlightToggleButtons();
         setupDeferredFontDetailRendering();
+        applyGlobalDiagnosticsTableInteractions();
+    }
+
+    function renderFontDetailActiveTab() {
+        var state = activeFontDetailState;
+        var $host = $('#fontDetailTabContent');
+        if (!state || !$host.length) return;
+
+        var tab = state.activeDetailTab || 'map';
+        if (tab === 'missing' && !state.hasMissingGlyphError) {
+            tab = 'map';
+        }
+        state.activeDetailTab = tab;
+
+        $('#fontDiagDetail .font-detail-tab-btn').removeClass('is-active');
+        $('#fontDiagDetail .font-detail-tab-btn[data-detail-tab="' + tab + '"]').addClass('is-active');
+
+        var html = '';
+        if (tab === 'missing') {
+            html =
+                '<div class="font-diag-detail-title"><strong>Missing glyph mapping table (' + (state.missingMappings || []).length + ')</strong></div>' +
+                '<div class="font-detail-map-filter-row">' +
+                '  <div class="font-detail-map-toolbar">' +
+                '    <button id="fontDetailClearHighlightsBtn" class="btn btn-outline-accent btn-sm"><i class="fas fa-eraser me-1"></i>Clear highlights</button>' +
+                '  </div>' +
+                '  <input id="fontDetailMissingHeaderFilter" class="form-control form-control-sm table-filter-input font-detail-header-filter" placeholder="Filter table..." />' +
+                '</div>' +
+                '<div class="font-detail-table-wrap font-detail-table-wrap-fill" id="fontDetailMissingWrap"><table class="font-detail-table" id="fontDetailMissingTable" data-disable-header-filter="1"><thead><tr><th title="Character code used in PDF text operators.">Code</th><th title="Unicode text mapped from this code.">Unicode</th><th title="Unicode code point(s) in U+XXXX format.">Hex</th><th title="Glyph width reported by font metrics.">Width</th><th title="How many times this code appears in extracted text.">Used</th><th title="Whether code maps to Unicode.">Mapped</th><th class="table-no-sort" title="Row actions.">Action</th></tr></thead><tbody id="fontDetailMissingTableBody"><tr><td colspan="7" class="text-muted">Loading rows…</td></tr></tbody></table></div>';
+        } else {
+            html =
+                '<div class="font-diag-detail-title"><strong>Glyph mapping table (' + (state.mappings || []).length + ')</strong></div>' +
+                '<div class="font-detail-map-filter-row">' +
+                '  <div class="font-detail-map-toolbar">' +
+                '    <button id="fontDetailClearHighlightsBtn" class="btn btn-outline-accent btn-sm"><i class="fas fa-eraser me-1"></i>Clear highlights</button>' +
+                '  </div>' +
+                '  <input id="fontDetailMapHeaderFilter" class="form-control form-control-sm table-filter-input font-detail-header-filter" placeholder="Filter table..." />' +
+                '</div>' +
+                '<div class="font-detail-table-wrap font-detail-table-wrap-fill" id="fontDetailMapWrap"><table class="font-detail-table" id="fontDetailMapTable" data-disable-header-filter="1"><thead><tr><th title="Character code used in PDF text operators.">Code</th><th title="Lazy-rendered preview of mapped glyphs.">Glyph</th><th title="Unicode text mapped from this code.">Unicode</th><th title="Unicode code point(s) in U+XXXX format.">Hex</th><th title="Glyph width reported by font metrics.">Width</th><th title="How many times this code appears in extracted text.">Used</th><th title="Whether code maps to Unicode.">Mapped</th><th class="table-no-sort" title="Row actions.">Action</th></tr></thead><tbody id="fontDetailMapTableBody"><tr><td colspan="8" class="text-muted">Loading rows…</td></tr></tbody></table></div>';
+        }
+
+        $host.html(html);
+        if (P.Utils && typeof P.Utils.initClearableInputs === 'function') {
+            P.Utils.initClearableInputs();
+        }
+
+        $('#fontDetailClearHighlightsBtn').off('click').on('click', function () {
+            clearFontUsageHighlights({ resetGlyphToggles: true });
+        });
+
+        $('#fontDetailMapHeaderFilter').off('input').on('input', function () {
+            if (!activeFontDetailState) return;
+            activeFontDetailState.pendingQuery = String($(this).val() || '');
+            renderMapTableNow(activeFontDetailState.pendingQuery, activeFontDetailState.pendingUsedOnly);
+        });
+
+        $('#fontDetailMissingHeaderFilter').off('input').on('input', function () {
+            if (!activeFontDetailState) return;
+            activeFontDetailState.missingPendingQuery = String($(this).val() || '');
+            renderMissingTableNow(activeFontDetailState.missingPendingQuery);
+        });
+
+        if (tab === 'missing') {
+            renderMissingTableNow(state.missingPendingQuery);
+        } else {
+            renderMapTableNow(state.pendingQuery, state.pendingUsedOnly);
+        }
+
         applyGlobalDiagnosticsTableInteractions();
     }
 
@@ -603,6 +693,22 @@ PDFalyzer.Tabs = (function ($, P) {
         return '<tr class="font-map-row" data-code="' + escapeHtmlAttr(String(row.code == null ? '' : row.code)) + '" data-unicode="' + escapeHtmlAttr(row.unicode || '') + '" data-unicode-hex="' + escapeHtmlAttr(row.unicodeHex || '') + '">' +
             '<td>' + P.Utils.escapeHtml(String(row.code == null ? '' : row.code)) + '</td>' +
             '<td class="font-glyph-preview-cell">' + glyphPreview + '</td>' +
+            '<td class="font-map-unicode-cell">' + unicode + '</td>' +
+            '<td>' + P.Utils.escapeHtml(row.unicodeHex || '') + '</td>' +
+            '<td>' + (row.width == null ? '' : row.width) + '</td>' +
+            '<td>' + (row.usedCount || 0) + '</td>' +
+            '<td>' + (row.mapped ? '<span class="text-success">yes</span>' : '<span class="text-danger">no</span>') + '</td>' +
+            '<td><button class="btn btn-xs btn-outline-accent font-map-highlight-btn glyph-highlight-toggle" data-obj="' + escapeHtmlAttr(String(obj)) + '" data-gen="' + escapeHtmlAttr(String(gen)) + '" data-code="' + escapeHtmlAttr(String(code)) + '" title="Toggle glyph highlight"><i class="fas fa-brush"></i></button></td>' +
+            '</tr>';
+    }
+
+    function buildMissingMappingRowHtml(row, state) {
+        var obj = parseCodeValue(state.font && state.font.objectNumber);
+        var gen = parseCodeValue((state.font && state.font.generationNumber) || 0);
+        var code = parseCodeValue(row.code);
+        var unicode = row.unicode ? P.Utils.escapeHtml(row.unicode) : '<span class="text-danger">(unmapped)</span>';
+        return '<tr class="font-map-row" data-code="' + escapeHtmlAttr(String(row.code == null ? '' : row.code)) + '" data-unicode="' + escapeHtmlAttr(row.unicode || '') + '" data-unicode-hex="' + escapeHtmlAttr(row.unicodeHex || '') + '">' +
+            '<td>' + P.Utils.escapeHtml(String(row.code == null ? '' : row.code)) + '</td>' +
             '<td class="font-map-unicode-cell">' + unicode + '</td>' +
             '<td>' + P.Utils.escapeHtml(row.unicodeHex || '') + '</td>' +
             '<td>' + (row.width == null ? '' : row.width) + '</td>' +
@@ -755,6 +861,79 @@ PDFalyzer.Tabs = (function ($, P) {
         fillUntilScrollable();
     }
 
+    function renderMissingTableNow(query) {
+        var state = activeFontDetailState;
+        var tbody = document.getElementById('fontDetailMissingTableBody');
+        var wrap = document.getElementById('fontDetailMissingWrap');
+        if (!state || !tbody || !state.hasMissingGlyphError) return;
+
+        state.missingRenderToken += 1;
+        var token = state.missingRenderToken;
+
+        var normalizedQuery = String(query || '').toLowerCase();
+        var filtered = (state.missingMappings || []).filter(function (row) {
+            if (!normalizedQuery) return true;
+            var rowText = [row.code, row.unicode, row.unicodeHex, row.width, row.usedCount].join(' ').toLowerCase();
+            return rowText.indexOf(normalizedQuery) !== -1;
+        });
+
+        if (!filtered.length) {
+            tbody.innerHTML = '<tr><td colspan="7" class="text-muted">No missing glyph rows match the current filter.</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = '<tr><td colspan="7" class="text-muted">Rendering ' + filtered.length + ' rows… scroll to load more.</td></tr>';
+
+        state.missingRenderContext = {
+            token: token,
+            filtered: filtered,
+            index: 0,
+            chunkSize: 120
+        };
+
+        function appendNextChunk() {
+            var ctx = state.missingRenderContext;
+            if (!ctx || ctx.token !== state.missingRenderToken) return;
+            if (ctx.index === 0) {
+                tbody.innerHTML = '';
+            }
+            var end = Math.min(ctx.index + ctx.chunkSize, ctx.filtered.length);
+            var html = '';
+            for (; ctx.index < end; ctx.index += 1) {
+                html += buildMissingMappingRowHtml(ctx.filtered[ctx.index], state);
+            }
+            if (html) {
+                tbody.insertAdjacentHTML('beforeend', html);
+                bindGlyphMappingRowClicks();
+                syncGlyphHighlightToggleButtons();
+            }
+        }
+
+        function fillUntilScrollable() {
+            if (!wrap) return;
+            var guard = 0;
+            while (state.missingRenderContext && state.missingRenderContext.index < state.missingRenderContext.filtered.length && wrap.scrollHeight <= wrap.clientHeight + 4 && guard < 12) {
+                appendNextChunk();
+                guard += 1;
+            }
+            enableTableInteractions($('#fontDetailMissingTable'));
+        }
+
+        if (wrap) {
+            $(wrap).off('scroll.maplazy').on('scroll.maplazy', function () {
+                var ctx = state.missingRenderContext;
+                if (!ctx || ctx.token !== state.missingRenderToken) return;
+                if (ctx.index >= ctx.filtered.length) return;
+                if (wrap.scrollTop + wrap.clientHeight >= wrap.scrollHeight - 120) {
+                    appendNextChunk();
+                }
+            });
+        }
+
+        appendNextChunk();
+        fillUntilScrollable();
+    }
+
     function setupDeferredFontDetailRendering() {
         var state = activeFontDetailState;
         if (!state) return;
@@ -764,7 +943,7 @@ PDFalyzer.Tabs = (function ($, P) {
             state.observer = null;
         }
 
-        renderMapTableNow(state.pendingQuery, state.pendingUsedOnly);
+        renderFontDetailActiveTab();
     }
 
     function ensureGlyphDetailModal() {
