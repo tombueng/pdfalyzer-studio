@@ -804,6 +804,7 @@ PDFalyzer.Tabs = (function ($, P) {
             '      <div class="font-glyph-hero-toolbar font-glyph-hero-toolbar-right">' +
             '        <button id="fontGlyphZoomOut" class="btn btn-xs btn-outline-accent glyph-zoom-btn" title="Zoom out"><i class="fas fa-search-minus"></i></button>' +
             '        <button id="fontGlyphZoomIn" class="btn btn-xs btn-outline-accent glyph-zoom-btn" title="Zoom in"><i class="fas fa-search-plus"></i></button>' +
+            '        <button id="fontGlyphZoomFit" class="btn btn-xs btn-outline-accent glyph-zoom-btn" title="Fit to view"><i class="fas fa-compress-arrows-alt"></i></button>' +
             '        <span id="fontGlyphZoomLabel" class="text-muted">100%</span>' +
             '        <span class="text-muted font-glyph-zoom-hint">Ctrl+Wheel</span>' +
             '      </div>' +
@@ -1154,9 +1155,9 @@ PDFalyzer.Tabs = (function ($, P) {
     }
 
     function drawGlyphDiagnosticsCanvas(canvas, options) {
-        if (!canvas) return;
+        if (!canvas) return null;
         var text = String(canvas.getAttribute('data-glyph') || '').trim();
-        if (!text) return;
+        if (!text) return null;
 
         var fontFamily = String(canvas.getAttribute('data-font-family') || "'Segoe UI Symbol', 'Segoe UI', sans-serif");
         var widthHintUnits = options && typeof options.widthHintUnits === 'number' ? options.widthHintUnits : NaN;
@@ -1172,7 +1173,7 @@ PDFalyzer.Tabs = (function ($, P) {
         canvas.height = Math.floor(cssHeight * dpr);
 
         var ctx = canvas.getContext('2d');
-        if (!ctx) return;
+        if (!ctx) return null;
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, cssWidth, cssHeight);
 
@@ -1261,6 +1262,20 @@ PDFalyzer.Tabs = (function ($, P) {
             ];
             metricsEl.textContent = info.join('  |  ');
         }
+
+        return {
+            contentLeft: region.x,
+            contentTop: region.y,
+            contentWidth: region.width,
+            contentHeight: region.height,
+            bboxLeft: bboxLeft,
+            bboxTop: bboxTop,
+            bboxWidth: bboxWidth,
+            bboxHeight: bboxHeight,
+            baselineY: baselineY,
+            ascentY: baselineY - m.ascent,
+            descentY: baselineY + m.descent
+        };
     }
 
     function collectExtraGlyphDiagnostics(glyph) {
@@ -1330,10 +1345,11 @@ PDFalyzer.Tabs = (function ($, P) {
 
         var viewportWidth = Math.max(320, viewport.clientWidth || 320);
         var viewportHeight = Math.max(260, viewport.clientHeight || 260);
-        var baseWidth = Math.max(520, viewportWidth - 18);
-        var baseHeight = Math.max(420, viewportHeight - 18);
+        var baseWidth = viewportWidth;
+        var baseHeight = viewportHeight;
         var renderScale = 4;
-        var initialZoom = 1 / renderScale;
+        var fitPaddingRatio = 0.10;
+        var defaultZoom = 1 / renderScale;
 
         activeGlyphCanvasState = {
             canvas: canvas,
@@ -1343,12 +1359,21 @@ PDFalyzer.Tabs = (function ($, P) {
             baseHeight: baseHeight,
             renderScale: renderScale,
             glyphScale: 4,
-            initialZoom: initialZoom,
-            zoom: initialZoom,
+            defaultZoom: defaultZoom,
+            initialZoom: defaultZoom,
+            zoom: defaultZoom,
             minZoom: 0.1,
             maxZoom: 4,
-            widthHintUnits: parseFloat(canvas.getAttribute('data-glyph-width'))
+            widthHintUnits: parseFloat(canvas.getAttribute('data-glyph-width')),
+            fitPaddingRatio: fitPaddingRatio,
+            userAdjustedZoom: false
         };
+
+        function applyViewportOverflow() {
+            if (!activeGlyphCanvasState) return;
+            var epsilon = 0.001;
+            viewport.style.overflow = (activeGlyphCanvasState.zoom > (activeGlyphCanvasState.initialZoom + epsilon)) ? 'auto' : 'hidden';
+        }
 
         function updateZoomLabel() {
             $('#fontGlyphZoomLabel').text(Math.round(activeGlyphCanvasState.zoom * 100) + '%');
@@ -1356,7 +1381,7 @@ PDFalyzer.Tabs = (function ($, P) {
 
         function drawCurrent() {
             if (!activeGlyphCanvasState) return;
-            drawGlyphDiagnosticsCanvas(canvas, {
+            var layout = drawGlyphDiagnosticsCanvas(canvas, {
                 metricsEl: metricsEl,
                 widthHintUnits: activeGlyphCanvasState.widthHintUnits,
                 glyphScale: activeGlyphCanvasState.glyphScale,
@@ -1366,10 +1391,28 @@ PDFalyzer.Tabs = (function ($, P) {
             canvas.style.width = Math.round(activeGlyphCanvasState.baseWidth * activeGlyphCanvasState.renderScale * activeGlyphCanvasState.zoom) + 'px';
             canvas.style.height = Math.round(activeGlyphCanvasState.baseHeight * activeGlyphCanvasState.renderScale * activeGlyphCanvasState.zoom) + 'px';
             updateZoomLabel();
+            return layout;
         }
 
-        function setZoom(nextZoom) {
+        function computeFitZoom(layout) {
+            if (!layout) return activeGlyphCanvasState.zoom;
+            var contentWidth = Math.max(1, layout.contentWidth);
+            var contentHeight = Math.max(1, layout.contentHeight);
+            var paddedWidth = contentWidth * (1 + activeGlyphCanvasState.fitPaddingRatio);
+            var paddedHeight = contentHeight * (1 + activeGlyphCanvasState.fitPaddingRatio);
+            var fitByWidth = viewport.clientWidth / paddedWidth;
+            var fitByHeight = viewport.clientHeight / paddedHeight;
+            var fitZoom = Math.min(fitByWidth, fitByHeight);
+            if (!isFinite(fitZoom) || fitZoom <= 0) return activeGlyphCanvasState.zoom;
+            fitZoom = clampNumber(fitZoom, activeGlyphCanvasState.minZoom, activeGlyphCanvasState.maxZoom);
+            return Math.max(activeGlyphCanvasState.defaultZoom, fitZoom);
+        }
+
+        function setZoom(nextZoom, userInitiated) {
             if (!activeGlyphCanvasState) return;
+            if (userInitiated) {
+                activeGlyphCanvasState.userAdjustedZoom = true;
+            }
             var prevWidth = canvas.clientWidth || activeGlyphCanvasState.baseWidth;
             var prevHeight = canvas.clientHeight || activeGlyphCanvasState.baseHeight;
             var centerX = viewport.scrollLeft + (viewport.clientWidth / 2);
@@ -1386,20 +1429,37 @@ PDFalyzer.Tabs = (function ($, P) {
             var targetCenterY = nextHeight * centerRatioY;
             viewport.scrollLeft = Math.max(0, targetCenterX - (viewport.clientWidth / 2));
             viewport.scrollTop = Math.max(0, targetCenterY - (viewport.clientHeight / 2));
+            applyViewportOverflow();
+        }
+
+        function fitAndCenterInitial() {
+            if (!activeGlyphCanvasState || activeGlyphCanvasState.userAdjustedZoom) return;
+            var layout = drawCurrent();
+            var computedInitialZoom = computeFitZoom(layout);
+            activeGlyphCanvasState.initialZoom = computedInitialZoom;
+            activeGlyphCanvasState.zoom = computedInitialZoom;
+            drawCurrent();
+            viewport.scrollLeft = Math.max(0, (canvas.clientWidth - viewport.clientWidth) / 2);
+            viewport.scrollTop = Math.max(0, (canvas.clientHeight - viewport.clientHeight) / 2);
+            applyViewportOverflow();
         }
 
         $('#fontGlyphZoomIn').off('click').on('click', function () {
-            setZoom(activeGlyphCanvasState.zoom * 1.2);
+            setZoom(activeGlyphCanvasState.zoom * 1.2, true);
         });
         $('#fontGlyphZoomOut').off('click').on('click', function () {
-            setZoom(activeGlyphCanvasState.zoom / 1.2);
+            setZoom(activeGlyphCanvasState.zoom / 1.2, true);
+        });
+        $('#fontGlyphZoomFit').off('click').on('click', function () {
+            activeGlyphCanvasState.userAdjustedZoom = false;
+            fitAndCenterInitial();
         });
         $(viewport).off('wheel.glyphzoom').on('wheel.glyphzoom', function (ev) {
             var oe = ev.originalEvent || ev;
             if (!oe.ctrlKey) return;
             ev.preventDefault();
             var delta = typeof oe.deltaY === 'number' ? oe.deltaY : 0;
-            setZoom(delta < 0 ? (activeGlyphCanvasState.zoom * 1.15) : (activeGlyphCanvasState.zoom / 1.15));
+            setZoom(delta < 0 ? (activeGlyphCanvasState.zoom * 1.15) : (activeGlyphCanvasState.zoom / 1.15), true);
         });
 
         var dragState = {
@@ -1443,15 +1503,12 @@ PDFalyzer.Tabs = (function ($, P) {
             $(viewport).removeClass('glyph-pan-active');
         });
 
-        drawCurrent();
-        viewport.scrollLeft = Math.max(0, (canvas.clientWidth - viewport.clientWidth) / 2);
-        viewport.scrollTop = Math.max(0, (canvas.clientHeight - viewport.clientHeight) / 2);
-
-        setTimeout(drawCurrent, 120);
-        setTimeout(drawCurrent, 380);
+        fitAndCenterInitial();
+        setTimeout(fitAndCenterInitial, 120);
+        setTimeout(fitAndCenterInitial, 380);
         if (document.fonts && document.fonts.ready && typeof document.fonts.ready.then === 'function') {
             document.fonts.ready.then(function () {
-                drawCurrent();
+                fitAndCenterInitial();
             });
         }
     }
