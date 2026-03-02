@@ -106,10 +106,23 @@ PDFalyzer.Utils = (function ($) {
         try {
             if (navigator && typeof navigator.sendBeacon === 'function') {
                 var blob = new Blob([body], { type: 'application/json' });
-                navigator.sendBeacon('/api/client-errors', blob);
-                return;
+                var queued = navigator.sendBeacon('/api/client-errors', blob);
+                if (queued) return;
             }
         } catch (ignored) {
+        }
+
+        try {
+            if (typeof fetch === 'function') {
+                fetch('/api/client-errors', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: body,
+                    keepalive: true
+                });
+                return;
+            }
+        } catch (ignoredFetch) {
         }
 
         try {
