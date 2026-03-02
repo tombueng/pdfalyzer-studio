@@ -279,20 +279,7 @@
     color: var(--text-muted);
 }
 
-.field-config-modal .modal-content {
-    border: 1px solid var(--border);
-    background: linear-gradient(180deg, #0f3460, #16213e);
-    box-shadow: 0 10px 32px rgba(0, 0, 0, 0.45);
-}
-
-.field-config-modal .modal-header,
-.field-config-modal .modal-footer {
-    border-color: var(--border);
-    background: var(--bg-panel);
-}
-
 .field-config-modal .modal-title {
-    color: var(--accent);
     font-size: 1rem;
 }
 

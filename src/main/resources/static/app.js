@@ -392,6 +392,9 @@
         document.addEventListener('show.bs.modal', function (event) {
             var modalEl = event && event.target;
             if (!modalEl || !modalEl.classList || !modalEl.classList.contains('modal')) return;
+            if (P.Utils && P.Utils.prepareModal) {
+                P.Utils.prepareModal(modalEl);
+            }
             makeHeaderDraggable(modalEl);
             prepositionDialogFromSaved(modalEl);
             observeDialogSize(modalEl);

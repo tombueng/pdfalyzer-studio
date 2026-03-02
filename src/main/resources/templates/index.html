@@ -115,7 +115,7 @@
     <div id="toastContainer"></div>
 
     <!-- Resource preview modal -->
-    <div class="modal fade" id="resourcePreviewModal" tabindex="-1" aria-labelledby="resourcePreviewLabel" aria-hidden="true">
+        <div class="modal fade pdfa-modal" id="resourcePreviewModal" tabindex="-1" aria-labelledby="resourcePreviewLabel" aria-hidden="true">
       <div class="modal-dialog modal-lg modal-dialog-centered">
         <div class="modal-content">
           <div class="modal-header">
@@ -125,6 +125,9 @@
           <div class="modal-body" id="resourcePreviewBody">
             <!-- injected content -->
           </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-outline-accent btn-sm" data-bs-dismiss="modal">Close</button>
+                    </div>
         </div>
       </div>
     </div>
@@ -255,7 +258,7 @@
         </div>
     </div>
 
-        <div class="modal fade" id="fieldOptionsModal" tabindex="-1" aria-labelledby="fieldOptionsLabel" aria-hidden="true">
+        <div class="modal fade pdfa-modal" id="fieldOptionsModal" tabindex="-1" aria-labelledby="fieldOptionsLabel" aria-hidden="true">
             <div class="modal-dialog modal-dialog-centered field-config-modal field-options-modal">
                 <div class="modal-content">
                     <div class="modal-header">

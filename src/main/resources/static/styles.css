@@ -230,27 +230,55 @@ html, body {
 
 .modal .modal-content {
     border: 1px solid var(--border);
+    background: linear-gradient(180deg, rgba(15, 52, 96, 0.92), rgba(22, 33, 62, 0.94));
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45);
 }
 
 .modal .modal-header {
-    background: rgba(255, 255, 255, 0.06);
+    background: rgba(15, 52, 96, 0.7);
     border-bottom: 1px solid var(--border);
-    padding: 0.45rem 0.7rem;
+    padding: 0.5rem 0.75rem;
 }
 
 .modal .modal-title {
     font-size: 14px;
     line-height: 1.15;
+    color: var(--accent);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
 }
 
 .modal .modal-title i {
     font-size: 0.95em;
+    color: var(--accent);
 }
 
 .modal .modal-header .btn-close {
     padding: 0.35rem;
     margin: -0.1rem -0.1rem -0.1rem auto;
     background-size: 0.75em;
+}
+
+.modal .modal-body {
+    background: rgba(9, 18, 35, 0.68);
+}
+
+.modal .modal-footer {
+    background: rgba(15, 52, 96, 0.45);
+    border-top: 1px solid var(--border);
+    padding: 0.5rem 0.75rem;
+}
+
+.modal .modal-footer .btn {
+    min-width: 78px;
+}
+
+.modal .form-control,
+.modal .form-select,
+.modal textarea {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: var(--border);
 }
 
 body.draggable-modal-dragging .modal .modal-header.draggable-modal-handle {
