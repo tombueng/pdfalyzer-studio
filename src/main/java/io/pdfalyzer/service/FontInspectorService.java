@@ -24,6 +24,30 @@ public class FontInspectorService {
 
     private static final Logger log = LoggerFactory.getLogger(FontInspectorService.class);
 
+    public static final class FontFileDownload {
+        private final byte[] data;
+        private final String filename;
+        private final String contentType;
+
+        public FontFileDownload(byte[] data, String filename, String contentType) {
+            this.data = data;
+            this.filename = filename;
+            this.contentType = contentType;
+        }
+
+        public byte[] getData() {
+            return data;
+        }
+
+        public String getFilename() {
+            return filename;
+        }
+
+        public String getContentType() {
+            return contentType;
+        }
+    }
+
     public List<FontInfo> analyzeFonts(byte[] pdfBytes) throws IOException {
         List<FontInfo> results = new ArrayList<>();
         try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
@@ -354,24 +378,164 @@ public class FontInspectorService {
      * Returns null if no embedded file is present.
      */
     public byte[] extractFontFile(byte[] pdfBytes, int objNum, int genNum) throws IOException {
+        FontFileDownload download = extractFontFileDownload(pdfBytes, objNum, genNum);
+        return download != null ? download.getData() : null;
+    }
+
+    public FontFileDownload extractFontFileDownload(byte[] pdfBytes, int objNum, int genNum) throws IOException {
         try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
             COSDocument cosDoc = doc.getDocument();
             COSObject cosObj = cosDoc.getObjectFromPool(new COSObjectKey(objNum, genNum));
             if (cosObj == null || !(cosObj.getObject() instanceof COSDictionary)) return null;
             COSDictionary fontDict = (COSDictionary) cosObj.getObject();
-            COSBase fdBase = fontDict.getDictionaryObject(COSName.FONT_DESC);
-            if (!(fdBase instanceof COSDictionary)) return null;
-            COSDictionary fd = (COSDictionary) fdBase;
-            for (String key : new String[]{"FontFile2", "FontFile3", "FontFile"}) {
-                COSBase ff = fd.getDictionaryObject(COSName.getPDFName(key));
-                if (ff instanceof COSStream) {
-                    try (java.io.InputStream is = ((COSStream) ff).createInputStream()) {
-                        return is.readAllBytes();
+            COSDictionary descriptor = resolveFontDescriptor(fontDict);
+            if (descriptor == null) return null;
+
+            for (String key : new String[]{"FontFile3", "FontFile2", "FontFile"}) {
+                COSBase fontFile = dereference(descriptor.getDictionaryObject(COSName.getPDFName(key)));
+                if (fontFile instanceof COSStream) {
+                    try (java.io.InputStream is = ((COSStream) fontFile).createInputStream()) {
+                        byte[] data = is.readAllBytes();
+                        String extension = determineFontExtension(key, (COSStream) fontFile);
+                        String filename = buildDownloadFilename(fontDict, descriptor, extension, objNum, genNum);
+                        String contentType = determineFontContentType(extension);
+                        return new FontFileDownload(data, filename, contentType);
                     }
                 }
             }
         }
         return null;
+    }
+
+    private String buildDownloadFilename(COSDictionary fontDict,
+                                         COSDictionary descriptor,
+                                         String extension,
+                                         int objNum,
+                                         int genNum) {
+        String family = sanitizeFilenamePart(descriptor.getString(COSName.FONT_FAMILY));
+        String fontName = sanitizeFilenamePart(cleanSubsetPrefix(readFontName(fontDict, descriptor)));
+
+        StringBuilder base = new StringBuilder();
+        if (!family.isBlank()) {
+            base.append(family);
+        }
+        if (!fontName.isBlank() && !fontName.equalsIgnoreCase(family)) {
+            if (base.length() > 0) {
+                base.append('-');
+            }
+            base.append(fontName);
+        }
+        if (base.length() == 0) {
+            base.append("font");
+        }
+
+        return base + "-" + objNum + "-" + genNum + "." + extension;
+    }
+
+    private String readFontName(COSDictionary fontDict, COSDictionary descriptor) {
+        String name = descriptor.getNameAsString(COSName.FONT_NAME);
+        if (name != null && !name.isBlank()) {
+            return name;
+        }
+        name = fontDict.getNameAsString(COSName.BASE_FONT);
+        if (name != null && !name.isBlank()) {
+            return name;
+        }
+        COSBase descendants = dereference(fontDict.getDictionaryObject(COSName.DESCENDANT_FONTS));
+        if (descendants instanceof COSArray descendantArray && descendantArray.size() > 0) {
+            COSBase descendant = dereference(descendantArray.get(0));
+            if (descendant instanceof COSDictionary descendantDict) {
+                String descendantName = descendantDict.getNameAsString(COSName.BASE_FONT);
+                if (descendantName != null && !descendantName.isBlank()) {
+                    return descendantName;
+                }
+            }
+        }
+        return "font";
+    }
+
+    private String determineFontExtension(String fontFileKey, COSStream fontFileStream) {
+        if ("FontFile2".equals(fontFileKey)) {
+            return "ttf";
+        }
+        if ("FontFile".equals(fontFileKey)) {
+            return "pfb";
+        }
+
+        String subtype = fontFileStream.getNameAsString(COSName.SUBTYPE);
+        if (subtype == null || subtype.isBlank()) {
+            return "bin";
+        }
+        String normalized = subtype.trim().toLowerCase(Locale.ROOT);
+        return switch (normalized) {
+            case "opentype" -> "otf";
+            case "type1c", "cidfonttype0c" -> "cff";
+            case "cidfonttype2", "truetype" -> "ttf";
+            default -> "bin";
+        };
+    }
+
+    private String determineFontContentType(String extension) {
+        return switch (extension.toLowerCase(Locale.ROOT)) {
+            case "ttf" -> "font/ttf";
+            case "otf" -> "font/otf";
+            case "pfb" -> "application/x-font-type1";
+            case "cff" -> "application/font-sfnt";
+            default -> "application/octet-stream";
+        };
+    }
+
+    private String cleanSubsetPrefix(String fontName) {
+        if (fontName == null) {
+            return "";
+        }
+        int plus = fontName.indexOf('+');
+        if (plus == 6) {
+            return fontName.substring(plus + 1);
+        }
+        return fontName;
+    }
+
+    private String sanitizeFilenamePart(String value) {
+        if (value == null) {
+            return "";
+        }
+        String normalized = value.trim().replaceAll("[^A-Za-z0-9._-]+", "-");
+        normalized = normalized.replaceAll("-+", "-");
+        return normalized.replaceAll("(^[-.]+|[-.]+$)", "");
+    }
+
+    private COSDictionary resolveFontDescriptor(COSDictionary fontDict) {
+        COSBase directDescriptor = dereference(fontDict.getDictionaryObject(COSName.FONT_DESC));
+        if (directDescriptor instanceof COSDictionary) {
+            return (COSDictionary) directDescriptor;
+        }
+
+        COSBase descendants = dereference(fontDict.getDictionaryObject(COSName.DESCENDANT_FONTS));
+        if (!(descendants instanceof COSArray)) {
+            return null;
+        }
+
+        COSArray descendantArray = (COSArray) descendants;
+        for (int i = 0; i < descendantArray.size(); i++) {
+            COSBase descendant = dereference(descendantArray.get(i));
+            if (!(descendant instanceof COSDictionary)) {
+                continue;
+            }
+            COSBase descendantDescriptor =
+                    dereference(((COSDictionary) descendant).getDictionaryObject(COSName.FONT_DESC));
+            if (descendantDescriptor instanceof COSDictionary) {
+                return (COSDictionary) descendantDescriptor;
+            }
+        }
+        return null;
+    }
+
+    private COSBase dereference(COSBase value) {
+        if (value instanceof COSObject) {
+            return ((COSObject) value).getObject();
+        }
+        return value;
     }
 
     /**

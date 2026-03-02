@@ -554,6 +554,15 @@
     width: 108px;
 }
 
+.font-map-unicode-cell {
+    min-width: 74px;
+    width: 74px;
+    font-size: 34px;
+    line-height: 1;
+    text-align: left;
+    white-space: nowrap;
+}
+
 .font-glyph-lazy {
     display: inline-flex;
     align-items: center;
