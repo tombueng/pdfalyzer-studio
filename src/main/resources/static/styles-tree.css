@@ -184,7 +184,7 @@
 
 .font-diag-controls {
     display: grid;
-    grid-template-columns: minmax(170px, 1.6fr) minmax(140px, 1fr) auto auto;
+    grid-template-columns: minmax(220px, 1fr);
     gap: 8px;
     align-items: center;
 }
@@ -240,7 +240,24 @@
     float: right;
     display: inline-flex;
     align-items: center;
+    gap: 8px;
     margin-left: 8px;
+}
+
+.table-header-tools .table-header-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    margin: 0;
+    font-size: 11px;
+    color: var(--text-muted);
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.table-header-tools .table-header-toggle input {
+    margin: 0;
+    accent-color: var(--accent);
 }
 
 .table-header-tools .table-filter-input {
@@ -263,6 +280,11 @@
 }
 
 .font-table tr:hover td { background: rgba(255,255,255,0.03); }
+
+.font-diag-row,
+.font-map-row {
+    cursor: pointer;
+}
 
 .font-table-focus td {
     vertical-align: top;
@@ -477,6 +499,7 @@
 
 .font-glyph-hero-canvas {
     display: block;
+    flex: 0 0 auto;
 }
 
 .font-glyph-hero-metrics {

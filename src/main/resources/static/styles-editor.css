@@ -297,7 +297,7 @@
 }
 
 .field-options-modal {
-    max-width: min(1180px, 96vw);
+    max-width: min(1020px, 94vw);
 }
 
 .field-options-modal .modal-body {
@@ -314,18 +314,47 @@
     line-height: 1.35;
 }
 
+.field-options-meta-card {
+    border: 1px solid rgba(0, 212, 255, 0.3);
+    border-radius: 10px;
+    background: linear-gradient(180deg, rgba(0, 212, 255, 0.11), rgba(0, 212, 255, 0.04));
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.field-options-meta-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.field-options-meta-row i {
+    color: var(--accent);
+    width: 14px;
+    text-align: center;
+}
+
 .field-options-meta-primary {
-    color: var(--text);
-    font-size: 12px;
+    color: #f2f8ff;
+    font-size: 14px;
     font-weight: 600;
 }
 
+.field-options-meta-secondary {
+    color: #d6e6ff;
+    font-size: 13px;
+}
+
 .field-options-grid {
-    row-gap: 10px;
+    --bs-gutter-x: 14px;
+    --bs-gutter-y: 14px;
 }
 
 .field-create-grid {
-    row-gap: 10px;
+    --bs-gutter-x: 14px;
+    --bs-gutter-y: 14px;
 }
 
 .field-options-modal .field-config-block {
@@ -334,6 +363,14 @@
 
 .field-create-modal .field-config-block {
     padding: 10px 12px;
+}
+
+@media (min-width: 992px) {
+    .field-options-grid .field-bool-block,
+    .field-create-grid .field-bool-block {
+        width: 33.333333%;
+        flex: 0 0 auto;
+    }
 }
 
 .field-option-section-header {
