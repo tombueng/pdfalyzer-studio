@@ -35,6 +35,7 @@ import java.util.Map;
 public class ApiController {
 
     private static final Logger log = LoggerFactory.getLogger(ApiController.class);
+    private static final Logger clientErrorLog = LoggerFactory.getLogger("io.pdfalyzer.client-errors");
 
     private final PdfService pdfService;
     private final FontInspectorService fontInspectorService;
@@ -300,7 +301,7 @@ public class ApiController {
         String requestUri = sanitizeLogField(request != null ? request.getRequestURI() : "", 500);
         String remoteAddr = sanitizeLogField(resolveClientAddress(request), 200);
 
-        log.warn("Client JS error kind={} message={} source={} line={} column={} page={} sequence={} timestamp={} remote={} uri={} userAgent={} stack={}",
+        clientErrorLog.warn("Client JS error kind={} message={} source={} line={} column={} page={} sequence={} timestamp={} remote={} uri={} userAgent={} stack={}",
                 kind, message, source, line, column, page, sequence, timestamp, remoteAddr, requestUri, userAgent, stack);
 
         Map<String, Object> result = new LinkedHashMap<>();
