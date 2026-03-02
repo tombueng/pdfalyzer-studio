@@ -211,6 +211,52 @@
     top: 0;
 }
 
+.font-table th.table-sortable,
+.font-detail-table th.table-sortable {
+    cursor: pointer;
+    user-select: none;
+}
+
+.font-table th.table-sortable:hover,
+.font-detail-table th.table-sortable:hover {
+    background: rgba(255,255,255,0.06);
+}
+
+.font-table th.table-sort-asc::after,
+.font-detail-table th.table-sort-asc::after {
+    content: ' ▲';
+    color: var(--accent);
+    font-size: 10px;
+}
+
+.font-table th.table-sort-desc::after,
+.font-detail-table th.table-sort-desc::after {
+    content: ' ▼';
+    color: var(--accent);
+    font-size: 10px;
+}
+
+.table-header-tools {
+    float: right;
+    display: inline-flex;
+    align-items: center;
+    margin-left: 8px;
+}
+
+.table-header-tools .table-filter-input {
+    height: 24px;
+    min-width: 150px;
+    width: 180px;
+    font-size: 11px;
+    background: rgba(0,0,0,0.35);
+    border-color: rgba(255,255,255,0.16);
+    color: var(--text);
+}
+
+.table-header-tools .table-filter-input::placeholder {
+    color: var(--text-muted);
+}
+
 .font-table td {
     padding: 4px 8px;
     border-bottom: 1px solid rgba(255,255,255,0.05);
