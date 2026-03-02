@@ -65,28 +65,6 @@ PDFalyzer.Resource = (function ($, P) {
         return $box;
     }
 
-    function wireModalFocusSafety(modalEl) {
-        if (!modalEl || modalEl.__pdfalyzerFocusSafetyBound) return;
-
-        modalEl.addEventListener('hide.bs.modal', function () {
-            var active = document.activeElement;
-            if (active && modalEl.contains(active) && typeof active.blur === 'function') {
-                active.blur();
-            }
-        });
-
-        modalEl.addEventListener('hidden.bs.modal', function () {
-            var returnFocusEl = modalEl.__pdfalyzerReturnFocusEl;
-            modalEl.__pdfalyzerReturnFocusEl = null;
-            if (!returnFocusEl || !document.contains(returnFocusEl) || returnFocusEl.disabled) return;
-            if (typeof returnFocusEl.focus === 'function') {
-                returnFocusEl.focus({ preventScroll: true });
-            }
-        });
-
-        modalEl.__pdfalyzerFocusSafetyBound = true;
-    }
-
     function preview(url, context) {
         var previewContext = context || {};
         var imageProps = previewContext.properties || null;
@@ -168,7 +146,9 @@ PDFalyzer.Resource = (function ($, P) {
                     return;
                 }
                 var modalEl = document.getElementById('resourcePreviewModal');
-                wireModalFocusSafety(modalEl);
+                if (P.Utils && P.Utils.prepareModal) {
+                    P.Utils.prepareModal(modalEl);
+                }
                 modalEl.__pdfalyzerReturnFocusEl = document.activeElement;
                 bootstrap.Modal.getOrCreateInstance(modalEl).show();
             })

@@ -767,32 +767,10 @@ PDFalyzer.Tabs = (function ($, P) {
         renderMapTableNow(state.pendingQuery, state.pendingUsedOnly);
     }
 
-    function wireModalFocusSafety(modalEl) {
-        if (!modalEl || modalEl.__pdfalyzerFocusSafetyBound) return;
-
-        modalEl.addEventListener('hide.bs.modal', function () {
-            var active = document.activeElement;
-            if (active && modalEl.contains(active) && typeof active.blur === 'function') {
-                active.blur();
-            }
-        });
-
-        modalEl.addEventListener('hidden.bs.modal', function () {
-            var returnFocusEl = modalEl.__pdfalyzerReturnFocusEl;
-            modalEl.__pdfalyzerReturnFocusEl = null;
-            if (!returnFocusEl || !document.contains(returnFocusEl) || returnFocusEl.disabled) return;
-            if (typeof returnFocusEl.focus === 'function') {
-                returnFocusEl.focus({ preventScroll: true });
-            }
-        });
-
-        modalEl.__pdfalyzerFocusSafetyBound = true;
-    }
-
     function ensureGlyphDetailModal() {
         if (document.getElementById('fontGlyphDetailModal')) return;
         var modalHtml = '' +
-            '<div class="modal fade" id="fontGlyphDetailModal" tabindex="-1" aria-hidden="true">' +
+            '<div class="modal fade pdfa-modal" id="fontGlyphDetailModal" tabindex="-1" aria-hidden="true">' +
             '  <div class="modal-dialog modal-lg modal-dialog-scrollable">' +
             '    <div class="modal-content">' +
             '      <div class="modal-header">' +
@@ -807,7 +785,9 @@ PDFalyzer.Tabs = (function ($, P) {
             '  </div>' +
             '</div>';
         $('body').append(modalHtml);
-        wireModalFocusSafety(document.getElementById('fontGlyphDetailModal'));
+        if (P.Utils && P.Utils.prepareModal) {
+            P.Utils.prepareModal(document.getElementById('fontGlyphDetailModal'));
+        }
     }
 
     function bindGlyphMappingRowClicks() {
@@ -862,7 +842,9 @@ PDFalyzer.Tabs = (function ($, P) {
         var glyphText = unicode || '(unmapped)';
         $body.html('<div class="text-muted"><span class="spinner-border spinner-border-sm"></span> Loading glyph diagnostics…</div>');
         var modalEl = document.getElementById('fontGlyphDetailModal');
-        wireModalFocusSafety(modalEl);
+        if (P.Utils && P.Utils.prepareModal) {
+            P.Utils.prepareModal(modalEl);
+        }
         modalEl.__pdfalyzerReturnFocusEl = document.activeElement;
         var modal = bootstrap.Modal.getOrCreateInstance(modalEl);
         modal.show();
