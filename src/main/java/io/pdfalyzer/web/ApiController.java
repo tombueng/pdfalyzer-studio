@@ -12,6 +12,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
+import jakarta.servlet.http.HttpServletRequest;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -283,22 +284,50 @@ public class ApiController {
     }
 
     @PostMapping("/client-errors")
-    public ResponseEntity<Map<String, Object>> logClientError(@RequestBody(required = false) Map<String, Object> payload) {
+    public ResponseEntity<Map<String, Object>> logClientError(@RequestBody(required = false) Map<String, Object> payload,
+                                                               HttpServletRequest request) {
         Map<String, Object> safePayload = payload == null ? Map.of() : payload;
-        String kind = String.valueOf(safePayload.getOrDefault("kind", "error"));
-        String message = String.valueOf(safePayload.getOrDefault("message", "(no message)"));
-        String source = String.valueOf(safePayload.getOrDefault("source", ""));
-        String line = String.valueOf(safePayload.getOrDefault("line", ""));
-        String column = String.valueOf(safePayload.getOrDefault("column", ""));
-        String stack = String.valueOf(safePayload.getOrDefault("stack", ""));
-        String timestamp = String.valueOf(safePayload.getOrDefault("timestamp", ""));
+        String kind = sanitizeLogField(safePayload.getOrDefault("kind", "error"), 1000);
+        String message = sanitizeLogField(safePayload.getOrDefault("message", "(no message)"), 4000);
+        String source = sanitizeLogField(safePayload.getOrDefault("source", ""), 2000);
+        String line = sanitizeLogField(safePayload.getOrDefault("line", ""), 100);
+        String column = sanitizeLogField(safePayload.getOrDefault("column", ""), 100);
+        String stack = sanitizeLogField(safePayload.getOrDefault("stack", ""), 12000);
+        String timestamp = sanitizeLogField(safePayload.getOrDefault("timestamp", ""), 100);
+        String page = sanitizeLogField(safePayload.getOrDefault("page", ""), 2000);
+        String userAgent = sanitizeLogField(safePayload.getOrDefault("userAgent", ""), 1000);
+        String sequence = sanitizeLogField(safePayload.getOrDefault("sequence", ""), 100);
+        String requestUri = sanitizeLogField(request != null ? request.getRequestURI() : "", 500);
+        String remoteAddr = sanitizeLogField(resolveClientAddress(request), 200);
 
-        log.warn("Client JS error kind={} message={} source={} line={} column={} timestamp={} stack={}",
-                kind, message, source, line, column, timestamp, stack);
+        log.warn("Client JS error kind={} message={} source={} line={} column={} page={} sequence={} timestamp={} remote={} uri={} userAgent={} stack={}",
+                kind, message, source, line, column, page, sequence, timestamp, remoteAddr, requestUri, userAgent, stack);
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("logged", true);
         return ResponseEntity.ok(result);
+    }
+
+    private String resolveClientAddress(HttpServletRequest request) {
+        if (request == null) return "";
+        String forwarded = request.getHeader("X-Forwarded-For");
+        if (forwarded != null && !forwarded.isBlank()) {
+            int commaIndex = forwarded.indexOf(',');
+            return commaIndex >= 0 ? forwarded.substring(0, commaIndex).trim() : forwarded.trim();
+        }
+        String realIp = request.getHeader("X-Real-IP");
+        if (realIp != null && !realIp.isBlank()) return realIp.trim();
+        return request.getRemoteAddr() == null ? "" : request.getRemoteAddr();
+    }
+
+    private String sanitizeLogField(Object value, int maxLength) {
+        if (value == null) return "";
+        String text = String.valueOf(value)
+                .replace('\r', ' ')
+                .replace('\n', ' ')
+                .trim();
+        if (text.length() <= maxLength) return text;
+        return text.substring(0, maxLength) + "...(trimmed)";
     }
 
     // ======================== PRIVATE ========================

@@ -451,6 +451,68 @@ PDFalyzer.Tree = (function ($, P) {
         return $wrapper;
     }
 
+    function firstDefined(obj, keys) {
+        if (!obj) return null;
+        for (var i = 0; i < keys.length; i += 1) {
+            var key = keys[i];
+            if (obj[key] !== undefined && obj[key] !== null && obj[key] !== '') return obj[key];
+        }
+        return null;
+    }
+
+    function parsePositiveNumber(value) {
+        var parsed = Number(value);
+        return isFinite(parsed) && parsed > 0 ? Math.round(parsed) : null;
+    }
+
+    function cleanPdfName(value) {
+        if (value === undefined || value === null) return '';
+        return String(value).replace(/^\//, '');
+    }
+
+    function detectImageType(contentType, fileName, imageProps) {
+        var ct = (contentType || '').toLowerCase();
+        if (ct.indexOf('image/') === 0) {
+            return ct.split('/')[1].split(';')[0].trim() || 'image';
+        }
+
+        var name = String(fileName || '');
+        var extMatch = name.match(/\.([a-z0-9]+)$/i);
+        if (extMatch) return extMatch[1].toLowerCase();
+
+        var filter = cleanPdfName(firstDefined(imageProps, ['Filter', 'filter'])).toLowerCase();
+        var filterMap = {
+            dctdecode: 'jpg',
+            jpxdecode: 'jpx',
+            jbig2decode: 'jbig2',
+            flatedecode: 'png',
+            ccittfaxdecode: 'tiff'
+        };
+        return filterMap[filter] || 'image';
+    }
+
+    function createMetaRow(label, value) {
+        return $('<div>', { 'class': 'image-meta-row' })
+            .append($('<span>', { 'class': 'image-meta-label', text: label }))
+            .append($('<span>', { 'class': 'image-meta-value', text: value || 'n/a' }));
+    }
+
+    function buildImageMetaBox(meta, variantClass) {
+        var boxClass = variantClass ? ('image-meta-box ' + variantClass) : 'image-meta-box';
+        var $box = $('<div>', { 'class': boxClass });
+        $box.append($('<div>', { 'class': 'image-meta-title', text: 'Image Info' }));
+        $box
+            .append(createMetaRow('Type', meta.type))
+            .append(createMetaRow('File size', meta.sizeText))
+            .append(createMetaRow('Pixel size', meta.pixelSize));
+
+        if (meta.filter) $box.append(createMetaRow('Filter', meta.filter));
+        if (meta.colorSpace) $box.append(createMetaRow('Color space', meta.colorSpace));
+        if (meta.bitsPerComponent) $box.append(createMetaRow('Bits/component', meta.bitsPerComponent));
+        if (meta.objectRef) $box.append(createMetaRow('Object', meta.objectRef));
+        return $box;
+    }
+
     function appendActionButtons($header, node) {
         // COS edit button (pencil)
         if (node.editable && node.rawValue !== undefined && node.rawValue !== null) {
@@ -499,24 +561,139 @@ PDFalyzer.Tree = (function ($, P) {
                              html: '<i class="fas fa-eye"></i>' })
                 .on('click', function (e) {
                     e.stopPropagation();
-                    P.Resource.preview(resourceUrl + (node.keyPath ? '&inline=true' : '?inline=true'));
+                    P.Resource.preview(resourceUrl + (node.keyPath ? '&inline=true' : '?inline=true'), {
+                        name: node.name || '',
+                        properties: node.properties || null,
+                        objectNumber: node.objectNumber,
+                        generationNumber: node.generationNumber || 0
+                    });
                 })
                 .appendTo($header);
             
             // Add image hover tooltip preview
             if (node.nodeCategory === 'image') {
                 $header.on('mouseenter', function() {
-                    if ($('.image-tooltip-preview').length) return;
+                    $('.image-tooltip-preview').each(function () {
+                        var staleObjectUrl = $(this).data('objectUrl');
+                        if (staleObjectUrl) URL.revokeObjectURL(staleObjectUrl);
+                    }).remove();
+                    $(document).off('mousemove.imgtooltip');
+
                     var $tooltip = $('<div>', { 'class': 'image-tooltip-preview' });
-                    var $img = $('<img>', { src: resourceUrl + (node.keyPath ? '&inline=true' : '?inline=true') });
-                    $tooltip.append($img).appendTo('body');
+                    var $media = $('<div>', { 'class': 'image-tooltip-media' });
+                    var $img = $('<img>', { alt: 'Image preview' });
+                    var $meta = $('<div>', { 'class': 'image-meta-box image-meta-box-tooltip' })
+                        .append($('<div>', { 'class': 'image-meta-title', text: 'Image Info' }))
+                        .append(createMetaRow('Status', 'Loading...'));
+                    $media.append($img);
+                    $tooltip.append($media).append($meta).appendTo('body');
+
+                    var closed = false;
+                    var lifeTimer = null;
+
+                    function cleanupTooltip() {
+                        if (closed) return;
+                        closed = true;
+                        if (lifeTimer) {
+                            window.clearInterval(lifeTimer);
+                            lifeTimer = null;
+                        }
+                        var objectUrl = $tooltip.data('objectUrl');
+                        if (objectUrl) URL.revokeObjectURL(objectUrl);
+                        $tooltip.remove();
+                        $(document).off('mousemove.imgtooltip');
+                    }
+
+                    function sourceIsAliveAndVisible() {
+                        return document.body.contains($header[0]) && $header.is(':visible');
+                    }
                     
                     var updatePos = function(ev) {
+                        if (!sourceIsAliveAndVisible() || !document.body.contains($tooltip[0])) {
+                            cleanupTooltip();
+                            return;
+                        }
                         $tooltip.css({ left: (ev.pageX + 15) + 'px', top: (ev.pageY + 15) + 'px' });
                     };
+                    var inlineUrl = resourceUrl + (node.keyPath ? '&inline=true' : '?inline=true');
+                    var imageProps = node.properties || null;
+                    var fallbackWidth = parsePositiveNumber(firstDefined(imageProps, ['Width', 'width']));
+                    var fallbackHeight = parsePositiveNumber(firstDefined(imageProps, ['Height', 'height']));
+                    var bitsPerComponent = firstDefined(imageProps, ['BitsPerComponent', 'bitsPerComponent']);
+                    var colorSpace = cleanPdfName(firstDefined(imageProps, ['ColorSpace', 'colorSpace']));
+                    var filter = cleanPdfName(firstDefined(imageProps, ['Filter', 'filter']));
+                    var objectRef = (node.objectNumber >= 0)
+                        ? (String(node.objectNumber) + ' ' + String(node.generationNumber || 0) + ' R')
+                        : '';
+
+                    fetch(inlineUrl)
+                        .then(function (resp) {
+                            var ct = resp.headers.get('content-type') || '';
+                            return resp.blob().then(function (blob) { return { ct: ct, blob: blob }; });
+                        })
+                        .then(function (r) {
+                            if (!sourceIsAliveAndVisible() || !document.body.contains($tooltip[0])) {
+                                cleanupTooltip();
+                                return;
+                            }
+
+                            var fileType = detectImageType(r.ct, node.name || '', imageProps);
+                            var fileSizeText = P.Utils.formatBytes(r.blob.size) + ' (' + r.blob.size + ' B)';
+                            var objUrl = URL.createObjectURL(r.blob);
+                            $tooltip.data('objectUrl', objUrl);
+                            $img.attr('src', objUrl);
+
+                            var renderMeta = function (width, height) {
+                                var pixelWidth = parsePositiveNumber(width) || fallbackWidth;
+                                var pixelHeight = parsePositiveNumber(height) || fallbackHeight;
+                                var pixelSize = (pixelWidth && pixelHeight)
+                                    ? (pixelWidth + ' × ' + pixelHeight)
+                                    : 'n/a';
+                                $meta.replaceWith(buildImageMetaBox({
+                                    type: fileType,
+                                    sizeText: fileSizeText,
+                                    pixelSize: pixelSize,
+                                    filter: filter,
+                                    colorSpace: colorSpace,
+                                    bitsPerComponent: bitsPerComponent != null ? String(bitsPerComponent) : '',
+                                    objectRef: objectRef
+                                }, 'image-meta-box-tooltip'));
+                            };
+
+                            $img.on('load', function () {
+                                renderMeta(this.naturalWidth, this.naturalHeight);
+                            });
+                            $img.on('error', function () {
+                                renderMeta(null, null);
+                            });
+                        })
+                        .catch(function () {
+                            if (!sourceIsAliveAndVisible() || !document.body.contains($tooltip[0])) {
+                                cleanupTooltip();
+                                return;
+                            }
+                            $meta.replaceWith(buildImageMetaBox({
+                                type: detectImageType('', node.name || '', imageProps),
+                                sizeText: 'n/a',
+                                pixelSize: 'n/a',
+                                filter: filter,
+                                colorSpace: colorSpace,
+                                bitsPerComponent: bitsPerComponent != null ? String(bitsPerComponent) : '',
+                                objectRef: objectRef
+                            }, 'image-meta-box-tooltip'));
+                        });
+
                     $(document).on('mousemove.imgtooltip', updatePos);
+                    lifeTimer = window.setInterval(function () {
+                        if (!sourceIsAliveAndVisible() || !document.body.contains($tooltip[0])) {
+                            cleanupTooltip();
+                        }
+                    }, 120);
                 }).on('mouseleave', function() {
-                    $('.image-tooltip-preview').remove();
+                    $('.image-tooltip-preview').each(function () {
+                        var objectUrl = $(this).data('objectUrl');
+                        if (objectUrl) URL.revokeObjectURL(objectUrl);
+                    }).remove();
                     $(document).off('mousemove.imgtooltip');
                 });
             }
