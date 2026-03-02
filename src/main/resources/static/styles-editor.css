@@ -304,6 +304,10 @@
     padding: 14px 18px 18px;
 }
 
+.field-create-modal .modal-body {
+    padding: 14px 18px 18px;
+}
+
 .field-options-meta {
     color: var(--text-muted);
     font-size: 11px;
@@ -320,7 +324,15 @@
     row-gap: 10px;
 }
 
+.field-create-grid {
+    row-gap: 10px;
+}
+
 .field-options-modal .field-config-block {
+    padding: 10px 12px;
+}
+
+.field-create-modal .field-config-block {
     padding: 10px 12px;
 }
 

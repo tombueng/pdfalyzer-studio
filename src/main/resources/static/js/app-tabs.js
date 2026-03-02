@@ -252,6 +252,8 @@ PDFalyzer.Tabs = (function ($, P) {
             }
             loadFontDiagnosticsDetail(obj, gen);
         });
+
+        applyGlobalDiagnosticsTableInteractions();
     }
 
     function getFocusMetaKey(obj, gen) {
@@ -480,6 +482,7 @@ PDFalyzer.Tabs = (function ($, P) {
         };
         bindFontDetailFilters();
         setupDeferredFontDetailRendering();
+        applyGlobalDiagnosticsTableInteractions();
     }
 
     function buildIssueRowHtml(row, state) {
@@ -550,6 +553,7 @@ PDFalyzer.Tabs = (function ($, P) {
         }
         tbody.innerHTML = html;
         state.issuesRendered = true;
+        enableTableInteractions($(tbody).closest('table'));
         bindLazyGlyphRendering();
         bindGlyphHoverTooltips();
     }
@@ -601,6 +605,7 @@ PDFalyzer.Tabs = (function ($, P) {
                 return;
             }
 
+            enableTableInteractions($('#fontDetailMapTable'));
             bindGlyphDetailButtons();
             bindLazyGlyphRendering();
             bindGlyphHoverTooltips();
@@ -846,6 +851,7 @@ PDFalyzer.Tabs = (function ($, P) {
         });
 
         bindGlyphUsageInspector(obj, gen, code);
+        applyGlobalDiagnosticsTableInteractions();
     }
 
     function bindGlyphUsageInspector(obj, gen, code) {
@@ -921,6 +927,7 @@ PDFalyzer.Tabs = (function ($, P) {
             html += '</tbody></table>';
             $body.html(html);
             $body.attr('data-rendered', '1');
+            enableTableInteractions($body.find('table'));
         }
 
         function groupByPage(areas) {
@@ -1526,6 +1533,103 @@ PDFalyzer.Tabs = (function ($, P) {
         $('#fontDetailUsedOnly').off('change').on('change', applyFilter);
     }
 
+    function enableTableInteractions($table) {
+        if (!$table || !$table.length) return;
+        var $thead = $table.find('thead');
+        if (!$thead.length) return;
+        var $ths = $thead.find('th');
+        if (!$ths.length) return;
+
+        var $tbody = $table.find('tbody').first();
+        if (!$tbody.length) return;
+
+        var tableId = $table.attr('id') || ('tbl_' + Math.random().toString(36).slice(2));
+        $table.attr('data-table-interactive-id', tableId);
+
+        var $lastTh = $ths.last();
+        if (!$lastTh.find('.table-header-tools').length) {
+            var $tools = $('<span class="table-header-tools"></span>');
+            var $input = $('<input type="text" class="form-control form-control-sm table-filter-input" placeholder="Filter table..." />');
+            $tools.append($input);
+            $lastTh.append($tools);
+
+            $input.off('input').on('input', function () {
+                var query = String($(this).val() || '').toLowerCase();
+                filterTableRows($table, query);
+            });
+        }
+
+        $ths.each(function (colIndex) {
+            var $th = $(this);
+            if ($th.find('.table-header-tools').length) return;
+            $th.addClass('table-sortable').attr('title', ($th.attr('title') || '') + ' (click to sort)');
+            $th.off('click.tablesort').on('click.tablesort', function (ev) {
+                if ($(ev.target).closest('.table-header-tools').length) return;
+                var currentIndex = parseInt($table.attr('data-sort-index'), 10);
+                var currentDir = $table.attr('data-sort-dir') || 'none';
+                var nextDir = 'asc';
+                if (currentIndex === colIndex && currentDir === 'asc') nextDir = 'desc';
+                else if (currentIndex === colIndex && currentDir === 'desc') nextDir = 'asc';
+
+                sortTableByColumn($table, colIndex, nextDir);
+                $table.attr('data-sort-index', String(colIndex));
+                $table.attr('data-sort-dir', nextDir);
+
+                $ths.removeClass('table-sort-asc table-sort-desc');
+                $th.addClass(nextDir === 'asc' ? 'table-sort-asc' : 'table-sort-desc');
+            });
+        });
+    }
+
+    function getSortableDataRows($tbody) {
+        return $tbody.children('tr').filter(function () {
+            return $(this).children('td').length > 1;
+        });
+    }
+
+    function sortTableByColumn($table, columnIndex, direction) {
+        var $tbody = $table.find('tbody').first();
+        if (!$tbody.length) return;
+
+        var rows = getSortableDataRows($tbody).get();
+        if (!rows.length) return;
+
+        rows.sort(function (a, b) {
+            var av = getCellSortValue(a, columnIndex);
+            var bv = getCellSortValue(b, columnIndex);
+
+            var an = parseFloat(av.replace(/[^0-9+\-.]/g, ''));
+            var bn = parseFloat(bv.replace(/[^0-9+\-.]/g, ''));
+            var bothNumeric = !Number.isNaN(an) && !Number.isNaN(bn);
+            var cmp = 0;
+            if (bothNumeric) {
+                cmp = an - bn;
+            } else {
+                cmp = av.localeCompare(bv, undefined, { numeric: true, sensitivity: 'base' });
+            }
+            return direction === 'desc' ? -cmp : cmp;
+        });
+
+        rows.forEach(function (row) {
+            $tbody.append(row);
+        });
+    }
+
+    function getCellSortValue(row, columnIndex) {
+        var $cell = $(row).children('td').eq(columnIndex);
+        return String($cell.text() || '').trim();
+    }
+
+    function filterTableRows($table, query) {
+        var $tbody = $table.find('tbody').first();
+        if (!$tbody.length) return;
+
+        getSortableDataRows($tbody).each(function () {
+            var text = String($(this).text() || '').toLowerCase();
+            $(this).toggle(!query || text.indexOf(query) !== -1);
+        });
+    }
+
     function clearFontUsageHighlights() {
         $('.pdf-font-usage').remove();
     }
@@ -1555,6 +1659,20 @@ PDFalyzer.Tabs = (function ($, P) {
             highlighted += 1;
         });
         return { found: found, highlighted: highlighted };
+    }
+
+    function applyGlobalDiagnosticsTableInteractions() {
+        var selectors = [
+            '#treeContent .font-table',
+            '#fontDiagDetail .font-detail-table',
+            '#fontGlyphDetailBody .font-detail-table',
+            '#fontGlyphUsagePanel .font-detail-table'
+        ];
+        selectors.forEach(function (selector) {
+            $(selector).each(function () {
+                enableTableInteractions($(this));
+            });
+        });
     }
 
     // ======================== VALIDATION TAB ========================
