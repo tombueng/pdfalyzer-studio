@@ -6,6 +6,7 @@ import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.http.ContentDisposition;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -15,6 +16,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -219,14 +221,18 @@ public class ApiController {
     public ResponseEntity<byte[]> extractFont(@PathVariable("sessionId") String sessionId,
                                                @PathVariable("objNum") int objNum,
                                                @PathVariable("genNum") int genNum) throws IOException {
-        byte[] data = fontInspectorService.extractFontFile(
+        FontInspectorService.FontFileDownload download = fontInspectorService.extractFontFileDownload(
                 pdfService.getSessionPdfBytes(sessionId), objNum, genNum);
-        if (data == null) return ResponseEntity.notFound().build();
+        if (download == null) return ResponseEntity.notFound().build();
+        String contentDisposition = ContentDisposition.attachment()
+            .filename(download.getFilename(), StandardCharsets.UTF_8)
+            .build()
+            .toString();
         return ResponseEntity.ok()
-                .contentType(MediaType.APPLICATION_OCTET_STREAM)
+            .contentType(MediaType.parseMediaType(download.getContentType()))
                 .header(HttpHeaders.CONTENT_DISPOSITION,
-                        "attachment; filename=\"font-" + objNum + "-" + genNum + ".bin\"")
-                .contentLength(data.length).body(data);
+                contentDisposition)
+            .contentLength(download.getData().length).body(download.getData());
     }
 
     @GetMapping("/validate/{sessionId}")

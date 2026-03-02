@@ -18,6 +18,7 @@ import org.springframework.util.StreamUtils;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -123,6 +124,84 @@ class ApiFlowIntegrationTest {
         assertNotNull(response.getBody());
         assertEquals(Boolean.TRUE, response.getBody().get("logged"));
         }
+
+    @Test
+    void fontExtractEndpointReturnsBytesForEmbeddedCompositeOrSimpleFont() throws IOException {
+        ResponseEntity<Map<String, Object>> uploadResp = uploadTestPdf();
+        assertEquals(HttpStatus.OK, uploadResp.getStatusCode());
+        assertNotNull(uploadResp.getBody());
+
+        Object sid = uploadResp.getBody().get("sessionId");
+        assertNotNull(sid, "upload response must contain sessionId");
+
+        ResponseEntity<Map<String, Object>> diagnosticsResp = restTemplate.exchange(
+            "/api/fonts/{sessionId}/diagnostics",
+            HttpMethod.GET,
+            null,
+            new ParameterizedTypeReference<Map<String, Object>>() {},
+            sid
+        );
+
+        assertEquals(HttpStatus.OK, diagnosticsResp.getStatusCode());
+        assertNotNull(diagnosticsResp.getBody());
+
+        Object fontsNode = diagnosticsResp.getBody().get("fonts");
+        assertTrue(fontsNode instanceof List<?>, "diagnostics response must contain fonts list");
+
+        Integer objectNumber = null;
+        Integer generationNumber = null;
+        for (Object item : (List<?>) fontsNode) {
+            if (!(item instanceof Map<?, ?> font)) {
+                continue;
+            }
+            Object embedded = font.get("embedded");
+            Object obj = font.get("objectNumber");
+            Object gen = font.get("generationNumber");
+            if (Boolean.TRUE.equals(embedded) && obj instanceof Number objNum && gen instanceof Number genNum) {
+                objectNumber = objNum.intValue();
+                generationNumber = genNum.intValue();
+                break;
+            }
+        }
+
+        assertNotNull(objectNumber, "Expected at least one embedded indirect font in diagnostics output");
+        assertNotNull(generationNumber, "Expected generation number for extracted font object");
+
+        ResponseEntity<byte[]> extractResp = restTemplate.getForEntity(
+            "/api/fonts/{sessionId}/extract/{objNum}/{genNum}",
+            byte[].class,
+            sid,
+            objectNumber,
+            generationNumber
+        );
+
+        assertEquals(HttpStatus.OK, extractResp.getStatusCode());
+        assertNotNull(extractResp.getBody(), "Extract endpoint must return bytes for embedded font object");
+        assertTrue(extractResp.getBody().length > 0, "Extracted font bytes must not be empty");
+        MediaType contentType = extractResp.getHeaders().getContentType();
+        assertNotNull(contentType, "Extract endpoint should provide content type");
+        assertTrue(
+            MediaType.APPLICATION_OCTET_STREAM.equals(contentType)
+                || "font".equalsIgnoreCase(contentType.getType())
+                || "application/x-font-type1".equalsIgnoreCase(contentType.toString())
+                || "application/font-sfnt".equalsIgnoreCase(contentType.toString()),
+            "Extract endpoint should return a font-specific MIME type or octet-stream fallback"
+        );
+
+        String contentDisposition = extractResp.getHeaders().getFirst(HttpHeaders.CONTENT_DISPOSITION);
+        assertNotNull(contentDisposition, "Extract endpoint must return content-disposition filename");
+        assertTrue(contentDisposition.contains("filename=\""), "Content-Disposition should include filename");
+        assertTrue(contentDisposition.contains("filename*=UTF-8''"), "Content-Disposition should include RFC 5987 filename*");
+        String cd = contentDisposition.toLowerCase();
+        boolean hasKnownExt =
+            cd.contains(".ttf") || cd.contains(".otf") || cd.contains(".pfb") || cd.contains(".cff") || cd.contains(".bin")
+                || cd.contains("%2ettf") || cd.contains("%2eotf") || cd.contains("%2epfb") || cd.contains("%2ecff") || cd.contains("%2ebin")
+                || cd.contains("=2ettf") || cd.contains("=2eotf") || cd.contains("=2epfb") || cd.contains("=2ecff") || cd.contains("=2ebin");
+        assertTrue(
+            hasKnownExt,
+            "Filename should include a valid font extension"
+        );
+    }
 
     private ResponseEntity<Map<String, Object>> uploadTestPdf() throws IOException {
         byte[] pdfBytes;
