@@ -64,6 +64,20 @@ PDFalyzer.Tabs = (function ($, P) {
         $(document).off('mousemove.glyphtooltip');
     }
 
+    function updateStructureSearchControl(tab) {
+        var isStructure = tab === 'structure';
+        var hasSession = !!P.state.sessionId;
+        var $tools = $('.tree-search-tools');
+        var $search = $('#searchInput');
+
+        $tools.toggleClass('d-none', !isStructure);
+        $search.prop('disabled', !isStructure || !hasSession);
+
+        if (!isStructure && $search.val()) {
+            $search.val('');
+        }
+    }
+
     function switchTab(tab) {
         if (!P.state.treeData || !P.state.sessionId) return;
 
@@ -73,6 +87,7 @@ PDFalyzer.Tabs = (function ($, P) {
         captureTreeViewStateForTab(previousTab);
 
         var viewState = getTreeViewStateForTab(tab);
+        updateStructureSearchControl(tab);
 
         switch (tab) {
             case 'structure':   P.Tree.render(P.state.treeData, { viewState: viewState }); break;
@@ -510,7 +525,7 @@ PDFalyzer.Tabs = (function ($, P) {
             '  <div class="font-detail-map-toolbar">' +
             '    <button id="fontDetailClearHighlightsBtn" class="btn btn-outline-accent btn-sm"><i class="fas fa-eraser me-1"></i>Clear highlights</button>' +
             '  </div>' +
-            '  <input id="fontDetailMapHeaderFilter" class="form-control form-control-sm" placeholder="Filter table..." />' +
+            '  <input id="fontDetailMapHeaderFilter" class="form-control form-control-sm table-filter-input" placeholder="Filter table..." />' +
             '</div>' +
             '<div class="font-detail-table-wrap font-detail-table-wrap-fill" id="fontDetailMapWrap"><table class="font-detail-table" id="fontDetailMapTable" data-disable-header-filter="1"><thead><tr><th title="Character code used in PDF text operators.">Code</th><th title="Lazy-rendered preview of mapped glyphs.">Glyph</th><th title="Unicode text mapped from this code.">Unicode</th><th title="Unicode code point(s) in U+XXXX format.">Hex</th><th title="Glyph width reported by font metrics.">Width</th><th title="How many times this code appears in extracted text.">Used</th><th title="Whether code maps to Unicode.">Mapped</th><th class="table-no-sort" title="Row actions.">Action</th></tr></thead><tbody id="fontDetailMapTableBody">' +
             '<tr><td colspan="8" class="text-muted">Loading rows…</td></tr>' +

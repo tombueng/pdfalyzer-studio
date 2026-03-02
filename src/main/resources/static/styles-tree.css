@@ -13,10 +13,19 @@
 /* Tabs */
 .tree-tabs {
     display: flex;
+    align-items: center;
+    gap: 8px;
     background: rgba(0,0,0,0.2);
     border-bottom: 1px solid var(--border);
-    overflow-x: auto;
+    overflow: hidden;
     flex-shrink: 0;
+}
+
+.tree-tabs-list {
+    display: flex;
+    overflow-x: auto;
+    min-width: 0;
+    flex: 1 1 auto;
 }
 
 .tree-tabs .tab-btn {
@@ -39,6 +48,13 @@
 .tree-tabs .tab-btn.active {
     color: var(--accent);
     border-bottom-color: var(--accent);
+}
+
+.tree-search-tools {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    padding-right: 8px;
 }
 
 /* Tree Content */
@@ -289,7 +305,8 @@
     accent-color: var(--accent);
 }
 
-.table-header-tools .table-filter-input {
+.table-header-tools .table-filter-input,
+.tree-search-tools .table-filter-input {
     height: 24px;
     min-width: 150px;
     width: 180px;
@@ -299,7 +316,8 @@
     color: var(--text);
 }
 
-.table-header-tools .table-filter-input::placeholder {
+.table-header-tools .table-filter-input::placeholder,
+.tree-search-tools .table-filter-input::placeholder {
     color: var(--text-muted);
 }
 
@@ -479,6 +497,64 @@
     border-color: var(--accent);
     box-shadow: 0 0 0 2px rgba(0, 212, 255, 0.15);
     color: var(--text);
+}
+
+.input-clear-wrap {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    vertical-align: middle;
+}
+
+.input-clear-wrap > input.has-input-clear {
+    padding-right: 26px;
+}
+
+.input-clear-wrap > .input-clear-btn {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    border: 0;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 11px;
+    line-height: 1;
+    padding: 0;
+    width: 14px;
+    height: 14px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
+.input-clear-wrap > .input-clear-btn:hover {
+    color: var(--text);
+}
+
+.input-clear-wrap > .input-clear-btn:focus-visible {
+    outline: 1px solid var(--accent);
+    outline-offset: 1px;
+    border-radius: 2px;
+}
+
+.table-header-tools .input-clear-wrap,
+.tree-search-tools .input-clear-wrap {
+    display: inline-flex;
+}
+
+.font-detail-map-filter-row .input-clear-wrap {
+    width: 240px;
+    max-width: 45%;
+    margin-left: auto;
+    flex: 0 1 auto;
+}
+
+.font-detail-map-filter-row .input-clear-wrap #fontDetailMapHeaderFilter {
+    width: 100%;
+    max-width: none;
+    margin-left: 0;
 }
 
 .font-detail-grid {

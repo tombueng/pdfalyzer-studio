@@ -8,10 +8,11 @@ PDFalyzer.Search = (function ($, P) {
     function init() {
         $('#searchInput').on('input', function () {
             clearTimeout(timer);
+            if (P.state.currentTab !== 'structure') return;
             var query = $(this).val().trim();
-            if (!query) { if (P.state.treeData) P.Tree.render(P.state.treeData); return; }
+            if (!query) { if (P.state.treeData && P.state.currentTab === 'structure') P.Tree.render(P.state.treeData); return; }
             timer = setTimeout(function () {
-                if (!P.state.sessionId) return;
+                if (!P.state.sessionId || P.state.currentTab !== 'structure') return;
                 P.Utils.apiFetch('/api/tree/' + P.state.sessionId + '/search',
                                   { data: { q: query } })
                     .done(function (results) { P.Tree.renderSearchResults(results); })
