@@ -89,6 +89,11 @@ public class ApiController {
                 .body(data);
     }
 
+    @GetMapping("/sample/load")
+    public ResponseEntity<Map<String, Object>> loadLatestSamplePdfSessionGet() throws IOException {
+        return loadLatestSamplePdfSession();
+    }
+
     @PostMapping("/sample/load")
     public ResponseEntity<Map<String, Object>> loadLatestSamplePdfSession() throws IOException {
         byte[] data = loadSamplePdfBytes();
