@@ -2,9 +2,12 @@ package io.pdfalyzer.service;
 
 import io.pdfalyzer.model.FontDiagnostics;
 import io.pdfalyzer.model.FontDiagnostics.DiagnosticStatus;
+import io.pdfalyzer.model.FontDiagnostics.EncodingDiagnostics;
+import io.pdfalyzer.model.FontDiagnostics.ExtractionStatus;
 import io.pdfalyzer.model.FontDiagnostics.FontDiagnosticsDetail;
 import io.pdfalyzer.model.FontDiagnostics.FontDiagnosticsEntry;
 import io.pdfalyzer.model.FontDiagnostics.GlyphMapping;
+import io.pdfalyzer.model.FontDiagnostics.RenderStatus;
 import io.pdfalyzer.tools.TestPdfGenerator;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -169,6 +172,122 @@ class GlyphMappingDiagnosticStatusTest {
                 assertNotNull(m.getDiagnosticStatus(),
                     "DiagnosticStatus should not be null for code " + m.getCode()
                         + " in font " + entry.getFontName());
+            }
+        }
+    }
+
+    @Test
+    void generatedPdf_renderAndExtractionStatusesPopulated() throws IOException {
+        FontDiagnostics diagnostics = service.analyzeFontIssues(generatedTestPdfBytes);
+
+        for (FontDiagnosticsEntry entry : diagnostics.getFonts()) {
+            if (entry.getObjectNumber() < 0) continue;
+
+            FontDiagnosticsDetail detail = service.analyzeFontIssueDetail(
+                generatedTestPdfBytes, entry.getObjectNumber(), entry.getGenerationNumber());
+
+            for (GlyphMapping m : detail.getGlyphMappings()) {
+                assertNotNull(m.getRenderStatus(),
+                    "RenderStatus should not be null for code " + m.getCode()
+                        + " in font " + entry.getFontName());
+                assertNotNull(m.getExtractionStatus(),
+                    "ExtractionStatus should not be null for code " + m.getCode()
+                        + " in font " + entry.getFontName());
+            }
+        }
+    }
+
+    @Test
+    void generatedPdf_renderStatusConsistentWithEmbeddingAndPresence() throws IOException {
+        FontDiagnostics diagnostics = service.analyzeFontIssues(generatedTestPdfBytes);
+
+        for (FontDiagnosticsEntry entry : diagnostics.getFonts()) {
+            if (entry.getObjectNumber() < 0) continue;
+
+            FontDiagnosticsDetail detail = service.analyzeFontIssueDetail(
+                generatedTestPdfBytes, entry.getObjectNumber(), entry.getGenerationNumber());
+
+            for (GlyphMapping m : detail.getGlyphMappings()) {
+                if (!entry.isEmbedded()) {
+                    assertEquals(RenderStatus.NOT_EMBEDDED, m.getRenderStatus(),
+                        "Non-embedded font code " + m.getCode() + " in " + entry.getFontName()
+                            + " should have NOT_EMBEDDED render status");
+                } else if (!m.isGlyphPresent()) {
+                    assertEquals(RenderStatus.GLYPH_MISSING, m.getRenderStatus(),
+                        "Missing glyph code " + m.getCode() + " in " + entry.getFontName()
+                            + " should have GLYPH_MISSING render status");
+                } else {
+                    assertEquals(RenderStatus.OK, m.getRenderStatus(),
+                        "Present glyph code " + m.getCode() + " in " + entry.getFontName()
+                            + " should have OK render status");
+                }
+            }
+        }
+    }
+
+    @Test
+    void generatedPdf_extractionStatusConsistentWithMapping() throws IOException {
+        FontDiagnostics diagnostics = service.analyzeFontIssues(generatedTestPdfBytes);
+
+        for (FontDiagnosticsEntry entry : diagnostics.getFonts()) {
+            if (entry.getObjectNumber() < 0) continue;
+
+            FontDiagnosticsDetail detail = service.analyzeFontIssueDetail(
+                generatedTestPdfBytes, entry.getObjectNumber(), entry.getGenerationNumber());
+
+            for (GlyphMapping m : detail.getGlyphMappings()) {
+                if (m.isMapped()) {
+                    assertTrue(
+                        m.getExtractionStatus() == ExtractionStatus.OK
+                            || m.getExtractionStatus() == ExtractionStatus.ENCODING_MISMATCH,
+                        "Mapped code " + m.getCode() + " in " + entry.getFontName()
+                            + " should have OK or ENCODING_MISMATCH extraction status, got: "
+                            + m.getExtractionStatus());
+                } else {
+                    assertEquals(ExtractionStatus.NO_UNICODE_MAPPING, m.getExtractionStatus(),
+                        "Unmapped code " + m.getCode() + " in " + entry.getFontName()
+                            + " should have NO_UNICODE_MAPPING extraction status");
+                }
+            }
+        }
+    }
+
+    @Test
+    void campingliste_subsetCompleteForEmbeddedFonts() throws IOException {
+        FontDiagnostics diagnostics = service.analyzeFontIssues(campinglisteBytes);
+
+        for (FontDiagnosticsEntry entry : diagnostics.getFonts()) {
+            if (entry.isEmbedded() && entry.isSubset()) {
+                // Well-formed Campingliste should have complete subsets
+                assertTrue(entry.isSubsetComplete(),
+                    "Embedded subset font " + entry.getFontName()
+                        + " in Campingliste.pdf should have subsetComplete=true");
+            }
+        }
+    }
+
+    @Test
+    void campingliste_encodingDiagnosticsPopulated() throws IOException {
+        FontDiagnostics diagnostics = service.analyzeFontIssues(campinglisteBytes);
+
+        for (FontDiagnosticsEntry entry : diagnostics.getFonts()) {
+            if (entry.getObjectNumber() < 0) continue;
+
+            FontDiagnosticsDetail detail = service.analyzeFontIssueDetail(
+                campinglisteBytes, entry.getObjectNumber(), entry.getGenerationNumber());
+
+            EncodingDiagnostics enc = detail.getEncoding();
+            assertNotNull(enc, "EncodingDiagnostics should not be null for " + entry.getFontName());
+            // Every font should have encoding or subtype info
+            assertNotNull(enc.getSubtype(),
+                "subtype should be populated for " + entry.getFontName());
+
+            // Type0 fonts should have descendant info and CMap name
+            if ("Type0Font".equals(entry.getFontType())) {
+                assertNotNull(enc.getCmapName(),
+                    "cmapName should be populated for Type0 font " + entry.getFontName());
+                assertNotNull(enc.getDescendantSubtype(),
+                    "descendantSubtype should be populated for Type0 font " + entry.getFontName());
             }
         }
     }

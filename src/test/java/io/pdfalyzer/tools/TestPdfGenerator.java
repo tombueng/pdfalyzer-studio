@@ -2,7 +2,10 @@ package io.pdfalyzer.tools;
 
 import ch.qos.logback.classic.Level;
 import ch.qos.logback.classic.Logger;
+import org.apache.pdfbox.cos.COSArray;
+import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.cos.COSStream;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDDocumentCatalog;
@@ -37,6 +40,7 @@ import org.apache.pdfbox.pdmodel.interactive.form.PDSignatureField;
 import org.apache.pdfbox.pdmodel.interactive.form.PDTextField;
 import org.apache.pdfbox.pdmodel.PDResources;
 import org.apache.pdfbox.pdmodel.common.PDMetadata;
+import org.apache.pdfbox.pdmodel.common.PDStream;
 import org.apache.pdfbox.pdmodel.PDDocumentNameDictionary;
 import org.apache.pdfbox.pdmodel.PDEmbeddedFilesNameTreeNode;
 import org.slf4j.LoggerFactory;
@@ -283,8 +287,10 @@ public class TestPdfGenerator {
                 optionalSourceSans != null
             );
 
+            PDFont missingGlyphProbeFont = createMissingGlyphProbeFont(doc, freeSansForPdf, bodyFont);
+
             renderPage1Images(doc, page1, jpg, png, jp2, fonts.heading(), fonts.body());
-            renderPage2Fonts(doc, page2, fonts.heading(), fonts.body(), embeddingResult);
+            renderPage2Fonts(doc, page2, fonts.heading(), fonts.body(), embeddingResult, missingGlyphProbeFont);
             renderPage3LinksAndAttachments(
                 doc,
                 page3,
@@ -354,9 +360,24 @@ public class TestPdfGenerator {
         PDPage page,
         PDFont headingFont,
         PDFont bodyFont,
-        FontEmbeddingResult embeddingResult
+        FontEmbeddingResult embeddingResult,
+        PDFont missingGlyphProbeFont
     ) throws IOException {
         List<FontDemoCell> cells = buildFontDemoCells(embeddingResult, bodyFont);
+        if (missingGlyphProbeFont != null) {
+            String probeSample = "Missing glyph mapping probe: 0123456789 ABCDEFG abcdefg äöü ß €";
+            String sanitizedProbe = sanitizeForFont(missingGlyphProbeFont, probeSample);
+            if (sanitizedProbe == null || sanitizedProbe.isBlank()) {
+                sanitizedProbe = "Missing glyph mapping probe";
+            }
+            cells.add(new FontDemoCell(
+                "probe-partial-embedded-no-tounicode.ttf",
+                missingGlyphProbeFont,
+                sanitizedProbe,
+                false,
+                true
+            ));
+        }
         int totalCells = Math.max(1, cells.size());
 
         float pageWidth = page.getMediaBox().getWidth();
@@ -428,6 +449,110 @@ public class TestPdfGenerator {
             drawTextLine(cs, bodyFont, 8.5f, PAGE_MARGIN, footerY,
                 "Each box is generated dynamically from /fonts; symbol-capable fonts receive symbol samples automatically.");
         }
+
+        if (missingGlyphProbeFont != null) {
+            appendRawMissingGlyphProbeText(doc, page, missingGlyphProbeFont);
+        }
+    }
+
+    private static PDFont createMissingGlyphProbeFont(PDDocument doc, Path fontPath, PDFont fallback) {
+        if (doc == null || fontPath == null || !Files.exists(fontPath)) {
+            return fallback;
+        }
+        try (InputStream inputStream = Files.newInputStream(fontPath)) {
+            PDFont probe = PDType0Font.load(doc, inputStream, false);
+            probe.getCOSObject().setItem(COSName.TO_UNICODE, createEmptyToUnicodeStream(doc));
+            return probe;
+        } catch (Exception ignored) {
+            return fallback;
+        }
+    }
+
+    private static org.apache.pdfbox.cos.COSStream createEmptyToUnicodeStream(PDDocument doc) throws IOException {
+        String cmap = "/CIDInit /ProcSet findresource begin\n"
+            + "12 dict begin\n"
+            + "begincmap\n"
+            + "/CIDSystemInfo << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def\n"
+            + "/CMapName /Adobe-Identity-UCS def\n"
+            + "/CMapType 2 def\n"
+            + "1 begincodespacerange\n"
+            + "<0000> <FFFF>\n"
+            + "endcodespacerange\n"
+            + "endcmap\n"
+            + "CMapName currentdict /CMap defineresource pop\n"
+            + "end\n"
+            + "end\n";
+        org.apache.pdfbox.cos.COSStream stream = doc.getDocument().createCOSStream();
+        try (OutputStream out = stream.createOutputStream()) {
+            out.write(cmap.getBytes(StandardCharsets.US_ASCII));
+        }
+        return stream;
+    }
+
+    private static void appendRawMissingGlyphProbeText(PDDocument doc, PDPage page, PDFont probeFont) throws IOException {
+        if (doc == null || page == null || probeFont == null) {
+            return;
+        }
+
+        List<Integer> unmappedCodes = findUnmappedCodes(probeFont, 8);
+        if (unmappedCodes.isEmpty()) {
+            return;
+        }
+
+        PDResources resources = page.getResources();
+        if (resources == null) {
+            resources = new PDResources();
+            page.setResources(resources);
+        }
+        COSName fontResourceName = resources.add(probeFont);
+
+        StringBuilder hexCodes = new StringBuilder();
+        for (int code : unmappedCodes) {
+            hexCodes.append(String.format("%04X", code & 0xFFFF));
+        }
+
+        String rawTextOps = "BT\n"
+            + "/" + fontResourceName.getName() + " 13 Tf\n"
+            + PAGE_MARGIN + " 70 Td\n"
+            + "<" + hexCodes + "> Tj\n"
+            + "ET\n";
+
+        PDStream append = new PDStream(doc);
+        try (OutputStream out = append.createOutputStream(COSName.FLATE_DECODE)) {
+            out.write(rawTextOps.getBytes(StandardCharsets.US_ASCII));
+        }
+
+        COSBase existing = page.getCOSObject().getDictionaryObject(COSName.CONTENTS);
+        COSStream appendStream = append.getCOSObject();
+        if (existing instanceof COSArray array) {
+            array.add(appendStream);
+        } else if (existing instanceof COSStream stream) {
+            COSArray array = new COSArray();
+            array.add(stream);
+            array.add(appendStream);
+            page.getCOSObject().setItem(COSName.CONTENTS, array);
+        } else {
+            page.getCOSObject().setItem(COSName.CONTENTS, appendStream);
+        }
+    }
+
+    private static List<Integer> findUnmappedCodes(PDFont font, int maxCount) {
+        List<Integer> codes = new ArrayList<>();
+        if (font == null || maxCount <= 0) {
+            return codes;
+        }
+        int maxCode = (font instanceof PDType0Font) ? 65535 : 255;
+        for (int code = 1; code <= maxCode && codes.size() < maxCount; code++) {
+            try {
+                String unicode = font.toUnicode(code);
+                if (unicode == null || unicode.isEmpty()) {
+                    codes.add(code);
+                }
+            } catch (Exception ignored) {
+                codes.add(code);
+            }
+        }
+        return codes;
     }
 
     private static List<FontDemoCell> buildFontDemoCells(FontEmbeddingResult embeddingResult, PDFont fallbackFont) {
