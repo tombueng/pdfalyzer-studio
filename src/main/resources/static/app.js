@@ -519,6 +519,14 @@
         P.Keyboard.init();
         P.Export.init();
         P.Zoom.init();
-        P.Upload.loadSampleOnInit();
+        if (P.Upload && P.Upload.restoreSessionOnInit) {
+            P.Upload.restoreSessionOnInit().always(function (restored) {
+                if (!restored && !P.state.sessionId) {
+                    P.Upload.loadSampleOnInit();
+                }
+            });
+        } else {
+            P.Upload.loadSampleOnInit();
+        }
     });
 })(jQuery);
