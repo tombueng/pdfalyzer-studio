@@ -262,6 +262,13 @@
 
         function applyLockedDialogWidth(dialogEl, modalId) {
             if (!dialogEl) return;
+            var fixedWidthAttr = Number(dialogEl.getAttribute('data-fixed-dialog-width') || 0);
+            if (isFinite(fixedWidthAttr) && fixedWidthAttr > 120) {
+                dialogEl.dataset.dragWidth = String(Math.round(fixedWidthAttr));
+                dialogEl.style.width = Math.round(fixedWidthAttr) + 'px';
+                dialogEl.style.maxWidth = 'none';
+                return;
+            }
             var storedWidth = Number(dialogEl.dataset.dragWidth || 0);
             if ((!isFinite(storedWidth) || storedWidth <= 120) && modalId) {
                 storedWidth = Number(readWidth(modalId) || 0);

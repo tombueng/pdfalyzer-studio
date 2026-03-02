@@ -284,7 +284,13 @@
 }
 
 .field-options-modal {
-    max-width: min(1020px, 94vw);
+    width: min(650px, 96vw);
+    max-width: min(650px, 96vw);
+}
+
+.field-create-modal {
+    width: min(650px, 96vw);
+    max-width: min(650px, 96vw);
 }
 
 .field-options-modal .modal-body {
@@ -335,27 +341,37 @@
 }
 
 .field-options-grid {
-    --bs-gutter-x: 14px;
+    --bs-gutter-x: 18px;
     --bs-gutter-y: 14px;
 }
 
 .field-create-grid {
-    --bs-gutter-x: 14px;
+    --bs-gutter-x: 18px;
     --bs-gutter-y: 14px;
 }
 
 .field-options-modal .field-config-block {
     padding: 10px 12px;
+    margin: 0;
 }
 
 .field-create-modal .field-config-block {
     padding: 10px 12px;
+    margin: 0;
 }
 
 @media (min-width: 992px) {
     .field-options-grid .field-bool-block,
     .field-create-grid .field-bool-block {
         width: 33.333333%;
+        flex: 0 0 auto;
+    }
+}
+
+@media (min-width: 1280px) {
+    .field-options-grid .field-bool-block,
+    .field-create-grid .field-bool-block {
+        width: 20%;
         flex: 0 0 auto;
     }
 }
@@ -395,10 +411,29 @@
 }
 
 .field-config-block {
-    border: 1px solid rgba(0, 212, 255, 0.22);
+    position: relative;
+    border: 0;
     border-radius: 8px;
-    padding: 8px 10px;
-    background: rgba(255, 255, 255, 0.03);
+    padding: 12px 14px;
+    background: transparent;
+    box-sizing: border-box;
+}
+
+.field-config-block::before {
+    content: '';
+    position: absolute;
+    inset: 4px;
+    border: 1px solid rgba(0, 212, 255, 0.38);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.055);
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.2);
+    pointer-events: none;
+    z-index: 0;
+}
+
+.field-config-block > * {
+    position: relative;
+    z-index: 1;
 }
 
 .field-option-radios {
