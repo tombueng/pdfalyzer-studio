@@ -14,6 +14,7 @@ import org.verapdf.processor.ProcessorFactory;
 import org.verapdf.processor.plugins.PluginsCollectionConfig;
 import org.verapdf.processor.reports.BatchSummary;
 import org.verapdf.processor.reports.ValidationBatchSummary;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -27,17 +28,20 @@ import java.util.Collections;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 
 @Service
 public class VeraPdfService {
 
     private static final Logger log = LoggerFactory.getLogger(VeraPdfService.class);
+    private Set<Thread> threadsBeforeInit;
 
     public Map<String, Object> validate(byte[] pdfBytes) throws IOException {
         Path tempPdf = Files.createTempFile("pdfalyzer-verapdf-", ".pdf");
         Files.write(tempPdf, pdfBytes);
 
         try {
+            threadsBeforeInit = Thread.getAllStackTraces().keySet();
             VeraGreenfieldFoundryProvider.initialise();
 
             ValidatorConfig validatorConfig = ValidatorConfigBuilder.defaultBuilder()
@@ -126,6 +130,20 @@ public class VeraPdfService {
             try {
                 Files.deleteIfExists(tempPdf);
             } catch (Exception ignored) {
+            }
+        }
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        if (threadsBeforeInit == null) {
+            return;
+        }
+        Set<Thread> currentThreads = Thread.getAllStackTraces().keySet();
+        for (Thread t : currentThreads) {
+            if (!threadsBeforeInit.contains(t) && t != Thread.currentThread() && !t.isDaemon()) {
+                log.info("Interrupting lingering veraPDF thread: {}", t.getName());
+                t.interrupt();
             }
         }
     }
