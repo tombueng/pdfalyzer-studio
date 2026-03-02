@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Sample WiX installer for Pdfalyzer UI -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+  <Product Id="*" Name="Pdfalyzer UI" Language="1033" Version="1.0.0" Manufacturer="YourCompany" UpgradeCode="PUT-GUID-HERE">
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Platform="x64" />
+    <MediaTemplate />
+    <Icon Id="AppIcon.ico" SourceFile="assets\app-icon.ico" />
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFilesFolder">
+        <Directory Id="INSTALLFOLDER" Name="PdfalyzerUI">
+          <Component Id="MainExecutable" Guid="PUT-GUID-HERE">
+            <File Id="PdfalyzerUIExe" Source="PdfalyzerUi.exe" KeyPath="yes" />
+            <Shortcut Id="desktopShortcut" Directory="DesktopFolder" Name="Pdfalyzer UI" WorkingDirectory="INSTALLFOLDER" Icon="AppIcon.ico" Advertise="yes" />
+          </Component>
+        </Directory>
+      </Directory>
+      <Directory Id="DesktopFolder" Name="Desktop" />
+    </Directory>
+    <Feature Id="MainFeature" Title="Pdfalyzer UI" Level="1">
+      <ComponentRef Id="MainExecutable" />
+    </Feature>
+  </Product>
+</Wix>
