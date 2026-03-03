@@ -8,6 +8,10 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 20
+    ignore:
+      # veraPDF artifacts don't release in lockstep — parser often
+      # skips versions, breaking the shared version property. Update manually.
+      - dependency-name: "org.verapdf*"
     groups:
       spring-boot:
         patterns:
@@ -16,9 +20,6 @@ updates:
       pdfbox:
         patterns:
           - "org.apache.pdfbox*"
-      verapdf:
-        patterns:
-          - "org.verapdf*"
       testing:
         patterns:
           - "org.junit*"
