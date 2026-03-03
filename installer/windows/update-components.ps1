@@ -357,9 +357,27 @@ End If
 ' Start Spring Boot (javaw.exe = no console window)
 Dim javaCmd
 javaCmd = """" & java & """ -jar """ & jar & """ --server.port=" & port
-Dim javaExec
-Set javaExec = shell.Exec(javaCmd)
-javaPid = javaExec.ProcessID
+' Use shell.Run (not Exec) to avoid stdout/stderr pipe issues with javaw
+shell.Run javaCmd, 0, False
+WScript.Sleep 1000
+
+' Find the javaw PID via WMI (shell.Run doesn't return a PID)
+Dim wmiStart, startProcs, startProc
+Set wmiStart = GetObject("winmgmts:\\.\root\cimv2")
+Set startProcs = wmiStart.ExecQuery("SELECT ProcessId, CommandLine FROM Win32_Process WHERE Name='javaw.exe'")
+javaPid = 0
+For Each startProc In startProcs
+    If Not IsNull(startProc.CommandLine) Then
+        If InStr(LCase(startProc.CommandLine), LCase(jar)) > 0 Then
+            javaPid = startProc.ProcessId
+            Exit For
+        End If
+    End If
+Next
+If javaPid = 0 Then
+    MsgBox "Failed to start Java process.", vbExclamation, "PDFalyzer Studio"
+    WScript.Quit 1
+End If
 
 ' Wait for server to be ready (poll health endpoint)
 Dim ready, attempts
