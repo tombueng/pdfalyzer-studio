@@ -4,3 +4,8 @@
 /aimaking.txt
 /requirements.md
 /target
+
+# Installer bundles (downloaded by update-components.ps1)
+/installer/windows/bundle/
+/installer/windows/output/
+/installer/linux/bundle/
