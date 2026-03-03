@@ -1,8 +1,6 @@
 <p align="center">
-  <img src="src/main/resources/static/logo.svg" alt="PDFalyzer Studio" width="96" height="96">
+  <img src="logo.jpg" alt="PDFalyzer Studio" width="280">
 </p>
-
-<h1 align="center">PDFalyzer Studio</h1>
 
 <p align="center">
 
