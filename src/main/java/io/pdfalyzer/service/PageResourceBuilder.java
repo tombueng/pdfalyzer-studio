@@ -1,6 +1,7 @@
 package io.pdfalyzer.service;
 
 import io.pdfalyzer.model.PdfNode;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.cos.*;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDResources;
@@ -11,7 +12,6 @@ import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
 import org.apache.pdfbox.contentstream.PDFGraphicsStreamEngine;
 import org.apache.pdfbox.util.Matrix;
 import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.awt.geom.Point2D;
@@ -26,9 +26,8 @@ import java.util.Map;
  * Extracted from {@link SemanticTreeBuilder} to keep file sizes under ~500 lines.
  */
 @Component
+@Slf4j
 public class PageResourceBuilder {
-
-    private static final Logger log = LoggerFactory.getLogger(PageResourceBuilder.class);
 
     private final CosNodeBuilder cosBuilder;
 
