@@ -2,6 +2,7 @@ package io.pdfalyzer.web;
 
 import io.pdfalyzer.model.*;
 import io.pdfalyzer.service.*;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.slf4j.Logger;
@@ -31,10 +32,9 @@ import java.util.Map;
  * Edit endpoints live in {@link EditApiController}.
  */
 @RestController
+@Slf4j
 @RequestMapping("/api")
 public class ApiController {
-
-    private static final Logger log = LoggerFactory.getLogger(ApiController.class);
     private static final Logger clientErrorLog = LoggerFactory.getLogger("io.pdfalyzer.client-errors");
 
     private final PdfService pdfService;

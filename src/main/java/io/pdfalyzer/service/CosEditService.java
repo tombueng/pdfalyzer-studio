@@ -1,11 +1,11 @@
 package io.pdfalyzer.service;
 
 import io.pdfalyzer.model.CosUpdateRequest;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.*;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayOutputStream;
@@ -13,9 +13,8 @@ import java.io.IOException;
 import java.util.List;
 
 @Service
+@Slf4j
 public class CosEditService {
-
-    private static final Logger log = LoggerFactory.getLogger(CosEditService.class);
 
     public byte[] updateCosValue(byte[] pdfBytes, CosUpdateRequest request) throws IOException {
         try (PDDocument doc = Loader.loadPDF(pdfBytes)) {

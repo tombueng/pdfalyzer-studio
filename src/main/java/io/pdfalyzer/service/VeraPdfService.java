@@ -15,8 +15,8 @@ import org.verapdf.processor.plugins.PluginsCollectionConfig;
 import org.verapdf.processor.reports.BatchSummary;
 import org.verapdf.processor.reports.ValidationBatchSummary;
 import jakarta.annotation.PreDestroy;
+import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayOutputStream;
@@ -31,9 +31,8 @@ import java.util.Map;
 import java.util.Set;
 
 @Service
+@Slf4j
 public class VeraPdfService {
-
-    private static final Logger log = LoggerFactory.getLogger(VeraPdfService.class);
     private Set<Thread> threadsBeforeInit;
 
     public Map<String, Object> validate(byte[] pdfBytes) throws IOException {

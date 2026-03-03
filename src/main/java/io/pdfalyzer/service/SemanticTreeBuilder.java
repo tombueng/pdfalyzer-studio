@@ -1,6 +1,7 @@
 package io.pdfalyzer.service;
 
 import io.pdfalyzer.model.PdfNode;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.cos.*;
 import org.apache.pdfbox.pdmodel.*;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
@@ -19,7 +20,6 @@ import org.apache.pdfbox.pdmodel.interactive.form.PDRadioButton;
 import org.apache.pdfbox.pdmodel.interactive.form.PDSignatureField;
 import org.apache.pdfbox.pdmodel.interactive.form.PDTextField;
 import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.*;
@@ -30,9 +30,8 @@ import java.util.*;
  * per-page resource (fonts/images) construction to {@link PageResourceBuilder}.
  */
 @Component
+@Slf4j
 public class SemanticTreeBuilder {
-
-    private static final Logger log = LoggerFactory.getLogger(SemanticTreeBuilder.class);
 
     private final CosNodeBuilder cosBuilder;
     private final PageResourceBuilder pageResourceBuilder;
