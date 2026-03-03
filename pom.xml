@@ -261,7 +261,8 @@
                 <artifactId>maven-surefire-plugin</artifactId>
                 <version>3.5.2</version>
                 <configuration>
-                    <forkedProcessExitTimeoutInSeconds>15</forkedProcessExitTimeoutInSeconds>
+                    <shutdown>kill</shutdown>
+                    <forkedProcessExitTimeoutInSeconds>10</forkedProcessExitTimeoutInSeconds>
                 </configuration>
             </plugin>
             <plugin>
