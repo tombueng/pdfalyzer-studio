@@ -18,7 +18,7 @@
         <spring.boot.version>3.5.11</spring.boot.version>
         <openpdf.version>1.3.30</openpdf.version>
         <pdfbox.version>3.0.0</pdfbox.version>
-        <verapdf.version>1.26.2</verapdf.version>
+        <verapdf.version>1.26.1</verapdf.version>
         <licenses.dir>${project.basedir}/licenses</licenses.dir>
     </properties>
 
