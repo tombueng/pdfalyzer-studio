@@ -434,10 +434,18 @@ PDFalyzer.Tabs = (function ($, P) {
     }
 
     function metricCard(label, value, icon, tooltip) {
-        return '<div class="font-diag-stat">' +
-            '<div class="font-diag-stat-label" title="' + P.Utils.escapeHtml(tooltip || '') + '"><i class="fas ' + icon + ' me-1"></i>' + P.Utils.escapeHtml(label) + '</div>' +
-            '<div class="font-diag-stat-value">' + value + '</div>' +
-            '</div>';
+        // Determine badge color class based on label
+        let colorClass = "text-bg-secondary";
+        if (label === "With issues" || label === "Missing glyphs" || label === "Encoding issues") {
+            colorClass = (value === 0) ? "text-bg-success" : "text-bg-danger";
+        } else if (label === "Fonts") {
+            colorClass = "text-bg-primary";
+        } else if (label === "Not embedded") {
+            colorClass = (value === 0) ? "text-bg-success" : "text-bg-danger";
+        }
+        return '<span class="badge ' + colorClass + '" title="' + P.Utils.escapeHtml(tooltip || '') + '">' +
+            '<i class="fas ' + icon + ' me-1"></i>' + P.Utils.escapeHtml(label) + ': <span>' + value + '</span>' +
+            '</span>';
     }
 
     function sortFontRows(fonts, mode) {
