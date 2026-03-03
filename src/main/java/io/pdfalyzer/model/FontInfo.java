@@ -1,53 +1,36 @@
 package io.pdfalyzer.model;
 
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
-
 import java.util.ArrayList;
 import java.util.List;
 
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@AllArgsConstructor
 @NoArgsConstructor
+@Builder
 public class FontInfo {
-    @Getter
-    @Setter
     private String fontName;
-    @Getter
-    @Setter
     private String fontType;
-    @Getter
-    @Setter
     private String encoding;
-    @Getter
-    @Setter
     private boolean embedded;
-    @Getter
-    @Setter
     private boolean subset;
-    @Getter
-    @Setter
     private int glyphCount;
-    @Getter
-    @Setter
+    @Builder.Default
     private List<String> issues = new ArrayList<>();
-    @Getter
-    @Setter
     private int pageIndex;
-    @Getter
-    @Setter
     private String objectId;
-    @Getter
-    @Setter
+    @Builder.Default
     private int objectNumber = -1;
-    @Getter
-    @Setter
+    @Builder.Default
     private int generationNumber = -1;
-    @Getter
-    @Setter
     private String usageContext;
-    @Getter
-    @Setter
     private String fixSuggestion;
 
-    public void addIssue(String issue) { this.issues.add(issue); }
+    public void addIssue(String issue) {
+        this.issues.add(issue);
+    }
 }

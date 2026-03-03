@@ -1,16 +1,16 @@
 package io.pdfalyzer.service;
 
-import io.pdfalyzer.model.PdfNode;
-import io.pdfalyzer.model.PdfSession;
-import lombok.extern.slf4j.Slf4j;
-import org.apache.pdfbox.Loader;
-import org.apache.pdfbox.pdmodel.PDDocument;
-import org.slf4j.Logger;
-import org.springframework.stereotype.Service;
-
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.springframework.stereotype.Service;
+
+import io.pdfalyzer.model.PdfNode;
+import io.pdfalyzer.model.PdfSession;
+import lombok.extern.slf4j.Slf4j;
 
 @Service
 @Slf4j
@@ -54,7 +54,8 @@ public class PdfService {
     }
 
     private void searchNodes(PdfNode node, String query, List<PdfNode> results) {
-        if (node == null) return;
+        if (node == null)
+            return;
 
         boolean matches = false;
         if (node.getName() != null && node.getName().toLowerCase().contains(query)) {

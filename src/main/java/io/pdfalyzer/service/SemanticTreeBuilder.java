@@ -1,9 +1,23 @@
 package io.pdfalyzer.service;
 
-import io.pdfalyzer.model.PdfNode;
-import lombok.extern.slf4j.Slf4j;
-import org.apache.pdfbox.cos.*;
-import org.apache.pdfbox.pdmodel.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
+import org.apache.pdfbox.cos.COSArray;
+import org.apache.pdfbox.cos.COSBase;
+import org.apache.pdfbox.cos.COSDictionary;
+import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.cos.COSObjectKey;
+import org.apache.pdfbox.cos.COSStream;
+import org.apache.pdfbox.cos.COSString;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDDocumentCatalog;
+import org.apache.pdfbox.pdmodel.PDDocumentInformation;
+import org.apache.pdfbox.pdmodel.PDDocumentNameDictionary;
+import org.apache.pdfbox.pdmodel.PDEmbeddedFilesNameTreeNode;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDResources;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.common.filespecification.PDComplexFileSpecification;
 import org.apache.pdfbox.pdmodel.common.filespecification.PDEmbeddedFile;
@@ -19,10 +33,10 @@ import org.apache.pdfbox.pdmodel.interactive.form.PDNonTerminalField;
 import org.apache.pdfbox.pdmodel.interactive.form.PDRadioButton;
 import org.apache.pdfbox.pdmodel.interactive.form.PDSignatureField;
 import org.apache.pdfbox.pdmodel.interactive.form.PDTextField;
-import org.slf4j.Logger;
 import org.springframework.stereotype.Component;
 
-import java.util.*;
+import io.pdfalyzer.model.PdfNode;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Builds the high-level semantic tree for a PDF document.
@@ -37,7 +51,7 @@ public class SemanticTreeBuilder {
     private final PageResourceBuilder pageResourceBuilder;
 
     public SemanticTreeBuilder(CosNodeBuilder cosBuilder, PageResourceBuilder pageResourceBuilder) {
-        this.cosBuilder          = cosBuilder;
+        this.cosBuilder = cosBuilder;
         this.pageResourceBuilder = pageResourceBuilder;
     }
 
@@ -50,27 +64,39 @@ public class SemanticTreeBuilder {
         try {
             cosBuilder.attachCosChildren(root, doc.getDocumentCatalog().getCOSObject(),
                     "catalog-cos", ctx, 0);
-        } catch (Exception e) { log.warn("Error attaching COS to catalog", e); }
+        } catch (Exception e) {
+            log.warn("Error attaching COS to catalog", e);
+        }
 
         PDDocumentInformation info = doc.getDocumentInformation();
-        if (info != null) root.addChild(buildDocInfoNode(info, ctx));
+        if (info != null)
+            root.addChild(buildDocInfoNode(info, ctx));
 
         root.addChild(buildPagesTree(doc, ctx));
 
         try {
             PDAcroForm acroForm = doc.getDocumentCatalog().getAcroForm();
-            if (acroForm != null) root.addChild(buildAcroFormTree(acroForm, ctx));
-        } catch (Exception e) { log.warn("Error parsing AcroForm", e); }
+            if (acroForm != null)
+                root.addChild(buildAcroFormTree(acroForm, ctx));
+        } catch (Exception e) {
+            log.warn("Error parsing AcroForm", e);
+        }
 
         try {
             PDDocumentOutline outline = doc.getDocumentCatalog().getDocumentOutline();
-            if (outline != null) root.addChild(buildOutlineTree(outline, ctx));
-        } catch (Exception e) { log.warn("Error parsing outlines", e); }
+            if (outline != null)
+                root.addChild(buildOutlineTree(outline, ctx));
+        } catch (Exception e) {
+            log.warn("Error parsing outlines", e);
+        }
 
         try {
             PdfNode attachmentsNode = buildAttachmentsNode(doc, ctx);
-            if (attachmentsNode != null) root.addChild(attachmentsNode);
-        } catch (Exception e) { log.warn("Error parsing attachments", e); }
+            if (attachmentsNode != null)
+                root.addChild(attachmentsNode);
+        } catch (Exception e) {
+            log.warn("Error parsing attachments", e);
+        }
 
         return root;
     }
@@ -80,18 +106,25 @@ public class SemanticTreeBuilder {
     private PdfNode buildDocInfoNode(PDDocumentInformation info, CosNodeBuilder.ParseContext ctx) {
         PdfNode node = new PdfNode("docinfo", "Document Info", "info", "fa-info-circle", "#17a2b8");
         node.setNodeCategory("info");
-        if (info.getTitle() != null) node.addProperty("Title", info.getTitle());
-        if (info.getAuthor() != null) node.addProperty("Author", info.getAuthor());
-        if (info.getSubject() != null) node.addProperty("Subject", info.getSubject());
-        if (info.getCreator() != null) node.addProperty("Creator", info.getCreator());
-        if (info.getProducer() != null) node.addProperty("Producer", info.getProducer());
+        if (info.getTitle() != null)
+            node.addProperty("Title", info.getTitle());
+        if (info.getAuthor() != null)
+            node.addProperty("Author", info.getAuthor());
+        if (info.getSubject() != null)
+            node.addProperty("Subject", info.getSubject());
+        if (info.getCreator() != null)
+            node.addProperty("Creator", info.getCreator());
+        if (info.getProducer() != null)
+            node.addProperty("Producer", info.getProducer());
         if (info.getCreationDate() != null)
             node.addProperty("Created", info.getCreationDate().getTime().toString());
         if (info.getModificationDate() != null)
             node.addProperty("Modified", info.getModificationDate().getTime().toString());
         try {
             cosBuilder.attachCosChildren(node, info.getCOSObject(), "docinfo-cos", ctx, 0);
-        } catch (Exception e) { log.debug("Error attaching COS to doc info", e); }
+        } catch (Exception e) {
+            log.debug("Error attaching COS to doc info", e);
+        }
         return node;
     }
 
@@ -136,9 +169,11 @@ public class SemanticTreeBuilder {
                 resourcesNode.setNodeCategory("resources");
                 resourcesNode.setPageIndex(index);
                 PdfNode fontsFolder = buildPageFontsNode(resources, index, ctx);
-                if (fontsFolder != null) resourcesNode.addChild(fontsFolder);
+                if (fontsFolder != null)
+                    resourcesNode.addChild(fontsFolder);
                 PdfNode imagesFolder = buildPageImagesNode(page, resources, index, ctx);
-                if (imagesFolder != null) resourcesNode.addChild(imagesFolder);
+                if (imagesFolder != null)
+                    resourcesNode.addChild(imagesFolder);
                 try {
                     COSDictionary resDict = resources.getCOSObject();
                     if (resDict != null) {
@@ -148,9 +183,12 @@ public class SemanticTreeBuilder {
                 } catch (Exception e) {
                     log.debug("Error attaching COS to resources for page {}", index, e);
                 }
-                if (!resourcesNode.getChildren().isEmpty()) pageNode.addChild(resourcesNode);
+                if (!resourcesNode.getChildren().isEmpty())
+                    pageNode.addChild(resourcesNode);
             }
-        } catch (Exception e) { log.warn("Error parsing resources for page {}", index, e); }
+        } catch (Exception e) {
+            log.warn("Error parsing resources for page {}", index, e);
+        }
 
         try {
             List<PDAnnotation> annotations = page.getAnnotations();
@@ -165,17 +203,24 @@ public class SemanticTreeBuilder {
                 }
                 pageNode.addChild(annotsNode);
             }
-        } catch (Exception e) { log.warn("Error parsing annotations for page {}", index, e); }
+        } catch (Exception e) {
+            log.warn("Error parsing annotations for page {}", index, e);
+        }
 
         try {
             PdfNode csNode = cosBuilder.buildContentStreamNode(page, index, ctx);
-            if (!csNode.getChildren().isEmpty()) pageNode.addChild(csNode);
-        } catch (Exception e) { log.warn("Error parsing content stream for page {}", index, e); }
+            if (!csNode.getChildren().isEmpty())
+                pageNode.addChild(csNode);
+        } catch (Exception e) {
+            log.warn("Error parsing content stream for page {}", index, e);
+        }
 
         try {
             cosBuilder.attachCosChildren(pageNode, page.getCOSObject(),
                     "page-" + index + "-cos", ctx, 0);
-        } catch (Exception e) { log.debug("Error attaching COS to page {}", index, e); }
+        } catch (Exception e) {
+            log.debug("Error attaching COS to page {}", index, e);
+        }
 
         return pageNode;
     }
@@ -183,35 +228,38 @@ public class SemanticTreeBuilder {
     // ======================== FONTS (per page) ========================
 
     private PdfNode buildPageFontsNode(PDResources resources, int pageIndex,
-                                        CosNodeBuilder.ParseContext ctx) {
+            CosNodeBuilder.ParseContext ctx) {
         return pageResourceBuilder.buildPageFontsNode(resources, pageIndex, ctx);
     }
 
     // ======================== IMAGES (per page) ========================
 
     private PdfNode buildPageImagesNode(PDPage page, PDResources resources,
-                                         int pageIndex, CosNodeBuilder.ParseContext ctx) {
+            int pageIndex, CosNodeBuilder.ParseContext ctx) {
         return pageResourceBuilder.buildPageImagesNode(page, resources, pageIndex, ctx);
     }
 
     // ======================== ANNOTATIONS ========================
 
     private PdfNode buildAnnotationNode(PDAnnotation annot, int pageIndex,
-                                         int annotIndex, CosNodeBuilder.ParseContext ctx) {
+            int annotIndex, CosNodeBuilder.ParseContext ctx) {
         String subtype = annot.getSubtype();
         String label = (subtype != null ? subtype : "Unknown") + " Annotation";
         PdfNode node = new PdfNode("page-" + pageIndex + "-annot-" + annotIndex,
                 label, "annotation", getAnnotationIcon(subtype), "#fd7e14");
         node.setNodeCategory("annotation");
         node.setPageIndex(pageIndex);
-        if (subtype != null) node.addProperty("Subtype", subtype);
-        if (annot.getContents() != null) node.addProperty("Contents", annot.getContents());
-        if (annot.getAnnotationName() != null) node.addProperty("Name", annot.getAnnotationName());
+        if (subtype != null)
+            node.addProperty("Subtype", subtype);
+        if (annot.getContents() != null)
+            node.addProperty("Contents", annot.getContents());
+        if (annot.getAnnotationName() != null)
+            node.addProperty("Name", annot.getAnnotationName());
         PDRectangle rect = annot.getRectangle();
         if (rect != null) {
-            node.setBoundingBox(new double[]{
+            node.setBoundingBox(new double[] {
                     rect.getLowerLeftX(), rect.getLowerLeftY(),
-                    rect.getWidth(), rect.getHeight()});
+                    rect.getWidth(), rect.getHeight() });
             node.addProperty("Rectangle", String.format("%.1f, %.1f, %.1f, %.1f",
                     rect.getLowerLeftX(), rect.getLowerLeftY(),
                     rect.getUpperRightX(), rect.getUpperRightY()));
@@ -219,22 +267,34 @@ public class SemanticTreeBuilder {
         try {
             cosBuilder.attachCosChildren(node, annot.getCOSObject(),
                     "page-" + pageIndex + "-annot-" + annotIndex + "-cos", ctx, 0);
-        } catch (Exception e) { log.debug("Error attaching COS to annotation", e); }
+        } catch (Exception e) {
+            log.debug("Error attaching COS to annotation", e);
+        }
         return node;
     }
 
     private String getAnnotationIcon(String subtype) {
-        if (subtype == null) return "fa-question-circle";
+        if (subtype == null)
+            return "fa-question-circle";
         switch (subtype) {
-            case "Link": return "fa-link";
-            case "Text": return "fa-comment";
-            case "Widget": return "fa-cog";
-            case "Highlight": return "fa-highlighter";
-            case "Underline": return "fa-underline";
-            case "StrikeOut": return "fa-strikethrough";
-            case "Stamp": return "fa-stamp";
-            case "FreeText": return "fa-pen";
-            default: return "fa-sticky-note";
+            case "Link":
+                return "fa-link";
+            case "Text":
+                return "fa-comment";
+            case "Widget":
+                return "fa-cog";
+            case "Highlight":
+                return "fa-highlighter";
+            case "Underline":
+                return "fa-underline";
+            case "StrikeOut":
+                return "fa-strikethrough";
+            case "Stamp":
+                return "fa-stamp";
+            case "FreeText":
+                return "fa-pen";
+            default:
+                return "fa-sticky-note";
         }
     }
 
@@ -245,21 +305,25 @@ public class SemanticTreeBuilder {
         PdfNode formNode = new PdfNode("acroform",
                 "AcroForm (" + fields.size() + " fields)", "acroform", "fa-wpforms", "#0dcaf0");
         formNode.setNodeCategory("acroform");
-        if (acroForm.isSignaturesExist()) formNode.addProperty("SignaturesExist", "true");
+        if (acroForm.isSignaturesExist())
+            formNode.addProperty("SignaturesExist", "true");
         formNode.addProperty("NeedAppearances", String.valueOf(acroForm.getNeedAppearances()));
         for (PDField field : fields) {
             formNode.addChild(buildFieldNode(field, ctx));
         }
         try {
             cosBuilder.attachCosChildren(formNode, acroForm.getCOSObject(), "acroform-cos", ctx, 0);
-        } catch (Exception e) { log.debug("Error attaching COS to acroform", e); }
+        } catch (Exception e) {
+            log.debug("Error attaching COS to acroform", e);
+        }
         return formNode;
     }
 
     private PdfNode buildFieldNode(PDField field, CosNodeBuilder.ParseContext ctx) {
         String fieldType = field.getFieldType();
         String label = (field.getPartialName() != null
-                ? field.getPartialName() : "(unnamed)") + " [" + fieldType + "]";
+                ? field.getPartialName()
+                : "(unnamed)") + " [" + fieldType + "]";
         PdfNode node = new PdfNode("field-" + field.getFullyQualifiedName(),
                 label, "field", getFieldIcon(fieldType), "#0dcaf0");
         node.setNodeCategory("field");
@@ -306,9 +370,9 @@ public class SemanticTreeBuilder {
             }
             PDRectangle rect = field.getWidgets().get(0).getRectangle();
             if (rect != null) {
-                node.setBoundingBox(new double[]{
+                node.setBoundingBox(new double[] {
                         rect.getLowerLeftX(), rect.getLowerLeftY(),
-                        rect.getWidth(), rect.getHeight()});
+                        rect.getWidth(), rect.getHeight() });
             }
         }
         if (field instanceof PDNonTerminalField) {
@@ -326,18 +390,25 @@ public class SemanticTreeBuilder {
     }
 
     private String detectFieldSubType(PDField field) {
-        if (field instanceof PDTextField) return "text";
-        if (field instanceof PDCheckBox) return "checkbox";
-        if (field instanceof PDRadioButton) return "radio";
-        if (field instanceof PDComboBox) return "combo";
-        if (field instanceof PDListBox) return "list";
-        if (field instanceof PDSignatureField) return "signature";
+        if (field instanceof PDTextField)
+            return "text";
+        if (field instanceof PDCheckBox)
+            return "checkbox";
+        if (field instanceof PDRadioButton)
+            return "radio";
+        if (field instanceof PDComboBox)
+            return "combo";
+        if (field instanceof PDListBox)
+            return "list";
+        if (field instanceof PDSignatureField)
+            return "signature";
         return "unknown";
     }
 
     private String extractChoiceOptions(PDField field) {
         COSBase optBase = field.getCOSObject().getDictionaryObject(COSName.OPT);
-        if (!(optBase instanceof COSArray optArray)) return null;
+        if (!(optBase instanceof COSArray optArray))
+            return null;
         List<String> values = new ArrayList<>();
         for (int i = 0; i < optArray.size(); i++) {
             COSBase item = optArray.getObject(i);
@@ -348,8 +419,10 @@ public class SemanticTreeBuilder {
             if (item instanceof COSArray pair && pair.size() > 0) {
                 COSBase first = pair.getObject(0);
                 COSBase second = pair.size() > 1 ? pair.getObject(1) : null;
-                if (second instanceof COSString display) values.add(display.getString());
-                else if (first instanceof COSString export) values.add(export.getString());
+                if (second instanceof COSString display)
+                    values.add(display.getString());
+                else if (first instanceof COSString export)
+                    values.add(export.getString());
             }
         }
         return values.isEmpty() ? null : String.join(",", values);
@@ -357,22 +430,31 @@ public class SemanticTreeBuilder {
 
     private String extractValidationJavaScript(PDField field) {
         COSBase aaBase = field.getCOSObject().getDictionaryObject(COSName.AA);
-        if (!(aaBase instanceof COSDictionary aaDict)) return null;
+        if (!(aaBase instanceof COSDictionary aaDict))
+            return null;
         COSBase validateBase = aaDict.getDictionaryObject(COSName.V);
-        if (!(validateBase instanceof COSDictionary validateDict)) return null;
+        if (!(validateBase instanceof COSDictionary validateDict))
+            return null;
         String subtype = validateDict.getNameAsString(COSName.S);
-        if (!"JavaScript".equals(subtype)) return null;
+        if (!"JavaScript".equals(subtype))
+            return null;
         return validateDict.getString(COSName.JS);
     }
 
     private String getFieldIcon(String fieldType) {
-        if (fieldType == null) return "fa-question-circle";
+        if (fieldType == null)
+            return "fa-question-circle";
         switch (fieldType) {
-            case "Tx": return "fa-keyboard";
-            case "Btn": return "fa-check-square";
-            case "Ch": return "fa-list";
-            case "Sig": return "fa-signature";
-            default: return "fa-square";
+            case "Tx":
+                return "fa-keyboard";
+            case "Btn":
+                return "fa-check-square";
+            case "Ch":
+                return "fa-list";
+            case "Sig":
+                return "fa-signature";
+            default:
+                return "fa-square";
         }
     }
 
@@ -394,13 +476,15 @@ public class SemanticTreeBuilder {
     }
 
     private PdfNode buildOutlineItemNode(PDOutlineItem item, int index,
-                                          CosNodeBuilder.ParseContext ctx) {
+            CosNodeBuilder.ParseContext ctx) {
         String title = item.getTitle() != null ? item.getTitle() : "(untitled)";
         PdfNode node = new PdfNode("bookmark-" + index + "-" + title.hashCode(),
                 title, "bookmark", "fa-bookmark", "#6610f2");
         node.setNodeCategory("bookmark");
-        if (item.isBold()) node.addProperty("Bold", "true");
-        if (item.isItalic()) node.addProperty("Italic", "true");
+        if (item.isBold())
+            node.addProperty("Bold", "true");
+        if (item.isItalic())
+            node.addProperty("Italic", "true");
         try {
             PDPage destPage = item.findDestinationPage(ctx.doc);
             if (destPage != null) {
@@ -416,7 +500,9 @@ public class SemanticTreeBuilder {
         try {
             cosBuilder.attachCosChildren(node, item.getCOSObject(),
                     "bookmark-" + index + "-cos", ctx, 0);
-        } catch (Exception e) { log.debug("Error attaching COS to bookmark", e); }
+        } catch (Exception e) {
+            log.debug("Error attaching COS to bookmark", e);
+        }
         PDOutlineItem child = item.getFirstChild();
         int childIdx = 0;
         while (child != null) {
@@ -438,7 +524,8 @@ public class SemanticTreeBuilder {
             log.debug("Could not get document names", e);
             return null;
         }
-        if (names == null) return null;
+        if (names == null)
+            return null;
 
         PDEmbeddedFilesNameTreeNode embeddedFiles;
         try {
@@ -447,7 +534,8 @@ public class SemanticTreeBuilder {
             log.debug("Could not get embedded files", e);
             return null;
         }
-        if (embeddedFiles == null) return null;
+        if (embeddedFiles == null)
+            return null;
 
         Map<String, PDComplexFileSpecification> fileSpecMap;
         try {
@@ -456,7 +544,8 @@ public class SemanticTreeBuilder {
             log.debug("Could not get embedded file names", e);
             return null;
         }
-        if (fileSpecMap == null || fileSpecMap.isEmpty()) return null;
+        if (fileSpecMap == null || fileSpecMap.isEmpty())
+            return null;
 
         PdfNode attachNode = new PdfNode("attachments",
                 "Attachments (" + fileSpecMap.size() + ")",
@@ -475,18 +564,24 @@ public class SemanticTreeBuilder {
                 fileNode.addProperty("Description", spec.getFileDescription());
 
             PDEmbeddedFile ef = spec.getEmbeddedFile();
-            if (ef == null) ef = spec.getEmbeddedFileUnicode();
+            if (ef == null)
+                ef = spec.getEmbeddedFileUnicode();
             if (ef != null) {
                 try {
-                    if (ef.getSize() > 0) fileNode.addProperty("Size", ef.getSize() + " bytes");
+                    if (ef.getSize() > 0)
+                        fileNode.addProperty("Size", ef.getSize() + " bytes");
                     if (ef.getSubtype() != null)
                         fileNode.addProperty("MIME", ef.getSubtype());
                     // Store COSStream reference for download
                     COSBase cosEf = ef.getCOSObject();
                     if (cosEf instanceof COSStream) {
                         COSObjectKey key = null;
-                        try { key = ((COSStream) cosEf).getKey(); } catch (Exception ignored) {}
-                        if (key == null) key = cosBuilder.findObjectKeyInDocument(cosEf, ctx.doc);
+                        try {
+                            key = ((COSStream) cosEf).getKey();
+                        } catch (Exception ignored) {
+                        }
+                        if (key == null)
+                            key = cosBuilder.findObjectKeyInDocument(cosEf, ctx.doc);
                         if (key != null) {
                             fileNode.setObjectNumber((int) key.getNumber());
                             fileNode.setGenerationNumber((int) key.getGeneration());
