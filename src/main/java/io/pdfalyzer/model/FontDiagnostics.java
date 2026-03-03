@@ -1,163 +1,130 @@
 package io.pdfalyzer.model;
 
+import lombok.Getter;
+import lombok.Setter;
+
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
 public class FontDiagnostics {
+    @Getter
+    @Setter
     private int totalFonts;
+    @Getter
+    @Setter
     private int fontsWithIssues;
+    @Getter
+    @Setter
     private int fontsWithMissingGlyphs;
+    @Getter
+    @Setter
     private int fontsWithEncodingProblems;
+    @Getter
+    @Setter
     private List<FontDiagnosticsEntry> fonts = new ArrayList<>();
 
-    public int getTotalFonts() { return totalFonts; }
-    public void setTotalFonts(int totalFonts) { this.totalFonts = totalFonts; }
-
-    public int getFontsWithIssues() { return fontsWithIssues; }
-    public void setFontsWithIssues(int fontsWithIssues) { this.fontsWithIssues = fontsWithIssues; }
-
-    public int getFontsWithMissingGlyphs() { return fontsWithMissingGlyphs; }
-    public void setFontsWithMissingGlyphs(int fontsWithMissingGlyphs) { this.fontsWithMissingGlyphs = fontsWithMissingGlyphs; }
-
-    public int getFontsWithEncodingProblems() { return fontsWithEncodingProblems; }
-    public void setFontsWithEncodingProblems(int fontsWithEncodingProblems) { this.fontsWithEncodingProblems = fontsWithEncodingProblems; }
-
-    public List<FontDiagnosticsEntry> getFonts() { return fonts; }
-    public void setFonts(List<FontDiagnosticsEntry> fonts) { this.fonts = fonts; }
-
     public static class FontDiagnosticsEntry {
+        @Getter
+        @Setter
         private String fontName;
+        @Getter
+        @Setter
         private String fontType;
+        @Getter
+        @Setter
         private String encoding;
+        @Getter
+        @Setter
         private boolean embedded;
+        @Getter
+        @Setter
         private boolean subset;
+        @Getter
+        @Setter
         private int objectNumber = -1;
+        @Getter
+        @Setter
         private int generationNumber = -1;
+        @Getter
+        @Setter
         private int glyphCount;
+        @Getter
+        @Setter
         private int distinctUsedCodes;
+        @Getter
+        @Setter
         private int mappedUsedCodes;
+        @Getter
+        @Setter
         private int unmappedUsedCodes;
+        @Getter
+        @Setter
         private int unencodableUsedChars;
+        @Getter
+        @Setter
         private List<Integer> pagesUsed = new ArrayList<>();
+        @Getter
+        @Setter
         private List<String> usageContexts = new ArrayList<>();
+        @Getter
+        @Setter
         private boolean subsetComplete;
+        @Getter
+        @Setter
         private List<String> issues = new ArrayList<>();
+        @Getter
+        @Setter
         private String fixSuggestion;
-
-        public String getFontName() { return fontName; }
-        public void setFontName(String fontName) { this.fontName = fontName; }
-
-        public String getFontType() { return fontType; }
-        public void setFontType(String fontType) { this.fontType = fontType; }
-
-        public String getEncoding() { return encoding; }
-        public void setEncoding(String encoding) { this.encoding = encoding; }
-
-        public boolean isEmbedded() { return embedded; }
-        public void setEmbedded(boolean embedded) { this.embedded = embedded; }
-
-        public boolean isSubset() { return subset; }
-        public void setSubset(boolean subset) { this.subset = subset; }
-
-        public int getObjectNumber() { return objectNumber; }
-        public void setObjectNumber(int objectNumber) { this.objectNumber = objectNumber; }
-
-        public int getGenerationNumber() { return generationNumber; }
-        public void setGenerationNumber(int generationNumber) { this.generationNumber = generationNumber; }
-
-        public int getGlyphCount() { return glyphCount; }
-        public void setGlyphCount(int glyphCount) { this.glyphCount = glyphCount; }
-
-        public int getDistinctUsedCodes() { return distinctUsedCodes; }
-        public void setDistinctUsedCodes(int distinctUsedCodes) { this.distinctUsedCodes = distinctUsedCodes; }
-
-        public int getMappedUsedCodes() { return mappedUsedCodes; }
-        public void setMappedUsedCodes(int mappedUsedCodes) { this.mappedUsedCodes = mappedUsedCodes; }
-
-        public int getUnmappedUsedCodes() { return unmappedUsedCodes; }
-        public void setUnmappedUsedCodes(int unmappedUsedCodes) { this.unmappedUsedCodes = unmappedUsedCodes; }
-
-        public int getUnencodableUsedChars() { return unencodableUsedChars; }
-        public void setUnencodableUsedChars(int unencodableUsedChars) { this.unencodableUsedChars = unencodableUsedChars; }
-
-        public List<Integer> getPagesUsed() { return pagesUsed; }
-        public void setPagesUsed(List<Integer> pagesUsed) { this.pagesUsed = pagesUsed; }
-
-        public List<String> getUsageContexts() { return usageContexts; }
-        public void setUsageContexts(List<String> usageContexts) { this.usageContexts = usageContexts; }
-
-        public List<String> getIssues() { return issues; }
-        public void setIssues(List<String> issues) { this.issues = issues; }
-
-        public boolean isSubsetComplete() { return subsetComplete; }
-        public void setSubsetComplete(boolean subsetComplete) { this.subsetComplete = subsetComplete; }
-
-        public String getFixSuggestion() { return fixSuggestion; }
-        public void setFixSuggestion(String fixSuggestion) { this.fixSuggestion = fixSuggestion; }
     }
 
     public static class FontDiagnosticsDetail {
+        @Getter
+        @Setter
         private FontDiagnosticsEntry font;
+        @Getter
+        @Setter
         private EncodingDiagnostics encoding = new EncodingDiagnostics();
+        @Getter
+        @Setter
         private List<GlyphMapping> glyphMappings = new ArrayList<>();
+        @Getter
+        @Setter
         private List<GlyphMapping> missingUsedGlyphMappings = new ArrayList<>();
+        @Getter
+        @Setter
         private List<UsedCharacterIssue> usedCharacterIssues = new ArrayList<>();
+        @Getter
+        @Setter
         private Map<String, String> fontDictionary = new LinkedHashMap<>();
-
-        public FontDiagnosticsEntry getFont() { return font; }
-        public void setFont(FontDiagnosticsEntry font) { this.font = font; }
-
-        public EncodingDiagnostics getEncoding() { return encoding; }
-        public void setEncoding(EncodingDiagnostics encoding) { this.encoding = encoding; }
-
-        public List<GlyphMapping> getGlyphMappings() { return glyphMappings; }
-        public void setGlyphMappings(List<GlyphMapping> glyphMappings) { this.glyphMappings = glyphMappings; }
-
-        public List<GlyphMapping> getMissingUsedGlyphMappings() { return missingUsedGlyphMappings; }
-        public void setMissingUsedGlyphMappings(List<GlyphMapping> missingUsedGlyphMappings) { this.missingUsedGlyphMappings = missingUsedGlyphMappings; }
-
-        public List<UsedCharacterIssue> getUsedCharacterIssues() { return usedCharacterIssues; }
-        public void setUsedCharacterIssues(List<UsedCharacterIssue> usedCharacterIssues) { this.usedCharacterIssues = usedCharacterIssues; }
-
-        public Map<String, String> getFontDictionary() { return fontDictionary; }
-        public void setFontDictionary(Map<String, String> fontDictionary) { this.fontDictionary = fontDictionary; }
     }
 
     public static class EncodingDiagnostics {
+        @Getter
+        @Setter
         private boolean hasToUnicode;
+        @Getter
+        @Setter
         private String encodingObject;
+        @Getter
+        @Setter
         private String toUnicodeObject;
+        @Getter
+        @Setter
         private String subtype;
+        @Getter
+        @Setter
         private String baseFont;
+        @Getter
+        @Setter
         private String descendantFont;
+        @Getter
+        @Setter
         private String cmapName;
+        @Getter
+        @Setter
         private String descendantSubtype;
-
-        public boolean isHasToUnicode() { return hasToUnicode; }
-        public void setHasToUnicode(boolean hasToUnicode) { this.hasToUnicode = hasToUnicode; }
-
-        public String getEncodingObject() { return encodingObject; }
-        public void setEncodingObject(String encodingObject) { this.encodingObject = encodingObject; }
-
-        public String getToUnicodeObject() { return toUnicodeObject; }
-        public void setToUnicodeObject(String toUnicodeObject) { this.toUnicodeObject = toUnicodeObject; }
-
-        public String getSubtype() { return subtype; }
-        public void setSubtype(String subtype) { this.subtype = subtype; }
-
-        public String getBaseFont() { return baseFont; }
-        public void setBaseFont(String baseFont) { this.baseFont = baseFont; }
-
-        public String getDescendantFont() { return descendantFont; }
-        public void setDescendantFont(String descendantFont) { this.descendantFont = descendantFont; }
-
-        public String getCmapName() { return cmapName; }
-        public void setCmapName(String cmapName) { this.cmapName = cmapName; }
-
-        public String getDescendantSubtype() { return descendantSubtype; }
-        public void setDescendantSubtype(String descendantSubtype) { this.descendantSubtype = descendantSubtype; }
     }
 
     public enum RenderStatus {
@@ -198,68 +165,53 @@ public class FontDiagnostics {
     }
 
     public static class GlyphMapping {
+        @Getter
+        @Setter
         private int code;
+        @Getter
+        @Setter
         private String unicode;
+        @Getter
+        @Setter
         private String unicodeHex;
+        @Getter
+        @Setter
         private Integer width;
+        @Getter
+        @Setter
         private int usedCount;
+        @Getter
+        @Setter
         private boolean mapped;
+        @Getter
+        @Setter
         private String glyphName;
+        @Getter
+        @Setter
         private boolean glyphPresent;
+        @Getter
+        @Setter
         private DiagnosticStatus diagnosticStatus = DiagnosticStatus.UNKNOWN;
+        @Getter
+        @Setter
         private RenderStatus renderStatus = RenderStatus.UNKNOWN;
+        @Getter
+        @Setter
         private ExtractionStatus extractionStatus = ExtractionStatus.UNKNOWN;
-
-        public int getCode() { return code; }
-        public void setCode(int code) { this.code = code; }
-
-        public String getUnicode() { return unicode; }
-        public void setUnicode(String unicode) { this.unicode = unicode; }
-
-        public String getUnicodeHex() { return unicodeHex; }
-        public void setUnicodeHex(String unicodeHex) { this.unicodeHex = unicodeHex; }
-
-        public Integer getWidth() { return width; }
-        public void setWidth(Integer width) { this.width = width; }
-
-        public int getUsedCount() { return usedCount; }
-        public void setUsedCount(int usedCount) { this.usedCount = usedCount; }
-
-        public boolean isMapped() { return mapped; }
-        public void setMapped(boolean mapped) { this.mapped = mapped; }
-
-        public String getGlyphName() { return glyphName; }
-        public void setGlyphName(String glyphName) { this.glyphName = glyphName; }
-
-        public boolean isGlyphPresent() { return glyphPresent; }
-        public void setGlyphPresent(boolean glyphPresent) { this.glyphPresent = glyphPresent; }
-
-        public DiagnosticStatus getDiagnosticStatus() { return diagnosticStatus; }
-        public void setDiagnosticStatus(DiagnosticStatus diagnosticStatus) { this.diagnosticStatus = diagnosticStatus; }
-
-        public RenderStatus getRenderStatus() { return renderStatus; }
-        public void setRenderStatus(RenderStatus renderStatus) { this.renderStatus = renderStatus; }
-
-        public ExtractionStatus getExtractionStatus() { return extractionStatus; }
-        public void setExtractionStatus(ExtractionStatus extractionStatus) { this.extractionStatus = extractionStatus; }
     }
 
     public static class UsedCharacterIssue {
+        @Getter
+        @Setter
         private String character;
+        @Getter
+        @Setter
         private String unicodeHex;
+        @Getter
+        @Setter
         private int count;
+        @Getter
+        @Setter
         private String issue;
-
-        public String getCharacter() { return character; }
-        public void setCharacter(String character) { this.character = character; }
-
-        public String getUnicodeHex() { return unicodeHex; }
-        public void setUnicodeHex(String unicodeHex) { this.unicodeHex = unicodeHex; }
-
-        public int getCount() { return count; }
-        public void setCount(int count) { this.count = count; }
-
-        public String getIssue() { return issue; }
-        public void setIssue(String issue) { this.issue = issue; }
     }
 }

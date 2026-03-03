@@ -1,6 +1,7 @@
 package io.pdfalyzer.service;
 
 import io.pdfalyzer.model.ValidationIssue;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -11,7 +12,6 @@ import org.apache.pdfbox.pdmodel.common.PDMetadata;
 import org.apache.pdfbox.pdmodel.font.PDFont;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotation;
 import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -19,9 +19,8 @@ import java.util.ArrayList;
 import java.util.List;
 
 @Service
+@Slf4j
 public class ValidationService {
-
-    private static final Logger log = LoggerFactory.getLogger(ValidationService.class);
 
     public List<ValidationIssue> validate(byte[] pdfBytes) throws IOException {
         List<ValidationIssue> issues = new ArrayList<>();

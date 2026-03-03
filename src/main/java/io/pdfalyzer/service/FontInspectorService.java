@@ -2,6 +2,8 @@ package io.pdfalyzer.service;
 
 import io.pdfalyzer.model.FontDiagnostics;
 import io.pdfalyzer.model.FontInfo;
+import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.*;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -14,7 +16,6 @@ import org.apache.pdfbox.pdmodel.graphics.form.PDFormXObject;
 import org.apache.pdfbox.text.PDFTextStripper;
 import org.apache.pdfbox.text.TextPosition;
 import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.io.IOException;
@@ -23,31 +24,21 @@ import java.nio.charset.StandardCharsets;
 import java.util.*;
 
 @Service
+@Slf4j
 public class FontInspectorService {
 
-    private static final Logger log = LoggerFactory.getLogger(FontInspectorService.class);
-
     public static final class FontFileDownload {
+        @Getter
         private final byte[] data;
+        @Getter
         private final String filename;
+        @Getter
         private final String contentType;
 
         public FontFileDownload(byte[] data, String filename, String contentType) {
             this.data = data;
             this.filename = filename;
             this.contentType = contentType;
-        }
-
-        public byte[] getData() {
-            return data;
-        }
-
-        public String getFilename() {
-            return filename;
-        }
-
-        public String getContentType() {
-            return contentType;
         }
     }
 

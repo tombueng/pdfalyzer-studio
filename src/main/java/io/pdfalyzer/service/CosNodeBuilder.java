@@ -1,13 +1,13 @@
 package io.pdfalyzer.service;
 
 import io.pdfalyzer.model.PdfNode;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.contentstream.operator.Operator;
 import org.apache.pdfbox.cos.*;
 import org.apache.pdfbox.pdfparser.PDFStreamParser;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.nio.charset.StandardCharsets;
@@ -18,9 +18,8 @@ import java.util.*;
  * Used by both the semantic tree builder and the raw COS view.
  */
 @Component
+@Slf4j
 public class CosNodeBuilder {
-
-    private static final Logger log = LoggerFactory.getLogger(CosNodeBuilder.class);
 
     private static final int MAX_STREAM_PREVIEW = 512;
 

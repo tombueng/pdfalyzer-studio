@@ -1,6 +1,7 @@
 package io.pdfalyzer.service;
 
 import io.pdfalyzer.model.FormFieldRequest;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.*;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -15,7 +16,6 @@ import org.apache.pdfbox.pdmodel.interactive.annotation.PDAppearanceDictionary;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAppearanceStream;
 import org.apache.pdfbox.pdmodel.interactive.form.*;
 import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayOutputStream;
@@ -25,9 +25,8 @@ import java.util.List;
 import java.util.Map;
 
 @Service
+@Slf4j
 public class PdfEditService {
-
-    private static final Logger log = LoggerFactory.getLogger(PdfEditService.class);
 
     public byte[] addFormField(byte[] pdfBytes, FormFieldRequest request) throws IOException {
         try (PDDocument doc = Loader.loadPDF(pdfBytes)) {

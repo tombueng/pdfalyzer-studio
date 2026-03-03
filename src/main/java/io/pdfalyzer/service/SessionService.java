@@ -1,8 +1,8 @@
 package io.pdfalyzer.service;
 
 import io.pdfalyzer.model.PdfSession;
+import lombok.extern.slf4j.Slf4j;
 import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
@@ -12,9 +12,8 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Service
+@Slf4j
 public class SessionService {
-
-    private static final Logger log = LoggerFactory.getLogger(SessionService.class);
 
     private final ConcurrentHashMap<String, PdfSession> sessions = new ConcurrentHashMap<>();
 
