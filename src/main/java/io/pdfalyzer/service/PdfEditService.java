@@ -1,9 +1,16 @@
 package io.pdfalyzer.service;
 
-import io.pdfalyzer.model.FormFieldRequest;
-import lombok.extern.slf4j.Slf4j;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
 import org.apache.pdfbox.Loader;
-import org.apache.pdfbox.cos.*;
+import org.apache.pdfbox.cos.COSArray;
+import org.apache.pdfbox.cos.COSBase;
+import org.apache.pdfbox.cos.COSDictionary;
+import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.PDPageContentStream;
@@ -14,15 +21,18 @@ import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationWidget;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAppearanceDictionary;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAppearanceStream;
-import org.apache.pdfbox.pdmodel.interactive.form.*;
-import org.slf4j.Logger;
+import org.apache.pdfbox.pdmodel.interactive.form.PDAcroForm;
+import org.apache.pdfbox.pdmodel.interactive.form.PDCheckBox;
+import org.apache.pdfbox.pdmodel.interactive.form.PDComboBox;
+import org.apache.pdfbox.pdmodel.interactive.form.PDField;
+import org.apache.pdfbox.pdmodel.interactive.form.PDListBox;
+import org.apache.pdfbox.pdmodel.interactive.form.PDRadioButton;
+import org.apache.pdfbox.pdmodel.interactive.form.PDSignatureField;
+import org.apache.pdfbox.pdmodel.interactive.form.PDTextField;
 import org.springframework.stereotype.Service;
 
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
+import io.pdfalyzer.model.FormFieldRequest;
+import lombok.extern.slf4j.Slf4j;
 
 @Service
 @Slf4j

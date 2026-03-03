@@ -1,68 +1,43 @@
 package io.pdfalyzer.model;
 
-import com.fasterxml.jackson.annotation.JsonInclude;
-import lombok.Getter;
-import lombok.NoArgsConstructor;
-import lombok.Setter;
-
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
 @JsonInclude(JsonInclude.Include.NON_NULL)
 @NoArgsConstructor
+@AllArgsConstructor
+@Data
+@Builder
 public class PdfNode {
-    @Getter
-    @Setter
     private String id;
-    @Getter
-    @Setter
     private String name;
-    @Getter
-    @Setter
     private String type;
-    @Getter
-    @Setter
     private String icon;
-    @Getter
-    @Setter
     private String color;
-    @Getter
-    @Setter
     private String nodeCategory;
-    @Getter
-    @Setter
+    @Builder.Default
     private int objectNumber = -1;
-    @Getter
-    @Setter
+    @Builder.Default
     private int generationNumber = -1;
-    @Getter
-    @Setter
+    @Builder.Default
     private int pageIndex = -1;
-    @Getter
-    @Setter
     private double[] boundingBox;
-    @Getter
-    @Setter
     private Map<String, String> properties;
-    @Getter
-    @Setter
+    @Builder.Default
     private List<PdfNode> children = new ArrayList<>();
-    @Getter
-    @Setter
     private String cosType;
-    @Getter
-    @Setter
     private String rawValue;
-    @Getter
-    @Setter
     private boolean editable;
-    @Getter
-    @Setter
     private String valueType;
-    @Getter
-    @Setter
     private String keyPath;
 
     public PdfNode(String name, String type) {
