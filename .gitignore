@@ -1,5 +1,7 @@
 /.claude
-/.github
+/.github/java-upgrade/
+!/.github/workflows/
+!/.github/dependabot.yml
 /.vscode
 /aimaking.txt
 /requirements.md
