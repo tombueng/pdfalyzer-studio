@@ -1,0 +1,48 @@
+version: 2
+
+updates:
+  # Maven dependencies
+  - package-ecosystem: maven
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 20
+    groups:
+      spring-boot:
+        patterns:
+          - "org.springframework.boot*"
+          - "org.springframework*"
+      pdfbox:
+        patterns:
+          - "org.apache.pdfbox*"
+      verapdf:
+        patterns:
+          - "org.verapdf*"
+      testing:
+        patterns:
+          - "org.junit*"
+          - "org.mockito*"
+          - "org.seleniumhq*"
+          - "io.github.bonigarcia*"
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+        exclude-patterns:
+          - "org.springframework.boot*"
+          - "org.springframework*"
+          - "org.apache.pdfbox*"
+          - "org.verapdf*"
+
+  # GitHub Actions
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 10
+    groups:
+      actions:
+        patterns:
+          - "*"
