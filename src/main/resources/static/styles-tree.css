@@ -919,6 +919,154 @@
     }
 }
 
+/* === Font Diagnostic Status Indicators === */
+
+/* Glyph table row status borders */
+.font-map-row-warning { border-left: 3px solid #fa8c16; }
+.font-map-row-danger { border-left: 3px solid #dc3545; background: rgba(220,53,69,0.04); }
+.font-map-row-mismatch { border-left: 3px solid #fadb14; }
+.font-map-row-unknown { border-left: 3px solid #6c757d; }
+.font-map-row-used-problem { background: rgba(220,53,69,0.08); }
+
+/* Summary table row status borders */
+.font-diag-row-ok { border-left: 3px solid #28a745; }
+.font-diag-row-warn { border-left: 3px solid #fa8c16; }
+.font-diag-row-danger { border-left: 3px solid #dc3545; }
+
+/* Diagnostic badges */
+.diag-badge {
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.diag-badge-ok { color: #28a745; }
+.diag-badge-warn { color: #fa8c16; }
+.diag-badge-danger { color: #dc3545; }
+.diag-badge-mismatch { color: #fadb14; }
+.diag-badge-muted { color: #6c757d; }
+
+/* Compact status icons (Render/Extract columns) */
+.diag-icon { font-size: 13px; cursor: default; }
+.diag-icon-ok { color: #28a745; }
+.diag-icon-warn { color: #fa8c16; }
+.diag-icon-danger { color: #dc3545; }
+.diag-icon-mismatch { color: #fadb14; }
+.diag-icon-muted { color: #6c757d; }
+
+/* Glyph absent indicator */
+.font-glyph-absent {
+    color: rgba(220,53,69,0.6);
+    font-size: 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 84px;
+    height: 56px;
+}
+
+/* Filter bar for glyph table */
+.font-detail-filter-group {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+.font-detail-filter-btn {
+    font-size: 12px;
+    padding: 3px 10px;
+}
+.font-detail-filter-btn.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--accent);
+}
+.font-detail-filter-count {
+    font-size: 10px;
+    opacity: 0.7;
+    margin-left: 2px;
+}
+
+/* Subset completeness badges */
+.subset-badge {
+    font-size: 10px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    white-space: nowrap;
+}
+.subset-badge-ok {
+    color: #28a745;
+    border: 1px solid rgba(40,167,69,0.4);
+}
+.subset-badge-warn {
+    color: #fa8c16;
+    border: 1px solid rgba(250,140,22,0.4);
+}
+
+/* Encoding details panel in focused font card */
+.font-encoding-details {
+    font-size: 12px;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 6px;
+    background: rgba(8,12,18,0.55);
+    padding: 8px 10px;
+    margin-top: 6px;
+}
+.font-encoding-details summary {
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--accent);
+}
+.font-encoding-details-grid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 3px 12px;
+    margin-top: 6px;
+    font-size: 11px;
+}
+.font-encoding-details-grid .label {
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+/* Glyph name column styling */
+.font-map-glyph-name {
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+/* Diagnostics summary in glyph modal */
+.glyph-diag-summary {
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 6px;
+    background: rgba(8,12,18,0.55);
+    padding: 8px 10px;
+}
+.glyph-diag-summary-grid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 4px 12px;
+    font-size: 12px;
+}
+.glyph-diag-summary-grid .label {
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+.glyph-diag-explanation {
+    margin-top: 6px;
+    padding: 6px 8px;
+    border-left: 3px solid var(--accent);
+    background: rgba(0,212,255,0.04);
+    border-radius: 0 4px 4px 0;
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.5;
+}
+
 /* === Validation Results === */
 .validation-issue {
     padding: 8px 12px;

@@ -127,6 +127,7 @@ public class VeraPdfService {
             log.warn("Embedded veraPDF validation failed", ex);
             return result;
         } finally {
+            cleanupVeraPdfThreads();
             try {
                 Files.deleteIfExists(tempPdf);
             } catch (Exception ignored) {
@@ -136,13 +137,16 @@ public class VeraPdfService {
 
     @PreDestroy
     public void shutdown() {
+        cleanupVeraPdfThreads();
+    }
+
+    private void cleanupVeraPdfThreads() {
         if (threadsBeforeInit == null) {
             return;
         }
-        Set<Thread> currentThreads = Thread.getAllStackTraces().keySet();
-        for (Thread t : currentThreads) {
+        for (Thread t : Thread.getAllStackTraces().keySet()) {
             if (!threadsBeforeInit.contains(t) && t != Thread.currentThread() && !t.isDaemon()) {
-                log.info("Interrupting lingering veraPDF thread: {}", t.getName());
+                log.debug("Interrupting lingering veraPDF thread: {}", t.getName());
                 t.interrupt();
             }
         }

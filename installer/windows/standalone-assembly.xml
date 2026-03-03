@@ -8,9 +8,10 @@
   <includeBaseDirectory>false</includeBaseDirectory>
   <dependencySets>
     <dependencySet>
-      <outputDirectory>/</outputDirectory>
-      <unpack>true</unpack>
+      <outputDirectory>/lib</outputDirectory>
+      <unpack>false</unpack>
       <scope>runtime</scope>
+      <useProjectArtifact>false</useProjectArtifact>
     </dependencySet>
   </dependencySets>
   <fileSets>

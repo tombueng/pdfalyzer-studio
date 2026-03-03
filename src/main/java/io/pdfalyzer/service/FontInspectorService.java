@@ -315,6 +315,8 @@ public class FontInspectorService {
             encoding.put("subtype", encodingDiagnostics.getSubtype());
             encoding.put("baseFont", encodingDiagnostics.getBaseFont());
             encoding.put("descendantFont", encodingDiagnostics.getDescendantFont());
+            encoding.put("cmapName", encodingDiagnostics.getCmapName());
+            encoding.put("descendantSubtype", encodingDiagnostics.getDescendantSubtype());
             detail.put("encodingDiagnostics", encoding);
 
             Map<String, Object> glyph = new LinkedHashMap<>();
@@ -326,6 +328,20 @@ public class FontInspectorService {
             glyph.put("usedCount", stats.usedCodes.getOrDefault(glyphCode, 0));
             glyph.put("width", width);
             glyph.put("canEncodeMappedUnicode", unicode == null || unicode.isEmpty() || canEncode(font, unicode));
+
+            // Diagnostic fields
+            String gName = safeGlyphName(font, glyphCode);
+            boolean present = isGlyphPresent(font, glyphCode, gName);
+            glyph.put("glyphName", gName != null ? gName : "-");
+            glyph.put("glyphPresent", present);
+
+            // Compute diagnostic/render/extraction statuses using a temporary GlyphMapping
+            FontDiagnostics.GlyphMapping tempMapping = new FontDiagnostics.GlyphMapping();
+            tempMapping.setMapped(unicode != null && !unicode.isEmpty());
+            applyDiagnosticStatuses(tempMapping, tempMapping.isMapped(), present, gName, font, glyphCode, unicode);
+            glyph.put("diagnosticStatus", tempMapping.getDiagnosticStatus().name());
+            glyph.put("renderStatus", tempMapping.getRenderStatus().name());
+            glyph.put("extractionStatus", tempMapping.getExtractionStatus().name());
 
             try {
                 org.apache.pdfbox.util.Vector displacement = font.getDisplacement(glyphCode);

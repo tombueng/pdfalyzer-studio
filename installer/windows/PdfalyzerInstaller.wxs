@@ -1,23 +1,145 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Sample WiX installer for Pdfalyzer UI -->
-<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
-  <Product Id="*" Name="Pdfalyzer UI" Language="1033" Version="1.0.0" Manufacturer="YourCompany" UpgradeCode="PUT-GUID-HERE">
-    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Platform="x64" />
-    <MediaTemplate />
-    <Icon Id="AppIcon.ico" SourceFile="assets\app-icon.ico" />
+<!-- PDFalyzer UI – WiX 3 Installer
+     Bundles: Application JAR, JRE, Chromium, launcher scripts
+     Creates: Desktop shortcut, Start Menu folder, uninstaller entry -->
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
+     xmlns:util="http://schemas.microsoft.com/wix/UtilExtension">
+
+  <Product Id="*"
+           Name="PDFalyzer Studio"
+           Language="1033"
+           Version="1.0.0"
+           Manufacturer="PDFalyzer"
+           UpgradeCode="9E08A50A-9DCA-4C01-8D2B-B1E672052C1B">
+
+    <Package InstallerVersion="500"
+             Compressed="yes"
+             InstallScope="perMachine"
+             Platform="x64"
+             Description="PDFalyzer Studio – PDF Analysis Tool"
+             Comments="Installs PDFalyzer Studio with bundled JRE and Chromium" />
+
+    <!-- Single-file compressed cabinet -->
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <!-- Major upgrade: remove older versions automatically -->
+    <MajorUpgrade DowngradeErrorMessage="A newer version of PDFalyzer Studio is already installed." />
+
+    <!-- Icon for Add/Remove Programs -->
+    <Icon Id="AppIcon.ico" SourceFile="$(var.AppIcon)" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+    <Property Id="ARPHELPLINK" Value="https://github.com/pdfalyzer" />
+
+    <!-- ── Directory Structure ────────────────────────────────────────── -->
     <Directory Id="TARGETDIR" Name="SourceDir">
-      <Directory Id="ProgramFilesFolder">
-        <Directory Id="INSTALLFOLDER" Name="PdfalyzerUI">
-          <Component Id="MainExecutable" Guid="PUT-GUID-HERE">
-            <File Id="PdfalyzerUIExe" Source="PdfalyzerUi.exe" KeyPath="yes" />
-            <Shortcut Id="desktopShortcut" Directory="DesktopFolder" Name="Pdfalyzer UI" WorkingDirectory="INSTALLFOLDER" Icon="AppIcon.ico" Advertise="yes" />
-          </Component>
+
+      <!-- Program Files\PDFalyzer Studio -->
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="PDFalyzer Studio">
+
+          <!-- app\ subfolder for the JAR -->
+          <Directory Id="AppDir" Name="app" />
+
+          <!-- jre\ subfolder (populated by heat-generated fragment) -->
+          <Directory Id="JreDir" Name="jre" />
+
+          <!-- chromium\ subfolder (populated by heat-generated fragment) -->
+          <Directory Id="ChromiumDir" Name="chromium" />
+
         </Directory>
       </Directory>
+
+      <!-- Desktop shortcut target -->
       <Directory Id="DesktopFolder" Name="Desktop" />
+
+      <!-- Start Menu\Programs\PDFalyzer Studio -->
+      <Directory Id="ProgramMenuFolder">
+        <Directory Id="ProgramMenuDir" Name="PDFalyzer Studio" />
+      </Directory>
+
     </Directory>
-    <Feature Id="MainFeature" Title="Pdfalyzer UI" Level="1">
-      <ComponentRef Id="MainExecutable" />
+
+    <!-- ── Core Application Components ────────────────────────────────── -->
+
+    <DirectoryRef Id="INSTALLFOLDER">
+      <!-- VBScript launcher (main entry point, windowless) -->
+      <Component Id="LauncherVbs" Guid="65BC4507-3F33-4E7D-A6EF-7541F6ABA110" Win64="yes">
+        <File Id="PdfalyzerVbs" Source="$(var.LauncherVbs)" Name="pdfalyzer.vbs" KeyPath="yes" />
+      </Component>
+
+      <!-- Batch launcher (debug fallback) -->
+      <Component Id="LauncherBat" Guid="*" Win64="yes">
+        <File Id="PdfalyzerBat" Source="$(var.LauncherBat)" Name="pdfalyzer.bat" KeyPath="yes" />
+      </Component>
+
+      <!-- Launch4j EXE wrapper -->
+      <Component Id="AppExeComponent" Guid="666CE839-7C92-49E5-BF66-C98AD4DD5B65" Win64="yes">
+        <File Id="PdfalyzerExe" Source="$(var.AppExe)" Name="PdfalyzerUi.exe" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- Application JAR -->
+    <DirectoryRef Id="AppDir">
+      <Component Id="AppJarComponent" Guid="14F98BCF-9DAE-4100-99EE-56855075E088" Win64="yes">
+        <File Id="AppJar" Source="$(var.AppJar)" Name="pdfalyzer-ui.jar" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- ── Shortcuts ──────────────────────────────────────────────────── -->
+
+    <!-- Desktop shortcut — launches VBS via wscript (no console) -->
+    <DirectoryRef Id="DesktopFolder">
+      <Component Id="DesktopShortcutComp" Guid="1529C297-8049-4AA5-BF65-FB6FF57EA2C1" Win64="yes">
+        <Shortcut Id="DesktopShortcut"
+                  Name="PDFalyzer Studio"
+                  Description="PDF Analysis Tool"
+                  Target="[System64Folder]wscript.exe"
+                  Arguments="&quot;[INSTALLFOLDER]pdfalyzer.vbs&quot;"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIcon.ico" />
+        <RegistryValue Root="HKCU" Key="Software\PDFalyzer\Studio" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- Start Menu shortcuts -->
+    <DirectoryRef Id="ProgramMenuDir">
+      <Component Id="StartMenuShortcutComp" Guid="*" Win64="yes">
+        <Shortcut Id="StartMenuShortcut"
+                  Name="PDFalyzer Studio"
+                  Description="PDF Analysis Tool"
+                  Target="[System64Folder]wscript.exe"
+                  Arguments="&quot;[INSTALLFOLDER]pdfalyzer.vbs&quot;"
+                  WorkingDirectory="INSTALLFOLDER"
+                  Icon="AppIcon.ico" />
+        <Shortcut Id="UninstallShortcut"
+                  Name="Uninstall PDFalyzer Studio"
+                  Description="Remove PDFalyzer Studio"
+                  Target="[SystemFolder]msiexec.exe"
+                  Arguments="/x [ProductCode]" />
+        <RemoveFolder Id="RemoveProgramMenuDir" On="uninstall" />
+        <RegistryValue Root="HKCU" Key="Software\PDFalyzer\Studio" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+      </Component>
+    </DirectoryRef>
+
+    <!-- ── Features ───────────────────────────────────────────────────── -->
+    <Feature Id="MainFeature" Title="PDFalyzer Studio" Description="Core application" Level="1" ConfigurableDirectory="INSTALLFOLDER">
+      <ComponentRef Id="LauncherVbs" />
+      <ComponentRef Id="LauncherBat" />
+      <ComponentRef Id="AppExeComponent" />
+      <ComponentRef Id="AppJarComponent" />
+      <ComponentRef Id="DesktopShortcutComp" />
+      <ComponentRef Id="StartMenuShortcutComp" />
+      <!-- JRE and Chromium component groups are defined by heat.exe fragments -->
+      <ComponentGroupRef Id="JreComponents" />
+      <ComponentGroupRef Id="ChromiumComponents" />
     </Feature>
+
+    <!-- ── UI ─────────────────────────────────────────────────────────── -->
+    <UIRef Id="WixUI_InstallDir" />
+    <Property Id="WIXUI_INSTALLDIR" Value="INSTALLFOLDER" />
+
+    <!-- Suppress license dialog (no EULA) -->
+    <WixVariable Id="WixUILicenseRtf" Value="$(sys.SOURCEFILEDIR)\assets\license.rtf" />
+
   </Product>
 </Wix>
