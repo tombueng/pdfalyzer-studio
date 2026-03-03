@@ -13,49 +13,57 @@
 </head>
 <body>
     <!-- Navbar -->
-    <nav class="navbar">
-        <div class="container-fluid d-flex align-items-center">
+    <nav class="navbar navbar-expand-lg">
+        <div class="container-fluid">
             <a class="navbar-brand d-flex align-items-center" href="#">
                 <img src="/icon.svg" alt="logo" width="28" height="28" class="me-2" />
-                <span>PDFalyzer Studio</span>
+                <span class="d-none d-md-inline">PDFalyzer Studio</span>
             </a>
-            <div class="d-flex align-items-center gap-2">
-                <label class="btn btn-accent btn-sm mb-0" id="uploadBtn">
-                    <i class="fas fa-upload me-1"></i> Upload PDF
-                    <input type="file" id="fileInput" accept=".pdf" hidden />
-                </label>
-                <button class="btn btn-outline-accent btn-sm" id="downloadBtn" disabled title="Download PDF (Ctrl+S)">
-                    <i class="fas fa-download"></i>
-                </button>
-                <button class="btn btn-outline-accent btn-sm" id="exportTreeBtn" disabled title="Export tree as JSON">
-                    <i class="fas fa-file-export"></i>
-                </button>
-                <button class="btn btn-outline-accent btn-sm" id="zoomModeBtn" disabled title="Toggle auto zoom mode">
-                    <i class="fas fa-expand-arrows-alt"></i>
-                </button>
-                <button class="btn btn-outline-accent btn-sm" id="zoomOutBtn" disabled title="Zoom out">
-                    <i class="fas fa-search-minus"></i>
-                </button>
-                <button class="btn btn-outline-accent btn-sm" id="zoomInBtn" disabled title="Zoom in">
-                    <i class="fas fa-search-plus"></i>
-                </button>
-                <button class="btn btn-outline-accent btn-sm" id="panModeBtn" disabled title="Pan view (hand tool)">
-                    <i class="fas fa-hand-paper"></i>
-                </button>
-                <div id="editToolbar" class="d-flex align-items-center gap-1">
-                    <span class="text-muted me-1" style="font-size:12px;">Add field:</span>
-                    <button class="edit-field-btn" data-type="text"><i class="fas fa-keyboard me-1"></i>Text</button>
-                    <button class="edit-field-btn" data-type="checkbox"><i class="fas fa-check-square me-1"></i>Checkbox</button>
-                    <button class="edit-field-btn" data-type="combo"><i class="fas fa-list me-1"></i>Combo</button>
-                    <button class="edit-field-btn" data-type="radio"><i class="fas fa-dot-circle me-1"></i>Radio</button>
-                    <button class="edit-field-btn" data-type="signature"><i class="fas fa-signature me-1"></i>Signature</button>
-                    <button class="btn btn-outline-accent btn-sm" id="formOptionsBtn" disabled title="Edit options for selected field(s)">
-                        <i class="fas fa-sliders-h me-1"></i>Options
-                    </button>
-                    <button class="btn btn-outline-accent btn-sm" id="formSaveBtn" disabled title="Save pending form changes">
-                        <i class="fas fa-save me-1"></i>Save
-                        <span id="formSaveFailedBadge" class="badge text-bg-danger ms-1 d-none" title="Failed pending COS changes">0</span>
-                    </button>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarContent" aria-controls="navbarContent" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarContent">
+                <div class="d-flex flex-wrap align-items-center gap-2 ms-auto">
+                    <div id="generalToolbar" class="d-flex align-items-center gap-2">
+                        <label class="btn btn-accent btn-sm mb-0" id="uploadBtn">
+                            <i class="fas fa-upload me-1"></i> Upload PDF
+                            <input type="file" id="fileInput" accept=".pdf" hidden />
+                        </label>
+                        <button class="btn btn-outline-accent btn-sm" id="downloadBtn" disabled title="Download PDF (Ctrl+S)">
+                            <i class="fas fa-download"></i>
+                        </button>
+                        <button class="btn btn-outline-accent btn-sm" id="exportTreeBtn" disabled title="Export tree as JSON">
+                            <i class="fas fa-file-export"></i>
+                        </button>
+                        <button class="btn btn-outline-accent btn-sm" id="zoomModeBtn" disabled title="Toggle auto zoom mode">
+                            <i class="fas fa-expand-arrows-alt"></i>
+                        </button>
+                        <button class="btn btn-outline-accent btn-sm" id="zoomOutBtn" disabled title="Zoom out">
+                            <i class="fas fa-search-minus"></i>
+                        </button>
+                        <button class="btn btn-outline-accent btn-sm" id="zoomInBtn" disabled title="Zoom in">
+                            <i class="fas fa-search-plus"></i>
+                        </button>
+                        <button class="btn btn-outline-accent btn-sm" id="panModeBtn" disabled title="Pan view (hand tool)">
+                            <i class="fas fa-hand-paper"></i>
+                        </button>
+                    </div>
+                    <div class="vr d-none d-lg-block"></div>
+                    <div id="editToolbar" class="d-flex align-items-center gap-1">
+                        <span class="text-muted me-1" style="font-size:12px;">Add field:</span>
+                        <button class="edit-field-btn" data-type="text"><i class="fas fa-keyboard me-1"></i>Text</button>
+                        <button class="edit-field-btn" data-type="checkbox"><i class="fas fa-check-square me-1"></i>Checkbox</button>
+                        <button class="edit-field-btn" data-type="combo"><i class="fas fa-list me-1"></i>Combo</button>
+                        <button class="edit-field-btn" data-type="radio"><i class="fas fa-dot-circle me-1"></i>Radio</button>
+                        <button class="edit-field-btn" data-type="signature"><i class="fas fa-signature me-1"></i>Signature</button>
+                        <button class="btn btn-outline-accent btn-sm" id="formOptionsBtn" disabled title="Edit options for selected field(s)">
+                            <i class="fas fa-sliders-h me-1"></i>Options
+                        </button>
+                        <button class="btn btn-outline-accent btn-sm" id="formSaveBtn" disabled title="Save pending form changes">
+                            <i class="fas fa-save me-1"></i>Save
+                            <span id="formSaveFailedBadge" class="badge text-bg-danger ms-1 d-none" title="Failed pending COS changes">0</span>
+                        </button>
+                    </div>
                 </div>
             </div>
         </div>
