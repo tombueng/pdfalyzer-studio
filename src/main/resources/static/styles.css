@@ -70,6 +70,93 @@ html, body {
 
 .navbar #searchInput::placeholder { color: var(--text-muted); }
 
+/* === Mobile Nav (collapsed navbar) === */
+.navbar-mobile-nav {
+    width: 100%;
+    padding: 6px 0;
+    overflow-y: auto;
+    max-height: calc(100vh - 56px);
+}
+
+.navbar-mobile-header {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-muted);
+    padding: 8px 16px 4px;
+    pointer-events: none;
+}
+
+.navbar-mobile-item {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    padding: 9px 20px;
+    background: none;
+    border: none;
+    color: var(--text);
+    font-size: 14px;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s;
+    text-decoration: none;
+    border-radius: 0;
+}
+
+.navbar-mobile-item:hover {
+    background: rgba(0, 212, 255, 0.08);
+    color: var(--accent);
+}
+
+.navbar-mobile-item:active {
+    background: rgba(0, 212, 255, 0.15);
+}
+
+.navbar-mobile-item.active {
+    color: var(--accent);
+    background: var(--accent-dim);
+}
+
+.navbar-mobile-divider {
+    border-color: var(--border);
+    margin: 4px 16px;
+    opacity: 1;
+}
+
+/* Override edit-field-btn appearance inside mobile nav */
+.navbar-mobile-nav .edit-field-btn {
+    display: flex;
+    justify-content: flex-start;
+    color: var(--text);
+    border: none;
+    border-radius: 0;
+    padding: 9px 20px;
+    min-height: unset;
+    width: 100%;
+    font-size: 14px;
+    line-height: inherit;
+    background: none;
+}
+
+.navbar-mobile-nav .edit-field-btn i {
+    width: auto;
+    min-width: auto;
+    text-align: left;
+    font-size: inherit;
+}
+
+.navbar-mobile-nav .edit-field-btn:hover {
+    background: rgba(0, 212, 255, 0.08);
+    border-color: transparent;
+    color: var(--accent);
+}
+
+.navbar-mobile-nav .edit-field-btn.active {
+    color: var(--accent);
+    background: var(--accent-dim);
+}
+
 /* === Main Layout === */
 #appContainer {
     display: flex;
