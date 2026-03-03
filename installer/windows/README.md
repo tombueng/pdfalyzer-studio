@@ -1,25 +1,29 @@
-# Windows Installer (WiX)
+# Windows Installer
 
-This directory contains WiX Toolset scripts and resources for building a standalone Windows 64-bit installer for Pdfalyzer UI.
+Builds a standalone MSI installer for PDFalyzer Studio that bundles JRE 21, Chromium, and the application JAR.
 
-## Steps
-1. Place WiX .wxs script(s) here to define the installer.
-2. Add scripts to bundle the Java runtime, Chromium, and all required resources.
-3. Document signing process (if certificate available).
+See the [parent README](../README.md) for full documentation.
 
-## Example Structure
-- `PdfalyzerInstaller.wxs` — Main WiX script
-- `assets/` — Icons, images, and other installer resources
-- `scripts/` — Helper scripts for build automation
-- `README.md` — Build and usage instructions
+## Quick Reference
 
-## Requirements
-- WiX Toolset (https://wixtoolset.org/)
-- Windows 10/11 64-bit
-- JRE/JDK and Chromium binaries (to be bundled)
-- Optional: Code signing certificate
+```powershell
+# Download all components + build app JAR
+.\update-components.ps1
 
-## Next Steps
-- Add a sample PdfalyzerInstaller.wxs
-- Add build instructions
-- Add signing instructions
+# Build the MSI installer
+.\build-installer.bat
+```
+
+Output: `output\PdfalyzerUiInstaller.msi` (~236 MB)
+
+## Files
+
+| File | Purpose |
+|------|---------|
+| `update-components.ps1` | Downloads JRE, Chromium, Launch4j, WiX; builds app JAR |
+| `build-installer.bat` | Wraps JAR as EXE (Launch4j) + builds MSI (WiX) |
+| `PdfalyzerInstaller.wxs` | WiX installer definition (directories, shortcuts, features) |
+| `assets/app-icon.ico` | Application icon (16/32/48/256px) |
+| `assets/license.rtf` | License dialog shown during install |
+| `bundle/` | Downloaded components (gitignored) |
+| `output/` | Build artifacts (gitignored) |
