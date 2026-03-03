@@ -1,5 +1,12 @@
 # PDFalyzer Studio
 
+[![CI](https://github.com/tombueng/pdfalyzer-ui/actions/workflows/ci.yml/badge.svg)](https://github.com/tombueng/pdfalyzer-ui/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/tombueng/pdfalyzer-ui/actions/workflows/codeql.yml/badge.svg)](https://github.com/tombueng/pdfalyzer-ui/actions/workflows/codeql.yml)
+[![Java 21](https://img.shields.io/badge/Java-21-blue?logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/21/)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
+[![PDFBox](https://img.shields.io/badge/PDFBox-3.0-red?logo=apache&logoColor=white)](https://pdfbox.apache.org/)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue?logo=apache&logoColor=white)](LICENSE)
+
 PDFalyzer Studio is a Spring Boot web application for inspecting, validating, and editing PDF internals through an interactive browser UI.
 
 ## Quick Start
