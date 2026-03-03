@@ -1233,7 +1233,7 @@ public class UIRenderingTest {
         assertFalse(sessionId.isBlank(), "Session id should be available after save");
 
         byte[] pdfBytes;
-        URL pdfUrl = new URL(baseUrl + "/api/pdf/" + sessionId);
+        URL pdfUrl = new URL(null,baseUrl + "/api/pdf/" + sessionId);
         try (InputStream is = pdfUrl.openStream()) {
             pdfBytes = is.readAllBytes();
         }

@@ -1,15 +1,15 @@
 package io.pdfalyzer.service;
 
-import io.pdfalyzer.model.PdfSession;
-import lombok.extern.slf4j.Slf4j;
-import org.slf4j.Logger;
+import java.util.NoSuchElementException;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
-import java.util.NoSuchElementException;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
+import io.pdfalyzer.model.PdfSession;
+import lombok.extern.slf4j.Slf4j;
 
 @Service
 @Slf4j

@@ -1,19 +1,5 @@
 package io.pdfalyzer.service;
 
-import io.pdfalyzer.model.PdfNode;
-import lombok.extern.slf4j.Slf4j;
-import org.apache.pdfbox.cos.*;
-import org.apache.pdfbox.pdmodel.PDPage;
-import org.apache.pdfbox.pdmodel.PDResources;
-import org.apache.pdfbox.pdmodel.font.PDFont;
-import org.apache.pdfbox.pdmodel.graphics.image.PDImage;
-import org.apache.pdfbox.pdmodel.graphics.PDXObject;
-import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
-import org.apache.pdfbox.contentstream.PDFGraphicsStreamEngine;
-import org.apache.pdfbox.util.Matrix;
-import org.slf4j.Logger;
-import org.springframework.stereotype.Component;
-
 import java.awt.geom.Point2D;
 import java.io.IOException;
 import java.util.ArrayList;
@@ -21,9 +7,29 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.pdfbox.contentstream.PDFGraphicsStreamEngine;
+import org.apache.pdfbox.cos.COSBase;
+import org.apache.pdfbox.cos.COSDictionary;
+import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.cos.COSObject;
+import org.apache.pdfbox.cos.COSObjectKey;
+import org.apache.pdfbox.cos.COSStream;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDResources;
+import org.apache.pdfbox.pdmodel.font.PDFont;
+import org.apache.pdfbox.pdmodel.graphics.PDXObject;
+import org.apache.pdfbox.pdmodel.graphics.image.PDImage;
+import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
+import org.apache.pdfbox.util.Matrix;
+import org.springframework.stereotype.Component;
+
+import io.pdfalyzer.model.PdfNode;
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * Builds the Fonts and Images sub-nodes for a single page's Resources node.
- * Extracted from {@link SemanticTreeBuilder} to keep file sizes under ~500 lines.
+ * Extracted from {@link SemanticTreeBuilder} to keep file sizes under ~500
+ * lines.
  */
 @Component
 @Slf4j
@@ -37,7 +43,7 @@ public class PageResourceBuilder {
 
     /** Build a "Fonts (N)" folder node for a page, or null if no fonts. */
     public PdfNode buildPageFontsNode(PDResources resources, int pageIndex,
-                                       CosNodeBuilder.ParseContext ctx) {
+            CosNodeBuilder.ParseContext ctx) {
         List<PdfNode> fontNodes = new ArrayList<>();
         try {
             for (COSName fontName : resources.getFontNames()) {
@@ -71,7 +77,8 @@ public class PageResourceBuilder {
         } catch (Exception e) {
             log.debug("Error iterating fonts for page {}", pageIndex, e);
         }
-        if (fontNodes.isEmpty()) return null;
+        if (fontNodes.isEmpty())
+            return null;
         PdfNode folder = new PdfNode("page-" + pageIndex + "-fonts",
                 "Fonts (" + fontNodes.size() + ")", "folder", "fa-font", "#20c997");
         folder.setNodeCategory("fonts");
@@ -82,7 +89,7 @@ public class PageResourceBuilder {
 
     /** Build an "Images (N)" folder node for a page, or null if no images. */
     public PdfNode buildPageImagesNode(PDPage page, PDResources resources,
-                                        int pageIndex, CosNodeBuilder.ParseContext ctx) {
+            int pageIndex, CosNodeBuilder.ParseContext ctx) {
         Map<String, double[]> imageBoundsByKey = extractImageBoundsByObjectKey(page, ctx);
         int pageObjNum = -1;
         int pageGenNum = 0;
@@ -90,9 +97,16 @@ public class PageResourceBuilder {
             COSBase pageObj = page.getCOSObject();
             if (pageObj instanceof COSDictionary) {
                 COSObjectKey key = null;
-                try { key = ((COSDictionary) pageObj).getKey(); } catch (Exception ignored) {}
-                if (key == null) key = cosBuilder.findObjectKeyInDocument(pageObj, ctx.doc);
-                if (key != null) { pageObjNum = (int) key.getNumber(); pageGenNum = (int) key.getGeneration(); }
+                try {
+                    key = ((COSDictionary) pageObj).getKey();
+                } catch (Exception ignored) {
+                }
+                if (key == null)
+                    key = cosBuilder.findObjectKeyInDocument(pageObj, ctx.doc);
+                if (key != null) {
+                    pageObjNum = (int) key.getNumber();
+                    pageGenNum = (int) key.getGeneration();
+                }
             }
         } catch (Exception e) {
             log.debug("Error extracting page object number", e);
@@ -103,7 +117,8 @@ public class PageResourceBuilder {
             for (COSName xobjName : resources.getXObjectNames()) {
                 try {
                     PDXObject xobj = resources.getXObject(xobjName);
-                    if (!(xobj instanceof PDImageXObject)) continue;
+                    if (!(xobj instanceof PDImageXObject))
+                        continue;
                     PDImageXObject img = (PDImageXObject) xobj;
                     PdfNode imgNode = new PdfNode(
                             "page-" + pageIndex + "-img-" + xobjName.getName(),
@@ -126,7 +141,8 @@ public class PageResourceBuilder {
                     }
                     if (pageObjNum >= 0) {
                         List<String> kp = new ArrayList<>();
-                        kp.add("Resources"); kp.add("XObject");
+                        kp.add("Resources");
+                        kp.add("XObject");
                         kp.add("/" + xobjName.getName());
                         imgNode.setKeyPath(cosBuilder.keyPathToJson(kp));
                     }
@@ -144,7 +160,8 @@ public class PageResourceBuilder {
         } catch (Exception e) {
             log.debug("Error iterating XObjects for page {}", pageIndex, e);
         }
-        if (imageNodes.isEmpty()) return null;
+        if (imageNodes.isEmpty())
+            return null;
         PdfNode folder = new PdfNode("page-" + pageIndex + "-images",
                 "Images (" + imageNodes.size() + ")", "folder", "fa-images", "#e83e8c");
         folder.setNodeCategory("images");
@@ -154,16 +171,20 @@ public class PageResourceBuilder {
     }
 
     private void resolveImageObjectNumber(PDImageXObject img, PdfNode imgNode,
-                                           int fallbackObjNum, int fallbackGenNum,
-                                           CosNodeBuilder.ParseContext ctx) {
+            int fallbackObjNum, int fallbackGenNum,
+            CosNodeBuilder.ParseContext ctx) {
         COSBase cosObj = img.getCOSObject();
         if (cosObj instanceof COSObject) {
             imgNode.setObjectNumber((int) ((COSObject) cosObj).getObjectNumber());
             imgNode.setGenerationNumber((int) ((COSObject) cosObj).getGenerationNumber());
         } else if (cosObj instanceof COSStream) {
             COSObjectKey key = null;
-            try { key = ((COSStream) cosObj).getKey(); } catch (Exception ignored) {}
-            if (key == null) key = cosBuilder.findObjectKeyInDocument(cosObj, ctx.doc);
+            try {
+                key = ((COSStream) cosObj).getKey();
+            } catch (Exception ignored) {
+            }
+            if (key == null)
+                key = cosBuilder.findObjectKeyInDocument(cosObj, ctx.doc);
             if (key != null) {
                 imgNode.setObjectNumber((int) key.getNumber());
                 imgNode.setGenerationNumber((int) key.getGeneration());
@@ -176,7 +197,7 @@ public class PageResourceBuilder {
     }
 
     private Map<String, double[]> extractImageBoundsByObjectKey(PDPage page,
-                                                                  CosNodeBuilder.ParseContext ctx) {
+            CosNodeBuilder.ParseContext ctx) {
         Map<String, double[]> boundsByKey = new HashMap<>();
         try {
             new PDFGraphicsStreamEngine(page) {
@@ -209,7 +230,8 @@ public class PageResourceBuilder {
                     }
 
                     String key = toObjectKey(objNum, genNum);
-                    if (key == null) return;
+                    if (key == null)
+                        return;
 
                     Matrix ctm = getGraphicsState().getCurrentTransformationMatrix();
                     Point2D.Float p0 = ctm.transformPoint(0, 0);
@@ -229,7 +251,8 @@ public class PageResourceBuilder {
                             Math.max(0, maxY - minY)
                     };
 
-                    if (box[2] <= 0 || box[3] <= 0) return;
+                    if (box[2] <= 0 || box[3] <= 0)
+                        return;
 
                     double[] existing = boundsByKey.get(key);
                     if (existing == null) {
@@ -304,7 +327,8 @@ public class PageResourceBuilder {
     }
 
     private String toObjectKey(int objNum, int genNum) {
-        if (objNum < 0) return null;
+        if (objNum < 0)
+            return null;
         return objNum + ":" + Math.max(0, genNum);
     }
 }

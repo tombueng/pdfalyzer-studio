@@ -1,24 +1,5 @@
 package io.pdfalyzer.service;
 
-import org.verapdf.features.FeatureFactory;
-import org.verapdf.gf.foundry.VeraGreenfieldFoundryProvider;
-import org.verapdf.metadata.fixer.FixerFactory;
-import org.verapdf.pdfa.validation.validators.ValidatorConfig;
-import org.verapdf.pdfa.validation.validators.ValidatorConfigBuilder;
-import org.verapdf.processor.BatchProcessingHandler;
-import org.verapdf.processor.BatchProcessor;
-import org.verapdf.processor.FormatOption;
-import org.verapdf.processor.TaskType;
-import org.verapdf.processor.ProcessorConfig;
-import org.verapdf.processor.ProcessorFactory;
-import org.verapdf.processor.plugins.PluginsCollectionConfig;
-import org.verapdf.processor.reports.BatchSummary;
-import org.verapdf.processor.reports.ValidationBatchSummary;
-import jakarta.annotation.PreDestroy;
-import lombok.extern.slf4j.Slf4j;
-import org.slf4j.Logger;
-import org.springframework.stereotype.Service;
-
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -29,6 +10,25 @@ import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
+
+import org.springframework.stereotype.Service;
+import org.verapdf.features.FeatureFactory;
+import org.verapdf.gf.foundry.VeraGreenfieldFoundryProvider;
+import org.verapdf.metadata.fixer.FixerFactory;
+import org.verapdf.pdfa.validation.validators.ValidatorConfig;
+import org.verapdf.pdfa.validation.validators.ValidatorConfigBuilder;
+import org.verapdf.processor.BatchProcessingHandler;
+import org.verapdf.processor.BatchProcessor;
+import org.verapdf.processor.FormatOption;
+import org.verapdf.processor.ProcessorConfig;
+import org.verapdf.processor.ProcessorFactory;
+import org.verapdf.processor.TaskType;
+import org.verapdf.processor.plugins.PluginsCollectionConfig;
+import org.verapdf.processor.reports.BatchSummary;
+import org.verapdf.processor.reports.ValidationBatchSummary;
+
+import jakarta.annotation.PreDestroy;
+import lombok.extern.slf4j.Slf4j;
 
 @Service
 @Slf4j
@@ -44,18 +44,17 @@ public class VeraPdfService {
             VeraGreenfieldFoundryProvider.initialise();
 
             ValidatorConfig validatorConfig = ValidatorConfigBuilder.defaultBuilder()
-                .recordPasses(true)
-                .maxFails(-1)
-                .maxNumberOfDisplayedFailedChecks(Integer.MAX_VALUE)
-                .build();
+                    .recordPasses(true)
+                    .maxFails(-1)
+                    .maxNumberOfDisplayedFailedChecks(Integer.MAX_VALUE)
+                    .build();
 
             ProcessorConfig config = ProcessorFactory.fromValues(
-                validatorConfig,
-                FeatureFactory.defaultConfig(),
-                PluginsCollectionConfig.defaultConfig(),
-                FixerFactory.defaultConfig(),
-                EnumSet.of(TaskType.VALIDATE)
-            );
+                    validatorConfig,
+                    FeatureFactory.defaultConfig(),
+                    PluginsCollectionConfig.defaultConfig(),
+                    FixerFactory.defaultConfig(),
+                    EnumSet.of(TaskType.VALIDATE));
             BatchProcessor processor = ProcessorFactory.fileBatchProcessor(config);
             BatchSummary summary;
             String output;
@@ -63,8 +62,7 @@ public class VeraPdfService {
 
             try {
                 ByteArrayOutputStream out = new ByteArrayOutputStream();
-                BatchProcessingHandler handler =
-                        ProcessorFactory.getHandler(FormatOption.MRR, true, out, true);
+                BatchProcessingHandler handler = ProcessorFactory.getHandler(FormatOption.MRR, true, out, true);
                 summary = processor.process(Collections.singletonList(tempPdf.toFile()), handler);
                 output = out.toString(StandardCharsets.UTF_8);
                 reportFormat = "xml";
@@ -72,16 +70,16 @@ public class VeraPdfService {
                 log.warn("veraPDF detailed XML report generation failed, retrying with HTML", mrrEx);
                 try {
                     ByteArrayOutputStream htmlOut = new ByteArrayOutputStream();
-                    BatchProcessingHandler htmlHandler =
-                            ProcessorFactory.getHandler(FormatOption.HTML, true, htmlOut, true);
+                    BatchProcessingHandler htmlHandler = ProcessorFactory.getHandler(FormatOption.HTML, true, htmlOut,
+                            true);
                     summary = processor.process(Collections.singletonList(tempPdf.toFile()), htmlHandler);
                     output = htmlOut.toString(StandardCharsets.UTF_8);
                     reportFormat = "html";
                 } catch (Exception htmlEx) {
                     log.warn("veraPDF HTML report generation failed, retrying with text report", htmlEx);
                     ByteArrayOutputStream fallbackOut = new ByteArrayOutputStream();
-                    BatchProcessingHandler fallbackHandler =
-                            ProcessorFactory.getHandler(FormatOption.TEXT, true, fallbackOut, true);
+                    BatchProcessingHandler fallbackHandler = ProcessorFactory.getHandler(FormatOption.TEXT, true,
+                            fallbackOut, true);
                     summary = processor.process(Collections.singletonList(tempPdf.toFile()), fallbackHandler);
                     output = fallbackOut.toString(StandardCharsets.UTF_8);
                     reportFormat = "text";

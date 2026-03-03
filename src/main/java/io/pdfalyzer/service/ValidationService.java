@@ -1,7 +1,9 @@
 package io.pdfalyzer.service;
 
-import io.pdfalyzer.model.ValidationIssue;
-import lombok.extern.slf4j.Slf4j;
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.PDDocument;
@@ -11,12 +13,10 @@ import org.apache.pdfbox.pdmodel.PDResources;
 import org.apache.pdfbox.pdmodel.common.PDMetadata;
 import org.apache.pdfbox.pdmodel.font.PDFont;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotation;
-import org.slf4j.Logger;
 import org.springframework.stereotype.Service;
 
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
+import io.pdfalyzer.model.ValidationIssue;
+import lombok.extern.slf4j.Slf4j;
 
 @Service
 @Slf4j
@@ -63,7 +63,8 @@ public class ValidationService {
         for (int i = 0; i < doc.getNumberOfPages(); i++) {
             PDPage page = doc.getPage(i);
             PDResources resources = page.getResources();
-            if (resources == null) continue;
+            if (resources == null)
+                continue;
 
             for (COSName fontName : resources.getFontNames()) {
                 try {
@@ -81,7 +82,8 @@ public class ValidationService {
                     if (!font.getCOSObject().containsKey(COSName.TO_UNICODE)) {
                         issues.add(new ValidationIssue(
                                 "WARNING", "FONT-002",
-                                "Font '" + font.getName() + "' has no ToUnicode CMap on page " + (i + 1) + " - text extraction may fail",
+                                "Font '" + font.getName() + "' has no ToUnicode CMap on page " + (i + 1)
+                                        + " - text extraction may fail",
                                 "PDF/A-1b, Section 6.3.7",
                                 "Page " + (i + 1) + " / " + fontName.getName(),
                                 "font"));
@@ -89,7 +91,8 @@ public class ValidationService {
                 } catch (Exception e) {
                     issues.add(new ValidationIssue(
                             "ERROR", "FONT-ERR",
-                            "Could not load font '" + fontName.getName() + "' on page " + (i + 1) + ": " + e.getMessage(),
+                            "Could not load font '" + fontName.getName() + "' on page " + (i + 1) + ": "
+                                    + e.getMessage(),
                             "PDF 2.0, Section 9",
                             "Page " + (i + 1),
                             "font"));
@@ -136,7 +139,8 @@ public class ValidationService {
                     if (annot.getAppearance() == null) {
                         issues.add(new ValidationIssue(
                                 "WARNING", "ANNOT-002",
-                                "Annotation '" + annot.getSubtype() + "' on page " + (i + 1) + " has no appearance stream",
+                                "Annotation '" + annot.getSubtype() + "' on page " + (i + 1)
+                                        + " has no appearance stream",
                                 "PDF/A-1b, Section 6.5.3",
                                 "Page " + (i + 1),
                                 "annotation"));

@@ -1,16 +1,26 @@
 package io.pdfalyzer.service;
 
-import io.pdfalyzer.model.CosUpdateRequest;
-import lombok.extern.slf4j.Slf4j;
-import org.apache.pdfbox.Loader;
-import org.apache.pdfbox.cos.*;
-import org.apache.pdfbox.pdmodel.PDDocument;
-import org.slf4j.Logger;
-import org.springframework.stereotype.Service;
-
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.List;
+
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.cos.COSArray;
+import org.apache.pdfbox.cos.COSBase;
+import org.apache.pdfbox.cos.COSBoolean;
+import org.apache.pdfbox.cos.COSDictionary;
+import org.apache.pdfbox.cos.COSDocument;
+import org.apache.pdfbox.cos.COSFloat;
+import org.apache.pdfbox.cos.COSInteger;
+import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.cos.COSObject;
+import org.apache.pdfbox.cos.COSObjectKey;
+import org.apache.pdfbox.cos.COSString;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.springframework.stereotype.Service;
+
+import io.pdfalyzer.model.CosUpdateRequest;
+import lombok.extern.slf4j.Slf4j;
 
 @Service
 @Slf4j
