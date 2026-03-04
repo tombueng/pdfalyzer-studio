@@ -82,202 +82,24 @@ PDFalyzer.Viewer = (function ($, P) {
         $(window).on('blur.pdfviewerpan', finishPanDrag);
     }
 
-    function ensureStagingViewer() {
-        var $staging = $('#pdfViewerStaging');
-        if ($staging.length) return $staging;
-        $staging = $('<div>', { id: 'pdfViewerStaging', 'class': 'pdf-viewer-staging' });
-        $('#pdfPane').append($staging);
-        return $staging;
-    }
+    function attachPageListeners(canvas, pageIndex, $wrapper) {
+        ensurePanListenersAttached();
 
-    function capturePaneViewState() {
-        var pane = $('#pdfPane')[0];
-        var $viewer = $('#pdfViewer');
-        if (!pane || !$viewer.length) return null;
-
-        var centerY = pane.scrollTop + (pane.clientHeight / 2);
-        var bestPage = -1;
-        var bestDistance = Number.POSITIVE_INFINITY;
-        var bestOffset = 0;
-
-        $viewer.find('.pdf-page-wrapper').each(function () {
-            var pageIndex = parseInt($(this).attr('data-page'), 10);
-            if (!isFinite(pageIndex)) return;
-            var top = this.offsetTop;
-            var bottom = top + this.offsetHeight;
-            var distance;
-            if (centerY < top) distance = top - centerY;
-            else if (centerY > bottom) distance = centerY - bottom;
-            else distance = 0;
-            if (distance < bestDistance) {
-                bestDistance = distance;
-                bestPage = pageIndex;
-                bestOffset = centerY - top;
-            }
-        });
-
-        return {
-            scrollTop: pane.scrollTop,
-            scrollLeft: pane.scrollLeft,
-            anchorPage: bestPage,
-            anchorOffset: bestOffset
-        };
-    }
-
-    function restorePaneViewState(viewState, exactOnly) {
-        if (!viewState) return;
-        var pane = $('#pdfPane')[0];
-        if (!pane) return;
-
-        pane.scrollLeft = typeof viewState.scrollLeft === 'number' ? viewState.scrollLeft : 0;
-
-        var restored = false;
-        if (!exactOnly && typeof viewState.anchorPage === 'number' && viewState.anchorPage >= 0) {
-            var wrapper = $('#pdfViewer .pdf-page-wrapper[data-page="' + viewState.anchorPage + '"]')[0];
-            if (wrapper) {
-                var center = wrapper.offsetTop + (viewState.anchorOffset || 0);
-                var desiredTop = center - (pane.clientHeight / 2);
-                pane.scrollTop = Math.max(0, desiredTop);
-                restored = true;
-            }
-        }
-
-        if (!restored && typeof viewState.scrollTop === 'number') {
-            pane.scrollTop = viewState.scrollTop;
-        }
-    }
-
-    function waitForPaneSettle(targetScrollTop, maxWaitMs) {
-        var pane = $('#pdfPane')[0];
-        if (!pane) return Promise.resolve();
-
-        var timeoutMs = typeof maxWaitMs === 'number' ? maxWaitMs : 1000;
-        var start = (window.performance && window.performance.now) ? window.performance.now() : Date.now();
-        var stableFrames = 0;
-        var lastTop = pane.scrollTop;
-
-        return new Promise(function (resolve) {
-            function tick() {
-                var now = (window.performance && window.performance.now) ? window.performance.now() : Date.now();
-                var currentTop = pane.scrollTop;
-                var referenceTop = typeof targetScrollTop === 'number' ? targetScrollTop : lastTop;
-                var isStable = Math.abs(currentTop - referenceTop) <= 1;
-
-                stableFrames = isStable ? (stableFrames + 1) : 0;
-                lastTop = currentTop;
-
-                if (stableFrames >= 3 || (now - start) >= timeoutMs) {
-                    resolve();
-                    return;
+        $(canvas).on('click', function (e) { handleClick(e, pageIndex); })
+            .on('mousedown', function (e) {
+                if (tryStartPanDrag(e, pageIndex, canvas)) return;
+                if (P.state.editMode && P.state.editFieldType) {
+                    P.EditMode.startDraw(e, pageIndex, $wrapper[0]);
                 }
-
-                window.requestAnimationFrame(tick);
-            }
-
-            window.requestAnimationFrame(tick);
-        });
-    }
-
-    function swapStagedViewer($staging, viewState) {
-        var $viewer = $('#pdfViewer');
-        if (!$viewer.length || !$staging.length) return;
-        $staging.removeClass('pdf-viewer-crossfade-in').addClass('pdf-viewer-staging-active');
-
-        restorePaneViewState(viewState, true);
-        var targetTop = viewState && typeof viewState.scrollTop === 'number' ? viewState.scrollTop : null;
-
-        waitForPaneSettle(targetTop, 1000).then(function () {
-            window.requestAnimationFrame(function () {
-                window.requestAnimationFrame(function () {
-                    $staging.addClass('pdf-viewer-crossfade-in');
-                });
+            })
+            .on('mousemove', function (e) {
+                updateCanvasCursor(canvas, pageIndex, e);
+            })
+            .on('mouseleave', function () {
+                if (!panDragState.active) {
+                    canvas.style.cursor = '';
+                }
             });
-
-            window.setTimeout(function () {
-                $viewer.remove();
-                $staging
-                    .attr('id', 'pdfViewer')
-                    .removeClass('pdf-viewer-staging pdf-viewer-staging-active pdf-viewer-crossfade-in')
-                    .css({ visibility: '', pointerEvents: '', opacity: '', zIndex: '', position: '', inset: '', overflow: '' });
-                $(document).trigger('pdfviewer:rendered');
-            }, 190);
-        });
-    }
-
-    function renderPageToContainer(pdf, pageNum, $container, pageViewports, pageCanvases, disableEntryAnimation) {
-        return pdf.getPage(pageNum).then(function (page) {
-            var scale = P.state.currentScale;
-            var viewport = page.getViewport({ scale: scale });
-            pageViewports[pageNum - 1] = viewport;
-
-            var $wrapper = $('<div>', { 'class': 'pdf-page-wrapper', 'data-page': pageNum - 1 })
-                .css('animation-delay', ((pageNum - 1) * 0.08) + 's');
-            if (disableEntryAnimation) {
-                $wrapper.addClass('pdf-page-wrapper-static').css('animation-delay', '0s');
-            }
-            var canvas = document.createElement('canvas');
-            canvas.width = viewport.width;
-            canvas.height = viewport.height;
-            $wrapper.append(canvas);
-            pageCanvases[pageNum - 1] = canvas;
-            $wrapper.append($('<div>', { 'class': 'pdf-page-label', text: 'Page ' + pageNum }));
-            $container.append($wrapper);
-
-            ensurePanListenersAttached();
-
-            $(canvas).on('click', function (e) { handleClick(e, pageNum - 1); })
-                .on('mousedown', function (e) {
-                    if (tryStartPanDrag(e, pageNum - 1, canvas)) return;
-                    if (P.state.editMode && P.state.editFieldType) {
-                        P.EditMode.startDraw(e, pageNum - 1, $wrapper[0]);
-                    }
-                })
-                .on('mousemove', function (e) {
-                    updateCanvasCursor(canvas, pageNum - 1, e);
-                })
-                .on('mouseleave', function () {
-                    if (!panDragState.active) {
-                        canvas.style.cursor = '';
-                    }
-                });
-
-            return page.render({ canvasContext: canvas.getContext('2d'), viewport: viewport }).promise
-                .then(function () {
-                    if (P.EditMode && P.EditMode.renderFieldHandles) {
-                        P.EditMode.renderFieldHandles(pageNum - 1, $wrapper[0], viewport);
-                    }
-                });
-        });
-    }
-
-    function renderPdfIntoContainer(pdf, $container, pageViewports, pageCanvases, options) {
-        var opts = options || {};
-        var disableEntryAnimation = !!opts.disableEntryAnimation;
-        var isCancelled = typeof opts.isCancelled === 'function' ? opts.isCancelled : null;
-        var atomicCommit = !!opts.atomicCommit;
-        var $renderTarget = atomicCommit ? $('<div>') : $container;
-
-        if (!atomicCommit) {
-            $container.empty();
-        }
-
-        var chain = Promise.resolve();
-        for (var i = 1; i <= pdf.numPages; i++) {
-            chain = chain.then((function (pageNum) {
-                return function () {
-                    if (isCancelled && isCancelled()) return;
-                    return renderPageToContainer(pdf, pageNum, $renderTarget, pageViewports, pageCanvases,
-                        disableEntryAnimation);
-                };
-            })(i));
-        }
-
-        return chain.then(function () {
-            if (isCancelled && isCancelled()) return;
-            if (atomicCommit) {
-                $container.empty().append($renderTarget.children());
-            }
-        });
     }
 
     function loadPdf(sid, options) {
@@ -285,13 +107,13 @@ PDFalyzer.Viewer = (function ($, P) {
         var opts = options || {};
         var url = '/api/pdf/' + sid;
         var $viewer = $('#pdfViewer').show();
-        var viewState = opts.preserveView ? capturePaneViewState() : null;
+        var viewState = opts.preserveView ? P.ViewerRender.capturePaneViewState() : null;
         var useSmoothSwap = !!opts.smoothSwap && $viewer.children().length > 0;
         var $target = $viewer;
         var $staging = null;
 
         if (useSmoothSwap) {
-            $staging = ensureStagingViewer();
+            $staging = P.ViewerRender.ensureStagingViewer();
             $staging.removeClass('pdf-viewer-crossfade-in pdf-viewer-staging-active').empty();
             $target = $staging;
         }
@@ -307,15 +129,15 @@ PDFalyzer.Viewer = (function ($, P) {
                 P.state.basePageSize.width  = vp.width;
                 P.state.basePageSize.height = vp.height;
             });
-            return renderPdfIntoContainer(pdf, $target, nextViewports, nextCanvases,
+            return P.ViewerRender.renderPdfIntoContainer(pdf, $target, nextViewports, nextCanvases,
                 { disableEntryAnimation: useSmoothSwap })
                 .then(function () {
                     P.state.pageViewports = nextViewports;
                     P.state.pageCanvases = nextCanvases;
                     if (useSmoothSwap && $staging) {
-                        swapStagedViewer($staging, viewState);
+                        P.ViewerRender.swapStagedViewer($staging, viewState);
                     } else {
-                        restorePaneViewState(viewState);
+                        P.ViewerRender.restorePaneViewState(viewState);
                         $(document).trigger('pdfviewer:rendered');
                     }
                 });
@@ -331,16 +153,16 @@ PDFalyzer.Viewer = (function ($, P) {
         if (!P.state.pdfDoc) return;
         var opts = options || {};
         var requestId = beginRenderRequest();
-        var viewState = opts.preserveView ? capturePaneViewState() : null;
+        var viewState = opts.preserveView ? P.ViewerRender.capturePaneViewState() : null;
         var useSmoothSwap = !!opts.smoothSwap && $('#pdfViewer').children().length > 0;
         var nextViewports = [];
         var nextCanvases = [];
 
         if (useSmoothSwap) {
-            var $staging = ensureStagingViewer();
+            var $staging = P.ViewerRender.ensureStagingViewer();
             $staging.removeClass('pdf-viewer-crossfade-in pdf-viewer-staging-active').empty();
 
-            return renderPdfIntoContainer(P.state.pdfDoc, $staging, nextViewports, nextCanvases, {
+            return P.ViewerRender.renderPdfIntoContainer(P.state.pdfDoc, $staging, nextViewports, nextCanvases, {
                 disableEntryAnimation: true,
                 isCancelled: function () { return !isRenderRequestActive(requestId); }
             }).then(function () {
@@ -351,14 +173,14 @@ PDFalyzer.Viewer = (function ($, P) {
 
                 P.state.pageViewports = nextViewports;
                 P.state.pageCanvases = nextCanvases;
-                swapStagedViewer($staging, viewState);
+                P.ViewerRender.swapStagedViewer($staging, viewState);
             }).catch(function () {
                 if (!isRenderRequestActive(requestId)) return;
                 $staging.removeClass('pdf-viewer-crossfade-in pdf-viewer-staging-active').empty();
             });
         }
 
-        return renderPdfIntoContainer(P.state.pdfDoc, $('#pdfViewer'), nextViewports, nextCanvases, {
+        return P.ViewerRender.renderPdfIntoContainer(P.state.pdfDoc, $('#pdfViewer'), nextViewports, nextCanvases, {
             disableEntryAnimation: true,
             atomicCommit: true,
             isCancelled: function () { return !isRenderRequestActive(requestId); }
@@ -366,7 +188,7 @@ PDFalyzer.Viewer = (function ($, P) {
             if (!isRenderRequestActive(requestId)) return;
             P.state.pageViewports = nextViewports;
             P.state.pageCanvases = nextCanvases;
-            restorePaneViewState(viewState);
+            P.ViewerRender.restorePaneViewState(viewState);
             $(document).trigger('pdfviewer:rendered');
         });
     }
@@ -606,5 +428,5 @@ PDFalyzer.Viewer = (function ($, P) {
     return { loadPdf: loadPdf, renderAllPages: renderAllPages, setScale: setScale,
              fitWidth: fitWidth, fitHeight: fitHeight, applyAutoZoom: applyAutoZoom,
              highlight: highlight, clearHighlights: clearHighlights,
-             scrollToPage: scrollToPage };
+             scrollToPage: scrollToPage, attachPageListeners: attachPageListeners };
 })(jQuery, PDFalyzer);

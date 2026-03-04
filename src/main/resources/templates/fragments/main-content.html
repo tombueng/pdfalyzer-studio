@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<div id="appContainer" th:fragment="main-content">
+    <!-- PDF Viewer -->
+    <div id="pdfPane">
+        <div id="dropOverlay"><i class="fas fa-cloud-upload-alt me-2"></i> Drop PDF here</div>
+        <div id="uploadSplash">
+            <img src="/logo.svg" alt="PDFalyzer Studio" />
+            <p>Upload or drop a PDF to get started</p>
+            <label class="btn btn-accent">
+                <i class="fas fa-file-pdf me-1"></i> Choose PDF
+                <input type="file" accept=".pdf" hidden
+                       onchange="document.getElementById('fileInput').files = this.files;
+                                 document.getElementById('fileInput').dispatchEvent(new Event('change'));" />
+            </label>
+        </div>
+        <div id="pdfViewer" style="display:none;"></div>
+    </div>
+
+    <!-- Resize Divider -->
+    <div id="divider"></div>
+
+    <!-- Tree Panel -->
+    <div id="treePane">
+        <div class="tree-tabs">
+            <div class="tree-tabs-list">
+                <button class="tab-btn active" data-tab="structure"><i class="fas fa-sitemap me-1"></i>Structure</button>
+                <button class="tab-btn" data-tab="forms"><i class="fas fa-wpforms me-1"></i>Forms</button>
+                <button class="tab-btn" data-tab="fonts"><i class="fas fa-font me-1"></i>Fonts</button>
+                <button class="tab-btn" data-tab="validation"><i class="fas fa-check-circle me-1"></i>Validation</button>
+                <button class="tab-btn" data-tab="rawcos"><i class="fas fa-database me-1"></i>Raw COS</button>
+                <button class="tab-btn" data-tab="bookmarks"><i class="fas fa-bookmark me-1"></i>Bookmarks</button>
+                <button class="tab-btn" data-tab="attachments"><i class="fas fa-paperclip me-1"></i>Attachments</button>
+            </div>
+            <div class="tree-search-tools">
+                <input id="searchInput" type="text" class="form-control form-control-sm table-filter-input"
+                       placeholder="Search tree..." disabled />
+            </div>
+        </div>
+        <div id="treeContent">
+            <div class="text-muted text-center mt-5" style="font-size:13px;">
+                <i class="fas fa-arrow-left me-1"></i> Upload a PDF to inspect
+            </div>
+        </div>
+    </div>
+</div>
+</body>
+</html>
