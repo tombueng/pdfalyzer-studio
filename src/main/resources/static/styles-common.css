@@ -266,6 +266,61 @@
 .cos-edit-cancel { color: var(--danger); }
 .cos-edit-cancel:hover { background: rgba(220, 53, 69, 0.2); }
 
+/* === Encryption Status === */
+#statusEncryption {
+    color: var(--warning);
+    font-size: 11px;
+}
+
+.enc-badge-readonly {
+    display: inline-block;
+    font-size: 10px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: rgba(220, 53, 69, 0.18);
+    color: var(--danger);
+    border: 1px solid rgba(220, 53, 69, 0.4);
+    vertical-align: middle;
+}
+
+/* === Snap-to-grid button active state === */
+#snapGridBtn.active {
+    background: rgba(var(--accent-rgb, 60,120,200), 0.2);
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+/* === Issue explainer === */
+.issue-explainer {
+    margin-top: 6px;
+    border-top: 1px solid rgba(255,255,255,0.08);
+    padding-top: 4px;
+}
+.issue-explainer-summary {
+    cursor: pointer;
+    font-size: 11px;
+    color: var(--text-muted);
+    user-select: none;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+.issue-explainer-summary::-webkit-details-marker { display: none; }
+.issue-explainer-summary::marker { content: ''; }
+.issue-explainer[open] .issue-explainer-summary { color: var(--text); }
+.issue-explainer-body {
+    padding: 6px 8px;
+    font-size: 11px;
+    color: var(--text-muted);
+    background: rgba(255,255,255,0.03);
+    border-radius: 4px;
+    margin-top: 4px;
+}
+.issue-explainer-body strong { color: var(--text); }
+.issue-tab-link { color: var(--accent); text-decoration: none; }
+.issue-tab-link:hover { text-decoration: underline; }
+
 /* === Responsive === */
 @media (max-width: 768px) {
     #appContainer { flex-direction: column; }

@@ -1,2 +1,17 @@
-add support for passowrd protected / encrypted documents. when the user upload such a document we shall detect what we need. owner or user password. let the user give us the passwrod, we will figure out which type it is (by trying out). display in the UI bottom bar the details about the encryption. if we can not modify the file (we will try to figure out anyway and ignore write protection if feasible) we will display that in the UI and disallow modification operations.
+- add support for passowrd protected / encrypted documents. 
+    when the user upload such a document we shall detect what we need. 
+    owner or user password. let the user give us the passwrod, we will figure out 
+    which type it is (by trying out). display in the UI bottom bar the details
+    about the encryption. if we can not modify the file 
+    (we will try to figure out anyway and ignore write protection
+     if feasible) we will display that in the UI and disallow modification operations.
+     Also generate Test pdf files with all the different types of protection/encryption
+     an use them for tests.
 
+- Field designer upgrades
+  - Snap-to-grid, copy/paste, align/distribute for form fields.
+  - Multi-select mass edit with live visual handles.
+
+- Smart issue explainer**
+  - For each validation issue, provide “Why this matters” + “Likely fix” text.
+  - Include confidence and direct links to relevant tree nodes.

@@ -17,6 +17,7 @@ public class PdfSession {
     private PdfNode rawCosTree;
     private int pageCount;
     private long lastAccessTime;
+    private EncryptionInfo encryptionInfo;
 
     public PdfSession(String id, String filename, byte[] pdfBytes) {
         this.id = id;

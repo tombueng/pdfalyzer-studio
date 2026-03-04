@@ -1,7 +1,11 @@
 package io.pdfalyzer.tools;
 
 import io.pdfalyzer.model.FontDiagnostics;
+import io.pdfalyzer.service.FontCollectionHelper;
+import io.pdfalyzer.service.FontDiagnosticsBuilder;
+import io.pdfalyzer.service.FontFileHelper;
 import io.pdfalyzer.service.FontInspectorService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -16,6 +20,13 @@ class GeneratedPdfMissingGlyphsTest {
     @TempDir
     Path tempDir;
 
+    FontInspectorService service;
+
+    @BeforeEach
+    void setUp() {
+        service = new FontInspectorService(new FontCollectionHelper(), new FontDiagnosticsBuilder(), new FontFileHelper());
+    }
+
     @Test
     void generatedPdfContainsAtLeastOneFontWithMissingUsedMappings() throws Exception {
         TestPdfGenerator.main(new String[]{tempDir.toString()});
@@ -24,7 +35,6 @@ class GeneratedPdfMissingGlyphsTest {
         assertTrue(Files.exists(generatedPdf), "Expected generated test.pdf");
 
         byte[] bytes = Files.readAllBytes(generatedPdf);
-        FontInspectorService service = new FontInspectorService();
         FontDiagnostics diagnostics = service.analyzeFontIssues(bytes);
 
         assertNotNull(diagnostics);

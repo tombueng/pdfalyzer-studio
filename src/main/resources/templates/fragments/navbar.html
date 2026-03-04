@@ -50,6 +50,32 @@
                     <button class="btn btn-outline-accent btn-sm" id="formOptionsBtn" disabled title="Edit options for selected field(s)">
                         <i class="fas fa-sliders-h me-1"></i>Options
                     </button>
+                    <div class="vr mx-1"></div>
+                    <button class="btn btn-outline-accent btn-sm" id="snapGridBtn" title="Toggle snap to grid (G)">
+                        <i class="fas fa-th"></i>
+                    </button>
+                    <button class="btn btn-outline-accent btn-sm" id="copyFieldsBtn" disabled title="Copy selected fields (Ctrl+C)">
+                        <i class="fas fa-copy"></i>
+                    </button>
+                    <button class="btn btn-outline-accent btn-sm" id="pasteFieldsBtn" disabled title="Paste fields (Ctrl+V)">
+                        <i class="fas fa-paste"></i>
+                    </button>
+                    <div class="dropdown">
+                        <button class="btn btn-outline-accent btn-sm dropdown-toggle" id="alignDropdownBtn" disabled title="Align / distribute selected fields (2+ required)">
+                            <i class="fas fa-align-left"></i>
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="alignDropdownBtn">
+                            <li><button class="dropdown-item" id="alignLeftBtn"><i class="fas fa-align-left me-2"></i>Align Left</button></li>
+                            <li><button class="dropdown-item" id="alignRightBtn"><i class="fas fa-align-right me-2"></i>Align Right</button></li>
+                            <li><button class="dropdown-item" id="alignTopBtn"><i class="fas fa-arrow-up me-2"></i>Align Top</button></li>
+                            <li><button class="dropdown-item" id="alignBottomBtn"><i class="fas fa-arrow-down me-2"></i>Align Bottom</button></li>
+                            <li><button class="dropdown-item" id="centerHBtn"><i class="fas fa-arrows-alt-h me-2"></i>Center Horizontally</button></li>
+                            <li><button class="dropdown-item" id="centerVBtn"><i class="fas fa-arrows-alt-v me-2"></i>Center Vertically</button></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><button class="dropdown-item" id="distributeHBtn"><i class="fas fa-grip-lines-vertical me-2"></i>Distribute Horizontally</button></li>
+                            <li><button class="dropdown-item" id="distributeVBtn"><i class="fas fa-grip-lines me-2"></i>Distribute Vertically</button></li>
+                        </ul>
+                    </div>
                     <button class="btn btn-outline-accent btn-sm" id="formSaveBtn" disabled title="Save pending form changes">
                         <i class="fas fa-save me-1"></i>Save
                         <span id="formSaveFailedBadge" class="badge text-bg-danger ms-1 d-none" title="Failed pending COS changes">0</span>
@@ -107,6 +133,18 @@
                     </button>
                     <button class="navbar-mobile-item" onclick="document.getElementById('formOptionsBtn').click()">
                         <i class="fas fa-sliders-h me-2"></i>Field Options
+                    </button>
+                    <button class="navbar-mobile-item" onclick="document.getElementById('snapGridBtn').click()">
+                        <i class="fas fa-th me-2"></i>Toggle Snap to Grid
+                    </button>
+                    <button class="navbar-mobile-item" onclick="document.getElementById('copyFieldsBtn').click()">
+                        <i class="fas fa-copy me-2"></i>Copy Selected Fields
+                    </button>
+                    <button class="navbar-mobile-item" onclick="document.getElementById('pasteFieldsBtn').click()">
+                        <i class="fas fa-paste me-2"></i>Paste Fields
+                    </button>
+                    <button class="navbar-mobile-item" onclick="document.getElementById('alignLeftBtn').click()">
+                        <i class="fas fa-align-left me-2"></i>Align Left
                     </button>
                     <button class="navbar-mobile-item" onclick="document.getElementById('formSaveBtn').click()">
                         <i class="fas fa-save me-2"></i>Save Form Changes

@@ -233,7 +233,8 @@ PDFalyzer.EditField = (function ($, P) {
         function commitRect() {
             var l = parseFloat($handle.css('left')), t = parseFloat($handle.css('top'));
             var s = viewport.scale, fn = fieldNode && fieldNode.properties ? fieldNode.properties.FullName : null;
-            if (fn) P.EditMode.queueRectChange(fn, l / s, (viewport.height - t - $handle.height()) / s, $handle.width() / s, $handle.height() / s);
+            var sn = P.EditDesigner ? P.EditDesigner.snapV : function (v) { return v; };
+            if (fn) P.EditMode.queueRectChange(fn, sn(l / s), sn((viewport.height - t - $handle.height()) / s), sn($handle.width() / s), sn($handle.height() / s));
             P.EditMode.renderFieldHandlesForAllPages(); P.EditMode.updateSaveButton(); detach();
         }
         $handle.on('dblclick', function (e) {
@@ -272,7 +273,8 @@ PDFalyzer.EditField = (function ($, P) {
                 if (!dragging && !resizing) { detach(); return; }
                 var wasDrag = dragging; dragging = false; resizing = false;
                 if (wasDrag) {
-                    (start.dragTargets || []).forEach(function (t) { if (!t.viewport || !t.rect) return; var tl = parseFloat(t.$el.css('left')) || 0, tt = parseFloat(t.$el.css('top')) || 0; P.EditMode.queueRectChange(t.fieldName, t.rect.x + (tl - t.left) / t.viewport.scale, t.rect.y - (tt - t.top) / t.viewport.scale, t.rect.width, t.rect.height); });
+                    var sn = P.EditDesigner ? P.EditDesigner.snapV : function (v) { return v; };
+                    (start.dragTargets || []).forEach(function (t) { if (!t.viewport || !t.rect) return; var tl = parseFloat(t.$el.css('left')) || 0, tt = parseFloat(t.$el.css('top')) || 0; P.EditMode.queueRectChange(t.fieldName, sn(t.rect.x + (tl - t.left) / t.viewport.scale), sn(t.rect.y - (tt - t.top) / t.viewport.scale), t.rect.width, t.rect.height); });
                     P.EditMode.renderFieldHandlesForAllPages(); P.EditMode.updateSaveButton(); detach();
                 } else { commitRect(); }
             };
@@ -300,6 +302,7 @@ PDFalyzer.EditField = (function ($, P) {
         getSupportedOptionsForFieldType: getSupportedOptionsForFieldType,
         setFieldConfigBlockVisible: setFieldConfigBlockVisible, isFieldConfigBlockVisible: isFieldConfigBlockVisible,
         getJsPresetDefinitions: getJsPresetDefinitions, buildPresetScript: buildPresetScript,
-        renderJsPresetParams: renderJsPresetParams, collectJsPresetParams: collectJsPresetParams
+        renderJsPresetParams: renderJsPresetParams, collectJsPresetParams: collectJsPresetParams,
+        suggestNextFieldId: suggestNextFieldId
     };
 })(jQuery, PDFalyzer);

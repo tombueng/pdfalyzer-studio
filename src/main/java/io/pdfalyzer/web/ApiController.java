@@ -68,6 +68,22 @@ public class ApiController {
         result.put("filename", session.getFilename());
         result.put("pageCount", session.getPageCount());
         result.put("tree", session.getTreeRoot());
+        result.put("encryptionInfo", session.getEncryptionInfo());
+        return ResponseEntity.ok(result);
+    }
+
+    @PostMapping("/session/{sessionId}/unlock")
+    public ResponseEntity<Map<String, Object>> unlockSession(
+            @PathVariable("sessionId") String sessionId,
+            @RequestBody Map<String, String> body) throws IOException {
+        String password = body == null ? "" : body.getOrDefault("password", "");
+        PdfSession session = pdfService.unlockSession(sessionId, password);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("sessionId", session.getId());
+        result.put("filename", session.getFilename());
+        result.put("pageCount", session.getPageCount());
+        result.put("tree", session.getTreeRoot());
+        result.put("encryptionInfo", session.getEncryptionInfo());
         return ResponseEntity.ok(result);
     }
 
