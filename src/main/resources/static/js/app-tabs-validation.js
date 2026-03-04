@@ -6,6 +6,90 @@ PDFalyzer.ValidationTab = (function ($, P) {
 
     var _p = P._tabPrivate;
 
+    // ── Issue explainer knowledge base ────────────────────────────────────────
+    var ISSUE_EXPLAINER = {
+        'META-001': {
+            why: 'XMP metadata is required for PDF/A compliance. Document management systems and search engines rely on it for indexing and discoverability.',
+            fix: 'Embed an XMP metadata stream by setting document properties in your PDF authoring tool, or via PDFBox: PDMetadata / XMPMetadata APIs.',
+            confidence: 'high', tab: null
+        },
+        'META-002': {
+            why: 'A document title aids accessibility (screen readers announce the title) and improves search ranking in digital repositories.',
+            fix: 'Set the /Title entry in the document information dictionary via File → Properties → Description in your PDF editor.',
+            confidence: 'high', tab: null
+        },
+        'META-003': {
+            why: 'Producer information identifies the software that created the PDF. This is used for auditing, troubleshooting, and compliance reporting.',
+            fix: 'Set the /Producer entry programmatically or ensure your PDF creation tool writes it automatically.',
+            confidence: 'low', tab: null
+        },
+        'FONT-001': {
+            why: 'Non-embedded fonts cause rendering differences across systems. The document may display incorrectly or fail to print on machines that lack the font.',
+            fix: 'Re-export the document with font embedding enabled. In most tools: File → Export → PDF Options → Embed all fonts.',
+            confidence: 'high', tab: 'fonts'
+        },
+        'FONT-002': {
+            why: 'Without a ToUnicode CMap, text cannot be reliably extracted (copy/paste, search, accessibility). Required for PDF/A-1b compliance.',
+            fix: 'Regenerate the PDF with a tool that writes ToUnicode CMap entries, or use a subset-embedding option that includes them.',
+            confidence: 'high', tab: 'fonts'
+        },
+        'FONT-ERR': {
+            why: 'A corrupt or unloadable font will prevent text from rendering on that page and may cause viewer crashes.',
+            fix: 'Identify and replace the problematic font. Use PDFalyzer\'s Fonts tab to locate the object, then re-embed or substitute.',
+            confidence: 'medium', tab: 'fonts'
+        },
+        'PAGE-001': {
+            why: 'A PDF with zero pages is invalid per the PDF specification and will be rejected by most viewers, printers, and workflows.',
+            fix: 'The document may be corrupt. Try re-saving from the source application or repairing with a PDF repair tool.',
+            confidence: 'high', tab: null
+        },
+        'PAGE-002': {
+            why: 'Without a MediaBox, the viewer has no page dimensions and cannot render the page. This is a fatal structural error.',
+            fix: 'Add a /MediaBox entry to the page dictionary. Use the COS editor in PDFalyzer to add [0 0 595 842] for A4.',
+            confidence: 'high', tab: null
+        },
+        'ANNOT-001': {
+            why: 'An annotation without a rectangle has no position and will not display or be interactive.',
+            fix: 'Set the /Rect entry in the annotation dictionary. Use the COS editor to add the four-element array [x1 y1 x2 y2].',
+            confidence: 'medium', tab: null
+        },
+        'ANNOT-002': {
+            why: 'PDF/A-1b requires all annotations to have an appearance stream (/AP). Without one, the annotation may not render consistently across viewers.',
+            fix: 'Open the PDF in a PDF editor and flatten or regenerate annotations. For form fields, use "Flatten Annotations" export option.',
+            confidence: 'high', tab: null
+        }
+    };
+
+    function confidenceBadgeHtml(level) {
+        var cls = level === 'high' ? 'bg-success' : level === 'medium' ? 'bg-warning text-dark' : 'bg-secondary';
+        return '<span class="badge ' + cls + ' ms-1" style="font-size:10px;">Confidence: ' + level + '</span>';
+    }
+
+    function buildExplainerHtml(issue) {
+        var ex = ISSUE_EXPLAINER[issue.ruleId];
+        if (!ex) return '';
+        var tabLink = '';
+        if (ex.tab && P.Tabs && P.Tabs.switchTab) {
+            tabLink = ' <a href="#" class="issue-tab-link ms-2" data-tab="' + ex.tab + '" style="font-size:11px;">' +
+                '<i class="fas fa-arrow-right me-1"></i>Open ' + ex.tab + ' tab</a>';
+        }
+        return '<details class="issue-explainer mt-1"><summary class="issue-explainer-summary">' +
+            '<i class="fas fa-lightbulb me-1 text-warning"></i>Why this matters' +
+            confidenceBadgeHtml(ex.confidence) + '</summary>' +
+            '<div class="issue-explainer-body">' +
+            '<p class="mb-1"><strong>Why:</strong> ' + P.Utils.escapeHtml(ex.why) + '</p>' +
+            '<p class="mb-1"><strong>Likely fix:</strong> ' + P.Utils.escapeHtml(ex.fix) + tabLink + '</p>' +
+            '</div></details>';
+    }
+
+    function bindExplainerLinks($container) {
+        $container.find('.issue-tab-link').off('click').on('click', function (e) {
+            e.preventDefault();
+            var tab = $(this).data('tab');
+            if (tab && P.Tabs && P.Tabs.switchTab) P.Tabs.switchTab(tab);
+        });
+    }
+
     function getValidationControlsHtml(disableExport) {
         return '<div class="text-center mt-3">' +
             '<button class="btn btn-accent btn-sm me-2" id="runValidateBtn">' +
@@ -81,11 +165,14 @@ PDFalyzer.ValidationTab = (function ($, P) {
                 '<span class="issue-rule">' + P.Utils.escapeHtml(issue.ruleId) + '</span></div>' +
                 '<div>' + P.Utils.escapeHtml(issue.message) + '</div>' +
                 '<div class="issue-spec">' + P.Utils.escapeHtml(issue.specReference || '') +
-                ' &mdash; ' + P.Utils.escapeHtml(issue.location || '') + '</div></div>';
+                ' &mdash; ' + P.Utils.escapeHtml(issue.location || '') + '</div>' +
+                buildExplainerHtml(issue) +
+                '</div>';
         });
         html += '</div>';
         $c.html(html);
         bindValidationControls();
+        bindExplainerLinks($c);
     }
 
     // ======================== VERA PDF ========================

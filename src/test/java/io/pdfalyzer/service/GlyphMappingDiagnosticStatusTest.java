@@ -27,7 +27,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class GlyphMappingDiagnosticStatusTest {
 
-    private static final FontInspectorService service = new FontInspectorService();
+    static FontInspectorService service;
     private static byte[] generatedTestPdfBytes;
     private static byte[] campinglisteBytes;
 
@@ -36,6 +36,7 @@ class GlyphMappingDiagnosticStatusTest {
 
     @BeforeAll
     static void loadPdfs() throws Exception {
+        service = new FontInspectorService(new FontCollectionHelper(), new FontDiagnosticsBuilder(), new FontFileHelper());
         // Generate the comprehensive test.pdf which has a probe font with empty ToUnicode
         TestPdfGenerator.main(new String[]{tempDir.toString()});
         generatedTestPdfBytes = Files.readAllBytes(tempDir.resolve("test.pdf"));

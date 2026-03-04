@@ -1,10 +1,11 @@
 /**
- * PDFalyzer Studio – PDF file upload and drag-and-drop.
+ * PDFalyzer Studio – PDF file upload, drag-and-drop, and password unlock.
  */
 PDFalyzer.Upload = (function ($, P) {
     'use strict';
 
     var _inFlight = false;
+    var _passwordModal = null;  // BS modal instance
 
     function selectActiveTab(tab) {
         var nextTab = tab || 'structure';
@@ -31,6 +32,22 @@ PDFalyzer.Upload = (function ($, P) {
             '<input type="file" id="fileInput" accept=".pdf" hidden disabled />');
     }
 
+    function updateEncryptionStatus(encInfo) {
+        P.state.encryptionInfo = encInfo || null;
+        var $el = $('#statusEncryption');
+        if (!encInfo || !encInfo.encrypted) {
+            $el.hide().html('');
+            return;
+        }
+        var algo = encInfo.algorithm ? ' · ' + encInfo.algorithm : '';
+        var modText = encInfo.canModify ? '' :
+            ' <span class="enc-badge-readonly" title="Write operations restricted by PDF permissions">read-only</span>';
+        $el.html('<i class="fas fa-lock me-1"></i>Encrypted' + algo + modText).show();
+        if (!encInfo.canModify && P.EditMode && P.EditMode.setReadOnlyWarning) {
+            P.EditMode.setReadOnlyWarning(true);
+        }
+    }
+
     function applyUploadSuccess(data, bytesSize, options) {
         var opts = options || {};
         P.state.sessionId = data.sessionId;
@@ -43,6 +60,8 @@ PDFalyzer.Upload = (function ($, P) {
         if (opts.restoreDraft !== false) {
             restorePendingDraftForSession();
         }
+        updateEncryptionStatus(data.encryptionInfo);
+
         var sizeValue = typeof bytesSize === 'number' ? bytesSize : 0;
         var humanSize = P.Utils.formatBytes(sizeValue);
         $('#statusFilename').html('<i class="fas fa-file-pdf"></i> ' + data.filename);
@@ -73,6 +92,75 @@ PDFalyzer.Upload = (function ($, P) {
         }
     }
 
+    // ── password prompt ───────────────────────────────────────────────────────
+
+    function getPasswordModal() {
+        if (!_passwordModal) {
+            var el = document.getElementById('pdfPasswordModal');
+            if (el && window.bootstrap) _passwordModal = new bootstrap.Modal(el);
+        }
+        return _passwordModal;
+    }
+
+    function showPasswordPrompt(sessionId, filename, bytesSize) {
+        var modal = getPasswordModal();
+        if (!modal) {
+            P.Utils.toast('This PDF requires a password but the prompt could not be shown.', 'danger');
+            return;
+        }
+        $('#pdfPasswordHint').text('Enter the password to open "' + filename + '".');
+        $('#pdfPasswordInput').val('').attr('type', 'password');
+        $('#pdfPasswordError').hide().text('');
+        $('#pdfPasswordToggle').find('i').removeClass('fa-eye-slash').addClass('fa-eye');
+        modal.show();
+
+        $('#pdfPasswordSubmitBtn').off('click.pw').on('click.pw', function () {
+            doUnlock(sessionId, filename, bytesSize);
+        });
+        $('#pdfPasswordCancelBtn').off('click.pw').on('click.pw', function () {
+            modal.hide();
+            renderIdleButton();
+            _inFlight = false;
+        });
+        $('#pdfPasswordInput').off('keydown.pw').on('keydown.pw', function (e) {
+            if (e.key === 'Enter') doUnlock(sessionId, filename, bytesSize);
+        });
+    }
+
+    function doUnlock(sessionId, filename, bytesSize) {
+        var password = $('#pdfPasswordInput').val();
+        if (!password) {
+            $('#pdfPasswordError').text('Please enter a password.').show();
+            return;
+        }
+        $('#pdfPasswordError').hide();
+        var $btn = $('#pdfPasswordSubmitBtn');
+        $btn.prop('disabled', true).html('<span class="spinner-border spinner-border-sm"></span> Unlocking…');
+
+        P.Utils.apiFetch('/api/session/' + encodeURIComponent(sessionId) + '/unlock', {
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ password: password }),
+            dataType: 'json'
+        })
+        .done(function (data) {
+            getPasswordModal().hide();
+            applyUploadSuccess(data, bytesSize, { restoreDraft: false, resetPending: true });
+            P.Utils.toast('PDF unlocked: ' + filename, 'success');
+        })
+        .fail(function (xhr) {
+            var msg = 'Wrong password';
+            try { msg = JSON.parse(xhr.responseText).error || msg; } catch (e) {}
+            $('#pdfPasswordError').text(msg).show();
+        })
+        .always(function () {
+            $btn.prop('disabled', false).html('<i class="fas fa-unlock me-1"></i>Unlock');
+            _inFlight = false;
+        });
+    }
+
+    // ── upload ────────────────────────────────────────────────────────────────
+
     function upload(file) {
         if (_inFlight) return;
         if (file.size > 100 * 1024 * 1024) {
@@ -91,18 +179,26 @@ PDFalyzer.Upload = (function ($, P) {
             processData: false, contentType: false, dataType: 'json'
         })
         .done(function (data) {
+            if (data.encryptionInfo && data.encryptionInfo.requiresPassword) {
+                // Tree is absent; show password prompt, keep _inFlight=true
+                renderIdleButton();
+                $btn.removeClass('disabled').removeAttr('aria-disabled');
+                showPasswordPrompt(data.sessionId, data.filename, file.size);
+                $('#fileInput').val('');
+                return;
+            }
             applyUploadSuccess(data, file && file.size ? file.size : 0, {
-                restoreDraft: false,
-                resetPending: true
+                restoreDraft: false, resetPending: true
             });
             P.Utils.toast('PDF loaded: ' + data.filename + ' (' + data.pageCount + ' pages)', 'success');
+            _inFlight = false;
+            renderIdleButton();
+            $('#fileInput').val('');
         })
         .fail(function (xhr) {
             var msg = 'Upload failed';
             try { msg += ': ' + JSON.parse(xhr.responseText).error; } catch (e) {}
             P.Utils.toast(msg, 'danger');
-        })
-        .always(function () {
             _inFlight = false;
             $btn.removeClass('disabled').removeAttr('aria-disabled');
             renderIdleButton();
@@ -112,21 +208,14 @@ PDFalyzer.Upload = (function ($, P) {
 
     function loadSampleOnInit() {
         if (P.state.sessionId || _inFlight) return;
-
         _inFlight = true;
         renderUploadingButton();
 
-        P.Utils.apiFetch('/api/sample/load', {
-            method: 'POST',
-            dataType: 'json'
-        })
+        P.Utils.apiFetch('/api/sample/load', { method: 'POST', dataType: 'json' })
             .done(function (data) {
                 if (P.state.sessionId) return;
                 var sampleSize = typeof data.fileSize === 'number' ? data.fileSize : 0;
-                applyUploadSuccess(data, sampleSize, {
-                    restoreDraft: false,
-                    resetPending: true
-                });
+                applyUploadSuccess(data, sampleSize, { restoreDraft: false, resetPending: true });
                 P.Utils.toast('PDF loaded: ' + data.filename + ' (' + data.pageCount + ' pages)', 'success');
             })
             .always(function () {
@@ -139,40 +228,34 @@ PDFalyzer.Upload = (function ($, P) {
         if (_inFlight || P.state.sessionId || !P.Storage || !P.Storage.getCurrentSessionId) {
             return $.Deferred().resolve(false).promise();
         }
-
         var storedSessionId = P.Storage.getCurrentSessionId();
         if (!storedSessionId) {
             return $.Deferred().resolve(false).promise();
         }
-
         _inFlight = true;
         renderUploadingButton();
 
         var deferred = $.Deferred();
         P.Utils.apiFetch('/api/session/' + encodeURIComponent(storedSessionId) + '/restore', {
-            method: 'GET',
-            dataType: 'json'
+            method: 'GET', dataType: 'json'
         })
-            .done(function (data) {
-                var size = typeof data.fileSize === 'number' ? data.fileSize : 0;
-                applyUploadSuccess(data, size, {
-                    restoreDraft: true,
-                    resetPending: false
-                });
-                P.Utils.toast('Restored previous session', 'success');
-                deferred.resolve(true);
-            })
-            .fail(function () {
-                if (P.Storage) {
-                    P.Storage.clearDraft(storedSessionId);
-                    P.Storage.clearCurrentSessionId();
-                }
-                deferred.resolve(false);
-            })
-            .always(function () {
-                _inFlight = false;
-                renderIdleButton();
-            });
+        .done(function (data) {
+            var size = typeof data.fileSize === 'number' ? data.fileSize : 0;
+            applyUploadSuccess(data, size, { restoreDraft: true, resetPending: false });
+            P.Utils.toast('Restored previous session', 'success');
+            deferred.resolve(true);
+        })
+        .fail(function () {
+            if (P.Storage) {
+                P.Storage.clearDraft(storedSessionId);
+                P.Storage.clearCurrentSessionId();
+            }
+            deferred.resolve(false);
+        })
+        .always(function () {
+            _inFlight = false;
+            renderIdleButton();
+        });
 
         return deferred.promise();
     }
@@ -197,6 +280,16 @@ PDFalyzer.Upload = (function ($, P) {
             } else {
                 P.Utils.toast('Please drop a PDF file', 'warning');
             }
+        });
+
+        // Password toggle eye button
+        $(document).on('click', '#pdfPasswordToggle', function () {
+            var $input = $('#pdfPasswordInput');
+            var isPassword = $input.attr('type') === 'password';
+            $input.attr('type', isPassword ? 'text' : 'password');
+            $(this).find('i')
+                .toggleClass('fa-eye', !isPassword)
+                .toggleClass('fa-eye-slash', isPassword);
         });
     }
 
