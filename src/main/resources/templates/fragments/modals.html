@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<th:block th:fragment="modals">
+
+    <!-- Resource preview modal -->
+    <div class="modal fade pdfa-modal" id="resourcePreviewModal" tabindex="-1" aria-labelledby="resourcePreviewLabel" aria-hidden="true">
+        <div class="modal-dialog modal-lg modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="resourcePreviewLabel"><i class="fas fa-image me-2"></i><span id="resourcePreviewLabelText">Resource Preview</span></h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body" id="resourcePreviewBody">
+                    <!-- injected content -->
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-accent btn-sm" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Field create modal -->
+    <div class="modal fade" id="fieldCreateModal" tabindex="-1" aria-labelledby="fieldCreateLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered field-config-modal field-create-modal" data-fixed-dialog-width="650">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="fieldCreateLabel"><i class="fas fa-plus-square me-2"></i>Add Field</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="field-options-meta field-options-meta-primary mb-2">Set field identity and adjust options before queueing the change.</div>
+                    <div class="field-options-meta mb-3" id="fieldCreateScopeHint"></div>
+                    <div class="row g-3 field-create-grid">
+                        <div class="col-6 field-config-block field-create-block">
+                            <label class="form-label form-label-sm"><i class="fas fa-tag me-1"></i>Type</label>
+                            <input class="form-control form-control-sm" id="createFieldType" readonly />
+                        </div>
+                        <div class="col-6 field-config-block field-create-block">
+                            <label class="form-label form-label-sm"><i class="fas fa-file-alt me-1"></i>Page</label>
+                            <input class="form-control form-control-sm" id="createFieldPage" readonly />
+                        </div>
+                        <div class="col-12 field-config-block field-create-block">
+                            <label class="form-label form-label-sm"><i class="fas fa-fingerprint me-1"></i>Field ID</label>
+                            <input class="form-control form-control-sm" id="createFieldId" placeholder="field_id" />
+                        </div>
+                        <div class="col-6 field-config-block field-create-block field-bool-block" id="createRequiredBlock">
+                            <label class="form-label form-label-sm"><i class="fas fa-asterisk me-1"></i>Required</label>
+                            <div class="field-option-radios" data-option="create-required">
+                                <div class="form-check form-check-sm">
+                                    <input class="form-check-input" type="radio" name="createRequired" id="createRequiredTrue" value="true">
+                                    <label class="form-check-label" for="createRequiredTrue">True</label>
+                                </div>
+                                <div class="form-check form-check-sm">
+                                    <input class="form-check-input" type="radio" name="createRequired" id="createRequiredFalse" value="false">
+                                    <label class="form-check-label" for="createRequiredFalse">False</label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-6 field-config-block field-create-block field-bool-block" id="createReadonlyBlock">
+                            <label class="form-label form-label-sm"><i class="fas fa-lock me-1"></i>Read only</label>
+                            <div class="field-option-radios" data-option="create-readonly">
+                                <div class="form-check form-check-sm">
+                                    <input class="form-check-input" type="radio" name="createReadonly" id="createReadonlyTrue" value="true">
+                                    <label class="form-check-label" for="createReadonlyTrue">True</label>
+                                </div>
+                                <div class="form-check form-check-sm">
+                                    <input class="form-check-input" type="radio" name="createReadonly" id="createReadonlyFalse" value="false">
+                                    <label class="form-check-label" for="createReadonlyFalse">False</label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-6 field-config-block field-create-block field-bool-block" id="createMultilineBlock">
+                            <label class="form-label form-label-sm"><i class="fas fa-align-left me-1"></i>Multiline</label>
+                            <div class="field-option-radios" data-option="create-multiline">
+                                <div class="form-check form-check-sm">
+                                    <input class="form-check-input" type="radio" name="createMultiline" id="createMultilineTrue" value="true">
+                                    <label class="form-check-label" for="createMultilineTrue">True</label>
+                                </div>
+                                <div class="form-check form-check-sm">
+                                    <input class="form-check-input" type="radio" name="createMultiline" id="createMultilineFalse" value="false">
+                                    <label class="form-check-label" for="createMultilineFalse">False</label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-6 field-config-block field-create-block field-bool-block" id="createEditableBlock">
+                            <label class="form-label form-label-sm"><i class="fas fa-pen me-1"></i>Editable (combo)</label>
+                            <div class="field-option-radios" data-option="create-editable">
+                                <div class="form-check form-check-sm">
+                                    <input class="form-check-input" type="radio" name="createEditable" id="createEditableTrue" value="true">
+                                    <label class="form-check-label" for="createEditableTrue">True</label>
+                                </div>
+                                <div class="form-check form-check-sm">
+                                    <input class="form-check-input" type="radio" name="createEditable" id="createEditableFalse" value="false">
+                                    <label class="form-check-label" for="createEditableFalse">False</label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-6 field-config-block field-create-block field-bool-block" id="createCheckedBlock">
+                            <label class="form-label form-label-sm"><i class="fas fa-check-square me-1"></i>Checked (checkbox)</label>
+                            <div class="field-option-radios" data-option="create-checked">
+                                <div class="form-check form-check-sm">
+                                    <input class="form-check-input" type="radio" name="createChecked" id="createCheckedTrue" value="true">
+                                    <label class="form-check-label" for="createCheckedTrue">True</label>
+                                </div>
+                                <div class="form-check form-check-sm">
+                                    <input class="form-check-input" type="radio" name="createChecked" id="createCheckedFalse" value="false">
+                                    <label class="form-check-label" for="createCheckedFalse">False</label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-12 field-config-block field-create-block" id="createDefaultValueBlock">
+                            <label class="form-label form-label-sm"><i class="fas fa-i-cursor me-1"></i>Default value</label>
+                            <input class="form-control form-control-sm" id="createDefaultValue" placeholder="optional" />
+                        </div>
+                        <div class="col-12 field-config-block field-create-block" id="createChoicesBlock">
+                            <label class="form-label form-label-sm"><i class="fas fa-list me-1"></i>Choices comma-separated</label>
+                            <input class="form-control form-control-sm" id="createChoices" placeholder="A,B,C" />
+                        </div>
+                        <div class="col-12 field-config-block field-create-block" id="createJavascriptBlock">
+                            <label class="form-label form-label-sm"><i class="fab fa-js me-1"></i>JavaScript validation</label>
+                            <div class="row g-2 mb-2">
+                                <div class="col-7">
+                                    <select class="form-select form-select-sm" id="createJsPreset">
+                                        <option value="custom">Custom script</option>
+                                        <option value="length">Length (min/max)</option>
+                                        <option value="number">Number (min/max)</option>
+                                        <option value="date">Date (format)</option>
+                                    </select>
+                                </div>
+                                <div class="col-5 d-grid">
+                                    <button type="button" class="btn btn-outline-accent btn-sm" id="createJsPresetApplyBtn">
+                                        <i class="fas fa-magic me-1"></i>Insert preset
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="field-js-preset-params mb-2" id="createJsPresetParams"></div>
+                            <textarea class="form-control form-control-sm" id="createJavascript" rows="5" placeholder="if (event.value) { ... }"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-accent btn-sm" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-accent btn-sm" id="applyCreateFieldBtn">Queue Field</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Field options modal -->
+    <div class="modal fade pdfa-modal" id="fieldOptionsModal" tabindex="-1" aria-labelledby="fieldOptionsLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered field-config-modal field-options-modal" data-fixed-dialog-width="650">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="fieldOptionsLabel"><i class="fas fa-sliders-h me-2"></i>Field Options</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="field-options-meta-card mb-3">
+                        <div class="field-options-meta-row field-options-meta-primary">
+                            <i class="fas fa-pen-to-square"></i>
+                            <span id="fieldOptionsSelectionInfo"></span>
+                        </div>
+                        <div class="field-options-meta-row field-options-meta-secondary">
+                            <i class="fas fa-circle-info"></i>
+                            <span id="fieldOptionsScopeHint"></span>
+                        </div>
+                    </div>
+                    <div class="row g-3 field-options-grid">
+                        <div class="col-6 field-config-block field-option-block field-bool-block" id="optRequiredBlock">
+                            <label class="form-label form-label-sm"><i class="fas fa-asterisk me-1"></i>Required</label>
+                            <div class="field-option-radios" data-option="required">
+                                <div class="form-check form-check-sm tri-keep">
+                                    <input class="form-check-input" type="radio" name="optRequired" id="optRequiredKeep" value="keep">
+                                    <label class="form-check-label" for="optRequiredKeep">Keep current value</label>
+                                </div>
+                                <div class="form-check form-check-sm">
+                                    <input class="form-check-input" type="radio" name="optRequired" id="optRequiredTrue" value="true">
+                                    <label class="form-check-label" for="optRequiredTrue">True</label>
+                                </div>
+                                <div class="form-check form-check-sm">
+                                    <input class="form-check-input" type="radio" name="optRequired" id="optRequiredFalse" value="false">
+                                    <label class="form-check-label" for="optRequiredFalse">False</label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-6 field-config-block field-option-block field-bool-block" id="optReadonlyBlock">
+                            <label class="form-label form-label-sm"><i class="fas fa-lock me-1"></i>Read only</label>
+                            <div class="field-option-radios" data-option="readonly">
+                                <div class="form-check form-check-sm tri-keep">
+                                    <input class="form-check-input" type="radio" name="optReadonly" id="optReadonlyKeep" value="keep">
+                                    <label class="form-check-label" for="optReadonlyKeep">Keep current value</label>
+                                </div>
+                                <div class="form-check form-check-sm">
+                                    <input class="form-check-input" type="radio" name="optReadonly" id="optReadonlyTrue" value="true">
+                                    <label class="form-check-label" for="optReadonlyTrue">True</label>
+                                </div>
+                                <div class="form-check form-check-sm">
+                                    <input class="form-check-input" type="radio" name="optReadonly" id="optReadonlyFalse" value="false">
+                                    <label class="form-check-label" for="optReadonlyFalse">False</label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-6 field-config-block field-option-block field-bool-block" id="optMultilineBlock">
+                            <label class="form-label form-label-sm"><i class="fas fa-align-left me-1"></i>Multiline</label>
+                            <div class="field-option-radios" data-option="multiline">
+                                <div class="form-check form-check-sm tri-keep">
+                                    <input class="form-check-input" type="radio" name="optMultiline" id="optMultilineKeep" value="keep">
+                                    <label class="form-check-label" for="optMultilineKeep">Keep current value</label>
+                                </div>
+                                <div class="form-check form-check-sm">
+                                    <input class="form-check-input" type="radio" name="optMultiline" id="optMultilineTrue" value="true">
+                                    <label class="form-check-label" for="optMultilineTrue">True</label>
+                                </div>
+                                <div class="form-check form-check-sm">
+                                    <input class="form-check-input" type="radio" name="optMultiline" id="optMultilineFalse" value="false">
+                                    <label class="form-check-label" for="optMultilineFalse">False</label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-6 field-config-block field-option-block field-bool-block" id="optEditableBlock">
+                            <label class="form-label form-label-sm"><i class="fas fa-pen me-1"></i>Editable (combo)</label>
+                            <div class="field-option-radios" data-option="editable">
+                                <div class="form-check form-check-sm tri-keep">
+                                    <input class="form-check-input" type="radio" name="optEditable" id="optEditableKeep" value="keep">
+                                    <label class="form-check-label" for="optEditableKeep">Keep current value</label>
+                                </div>
+                                <div class="form-check form-check-sm">
+                                    <input class="form-check-input" type="radio" name="optEditable" id="optEditableTrue" value="true">
+                                    <label class="form-check-label" for="optEditableTrue">True</label>
+                                </div>
+                                <div class="form-check form-check-sm">
+                                    <input class="form-check-input" type="radio" name="optEditable" id="optEditableFalse" value="false">
+                                    <label class="form-check-label" for="optEditableFalse">False</label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-6 field-config-block field-option-block field-bool-block" id="optCheckedBlock">
+                            <label class="form-label form-label-sm"><i class="fas fa-check-square me-1"></i>Checked (checkbox)</label>
+                            <div class="field-option-radios" data-option="checked">
+                                <div class="form-check form-check-sm tri-keep">
+                                    <input class="form-check-input" type="radio" name="optChecked" id="optCheckedKeep" value="keep">
+                                    <label class="form-check-label" for="optCheckedKeep">Keep current value</label>
+                                </div>
+                                <div class="form-check form-check-sm">
+                                    <input class="form-check-input" type="radio" name="optChecked" id="optCheckedTrue" value="true">
+                                    <label class="form-check-label" for="optCheckedTrue">True</label>
+                                </div>
+                                <div class="form-check form-check-sm">
+                                    <input class="form-check-input" type="radio" name="optChecked" id="optCheckedFalse" value="false">
+                                    <label class="form-check-label" for="optCheckedFalse">False</label>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="col-12 field-config-block field-option-block" id="optDefaultValueBlock">
+                            <label class="form-label form-label-sm"><i class="fas fa-i-cursor me-1"></i>Default value (single field)</label>
+                            <input class="form-control form-control-sm" id="optDefaultValue" placeholder="leave empty to keep" />
+                        </div>
+                        <div class="col-12 field-config-block field-option-block" id="optChoicesBlock">
+                            <label class="form-label form-label-sm"><i class="fas fa-list me-1"></i>Choices comma-separated (single combo/list)</label>
+                            <input class="form-control form-control-sm" id="optChoices" placeholder="A,B,C" />
+                        </div>
+                        <div class="col-12 field-config-block field-option-block" id="optJavascriptBlock">
+                            <div class="field-option-section-header">
+                                <label class="form-label form-label-sm"><i class="fab fa-js me-1"></i>JavaScript validation (single field)</label>
+                                <button type="button"
+                                        class="btn btn-link btn-sm field-option-collapse-toggle collapsed"
+                                        id="optJavascriptToggle"
+                                        data-bs-toggle="collapse"
+                                        data-bs-target="#optJavascriptCollapse"
+                                        aria-expanded="false"
+                                        aria-controls="optJavascriptCollapse">
+                                    <span class="field-option-collapse-text">Show</span>
+                                    <i class="fas fa-chevron-down ms-1"></i>
+                                </button>
+                            </div>
+                            <div class="collapse" id="optJavascriptCollapse">
+                                <div class="row g-2 mb-2">
+                                    <div class="col-7">
+                                        <select class="form-select form-select-sm" id="optJsPreset">
+                                            <option value="custom">Custom script</option>
+                                            <option value="length">Length (min/max)</option>
+                                            <option value="number">Number (min/max)</option>
+                                            <option value="date">Date (format)</option>
+                                        </select>
+                                    </div>
+                                    <div class="col-5 d-grid">
+                                        <button type="button" class="btn btn-outline-accent btn-sm" id="optJsPresetApplyBtn">
+                                            <i class="fas fa-magic me-1"></i>Insert preset
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="field-js-preset-params mb-2" id="optJsPresetParams"></div>
+                                <textarea class="form-control form-control-sm" id="optJavascript" rows="5" placeholder="if (event.value) { ... }"></textarea>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-accent btn-sm" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-accent btn-sm" id="applyFieldOptionsBtn">Apply</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</th:block>
+</body>
+</html>

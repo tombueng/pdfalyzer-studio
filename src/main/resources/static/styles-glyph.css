@@ -1,0 +1,481 @@
+/* === Font Detail Table === */
+.font-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(180px, 1fr));
+    gap: 8px 12px;
+    margin-bottom: 8px;
+}
+
+.font-detail-tools {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin: 6px 0;
+}
+
+.font-detail-table-wrap {
+    max-height: 280px;
+    overflow: auto;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    scrollbar-gutter: stable both-edges;
+    position: relative;
+    background: rgba(8, 12, 18, 0.95);
+}
+
+.font-detail-table-wrap-fill {
+    max-height: 100%;
+    flex: 1 1 auto;
+    min-height: 0;
+    height: 100%;
+}
+
+.font-diag-detail-content {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+}
+
+.font-detail-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+    table-layout: fixed;
+}
+
+.font-detail-table th {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    background: rgba(18, 24, 36, 0.98);
+    color: var(--accent);
+    text-align: left;
+    padding: 5px 7px;
+    border-bottom: 1px solid var(--border);
+    box-shadow: 0 2px 0 rgba(0,0,0,0.35);
+    background-clip: padding-box;
+}
+
+.font-detail-table td {
+    position: relative;
+    z-index: 1;
+}
+
+.font-detail-table td {
+    padding: 4px 7px;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+
+/* === Glyph Preview === */
+.font-glyph-preview-cell {
+    min-width: 108px;
+    width: 108px;
+}
+
+.font-map-unicode-cell {
+    min-width: 74px;
+    width: 74px;
+    font-size: 34px;
+    line-height: 1;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.font-glyph-lazy {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 84px;
+    height: 56px;
+    border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 4px;
+    background: rgba(0,0,0,0.18);
+    overflow: hidden;
+}
+
+.font-glyph-preview {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    font-size: 34px;
+    text-align: center;
+    line-height: 1;
+    overflow: hidden;
+    user-select: text;
+}
+
+.font-glyph-preview-canvas {
+    display: block;
+}
+
+.glyph-tooltip-preview {
+    position: absolute;
+    z-index: 9999;
+    pointer-events: none;
+    background: rgba(8, 10, 14, 0.96);
+    border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 8px;
+    padding: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+    backdrop-filter: blur(2px);
+}
+
+.glyph-tooltip-char {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    line-height: 1;
+    color: #fff;
+    overflow: hidden;
+}
+
+/* === Glyph Hero Canvas === */
+.font-glyph-diag-layout {
+    display: grid;
+    grid-template-columns: 250px 1fr;
+    gap: 10px;
+    align-items: start;
+}
+
+.font-glyph-guide-box {
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px;
+    background: rgba(10,14,20,0.86);
+    padding: 10px;
+}
+
+.font-glyph-guide-title {
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 6px;
+    color: var(--accent);
+}
+
+.font-glyph-guide-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 5px;
+}
+
+.font-glyph-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    display: inline-block;
+    flex: 0 0 auto;
+}
+
+.font-glyph-dot.ascent { background: rgba(0,212,255,0.95); }
+.font-glyph-dot.baseline { background: rgba(255,193,7,0.95); }
+.font-glyph-dot.descent { background: rgba(220,53,69,0.95); }
+.font-glyph-dot.bbox { background: rgba(40,167,69,0.95); }
+.font-glyph-dot.origin { background: rgba(173,181,189,0.85); }
+
+.font-glyph-extra-grid {
+    display: grid;
+    gap: 4px;
+    max-height: 130px;
+    overflow: auto;
+    padding-right: 2px;
+}
+
+.font-glyph-hero-wrap {
+    width: 100%;
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 8px;
+    background: rgba(0,0,0,0.15);
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    overflow: hidden;
+    opacity: 0.95;
+    padding: 8px;
+    gap: 6px;
+}
+
+.font-glyph-hero-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.font-glyph-hero-stage {
+    display: flex;
+    align-items: stretch;
+    gap: 8px;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.font-glyph-hero-toolbar-right {
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+    min-width: 48px;
+    padding: 2px 0;
+}
+
+.glyph-zoom-btn {
+    width: 30px;
+    height: 26px;
+    padding: 0;
+    line-height: 1;
+}
+
+.glyph-zoom-btn i {
+    font-size: 12px;
+}
+
+#fontGlyphZoomLabel {
+    font-size: 10px;
+    line-height: 1;
+    margin-top: 2px;
+}
+
+.font-glyph-zoom-hint {
+    font-size: 10px;
+    line-height: 1.1;
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+    opacity: 0.85;
+}
+
+.font-glyph-canvas-viewport {
+    width: 100%;
+    flex: 1 1 auto;
+    height: 286px;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 6px;
+    background: rgba(5, 8, 12, 0.9);
+    overflow: auto;
+    display: flex;
+    align-items: flex-start;
+    justify-content: flex-start;
+    cursor: grab;
+    user-select: none;
+}
+
+.font-glyph-canvas-viewport.glyph-pan-active {
+    cursor: grabbing;
+}
+
+.font-glyph-hero-canvas {
+    display: block;
+    flex: 0 0 auto;
+}
+
+.font-glyph-hero-metrics {
+    width: 100%;
+    font-size: 11px;
+    line-height: 1.25;
+    font-family: Segoe UI, Arial, sans-serif;
+    white-space: normal;
+}
+
+/* === Glyph Usage Panel === */
+.font-glyph-usage-panel {
+    margin-top: 8px;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 6px;
+    background: rgba(8,12,18,0.55);
+    padding: 8px;
+}
+
+.font-glyph-usage-pages {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.font-glyph-usage-page {
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 5px;
+    background: rgba(255,255,255,0.02);
+    overflow: hidden;
+}
+
+.font-glyph-usage-page > summary {
+    cursor: pointer;
+    padding: 6px 8px;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    list-style: none;
+}
+
+.font-glyph-usage-page > summary::-webkit-details-marker {
+    display: none;
+}
+
+.font-glyph-usage-page-body {
+    border-top: 1px solid rgba(255,255,255,0.06);
+    padding: 6px;
+    max-height: 220px;
+    overflow: auto;
+}
+
+@media (max-width: 1100px) {
+    .font-glyph-diag-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .font-glyph-canvas-viewport {
+        height: 231px;
+    }
+}
+
+/* === Font Diagnostic Status Indicators === */
+
+/* Glyph table row status borders */
+.font-map-row-warning { border-left: 3px solid #fa8c16; }
+.font-map-row-danger { border-left: 3px solid #dc3545; background: rgba(220,53,69,0.04); }
+.font-map-row-mismatch { border-left: 3px solid #fadb14; }
+.font-map-row-unknown { border-left: 3px solid #6c757d; }
+.font-map-row-used-problem { background: rgba(220,53,69,0.08); }
+
+/* Summary table row status borders */
+.font-diag-row-ok { border-left: 3px solid #28a745; }
+.font-diag-row-warn { border-left: 3px solid #fa8c16; }
+.font-diag-row-danger { border-left: 3px solid #dc3545; }
+
+/* Diagnostic badges */
+.diag-badge {
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.diag-badge-ok { color: #28a745; }
+.diag-badge-warn { color: #fa8c16; }
+.diag-badge-danger { color: #dc3545; }
+.diag-badge-mismatch { color: #fadb14; }
+.diag-badge-muted { color: #6c757d; }
+
+/* Compact status icons */
+.diag-icon { font-size: 13px; cursor: default; }
+.diag-icon-ok { color: #28a745; }
+.diag-icon-warn { color: #fa8c16; }
+.diag-icon-danger { color: #dc3545; }
+.diag-icon-mismatch { color: #fadb14; }
+.diag-icon-muted { color: #6c757d; }
+
+/* Glyph absent indicator */
+.font-glyph-absent {
+    color: rgba(220,53,69,0.6);
+    font-size: 18px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 84px;
+    height: 56px;
+}
+
+/* Filter bar for glyph table */
+.font-detail-filter-group {
+    display: flex;
+    gap: 4px;
+    flex-wrap: wrap;
+    align-items: center;
+}
+.font-detail-filter-btn {
+    font-size: 12px;
+    padding: 3px 10px;
+}
+.font-detail-filter-btn.active {
+    border-color: var(--accent);
+    color: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--accent);
+}
+.font-detail-filter-count {
+    font-size: 10px;
+    opacity: 0.7;
+    margin-left: 2px;
+}
+
+/* Subset completeness badges */
+.subset-badge {
+    font-size: 10px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    white-space: nowrap;
+}
+.subset-badge-ok {
+    color: #28a745;
+    border: 1px solid rgba(40,167,69,0.4);
+}
+.subset-badge-warn {
+    color: #fa8c16;
+    border: 1px solid rgba(250,140,22,0.4);
+}
+
+/* Encoding details panel */
+.font-encoding-details {
+    font-size: 12px;
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 6px;
+    background: rgba(8,12,18,0.55);
+    padding: 8px 10px;
+    margin-top: 6px;
+}
+.font-encoding-details summary {
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--accent);
+}
+.font-encoding-details-grid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 3px 12px;
+    margin-top: 6px;
+    font-size: 11px;
+}
+.font-encoding-details-grid .label {
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+/* Glyph name column styling */
+.font-map-glyph-name {
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+/* Diagnostics summary in glyph modal */
+.glyph-diag-summary {
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 6px;
+    background: rgba(8,12,18,0.55);
+    padding: 8px 10px;
+}
+.glyph-diag-summary-grid {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 4px 12px;
+    font-size: 12px;
+}
+.glyph-diag-summary-grid .label {
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+.glyph-diag-explanation {
+    margin-top: 6px;
+    padding: 6px 8px;
+    border-left: 3px solid var(--accent);
+    background: rgba(0,212,255,0.04);
+    border-radius: 0 4px 4px 0;
+    font-size: 11px;
+    color: var(--text-muted);
+    line-height: 1.5;
+}

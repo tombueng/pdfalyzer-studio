@@ -209,7 +209,7 @@ This regenerates third-party notices and license texts from the current dependen
 
 - Backend: `src/main/java/io/pdfalyzer/...`
 - Frontend static assets: `src/main/resources/static/...`
-- Thymeleaf template: `src/main/resources/templates/index.html`
+- Thymeleaf templates: `src/main/resources/templates/` (index.html + fragments/)
 
 ## Notes
 
@@ -299,23 +299,54 @@ src/main/java/io/pdfalyzer/
 │   └── FormFieldRequest.java            # Edit request DTO
 ├── service/
 │   ├── SessionService.java              # In-memory session store with eviction
-│   ├── PdfStructureParser.java          # Deep COS-level PDF tree builder
 │   ├── PdfService.java                  # Upload, parse, search, session management
+│   ├── PdfStructureParser.java          # Deep COS-level PDF tree builder
+│   ├── DocumentStructureTreeBuilder.java
+│   ├── SemanticTreeBuilder.java
+│   ├── AcroFormTreeBuilder.java
+│   ├── CosNodeBuilder.java
+│   ├── PageResourceBuilder.java
 │   ├── FontInspectorService.java        # Font analysis per page
+│   ├── FontDiagnosticsBuilder.java
+│   ├── FontCollectionHelper.java
 │   ├── ValidationService.java           # PDF structure/font/metadata validation
-│   └── PdfEditService.java              # Form field creation
+│   ├── PdfEditService.java              # Form field CRUD operations
+│   ├── PdfFormFieldBuilder.java
+│   └── PdfFieldOptionApplier.java
 └── web/
-    ├── HomeController.java              # Serves index template
+    ├── HomeController.java              # Serves index + license templates
     ├── ApiController.java               # REST API endpoints
+    ├── ResourceApiController.java       # Resource/attachment endpoints
     └── GlobalExceptionHandler.java      # Centralized error handling
 
 src/main/resources/
 ├── application.properties
 ├── templates/
-│   └── index.html                       # Single-page Thymeleaf template
+│   ├── index.html                       # Single-page Thymeleaf entry point
+│   └── fragments/                       # Thymeleaf HTML fragments
+│       ├── navbar.html
+│       ├── main-content.html
+│       ├── status-bar.html
+│       ├── modals.html
+│       └── scripts.html
 └── static/
-    ├── app.js                           # Client-side application (~850 lines)
-    ├── styles.css                       # Custom CSS with dark theme
+    ├── app.js                           # Client entry point (wires modules)
+    ├── js/                              # JavaScript IIFE modules (one per namespace)
+    │   ├── app-state.js                 # PDFalyzer namespace + shared state
+    │   ├── app-utils.js                 # Utilities, toast, clearable inputs
+    │   ├── app-tree.js / app-tree-render.js
+    │   ├── app-viewer.js / app-viewer-render.js
+    │   ├── app-tabs.js / app-tabs-fonts.js / app-tabs-font-detail.js
+    │   ├── app-tabs-glyph.js / app-tabs-glyph-canvas.js / app-tabs-glyph-viewer.js / app-tabs-glyph-ui.js
+    │   ├── app-tabs-validation.js
+    │   ├── app-edit-mode.js / app-edit-field.js / app-edit-options.js
+    │   └── app-upload.js / app-search.js / app-zoom.js / app-keyboard.js / ...
+    ├── styles.css                       # Global dark theme variables and layout
+    ├── styles-tree.css                  # Tree pane, validation, status bar, image meta
+    ├── styles-fonts.css                 # Font table, font focus card, font detail tabs
+    ├── styles-glyph.css                 # Glyph canvas, hero, usage panel, diagnostic badges
+    ├── styles-editor.css                # Edit mode, form-field handles, pending panel, modals
+    ├── styles-common.css                # Animations, scrollbar, buttons, toasts, COS badges
     └── logo.svg                         # Application logo
 
 src/test/java/io/pdfalyzer/
