@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<body>
+<nav class="navbar navbar-expand-lg" th:fragment="navbar">
+    <div class="container-fluid">
+        <a class="navbar-brand d-flex align-items-center" href="#">
+            <img src="/icon.svg" alt="logo" width="28" height="28" class="me-2" />
+            <span class="d-none d-md-inline">PDFalyzer Studio</span>
+        </a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarContent" aria-controls="navbarContent" aria-expanded="false" aria-label="Toggle navigation">
+            <span class="navbar-toggler-icon"></span>
+        </button>
+        <!-- File input lives outside the collapse so it's always reachable by label[for] -->
+        <input type="file" id="fileInput" accept=".pdf" hidden />
+        <div class="collapse navbar-collapse" id="navbarContent">
+
+            <!-- Desktop: compact icon toolbars (hidden on mobile) -->
+            <div class="d-none d-lg-flex align-items-center gap-2 ms-auto">
+                <div id="generalToolbar" class="d-flex align-items-center gap-2">
+                    <label class="btn btn-accent btn-sm mb-0" id="uploadBtn" for="fileInput">
+                        <i class="fas fa-upload me-1"></i> Upload PDF
+                    </label>
+                    <button class="btn btn-outline-accent btn-sm" id="downloadBtn" disabled title="Download PDF (Ctrl+S)">
+                        <i class="fas fa-download"></i>
+                    </button>
+                    <button class="btn btn-outline-accent btn-sm" id="exportTreeBtn" disabled title="Export tree as JSON">
+                        <i class="fas fa-file-export"></i>
+                    </button>
+                    <button class="btn btn-outline-accent btn-sm" id="zoomModeBtn" disabled title="Toggle auto zoom mode">
+                        <i class="fas fa-expand-arrows-alt"></i>
+                    </button>
+                    <button class="btn btn-outline-accent btn-sm" id="zoomOutBtn" disabled title="Zoom out">
+                        <i class="fas fa-search-minus"></i>
+                    </button>
+                    <button class="btn btn-outline-accent btn-sm" id="zoomInBtn" disabled title="Zoom in">
+                        <i class="fas fa-search-plus"></i>
+                    </button>
+                    <button class="btn btn-outline-accent btn-sm" id="panModeBtn" disabled title="Pan view (hand tool)">
+                        <i class="fas fa-hand-paper"></i>
+                    </button>
+                </div>
+                <div class="vr"></div>
+                <div id="editToolbar" class="d-flex align-items-center gap-1">
+                    <span class="text-muted me-1" style="font-size:12px;">Add field:</span>
+                    <button class="edit-field-btn" data-type="text"><i class="fas fa-keyboard me-1"></i>Text</button>
+                    <button class="edit-field-btn" data-type="checkbox"><i class="fas fa-check-square me-1"></i>Checkbox</button>
+                    <button class="edit-field-btn" data-type="combo"><i class="fas fa-list me-1"></i>Combo</button>
+                    <button class="edit-field-btn" data-type="radio"><i class="fas fa-dot-circle me-1"></i>Radio</button>
+                    <button class="edit-field-btn" data-type="signature"><i class="fas fa-signature me-1"></i>Signature</button>
+                    <button class="btn btn-outline-accent btn-sm" id="formOptionsBtn" disabled title="Edit options for selected field(s)">
+                        <i class="fas fa-sliders-h me-1"></i>Options
+                    </button>
+                    <button class="btn btn-outline-accent btn-sm" id="formSaveBtn" disabled title="Save pending form changes">
+                        <i class="fas fa-save me-1"></i>Save
+                        <span id="formSaveFailedBadge" class="badge text-bg-danger ms-1 d-none" title="Failed pending COS changes">0</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Mobile: full-text nav menu grouped by category (hidden on desktop) -->
+            <nav class="d-lg-none navbar-mobile-nav">
+                <div class="navbar-mobile-section">
+                    <div class="navbar-mobile-header"><i class="fas fa-file me-2"></i>File</div>
+                    <label class="navbar-mobile-item" for="fileInput">
+                        <i class="fas fa-upload me-2"></i>Upload PDF
+                    </label>
+                    <button class="navbar-mobile-item" onclick="document.getElementById('downloadBtn').click()">
+                        <i class="fas fa-download me-2"></i>Download PDF
+                    </button>
+                    <button class="navbar-mobile-item" onclick="document.getElementById('exportTreeBtn').click()">
+                        <i class="fas fa-file-export me-2"></i>Export Tree as JSON
+                    </button>
+                </div>
+                <hr class="navbar-mobile-divider" />
+                <div class="navbar-mobile-section">
+                    <div class="navbar-mobile-header"><i class="fas fa-eye me-2"></i>View</div>
+                    <button class="navbar-mobile-item" onclick="document.getElementById('zoomModeBtn').click()">
+                        <i class="fas fa-expand-arrows-alt me-2"></i>Toggle Auto Zoom
+                    </button>
+                    <button class="navbar-mobile-item" onclick="document.getElementById('zoomOutBtn').click()">
+                        <i class="fas fa-search-minus me-2"></i>Zoom Out
+                    </button>
+                    <button class="navbar-mobile-item" onclick="document.getElementById('zoomInBtn').click()">
+                        <i class="fas fa-search-plus me-2"></i>Zoom In
+                    </button>
+                    <button class="navbar-mobile-item" onclick="document.getElementById('panModeBtn').click()">
+                        <i class="fas fa-hand-paper me-2"></i>Pan View
+                    </button>
+                </div>
+                <hr class="navbar-mobile-divider" />
+                <div class="navbar-mobile-section">
+                    <div class="navbar-mobile-header"><i class="fas fa-edit me-2"></i>Form Edit</div>
+                    <button class="navbar-mobile-item edit-field-btn" data-type="text">
+                        <i class="fas fa-keyboard me-2"></i>Add Text Field
+                    </button>
+                    <button class="navbar-mobile-item edit-field-btn" data-type="checkbox">
+                        <i class="fas fa-check-square me-2"></i>Add Checkbox
+                    </button>
+                    <button class="navbar-mobile-item edit-field-btn" data-type="combo">
+                        <i class="fas fa-list me-2"></i>Add Combo Box
+                    </button>
+                    <button class="navbar-mobile-item edit-field-btn" data-type="radio">
+                        <i class="fas fa-dot-circle me-2"></i>Add Radio Button
+                    </button>
+                    <button class="navbar-mobile-item edit-field-btn" data-type="signature">
+                        <i class="fas fa-signature me-2"></i>Add Signature Field
+                    </button>
+                    <button class="navbar-mobile-item" onclick="document.getElementById('formOptionsBtn').click()">
+                        <i class="fas fa-sliders-h me-2"></i>Field Options
+                    </button>
+                    <button class="navbar-mobile-item" onclick="document.getElementById('formSaveBtn').click()">
+                        <i class="fas fa-save me-2"></i>Save Form Changes
+                    </button>
+                </div>
+            </nav>
+
+        </div>
+    </div>
+</nav>
+</body>
+</html>
