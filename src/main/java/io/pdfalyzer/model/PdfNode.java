@@ -43,6 +43,10 @@ public class PdfNode {
     public PdfNode(String name, String type) {
         this.name = name;
         this.type = type;
+        this.children = new ArrayList<>();
+        this.objectNumber = -1;
+        this.generationNumber = -1;
+        this.pageIndex = -1;
     }
 
     public PdfNode(String id, String name, String type, String icon, String color) {
@@ -51,6 +55,10 @@ public class PdfNode {
         this.type = type;
         this.icon = icon;
         this.color = color;
+        this.children = new ArrayList<>();
+        this.objectNumber = -1;
+        this.generationNumber = -1;
+        this.pageIndex = -1;
     }
 
     public void addProperty(String key, String value) {

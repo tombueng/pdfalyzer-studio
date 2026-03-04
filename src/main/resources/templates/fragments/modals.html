@@ -305,6 +305,40 @@
         </div>
     </div>
 
+    <!-- PDF password modal -->
+    <div class="modal fade" id="pdfPasswordModal" tabindex="-1" aria-labelledby="pdfPasswordLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+        <div class="modal-dialog modal-dialog-centered" style="max-width:420px;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="pdfPasswordLabel">
+                        <i class="fas fa-lock me-2 text-warning"></i>Password Required
+                    </h5>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-2" style="font-size:13px;" id="pdfPasswordHint">
+                        This PDF is encrypted. Enter the password to open it.
+                    </p>
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="fas fa-key"></i></span>
+                        <input type="password" class="form-control form-control-sm" id="pdfPasswordInput"
+                               placeholder="Password" autocomplete="current-password" />
+                        <button class="btn btn-outline-secondary btn-sm" type="button" id="pdfPasswordToggle"
+                                title="Show/hide password">
+                            <i class="fas fa-eye"></i>
+                        </button>
+                    </div>
+                    <div class="mt-2 text-danger" id="pdfPasswordError" style="font-size:12px;display:none;"></div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="pdfPasswordCancelBtn">Cancel</button>
+                    <button type="button" class="btn btn-accent btn-sm" id="pdfPasswordSubmitBtn">
+                        <i class="fas fa-unlock me-1"></i>Unlock
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
 </th:block>
 </body>
 </html>

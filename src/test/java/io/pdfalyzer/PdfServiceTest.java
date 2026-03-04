@@ -5,6 +5,7 @@ import io.pdfalyzer.model.PdfSession;
 import io.pdfalyzer.service.*;
 import io.pdfalyzer.model.CosUpdateRequest;
 import io.pdfalyzer.web.ResourceApiController;
+
 import org.springframework.http.ResponseEntity;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDPage;
@@ -38,18 +39,15 @@ public class PdfServiceTest {
     private PdfService pdfService;
     private PdfStructureParser parser;
 
-    private static PdfStructureParser createParser() {
-        CosNodeBuilder cosBuilder = new CosNodeBuilder();
-        PageResourceBuilder pageResourceBuilder = new PageResourceBuilder(cosBuilder);
-        SemanticTreeBuilder semanticBuilder = new SemanticTreeBuilder(cosBuilder, pageResourceBuilder);
-        return new PdfStructureParser(semanticBuilder, cosBuilder);
-    }
-
     @BeforeEach
     void setUp() {
-        SessionService sessionService = new SessionService();
-        parser = createParser();
-        pdfService = new PdfService(sessionService, parser);
+        CosNodeBuilder cosBuilder = new CosNodeBuilder();
+        PageResourceBuilder pageResourceBuilder = new PageResourceBuilder(cosBuilder);
+        AcroFormTreeBuilder acroFormBuilder = new AcroFormTreeBuilder(cosBuilder);
+        DocumentStructureTreeBuilder docStructureBuilder = new DocumentStructureTreeBuilder(cosBuilder);
+        SemanticTreeBuilder semanticBuilder = new SemanticTreeBuilder(cosBuilder, pageResourceBuilder, acroFormBuilder, docStructureBuilder);
+        parser = new PdfStructureParser(semanticBuilder, cosBuilder);
+        pdfService = new PdfService(new SessionService(), parser);
     }
 
     @Test

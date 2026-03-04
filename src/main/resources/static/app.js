@@ -40,6 +40,7 @@
         P.Search.init();
         P.Tabs.init();
         P.EditMode.init();
+        P.EditDesigner.init();
         P.Divider.init();
         P.Keyboard.init();
         P.Export.init();

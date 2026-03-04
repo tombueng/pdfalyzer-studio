@@ -38,6 +38,17 @@ PDFalyzer.Keyboard = (function ($, P) {
                 var $tabs = $('.tab-btn');
                 if (idx < $tabs.length && P.state.sessionId) $tabs.eq(idx).trigger('click');
             }
+            if (P.state.editMode && P.EditDesigner) {
+                if ((e.ctrlKey || e.metaKey) && e.key === 'c') {
+                    e.preventDefault(); P.EditDesigner.copySelected();
+                }
+                if ((e.ctrlKey || e.metaKey) && e.key === 'v') {
+                    e.preventDefault(); P.EditDesigner.pasteFields();
+                }
+                if ((e.key === 'g' || e.key === 'G') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                    e.preventDefault(); P.EditDesigner.toggleGrid();
+                }
+            }
         });
     }
 

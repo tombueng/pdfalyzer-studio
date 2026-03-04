@@ -132,6 +132,7 @@ var PDFalyzer = (function () {
             rawCosTreeData: null,
             currentTab: 'structure',
             tabTreeViewStates: {},
+            encryptionInfo: null,
             selectedNodeId: null,
             editMode: true,
             editFieldType: null,

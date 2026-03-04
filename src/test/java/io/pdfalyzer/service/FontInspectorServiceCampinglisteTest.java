@@ -1,6 +1,7 @@
 package io.pdfalyzer.service;
 
 import io.pdfalyzer.model.FontDiagnostics;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.util.StreamUtils;
@@ -15,7 +16,12 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class FontInspectorServiceCampinglisteTest {
 
-    private final FontInspectorService service = new FontInspectorService();
+    FontInspectorService service;
+
+    @BeforeEach
+    void setUp() {
+        service = new FontInspectorService(new FontCollectionHelper(), new FontDiagnosticsBuilder(), new FontFileHelper());
+    }
 
     @Test
     void campingliste_calibri_bold_metrics_are_consistent() throws IOException {

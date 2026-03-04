@@ -114,6 +114,7 @@ PDFalyzer.EditMode = (function ($, P) {
     }
     function refreshSelectionButtons() {
         $('#formOptionsBtn').prop('disabled', !hasSession() || !(P.state.selectedFieldNames || []).length);
+        if (P.EditDesigner && P.EditDesigner.updateDesignerButtons) P.EditDesigner.updateDesignerButtons();
     }
     function updateSaveButton() {
         if (!P.state.pendingFieldOptions) P.state.pendingFieldOptions = [];
@@ -234,7 +235,8 @@ PDFalyzer.EditMode = (function ($, P) {
             if ($drawRect) $drawRect.remove();
             if (w < 10 || h < 10) return;
             var vp = P.state.pageViewports[pageIndex], s = vp.scale;
-            P.EditField.openCreateFieldDialog(P.state.editFieldType, pageIndex, { x: x / s, y: (vp.height - y - h) / s, width: w / s, height: h / s });
+            var sn = P.EditDesigner ? P.EditDesigner.snapV : function (v) { return v; };
+            P.EditField.openCreateFieldDialog(P.state.editFieldType, pageIndex, { x: sn(x / s), y: sn((vp.height - y - h) / s), width: sn(w / s), height: sn(h / s) });
         };
         $(document).on('mousemove', moveH).on('mouseup', upH);
     }
@@ -434,6 +436,7 @@ PDFalyzer.EditMode = (function ($, P) {
         setPendingCreatePayload: function (v) { pendingCreatePayload = v; },
         getLastAddedFieldTemplate: function () { return lastAddedFieldTemplate; },
         setLastAddedFieldTemplate: function (v) { lastAddedFieldTemplate = v; },
-        getPendingFieldOptionOverrides: function () { return pendingFieldOptionOverrides; }
+        getPendingFieldOptionOverrides: function () { return pendingFieldOptionOverrides; },
+        findFieldNodeByName: findFieldNodeByName
     };
 })(jQuery, PDFalyzer);
