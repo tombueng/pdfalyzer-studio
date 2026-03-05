@@ -1,6 +1,7 @@
 package io.pdfalyzer.ui;
 
 import io.github.bonigarcia.wdm.WebDriverManager;
+import lombok.extern.slf4j.Slf4j;
 import org.jcodec.api.awt.AWTSequenceEncoder;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,6 +19,10 @@ import org.openqa.selenium.WebDriver;
 import org.openqa.selenium.WebElement;
 import org.openqa.selenium.chrome.ChromeDriver;
 import org.openqa.selenium.chrome.ChromeOptions;
+import org.openqa.selenium.logging.LogEntries;
+import org.openqa.selenium.logging.LogEntry;
+import org.openqa.selenium.logging.LogType;
+import org.openqa.selenium.logging.LoggingPreferences;
 import org.openqa.selenium.support.ui.ExpectedConditions;
 import org.openqa.selenium.support.ui.WebDriverWait;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -36,9 +41,11 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.logging.Level;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+@Slf4j
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
 public class UIRenderingTest {
     
@@ -65,6 +72,10 @@ public class UIRenderingTest {
             options.addArguments("--disable-dev-shm-usage");
             options.addArguments("--disable-gpu");
             options.addArguments("--disable-blink-features=AutomationControlled");
+            LoggingPreferences loggingPrefs = new LoggingPreferences();
+            loggingPrefs.enable(LogType.BROWSER, Level.ALL);
+            loggingPrefs.enable(LogType.PERFORMANCE, Level.INFO);
+            options.setCapability("goog:loggingPrefs", loggingPrefs);
             
             driver = new ChromeDriver(options);
             driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(5));
@@ -1122,33 +1133,44 @@ public class UIRenderingTest {
 
         driver.manage().timeouts().scriptTimeout(Duration.ofSeconds(40));
         Object result = ((JavascriptExecutor) driver).executeAsyncScript(
-            "const done = arguments[arguments.length - 1];" +
-            "const P = window.PDFalyzer;" +
-            "if(!P || !P.state){ done({ok:false,msg:'no-state'}); return; }" +
-            "const handle = document.querySelector('.form-field-handle[data-field-name]');" +
+            "var done = arguments[arguments.length - 1];" +
+            "var P = window.PDFalyzer;" +
+            "if(!P||!P.state){ done({ok:false,msg:'no-state'}); return; }" +
+            "if(!P.FieldDialog){ done({ok:false,msg:'no-FieldDialog'}); return; }" +
+            "if(!P.EditOptions){ done({ok:false,msg:'no-EditOptions'}); return; }" +
+            "var handle = document.querySelector('.form-field-handle[data-field-name]');" +
             "if(!handle){ done({ok:false,msg:'no-handle'}); return; }" +
-            "const fieldName = handle.getAttribute('data-field-name');" +
-            "if(!fieldName){ done({ok:false,msg:'no-field-name'}); return; }" +
-            "P.state.selectedFieldNames = [fieldName];" +
-            "const btn = document.getElementById('formOptionsBtn');" +
+            "var fieldName = handle.getAttribute('data-field-name');" +
+            "var btn = document.getElementById('formOptionsBtn');" +
             "if(!btn){ done({ok:false,msg:'no-options-btn'}); return; }" +
-            "btn.click();" +
-            "setTimeout(function(){" +
-            "  const optReq = document.getElementById('optRequiredTrue');" +
-            "  const applyBtn = document.getElementById('applyFieldOptionsBtn');" +
-            "  const reqBlock = document.getElementById('optRequiredBlock');" +
-            "  if(!optReq || !applyBtn || !reqBlock){ done({ok:false,msg:'options-controls-missing'}); return; }" +
-            "  const blockVisible = !reqBlock.classList.contains('field-option-hidden');" +
-            "  if(!blockVisible){ done({ok:false,msg:'required-block-hidden'}); return; }" +
-            "  optReq.click();" +
-            "  applyBtn.click();" +
-            "  setTimeout(function(){" +
-            "    const saveBtn = document.getElementById('formSaveBtn');" +
-            "    const saveEnabled = !!saveBtn && !saveBtn.disabled;" +
-            "    const pendingOpts = Array.isArray(P.state.pendingFieldOptions) ? P.state.pendingFieldOptions.length : 0;" +
-            "    done({ ok: saveEnabled && pendingOpts > 0, saveEnabled: saveEnabled, pendingOpts: pendingOpts });" +
-            "  }, 180);" +
-            "}, 140);"
+            "P.state.selectedFieldNames = [fieldName];" +
+            "try { P.EditOptions.openOptionsPopup(); } catch(e) { done({ok:false,msg:'popup-threw:'+e.message}); return; }" +
+            "var deadline = Date.now() + 6000;" +
+            "function poll(){" +
+            "  var applyBtn = document.getElementById('fieldEditModalApplyBtn');" +
+            "  var reqBlock = document.querySelector('[data-fd-key=\"required\"]');" +
+            "  var optReq = document.querySelector('input[name=\"fd_required\"][value=\"true\"]');" +
+            "  if(optReq && applyBtn && reqBlock){" +
+            "    optReq.click(); applyBtn.click();" +
+            "    setTimeout(function(){" +
+            "      var saveBtn = document.getElementById('formSaveBtn');" +
+            "      var saveEnabled = !!saveBtn && !saveBtn.disabled;" +
+            "      var pendingOpts = Array.isArray(P.state.pendingFieldOptions)?P.state.pendingFieldOptions.length:0;" +
+            "      done({ok:saveEnabled&&pendingOpts>0, saveEnabled:saveEnabled, pendingOpts:pendingOpts});" +
+            "    }, 300);" +
+            "  } else if(Date.now()<deadline){" +
+            "    setTimeout(poll,100);" +
+            "  } else {" +
+            "    var tc = document.getElementById('fdTabsContainer');" +
+            "    var m = document.getElementById('fieldEditModal');" +
+            "    done({ok:false,msg:'timeout',schemaCache:!!window._PDFalyzerSchemaCache," +
+            "      editOptExists:!!P.EditOptions,fieldDialogExists:!!P.FieldDialog," +
+            "      modalShow:m?m.classList.contains('show'):false," +
+            "      tabsHtml:tc?tc.innerHTML.substring(0,300):''," +
+            "      sessionId:P.state.sessionId||null});" +
+            "  }" +
+            "}" +
+            "setTimeout(poll, 300);"
         );
 
         assertTrue(result instanceof Map, "Expected script result map");
@@ -1590,8 +1612,41 @@ public class UIRenderingTest {
         }
         List<?> list = (List<?>) raw;
         if (list.isEmpty()) return;
-
+        for (Object entry : list) {
+            log.warn("JS ERROR [{}]: {}", context, entry);
+        }
         throw new RuntimeException("JavaScript errors captured in browser (" + context + "): " + list);
+    }
+
+    /**
+     * Dumps Chromium browser console logs and HTTP 4xx/5xx network errors to SLF4J.
+     * Requires goog:loggingPrefs set in ChromeOptions (done in setUp).
+     */
+    private void dumpBrowserLogs(String context) {
+        if (driver == null) return;
+        try {
+            LogEntries browserLogs = driver.manage().logs().get(LogType.BROWSER);
+            for (LogEntry entry : browserLogs) {
+                if (entry.getLevel().intValue() >= Level.WARNING.intValue()) {
+                    log.warn("BROWSER [{}] {}: {}", context, entry.getLevel(), entry.getMessage());
+                } else {
+                    log.debug("BROWSER [{}] {}: {}", context, entry.getLevel(), entry.getMessage());
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Could not retrieve browser logs ({}): {}", context, e.getMessage());
+        }
+        try {
+            LogEntries perfLogs = driver.manage().logs().get(LogType.PERFORMANCE);
+            for (LogEntry entry : perfLogs) {
+                String msg = entry.getMessage();
+                if (msg.contains("Network.responseReceived") && (msg.contains("\"status\":4") || msg.contains("\"status\":5"))) {
+                    log.warn("NETWORK ERROR [{}]: {}", context, msg.length() > 500 ? msg.substring(0, 500) : msg);
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Could not retrieve performance logs ({}): {}", context, e.getMessage());
+        }
     }
 
     private boolean tryGenerateMp4FromFrames(Path artifactDir, int fps) {

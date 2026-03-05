@@ -474,6 +474,19 @@ public class FormFieldShowcasePdfGenerator {
         widget.getCOSObject().setInt(COSName.F, flags);
     }
 
+    /**
+     * Properly links a standalone widget annotation to a terminal field via a /Kids array.
+     * PDTerminalField.getWidgets() returns a fresh ArrayList, so .set(0,w) is a no-op and
+     * does NOT wire the widget to the field. This method sets /Parent on the widget and adds
+     * it to the field's /Kids array so Adobe Reader (and other viewers) can link them.
+     */
+    private static void linkWidget(PDField field, PDAnnotationWidget widget) {
+        widget.getCOSObject().setItem(COSName.PARENT, field.getCOSObject());
+        COSArray kids = new COSArray();
+        kids.add(widget.getCOSObject());
+        field.getCOSObject().setItem(COSName.KIDS, kids);
+    }
+
     private static void setJsAction(PDField field, String aaKey, String js) {
         COSDictionary aa = (COSDictionary) field.getCOSObject()
             .getDictionaryObject(COSName.AA);
@@ -507,7 +520,7 @@ public class FormFieldShowcasePdfGenerator {
         f.setRequired(true);
         f.setDefaultAppearance("/" + fontResName + " 11 Tf 0 g");
         PDAnnotationWidget w = widgetInZone(z, 280f, 18f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         f.setValue("Jane Doe  \u2190 required field");
         addField(f);
     }
@@ -527,7 +540,7 @@ public class FormFieldShowcasePdfGenerator {
         f.setReadOnly(true);
         f.setDefaultAppearance("/" + fontResName + " 11 Tf 0.4 0.4 0.4 rg");
         PDAnnotationWidget w = widgetInZone(z, 280f, 18f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         f.setValue("ACC-2026-0001  (read-only)");
         setMkColors(w, new float[]{0.92f, 0.92f, 0.95f}, new float[]{0.6f, 0.6f, 0.7f});
         addField(f);
@@ -548,7 +561,7 @@ public class FormFieldShowcasePdfGenerator {
         f.setMultiline(true);
         f.setDefaultAppearance("/" + fontResName + " 9 Tf 0 g");
         PDAnnotationWidget w = widgetInZone(z, 320f, 54f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         f.setValue("Line 1: Visible text.\nLine 2: Also visible.\nLine 3: May be scrolled out of view.\n"
             + "Line 4: Only in /V, not in the AP stream if viewport was too small.\n"
             + "Line 5: Many tools silently drop this line when parsing the appearance stream.");
@@ -572,7 +585,7 @@ public class FormFieldShowcasePdfGenerator {
         f.getCOSObject().setInt(COSName.FF, ff | (1 << 13)); // bit 14 (1-indexed) = bit 13 (0-indexed)
         f.setDefaultAppearance("/" + fontResName + " 11 Tf 0 g");
         PDAnnotationWidget w = widgetInZone(z, 220f, 18f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         f.setValue("s3cr3tP4ssw0rd"); // stored plain in /V
         addField(f);
     }
@@ -595,7 +608,7 @@ public class FormFieldShowcasePdfGenerator {
         f.setMaxLen(12);
         f.setDefaultAppearance("/" + fontResName + " 11 Tf 0 g");
         PDAnnotationWidget w = widgetInZone(z, 300f, 20f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         f.setValue("ABCDE12345XY");
         addField(f);
     }
@@ -615,7 +628,7 @@ public class FormFieldShowcasePdfGenerator {
         // Font size 0 = auto-size
         f.setDefaultAppearance("/" + fontResName + " 0 Tf 0 g");
         PDAnnotationWidget w = widgetInZone(z, 320f, 18f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         f.setValue("This text should auto-size to fit the field rectangle");
         addField(f);
     }
@@ -635,7 +648,7 @@ public class FormFieldShowcasePdfGenerator {
         // 72pt font in an 18pt-high widget
         f.setDefaultAppearance("/" + fontResName + " 72 Tf 0.1 0.1 0.5 rg");
         PDAnnotationWidget w = widgetInZone(z, 280f, 20f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         f.setValue("GIANT");
         addField(f);
     }
@@ -655,7 +668,7 @@ public class FormFieldShowcasePdfGenerator {
         f.setQ(1); // centre
         f.setDefaultAppearance("/" + fontResName + " 11 Tf 0 g");
         PDAnnotationWidget w = widgetInZone(z, 280f, 18f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         f.setValue("Centred text value");
         addField(f);
     }
@@ -675,7 +688,7 @@ public class FormFieldShowcasePdfGenerator {
         f.setQ(2); // right
         f.setDefaultAppearance("/" + fontResName + " 11 Tf 0 g");
         PDAnnotationWidget w = widgetInZone(z, 280f, 18f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         f.setValue("1.234,56");
         addField(f);
     }
@@ -697,7 +710,7 @@ public class FormFieldShowcasePdfGenerator {
         f.getCOSObject().setInt(COSName.FF, ff | 0x04000000);
         f.setDefaultAppearance("/" + fontResName + " 11 Tf 0 g");
         PDAnnotationWidget w = widgetInZone(z, 320f, 18f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         f.setValue("Rich text fallback value");
         // Manually set /RV (rich value) via COS
         f.getCOSObject().setString(COSName.getPDFName("RV"),
@@ -720,7 +733,7 @@ public class FormFieldShowcasePdfGenerator {
         f.setMaxLen(8);
         f.setDefaultAppearance("/" + fontResName + " 11 Tf 0 g");
         PDAnnotationWidget w = widgetInZone(z, 220f, 18f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         f.setValue("ABCDEFGHIJKLMNOP"); // 16 chars stored despite MaxLen=8
         addField(f);
     }
@@ -740,7 +753,7 @@ public class FormFieldShowcasePdfGenerator {
         f.getCOSObject().setInt(COSName.Q, -1); // directly write invalid value
         f.setDefaultAppearance("/" + fontResName + " 11 Tf 0 g");
         PDAnnotationWidget w = widgetInZone(z, 280f, 18f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         f.setValue("Negative /Q = -1");
         addField(f);
     }
@@ -762,7 +775,7 @@ public class FormFieldShowcasePdfGenerator {
         PDCheckBox f = new PDCheckBox(acroForm);
         f.setPartialName(uid());
         PDAnnotationWidget w = widgetInZone(z, 16f, 16f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         addField(f);
         f.check();
     }
@@ -780,7 +793,7 @@ public class FormFieldShowcasePdfGenerator {
         PDCheckBox f = new PDCheckBox(acroForm);
         f.setPartialName(uid());
         PDAnnotationWidget w = widgetInZone(z, 16f, 16f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
 
         // Build a minimal AP stream with /Checked instead of /Yes
         COSDictionary ap = new COSDictionary();
@@ -816,7 +829,7 @@ public class FormFieldShowcasePdfGenerator {
         PDCheckBox f = new PDCheckBox(acroForm);
         f.setPartialName(uid());
         PDAnnotationWidget w = widgetInZone(z, 16f, 16f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         setMkColors(w, new float[]{1f, 1f, 0f}, new float[]{0f, 0f, 0.8f});
         addField(f);
         f.check();
@@ -920,7 +933,7 @@ public class FormFieldShowcasePdfGenerator {
         f.setOptions(Arrays.asList("DE", "US", "FR", "JP", "GB", "AU"));
         f.setDefaultAppearance("/" + fontResName + " 10 Tf 0 g");
         PDAnnotationWidget w = widgetInZone(z, 180f, 18f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         f.setValue("DE");
         addField(f);
     }
@@ -941,7 +954,7 @@ public class FormFieldShowcasePdfGenerator {
         f.setOptions(Arrays.asList("Standard", "Premium", "Enterprise"));
         f.setDefaultAppearance("/" + fontResName + " 10 Tf 0 g");
         PDAnnotationWidget w = widgetInZone(z, 200f, 18f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         f.setValue("Custom Tier (not in list)");
         addField(f);
     }
@@ -970,7 +983,7 @@ public class FormFieldShowcasePdfGenerator {
         f.getCOSObject().setItem(COSName.OPT, opt);
         f.setDefaultAppearance("/" + fontResName + " 10 Tf 0 g");
         PDAnnotationWidget w = widgetInZone(z, 200f, 18f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         f.getCOSObject().setString(COSName.V, "de"); // export value in /V
         addField(f);
     }
@@ -993,7 +1006,7 @@ public class FormFieldShowcasePdfGenerator {
         f.setOptions(Arrays.asList("Low", "Medium", "High", "Critical", "Blocker"));
         f.setDefaultAppearance("/" + fontResName + " 10 Tf 0 g");
         PDAnnotationWidget w = widgetInZone(z, 160f, 60f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         // Set multi-value /V and /I directly
         COSArray v = new COSArray(); v.add(new COSString("Low")); v.add(new COSString("High"));
         COSArray i = new COSArray(); i.add(COSInteger.get(0)); i.add(COSInteger.get(2));
@@ -1019,7 +1032,7 @@ public class FormFieldShowcasePdfGenerator {
         f.setOptions(opts);
         f.setDefaultAppearance("/" + fontResName + " 10 Tf 0 g");
         PDAnnotationWidget w = widgetInZone(z, 160f, 60f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         f.setValue("Item 6");
         f.getCOSObject().setInt(COSName.getPDFName("TI"), 4); // pre-scroll to item 5
         addField(f);
@@ -1040,7 +1053,7 @@ public class FormFieldShowcasePdfGenerator {
         f.setOptions(Arrays.asList("Alpha", "Beta", "Gamma"));
         f.setDefaultAppearance("/" + fontResName + " 10 Tf 0 g");
         PDAnnotationWidget w = widgetInZone(z, 200f, 18f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         f.getCOSObject().setString(COSName.V, "CustomEntry"); // not in /Opt
         addField(f);
     }
@@ -1063,7 +1076,7 @@ public class FormFieldShowcasePdfGenerator {
         f.setPartialName(uid());
         f.getCOSObject().setString(COSName.DA, "/" + fontResName + " 10 Tf 1 1 1 rg");
         PDAnnotationWidget w = widgetInZone(z, 160f, 22f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         setMkColors(w, new float[]{0.2f, 0.35f, 0.65f}, new float[]{0.1f, 0.2f, 0.5f});
         // Set caption via MK
         COSDictionary mk = (COSDictionary) w.getCOSObject().getDictionaryObject(COSName.MK);
@@ -1091,7 +1104,7 @@ public class FormFieldShowcasePdfGenerator {
         f.setPartialName(uid());
         f.getCOSObject().setString(COSName.DA, "/" + fontResName + " 10 Tf 1 1 1 rg");
         PDAnnotationWidget w = widgetInZone(z, 160f, 22f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         setMkColors(w, new float[]{0.15f, 0.52f, 0.28f}, new float[]{0.05f, 0.35f, 0.15f});
         COSDictionary mk = (COSDictionary) w.getCOSObject().getDictionaryObject(COSName.MK);
         if (mk == null) { mk = new COSDictionary(); w.getCOSObject().setItem(COSName.MK, mk); }
@@ -1123,7 +1136,7 @@ public class FormFieldShowcasePdfGenerator {
         f.setPartialName(uid());
         f.getCOSObject().setString(COSName.DA, "/" + fontResName + " 9 Tf 0.4 0.1 0.1 rg");
         PDAnnotationWidget w = widgetInZone(z, 240f, 22f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         setMkColors(w, new float[]{1f, 0.85f, 0.85f}, new float[]{0.7f, 0.1f, 0.1f});
         COSDictionary mk = (COSDictionary) w.getCOSObject().getDictionaryObject(COSName.MK);
         if (mk == null) { mk = new COSDictionary(); w.getCOSObject().setItem(COSName.MK, mk); }
@@ -1150,7 +1163,7 @@ public class FormFieldShowcasePdfGenerator {
         f.setPartialName(uid());
         f.setDefaultAppearance("/" + fontResName + " 11 Tf 0 g");
         PDAnnotationWidget w = widgetInZone(z, 280f, 18f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         setBorderStyle(w, "S", 0f); // solid, width 0
         f.setValue("No visible border (W=0)");
         addField(f);
@@ -1170,7 +1183,7 @@ public class FormFieldShowcasePdfGenerator {
         f.setPartialName(uid());
         f.setDefaultAppearance("/" + fontResName + " 11 Tf 0 g");
         PDAnnotationWidget w = widgetInZone(z, 280f, 18f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         setBorderStyleDashed(w, 2f, 4, 2);
         f.setValue("Dashed border (4 on, 2 off)");
         addField(f);
@@ -1190,7 +1203,7 @@ public class FormFieldShowcasePdfGenerator {
         f.setPartialName(uid());
         f.setDefaultAppearance("/" + fontResName + " 11 Tf 0 g");
         PDAnnotationWidget w = widgetInZone(z, 280f, 18f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         setBorderStyle(w, "B", 2f);
         setMkColors(w, new float[]{0.95f, 0.95f, 1f}, new float[]{0.3f, 0.3f, 0.7f});
         f.setValue("Beveled border (3D raised)");
@@ -1211,7 +1224,7 @@ public class FormFieldShowcasePdfGenerator {
         f.setPartialName(uid());
         f.setDefaultAppearance("/" + fontResName + " 11 Tf 0 g");
         PDAnnotationWidget w = widgetInZone(z, 280f, 18f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         setBorderStyle(w, "I", 2f);
         setMkColors(w, new float[]{0.88f, 0.88f, 0.92f}, new float[]{0.3f, 0.3f, 0.5f});
         f.setValue("Inset border (3D sunken)");
@@ -1232,7 +1245,7 @@ public class FormFieldShowcasePdfGenerator {
         f.setPartialName(uid());
         f.setDefaultAppearance("/" + fontResName + " 11 Tf 0 g");
         PDAnnotationWidget w = widgetInZone(z, 280f, 18f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         setBorderStyle(w, "U", 2f);
         setMkColors(w, null, new float[]{0f, 0f, 0.6f});
         f.setValue("Underline only border");
@@ -1255,7 +1268,7 @@ public class FormFieldShowcasePdfGenerator {
         // Taller widget to show the rotation effect
         float wzB = z[1] + (z[3] - 30f) / 2f;
         PDAnnotationWidget w = mkWidget(z[0] + 10f, wzB, 160f, 30f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         setWidgetRotation(w, 90);
         f.setValue("Rotated 90 degrees");
         addField(f);
@@ -1275,7 +1288,7 @@ public class FormFieldShowcasePdfGenerator {
         f.setPartialName(uid());
         f.setDefaultAppearance("/" + fontResName + " 11 Tf 0 0 0 rg");
         PDAnnotationWidget w = widgetInZone(z, 280f, 18f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         setMkColors(w, new float[]{1f, 0.6f, 0f}, new float[]{0f, 0f, 0.7f});
         setBorderStyle(w, "S", 2f);
         f.setValue("Custom /BG and /BC colours");
@@ -1300,7 +1313,7 @@ public class FormFieldShowcasePdfGenerator {
         f.setPartialName(uid());
         float wzB = z[1] + (z[3] - 28f) / 2f;
         PDAnnotationWidget w = mkWidget(z[0] + 10f, wzB, 320f, 28f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         setMkColors(w, new float[]{0.97f, 0.97f, 0.97f}, new float[]{0.3f, 0.3f, 0.5f});
         addField(f);
     }
@@ -1319,7 +1332,7 @@ public class FormFieldShowcasePdfGenerator {
         f.setPartialName(uid());
         float wzB = z[1] + (z[3] - 28f) / 2f;
         PDAnnotationWidget w = mkWidget(z[0] + 10f, wzB, 320f, 28f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         // Build /Lock dictionary manually
         COSDictionary lock = new COSDictionary();
         lock.setName(COSName.TYPE, "SigFieldLock");
@@ -1346,7 +1359,7 @@ public class FormFieldShowcasePdfGenerator {
         f.setPartialName(uid());
         float wzB = z[1] + (z[3] - 28f) / 2f;
         PDAnnotationWidget w = mkWidget(z[0] + 10f, wzB, 320f, 28f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         // Attach DocMDP structure to the field (no actual signature value)
         COSDictionary transformParams = new COSDictionary();
         transformParams.setName(COSName.TYPE, "TransformParams");
@@ -1382,7 +1395,7 @@ public class FormFieldShowcasePdfGenerator {
         f.setPartialName(uid());
         f.setDefaultAppearance("/" + fontResName + " 11 Tf 0.7 0.1 0.1 rg");
         PDAnnotationWidget w = widgetInZone(z, 320f, 18f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         setAnnotationFlags(w, 2); // Hidden
         f.setValue("I should be HIDDEN (F=2) but most viewers show me anyway");
         addField(f);
@@ -1404,7 +1417,7 @@ public class FormFieldShowcasePdfGenerator {
         float cx = z[0] + 10f;
         float cy = z[1] + z[3] / 2f;
         PDAnnotationWidget w = mkWidget(cx, cy, 200f, 0f); // height = 0
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         f.setValue("Zero height widget value (invisible)");
         addField(f);
         // Draw a visible indicator showing where the 0-height widget is
@@ -1432,7 +1445,7 @@ public class FormFieldShowcasePdfGenerator {
         f.setMultiline(true);
         f.setDefaultAppearance("/" + fontResName + " 8 Tf 0 g");
         PDAnnotationWidget w = widgetInZone(z, 400f, 48f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         StringBuilder sb = new StringBuilder();
         for (int i = 1; i <= 50; i++) sb.append("Line ").append(i).append(": data value row ").append(i).append(".\n");
         f.setValue(sb.toString());
@@ -1462,7 +1475,7 @@ public class FormFieldShowcasePdfGenerator {
 
         name.setDefaultAppearance("/" + fontResName + " 11 Tf 0 g");
         PDAnnotationWidget w = widgetInZone(z, 300f, 18f);
-        name.getWidgets().set(0, w);
+        linkWidget(name, w);
         name.setValue("Nested field value");
 
         // Build hierarchy manually via COS Kids arrays
@@ -1491,7 +1504,7 @@ public class FormFieldShowcasePdfGenerator {
         // Deliberately omit /DA
         f.getCOSObject().removeItem(COSName.DA);
         PDAnnotationWidget w = widgetInZone(z, 280f, 18f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         f.getCOSObject().setString(COSName.V, "Value with no /DA (will appear blank in most viewers)");
         acroForm.getFields().add(f);
     }
@@ -1510,7 +1523,7 @@ public class FormFieldShowcasePdfGenerator {
         f.setPartialName(uid());
         f.setDefaultAppearance("/" + fontResName + " 11 Tf 0 g");
         PDAnnotationWidget w = widgetInZone(z, 320f, 18f);
-        f.getWidgets().set(0, w);
+        linkWidget(f, w);
         f.setValue("Changed value  (/V)");
         f.getCOSObject().setString(COSName.DV, "Original default  (/DV, used by ResetForm)");
         addField(f);
