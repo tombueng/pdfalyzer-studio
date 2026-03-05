@@ -1,5 +1,6 @@
 package io.pdfalyzer.tools;
 
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -8,6 +9,7 @@ import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+@Disabled("PDF generator tool — run manually when regenerating missing-glyph sample PDF")
 class MissingGlyphEasyPdfGeneratorTest {
 
     @TempDir

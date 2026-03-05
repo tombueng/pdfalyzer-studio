@@ -205,7 +205,7 @@ class ApiFlowIntegrationTest {
 
     private ResponseEntity<Map<String, Object>> uploadTestPdf() throws IOException {
         byte[] pdfBytes;
-        try (java.io.InputStream in = new ClassPathResource("test.pdf").getInputStream()) {
+        try (java.io.InputStream in = new ClassPathResource("sample-pdfs/test.pdf").getInputStream()) {
             pdfBytes = StreamUtils.copyToByteArray(in);
         }
 

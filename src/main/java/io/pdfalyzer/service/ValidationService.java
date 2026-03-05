@@ -13,6 +13,7 @@ import org.apache.pdfbox.pdmodel.PDResources;
 import org.apache.pdfbox.pdmodel.common.PDMetadata;
 import org.apache.pdfbox.pdmodel.font.PDFont;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotation;
+import org.apache.pdfbox.pdmodel.interactive.form.PDAcroForm;
 import org.springframework.stereotype.Service;
 
 import io.pdfalyzer.model.ValidationIssue;
@@ -29,6 +30,7 @@ public class ValidationService {
             validateFonts(doc, issues);
             validatePages(doc, issues);
             validateAnnotations(doc, issues);
+            validateFormFields(doc, issues);
         }
         return issues;
     }
@@ -119,6 +121,38 @@ public class ValidationService {
                         "Page " + (i + 1),
                         "structure"));
             }
+        }
+    }
+
+    private void validateFormFields(PDDocument doc, List<ValidationIssue> issues) {
+        int widgetCount = 0;
+        for (int i = 0; i < doc.getNumberOfPages(); i++) {
+            try {
+                for (PDAnnotation annot : doc.getPage(i).getAnnotations()) {
+                    if ("Widget".equals(annot.getSubtype())) widgetCount++;
+                }
+            } catch (Exception e) {
+                log.debug("Error scanning page {} for widget annotations", i, e);
+            }
+        }
+
+        PDAcroForm acroForm = doc.getDocumentCatalog().getAcroForm();
+        if (widgetCount > 0 && acroForm == null) {
+            issues.add(new ValidationIssue(
+                    "WARNING", "FORM-001",
+                    widgetCount + " form field widget(s) detected on page(s) but document has no AcroForm — fields cannot be read or filled",
+                    "PDF 2.0, Section 12.7.2",
+                    "Document Catalog",
+                    "form"));
+        }
+
+        if (acroForm != null && acroForm.getFields().isEmpty() && widgetCount > 0) {
+            issues.add(new ValidationIssue(
+                    "WARNING", "FORM-002",
+                    "AcroForm exists but declares no fields, yet " + widgetCount + " widget annotation(s) were found — fields are orphaned",
+                    "PDF 2.0, Section 12.7.3",
+                    "AcroForm",
+                    "form"));
         }
     }
 

@@ -98,6 +98,20 @@ PDFalyzer.EditDesigner = (function ($, P) {
         P.EditMode.updateSaveButton();
     }
 
+    function sizeFields(mode) {
+        var items = getSelectedRects();
+        if (items.length < 2) { P.Utils.toast('Select 2+ fields to match size', 'warning'); return; }
+        var refW = items[0].rect.width, refH = items[0].rect.height;
+        items.forEach(function (it) {
+            var r = it.rect;
+            var nw = (mode === 'matchWidth' || mode === 'matchSize') ? refW : r.width;
+            var nh = (mode === 'matchHeight' || mode === 'matchSize') ? refH : r.height;
+            P.EditMode.queueRectChange(it.name, r.x, r.y, nw, nh);
+        });
+        P.EditMode.renderFieldHandlesForAllPages();
+        P.EditMode.updateSaveButton();
+    }
+
     function distributeFields(axis) {
         var items = getSelectedRects();
         if (items.length < 3) { P.Utils.toast('Select 3+ fields to distribute', 'warning'); return; }
@@ -148,13 +162,16 @@ PDFalyzer.EditDesigner = (function ($, P) {
         $('#centerVBtn').on('click',      function () { alignFields('centerV'); });
         $('#distributeHBtn').on('click',  function () { distributeFields('h'); });
         $('#distributeVBtn').on('click',  function () { distributeFields('v'); });
+        $('#matchWidthBtn').on('click',   function () { sizeFields('matchWidth'); });
+        $('#matchHeightBtn').on('click',  function () { sizeFields('matchHeight'); });
+        $('#matchSizeBtn').on('click',    function () { sizeFields('matchSize'); });
         updateDesignerButtons();
     }
 
     return {
         init: init, toggleGrid: toggleGrid,
         copySelected: copySelected, pasteFields: pasteFields,
-        alignFields: alignFields, distributeFields: distributeFields,
+        alignFields: alignFields, distributeFields: distributeFields, sizeFields: sizeFields,
         updateDesignerButtons: updateDesignerButtons,
         snapV: snapV, isGridEnabled: function () { return gridEnabled; }
     };

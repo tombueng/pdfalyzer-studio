@@ -57,6 +57,16 @@ PDFalyzer.ValidationTab = (function ($, P) {
             why: 'PDF/A-1b requires all annotations to have an appearance stream (/AP). Without one, the annotation may not render consistently across viewers.',
             fix: 'Open the PDF in a PDF editor and flatten or regenerate annotations. For form fields, use "Flatten Annotations" export option.',
             confidence: 'high', tab: null
+        },
+        'FORM-001': {
+            why: 'Widget annotations represent interactive form fields rendered on the page, but without an AcroForm dictionary in the Document Catalog, their values cannot be read, filled, or submitted by any PDF viewer or processor.',
+            fix: 'Reconstruct the AcroForm by linking the orphaned widget annotations as fields.',
+            confidence: 'high', tab: 'fields', fixEndpoint: '/api/repair/acroform/'
+        },
+        'FORM-002': {
+            why: 'The AcroForm dictionary exists but its /Fields array is empty, while widget annotations are present on pages. These fields are orphaned and invisible to form processors.',
+            fix: 'Adopt the orphaned widget annotations into the AcroForm /Fields array.',
+            confidence: 'high', tab: 'fields', fixEndpoint: '/api/repair/acroform/'
         }
     };
 
@@ -73,12 +83,18 @@ PDFalyzer.ValidationTab = (function ($, P) {
             tabLink = ' <a href="#" class="issue-tab-link ms-2" data-tab="' + ex.tab + '" style="font-size:11px;">' +
                 '<i class="fas fa-arrow-right me-1"></i>Open ' + ex.tab + ' tab</a>';
         }
+        var fixBtn = '';
+        if (ex.fixEndpoint) {
+            fixBtn = ' <button class="btn btn-warning btn-sm ms-2 issue-fix-btn" data-endpoint="' +
+                ex.fixEndpoint + '" data-rule="' + issue.ruleId + '" style="font-size:11px;padding:2px 8px;">' +
+                '<i class="fas fa-wrench me-1"></i>Fix Now</button>';
+        }
         return '<details class="issue-explainer mt-1"><summary class="issue-explainer-summary">' +
             '<i class="fas fa-lightbulb me-1 text-warning"></i>Why this matters' +
             confidenceBadgeHtml(ex.confidence) + '</summary>' +
             '<div class="issue-explainer-body">' +
             '<p class="mb-1"><strong>Why:</strong> ' + P.Utils.escapeHtml(ex.why) + '</p>' +
-            '<p class="mb-1"><strong>Likely fix:</strong> ' + P.Utils.escapeHtml(ex.fix) + tabLink + '</p>' +
+            '<p class="mb-1"><strong>Likely fix:</strong> ' + P.Utils.escapeHtml(ex.fix) + tabLink + fixBtn + '</p>' +
             '</div></details>';
     }
 
@@ -87,6 +103,25 @@ PDFalyzer.ValidationTab = (function ($, P) {
             e.preventDefault();
             var tab = $(this).data('tab');
             if (tab && P.Tabs && P.Tabs.switchTab) P.Tabs.switchTab(tab);
+        });
+        $container.find('.issue-fix-btn').off('click').on('click', function () {
+            var $btn = $(this);
+            var endpoint = $btn.data('endpoint') + P.state.sessionId;
+            $btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin me-1"></i>Fixing…');
+            P.Utils.apiFetch(endpoint, { method: 'POST' })
+                .done(function (res) {
+                    if (res.success) {
+                        P.Utils.toast('AcroForm repaired — ' + res.adopted + ' field(s) adopted. Re-running validation…', 'success');
+                        runStandardValidation();
+                    } else {
+                        P.Utils.toast('No orphaned widget fields with a field name (/T) were found to adopt.', 'warning');
+                        $btn.prop('disabled', false).html('<i class="fas fa-wrench me-1"></i>Fix Now');
+                    }
+                })
+                .fail(function () {
+                    P.Utils.toast('Repair failed', 'danger');
+                    $btn.prop('disabled', false).html('<i class="fas fa-wrench me-1"></i>Fix Now');
+                });
         });
     }
 
@@ -102,8 +137,8 @@ PDFalyzer.ValidationTab = (function ($, P) {
 
     function runStandardValidation() {
         var $c = $('#treeContent');
-        $c.html('<div class="text-muted text-center mt-3">' +
-            '<span class="spinner-border spinner-border-sm"></span> Running standard validation...</div>');
+        $c.html(getValidationControlsHtml(true) + P.Utils.tabSkeleton('validation'));
+        bindValidationControls();
         P.Utils.apiFetch('/api/validate/' + P.state.sessionId)
             .done(function (issues) { renderValidation(issues); })
             .fail(function () { P.Utils.toast('Validation error', 'danger'); });
@@ -111,8 +146,8 @@ PDFalyzer.ValidationTab = (function ($, P) {
 
     function runVeraPdfValidation() {
         var $c = $('#treeContent');
-        $c.html('<div class="text-muted text-center mt-3">' +
-            '<span class="spinner-border spinner-border-sm"></span> Running veraPDF...</div>');
+        $c.html(getValidationControlsHtml(true) + P.Utils.tabSkeleton('validation'));
+        bindValidationControls();
         P.Utils.apiFetch('/api/validate/' + P.state.sessionId + '/verapdf')
             .done(function (result) { renderVeraPdf(result || {}); })
             .fail(function () { P.Utils.toast('veraPDF validation error', 'danger'); });
@@ -127,9 +162,6 @@ PDFalyzer.ValidationTab = (function ($, P) {
     }
 
     function loadValidation() {
-        var $c = $('#treeContent');
-        $c.html(getValidationControlsHtml(true));
-        bindValidationControls();
         runStandardValidation();
     }
 

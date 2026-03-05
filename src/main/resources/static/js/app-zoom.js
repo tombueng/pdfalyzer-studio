@@ -20,6 +20,11 @@ PDFalyzer.Zoom = (function ($, P) {
 
     function setPanMode(active) {
         panModeActive = !!active;
+        P.state.panMode = panModeActive;
+        if (panModeActive && P.state.editFieldType) {
+            P.state.editFieldType = null;
+            if (P.EditMode && P.EditMode.syncEditFieldTypeUI) P.EditMode.syncEditFieldTypeUI();
+        }
         $('#panModeBtn').toggleClass('active', panModeActive);
         $('#pdfPane').toggleClass('pan-mode-active', panModeActive);
     }

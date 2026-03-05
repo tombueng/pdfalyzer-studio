@@ -321,6 +321,26 @@
 .issue-tab-link { color: var(--accent); text-decoration: none; }
 .issue-tab-link:hover { text-decoration: underline; }
 
+/* === Tab skeleton loaders === */
+.skel {
+    background: linear-gradient(90deg,
+        rgba(255,255,255,0.05) 25%,
+        rgba(255,255,255,0.10) 50%,
+        rgba(255,255,255,0.05) 75%);
+    background-size: 200% 100%;
+    animation: skel-shimmer 1.4s ease-in-out infinite;
+    border-radius: 4px;
+}
+
+@keyframes skel-shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
+.skel-row    { height: 14px; margin: 8px 0; }
+.skel-metric { height: 62px; flex: 1; min-width: 90px; border-radius: 6px; }
+.skel-issue  { height: 54px; margin: 8px 0; border-radius: 6px; }
+
 /* === Responsive === */
 @media (max-width: 768px) {
     #appContainer { flex-direction: column; }

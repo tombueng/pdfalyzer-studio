@@ -131,6 +131,22 @@ public class EditApiController {
         return treeResponse(sessionId);
     }
 
+    @PostMapping("/edit/{sessionId}/radio/{fieldName}/restructure")
+    public ResponseEntity<Map<String, Object>> restructureRadioGroup(
+            @PathVariable("sessionId") String sessionId,
+            @PathVariable("fieldName") String fieldName,
+            @RequestBody Map<String, Object> body) throws IOException {
+        @SuppressWarnings("unchecked")
+        List<Map<String, String>> options = (List<Map<String, String>>) body.get("options");
+        @SuppressWarnings("unchecked")
+        Map<String, Object> fieldOptions = (Map<String, Object>) body.get("fieldOptions");
+        if (options == null) return ResponseEntity.badRequest().build();
+        byte[] bytes = pdfService.getSessionPdfBytes(sessionId);
+        byte[] modified = pdfEditService.restructureRadioGroup(bytes, fieldName, options, fieldOptions);
+        pdfService.updateSessionPdf(sessionId, modified);
+        return treeResponse(sessionId);
+    }
+
     private ResponseEntity<Map<String, Object>> treeResponse(String sessionId) {
         PdfSession session = pdfService.getSession(sessionId);
         Map<String, Object> result = new LinkedHashMap<>();

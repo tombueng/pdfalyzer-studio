@@ -1,0 +1,619 @@
+/* === PDFalyzer Studio — Color System ===
+ *
+ * 7 base variables per theme. Everything else is derived.
+ *
+ *  --c-bg       darkest background surface
+ *  --c-surface  raised panel / sidebar surface
+ *  --c-card     elevated card / header surface
+ *  --c-accent   primary interactive / brand color
+ *  --c-err      error / destructive color
+ *  --c-warn     warning color
+ *  --c-ok       success / positive color
+ *
+ * Semantic aliases (auto-derived via color-mix) follow.
+ * Theme overrides apply via  data-theme="name"  on <html>.
+ */
+
+/* ─────────────────────────────────────────────
+   DEFAULT THEME  →  "Void Blue"
+───────────────────────────────────────────── */
+:root {
+    /* 7 base colors */
+    --c-bg:      #1a1a2e;
+    --c-surface: #16213e;
+    --c-card:    #0f3460;
+    --c-accent:  #00d4ff;
+    --c-err:     #dc3545;
+    --c-warn:    #ffc107;
+    --c-ok:      #20c997;
+    --c-text:    #e0e0e0;
+
+    /* Additional base colors */
+    --c-text-btn: #000000;   /* text ON accent-coloured buttons */
+    --c-input-bg: color-mix(in srgb, var(--c-bg) 60%, var(--c-surface) 40%);
+    --c-title:    color-mix(in srgb, var(--c-text) 78%, var(--c-accent) 22%);
+
+    /* ── Semantic aliases consumed by all CSS files ── */
+    --bg-dark:    var(--c-bg);
+    --bg-panel:   var(--c-surface);
+    --bg-card:    var(--c-card);
+    --accent:     var(--c-accent);
+    --accent-dim: color-mix(in srgb, var(--c-accent) 15%, transparent);
+    --highlight:  color-mix(in srgb, var(--c-accent) 25%, transparent);
+    --danger:     var(--c-err);
+    --warning:    var(--c-warn);
+    --success:    var(--c-ok);
+    --text:       var(--c-text);
+    --text-muted: color-mix(in srgb, var(--c-text) 55%, var(--c-bg));
+    --border:     color-mix(in srgb, var(--c-card) 70%, var(--c-accent) 30%);
+    --input-bg:   var(--c-input-bg);
+    --title:      var(--c-title);
+    --btn-text:   var(--c-text-btn);
+}
+
+/* ══════════════════════════════════════════════════════
+   GROUP 1 · CYBERPUNK / NEON
+══════════════════════════════════════════════════════ */
+
+/* 2 – Neon Tokyo */
+[data-theme="neon-tokyo"] {
+    --c-bg:#0a0010; --c-surface:#120022; --c-card:#1e0040;
+    --c-accent:#ff00aa; --c-err:#ff2244; --c-warn:#ffaa00; --c-ok:#00ffaa; --c-text:#f0e0ff;
+}
+/* 3 – Acid Rain */
+[data-theme="acid-rain"] {
+    --c-bg:#050f05; --c-surface:#081408; --c-card:#0a1e0a;
+    --c-accent:#39ff14; --c-err:#ff3030; --c-warn:#ffcc00; --c-ok:#00ff88; --c-text:#c8f0c8;
+}
+/* 4 – Synthwave */
+[data-theme="synthwave"] {
+    --c-bg:#0a0520; --c-surface:#130a35; --c-card:#1f1060;
+    --c-accent:#cc00ff; --c-err:#ff1493; --c-warn:#ff9900; --c-ok:#00ffcc; --c-text:#ffe0ff;
+}
+/* 5 – Cyberpunk Gold */
+[data-theme="cyberpunk-gold"] {
+    --c-bg:#0a0800; --c-surface:#141000; --c-card:#1e1800;
+    --c-accent:#ffe000; --c-err:#ff3030; --c-warn:#ff9900; --c-ok:#00ff9f; --c-text:#fff8cc;
+}
+/* 6 – Matrix */
+[data-theme="matrix"] {
+    --c-bg:#000800; --c-surface:#000f00; --c-card:#001800;
+    --c-accent:#00ff41; --c-err:#ff3333; --c-warn:#ccff00; --c-ok:#00ffcc; --c-text:#b3ffb3;
+}
+/* 7 – Plasma */
+[data-theme="plasma"] {
+    --c-bg:#06000f; --c-surface:#0c0020; --c-card:#140040;
+    --c-accent:#7b00ff; --c-err:#ff0055; --c-warn:#ffbb00; --c-ok:#00ffc8; --c-text:#e8d0ff;
+}
+/* 8 – Outrun */
+[data-theme="outrun"] {
+    --c-bg:#08000f; --c-surface:#140018; --c-card:#200030;
+    --c-accent:#ff6ec7; --c-err:#ff2244; --c-warn:#ff9900; --c-ok:#00ff88; --c-text:#ffd6ff;
+}
+/* 9 – Ultraviolet */
+[data-theme="ultraviolet"] {
+    --c-bg:#050010; --c-surface:#0a0025; --c-card:#120040;
+    --c-accent:#4400ff; --c-err:#ff0040; --c-warn:#ffee00; --c-ok:#00ff80; --c-text:#d0c0ff;
+}
+/* 10 – Electra */
+[data-theme="electra"] {
+    --c-bg:#001414; --c-surface:#001e20; --c-card:#003035;
+    --c-accent:#00ffe5; --c-err:#ff2222; --c-warn:#ffcc00; --c-ok:#00ff99; --c-text:#c0fff8;
+}
+
+/* ══════════════════════════════════════════════════════
+   GROUP 2 · DARK ELEGANT
+══════════════════════════════════════════════════════ */
+
+/* 11 – Midnight Rose */
+[data-theme="midnight-rose"] {
+    --c-bg:#1a0a10; --c-surface:#280f18; --c-card:#3d1525;
+    --c-accent:#ff7eb3; --c-err:#ff3355; --c-warn:#ffc107; --c-ok:#2ed8a7; --c-text:#f5e0ea;
+}
+/* 12 – Obsidian */
+[data-theme="obsidian"] {
+    --c-bg:#0a0a08; --c-surface:#131310; --c-card:#1e1e19;
+    --c-accent:#ff8c42; --c-err:#ff4444; --c-warn:#ffcc00; --c-ok:#44cc88; --c-text:#f0efe8;
+}
+/* 13 – Onyx */
+[data-theme="onyx"] {
+    --c-bg:#0c0c0c; --c-surface:#161616; --c-card:#222222;
+    --c-accent:#c0c0c0; --c-err:#ff4444; --c-warn:#ffcc00; --c-ok:#44cc88; --c-text:#f0f0f0;
+}
+/* 14 – Stealth */
+[data-theme="stealth"] {
+    --c-bg:#0a0e08; --c-surface:#121a0f; --c-card:#1c2918;
+    --c-accent:#c9a82c; --c-err:#cc3333; --c-warn:#e8a020; --c-ok:#4ab848; --c-text:#e8e0c8;
+}
+/* 15 – Abyss */
+[data-theme="abyss"] {
+    --c-bg:#06080f; --c-surface:#0c1020; --c-card:#141a30;
+    --c-accent:#6070ff; --c-err:#ff4455; --c-warn:#ffbb22; --c-ok:#22cc99; --c-text:#d0d8ff;
+}
+/* 16 – Carbon */
+[data-theme="carbon"] {
+    --c-bg:#080808; --c-surface:#111111; --c-card:#1c1c1c;
+    --c-accent:#ff5500; --c-err:#ff2222; --c-warn:#ffaa00; --c-ok:#55bb44; --c-text:#f0e8e0;
+}
+/* 17 – Eclipse */
+[data-theme="eclipse"] {
+    --c-bg:#100800; --c-surface:#1a1000; --c-card:#281800;
+    --c-accent:#ffcc44; --c-err:#ff4422; --c-warn:#ff9900; --c-ok:#44cc88; --c-text:#fff0cc;
+}
+/* 18 – Nightshade */
+[data-theme="nightshade"] {
+    --c-bg:#0a0814; --c-surface:#121020; --c-card:#1c1838;
+    --c-accent:#aa88ff; --c-err:#ff4466; --c-warn:#ffbb44; --c-ok:#44ddaa; --c-text:#e8e0ff;
+}
+/* 19 – Dark Matter */
+[data-theme="dark-matter"] {
+    --c-bg:#060e0e; --c-surface:#0a1818; --c-card:#0f2828;
+    --c-accent:#00d9c0; --c-err:#ff4444; --c-warn:#ffcc00; --c-ok:#55dd99; --c-text:#c0f0ec;
+}
+/* 20 – Phantom */
+[data-theme="phantom"] {
+    --c-bg:#0a0808; --c-surface:#140f0f; --c-card:#201818;
+    --c-accent:#ff6666; --c-err:#ff2222; --c-warn:#ffcc00; --c-ok:#44cc88; --c-text:#f0e8e8;
+}
+
+/* ══════════════════════════════════════════════════════
+   GROUP 3 · NATURE / ORGANIC
+══════════════════════════════════════════════════════ */
+
+/* 21 – Forest */
+[data-theme="forest"] {
+    --c-bg:#050f08; --c-surface:#0a1810; --c-card:#122418;
+    --c-accent:#44cc44; --c-err:#ee4444; --c-warn:#ccaa22; --c-ok:#88dd44; --c-text:#c8f0c8;
+}
+/* 22 – Ocean Deep */
+[data-theme="ocean-deep"] {
+    --c-bg:#030d14; --c-surface:#071525; --c-card:#0c2038;
+    --c-accent:#00b4d8; --c-err:#ff4455; --c-warn:#ffcc00; --c-ok:#00d8aa; --c-text:#c0e8f8;
+}
+/* 23 – Volcanic */
+[data-theme="volcanic"] {
+    --c-bg:#120600; --c-surface:#1e0c00; --c-card:#2e1400;
+    --c-accent:#ff6a28; --c-err:#ff2222; --c-warn:#ffcc00; --c-ok:#44cc88; --c-text:#f0c8a8;
+}
+/* 24 – Autumn */
+[data-theme="autumn"] {
+    --c-bg:#100800; --c-surface:#1a1000; --c-card:#281800;
+    --c-accent:#d2691e; --c-err:#cc2222; --c-warn:#e8a020; --c-ok:#88aa44; --c-text:#f0dcc8;
+}
+/* 25 – Aurora */
+[data-theme="aurora"] {
+    --c-bg:#040c10; --c-surface:#081820; --c-card:#0e2830;
+    --c-accent:#00ffbb; --c-err:#ff4455; --c-warn:#ffd700; --c-ok:#a0ff40; --c-text:#d0fff0;
+}
+/* 26 – Tundra */
+[data-theme="tundra"] {
+    --c-bg:#080e14; --c-surface:#101820; --c-card:#18262e;
+    --c-accent:#88c8f8; --c-err:#ff6677; --c-warn:#ffcc77; --c-ok:#77ddaa; --c-text:#d8eef8;
+}
+/* 27 – Jungle */
+[data-theme="jungle"] {
+    --c-bg:#050c04; --c-surface:#0a1508; --c-card:#10200c;
+    --c-accent:#7dc241; --c-err:#ff4444; --c-warn:#d4b722; --c-ok:#41c268; --c-text:#d4efcc;
+}
+/* 28 – Lagoon */
+[data-theme="lagoon"] {
+    --c-bg:#040e0e; --c-surface:#081818; --c-card:#0e2424;
+    --c-accent:#00e5cc; --c-err:#ff5566; --c-warn:#ffd700; --c-ok:#44ee88; --c-text:#c0f8f4;
+}
+/* 29 – Amber Cave */
+[data-theme="amber-cave"] {
+    --c-bg:#0e0800; --c-surface:#180e00; --c-card:#241800;
+    --c-accent:#e8a030; --c-err:#cc3333; --c-warn:#ffcc44; --c-ok:#66aa44; --c-text:#f8e8c8;
+}
+/* 30 – Storm */
+[data-theme="storm"] {
+    --c-bg:#060810; --c-surface:#0c1020; --c-card:#141a2e;
+    --c-accent:#4488dd; --c-err:#ff4455; --c-warn:#ffaa22; --c-ok:#44ccaa; --c-text:#d0e0f0;
+}
+
+/* ══════════════════════════════════════════════════════
+   GROUP 4 · PASTEL / LIGHT
+══════════════════════════════════════════════════════ */
+
+/* 31 – Rose Quartz */
+[data-theme="rose-quartz"] {
+    --c-bg:#fdf0f2; --c-surface:#fff0f4; --c-card:#ffffff;
+    --c-accent:#e91e8c; --c-err:#c62828; --c-warn:#e65100; --c-ok:#00695c; --c-text:#2a1520;
+    --c-text-btn:#ffffff; --text-muted:#7a4455;
+}
+/* 32 – Cotton Candy */
+[data-theme="cotton-candy"] {
+    --c-bg:#f8f0ff; --c-surface:#fff0ff; --c-card:#ffffff;
+    --c-accent:#cc44ee; --c-err:#c62828; --c-warn:#e65100; --c-ok:#00695c; --c-text:#280a35;
+    --c-text-btn:#ffffff; --text-muted:#72367f;
+}
+/* 33 – Mint Dream */
+[data-theme="mint-dream"] {
+    --c-bg:#f0fcf8; --c-surface:#f5fff8; --c-card:#ffffff;
+    --c-accent:#00876a; --c-err:#c62828; --c-warn:#e65100; --c-ok:#00695c; --c-text:#0a2520;
+    --c-text-btn:#ffffff; --text-muted:#2e6655;
+}
+/* 34 – Cloud Day */
+[data-theme="cloud-day"] {
+    --c-bg:#f0f4ff; --c-surface:#f5f8ff; --c-card:#ffffff;
+    --c-accent:#2255dd; --c-err:#c62828; --c-warn:#e65100; --c-ok:#00695c; --c-text:#0a1535;
+    --c-text-btn:#ffffff; --text-muted:#364888;
+}
+/* 35 – Lavender Fields */
+[data-theme="lavender-fields"] {
+    --c-bg:#f4f0ff; --c-surface:#f8f4ff; --c-card:#ffffff;
+    --c-accent:#6633bb; --c-err:#c62828; --c-warn:#e65100; --c-ok:#00695c; --c-text:#1a0a35;
+    --c-text-btn:#ffffff; --text-muted:#5a3388;
+}
+/* 36 – Peach Cream */
+[data-theme="peach-cream"] {
+    --c-bg:#fff4ee; --c-surface:#fff8f0; --c-card:#ffffff;
+    --c-accent:#c04820; --c-err:#c62828; --c-warn:#e65100; --c-ok:#00695c; --c-text:#2a1008;
+    --c-text-btn:#ffffff; --text-muted:#7a4422;
+}
+/* 37 – Arctic */
+[data-theme="arctic"] {
+    --c-bg:#f0f8ff; --c-surface:#f5fcff; --c-card:#ffffff;
+    --c-accent:#006699; --c-err:#c62828; --c-warn:#e65100; --c-ok:#00695c; --c-text:#0a2030;
+    --c-text-btn:#ffffff; --text-muted:#345566;
+}
+/* 38 – Parchment */
+[data-theme="parchment"] {
+    --c-bg:#fdf8f0; --c-surface:#fffcf4; --c-card:#ffffff;
+    --c-accent:#7a4e2c; --c-err:#a32020; --c-warn:#7a5500; --c-ok:#1f5e1f; --c-text:#2a1a08;
+    --c-text-btn:#ffffff; --text-muted:#6a4422;
+}
+/* 39 – Sakura */
+[data-theme="sakura"] {
+    --c-bg:#fff0f4; --c-surface:#fff5f8; --c-card:#ffffff;
+    --c-accent:#cc2266; --c-err:#c62828; --c-warn:#e65100; --c-ok:#00695c; --c-text:#2a0a18;
+    --c-text-btn:#ffffff; --text-muted:#7a2244;
+}
+/* 40 – Fog */
+[data-theme="fog"] {
+    --c-bg:#f0f2f5; --c-surface:#f5f7fa; --c-card:#ffffff;
+    --c-accent:#2e6688; --c-err:#c62828; --c-warn:#e65100; --c-ok:#00695c; --c-text:#1a252f;
+    --c-text-btn:#ffffff; --text-muted:#445566;
+}
+
+/* ══════════════════════════════════════════════════════
+   GROUP 5 · RETRO / TERMINAL
+══════════════════════════════════════════════════════ */
+
+/* 41 – Amber Terminal */
+[data-theme="amber-terminal"] {
+    --c-bg:#0a0600; --c-surface:#130a00; --c-card:#1e1000;
+    --c-accent:#ffb000; --c-err:#ff4400; --c-warn:#ffcc00; --c-ok:#aacc00; --c-text:#ffd080;
+}
+/* 42 – Phosphor Green */
+[data-theme="phosphor-green"] {
+    --c-bg:#000600; --c-surface:#000a00; --c-card:#001000;
+    --c-accent:#33ff33; --c-err:#ff3300; --c-warn:#ccff00; --c-ok:#55ff55; --c-text:#b3ffb3;
+}
+/* 43 – CGA Blue */
+[data-theme="cga-blue"] {
+    --c-bg:#000088; --c-surface:#0000aa; --c-card:#0000cc;
+    --c-accent:#55ffff; --c-err:#ff5555; --c-warn:#ffff55; --c-ok:#55ff55; --c-text:#ffffff;
+}
+/* 44 – VHS Glitch */
+[data-theme="vhs-glitch"] {
+    --c-bg:#080010; --c-surface:#100020; --c-card:#180030;
+    --c-accent:#ff00ff; --c-err:#ff0055; --c-warn:#ffaa00; --c-ok:#00ffaa; --c-text:#ffccff;
+}
+/* 45 – Solarized Dark */
+[data-theme="solarized"] {
+    --c-bg:#002b36; --c-surface:#073642; --c-card:#0d4c5e;
+    --c-accent:#268bd2; --c-err:#dc322f; --c-warn:#b58900; --c-ok:#859900; --c-text:#839496;
+}
+/* 46 – Monokai */
+[data-theme="monokai"] {
+    --c-bg:#272822; --c-surface:#323227; --c-card:#3e3d32;
+    --c-accent:#f92672; --c-err:#f92672; --c-warn:#e6db74; --c-ok:#a6e22e; --c-text:#f8f8f2;
+}
+/* 47 – Dracula */
+[data-theme="dracula"] {
+    --c-bg:#282a36; --c-surface:#303345; --c-card:#44475a;
+    --c-accent:#bd93f9; --c-err:#ff5555; --c-warn:#f1fa8c; --c-ok:#50fa7b; --c-text:#f8f8f2;
+}
+/* 48 – Nord */
+[data-theme="nord"] {
+    --c-bg:#2e3440; --c-surface:#3b4252; --c-card:#434c5e;
+    --c-accent:#88c0d0; --c-err:#bf616a; --c-warn:#ebcb8b; --c-ok:#a3be8c; --c-text:#eceff4;
+}
+/* 49 – Gruvbox */
+[data-theme="gruvbox"] {
+    --c-bg:#282828; --c-surface:#3c3836; --c-card:#504945;
+    --c-accent:#fabd2f; --c-err:#fb4934; --c-warn:#fe8019; --c-ok:#b8bb26; --c-text:#ebdbb2;
+}
+/* 50 – Commodore 64 */
+[data-theme="commodore64"] {
+    --c-bg:#40318d; --c-surface:#503a99; --c-card:#6850b0;
+    --c-accent:#7869c4; --c-err:#ff4444; --c-warn:#ffcc44; --c-ok:#44ff88; --c-text:#9090e4;
+}
+
+/* ══════════════════════════════════════════════════════
+   GROUP 1 · CYBERPUNK / NEON  (10 more)
+══════════════════════════════════════════════════════ */
+
+/* 51 – Hot Wire */
+[data-theme="hot-wire"] {
+    --c-bg:#0f0000; --c-surface:#1e0500; --c-card:#2e0a00;
+    --c-accent:#ff3300; --c-err:#ff0000; --c-warn:#ffaa00; --c-ok:#00ff88; --c-text:#ffccbb;
+}
+/* 52 – Laser Lime */
+[data-theme="laser-lime"] {
+    --c-bg:#020f00; --c-surface:#041800; --c-card:#082500;
+    --c-accent:#ccff00; --c-err:#ff3333; --c-warn:#ffee00; --c-ok:#00ffaa; --c-text:#eeffaa;
+}
+/* 53 – Quantum Blue */
+[data-theme="quantum-blue"] {
+    --c-bg:#000a1e; --c-surface:#001030; --c-card:#001844;
+    --c-accent:#00aaff; --c-err:#ff2244; --c-warn:#ffcc00; --c-ok:#00ffcc; --c-text:#aaddff;
+}
+/* 54 – Ghost Signal */
+[data-theme="ghost-signal"] {
+    --c-bg:#060810; --c-surface:#0c1020; --c-card:#14182e;
+    --c-accent:#a8c8ff; --c-err:#ff4466; --c-warn:#ffcc66; --c-ok:#66ffcc; --c-text:#d8e8ff;
+}
+/* 55 – Neon Coral */
+[data-theme="neon-coral"] {
+    --c-bg:#100408; --c-surface:#1e0810; --c-card:#2e1018;
+    --c-accent:#ff6655; --c-err:#ff2222; --c-warn:#ffbb00; --c-ok:#00ffaa; --c-text:#ffd0cc;
+}
+/* 56 – Techno Cyan */
+[data-theme="techno-cyan"] {
+    --c-bg:#000e10; --c-surface:#001820; --c-card:#002530;
+    --c-accent:#00eeff; --c-err:#ff3344; --c-warn:#ffdd00; --c-ok:#00ff88; --c-text:#b8fcff;
+}
+/* 57 – Danger Zone */
+[data-theme="danger-zone"] {
+    --c-bg:#0f0000; --c-surface:#1e0000; --c-card:#300000;
+    --c-accent:#ff0055; --c-err:#ff0000; --c-warn:#ff8800; --c-ok:#00ff88; --c-text:#ffbbcc;
+}
+/* 58 – Hologram */
+[data-theme="hologram"] {
+    --c-bg:#010814; --c-surface:#02101e; --c-card:#041830;
+    --c-accent:#88ddff; --c-err:#ff4455; --c-warn:#ffdd44; --c-ok:#44ffcc; --c-text:#c8f0ff;
+}
+/* 59 – Static Discharge */
+[data-theme="static-discharge"] {
+    --c-bg:#080808; --c-surface:#101010; --c-card:#181818;
+    --c-accent:#ffff00; --c-err:#ff3333; --c-warn:#ff8800; --c-ok:#00ff88; --c-text:#ffffcc;
+}
+/* 60 – Plasma Storm */
+[data-theme="plasma-storm"] {
+    --c-bg:#08001a; --c-surface:#120030; --c-card:#1e0050;
+    --c-accent:#ff44ff; --c-err:#ff0055; --c-warn:#ffcc00; --c-ok:#00ffcc; --c-text:#ffccff;
+}
+
+/* ══════════════════════════════════════════════════════
+   GROUP 2 · DARK ELEGANT  (10 more)
+══════════════════════════════════════════════════════ */
+
+/* 61 – Bordeaux */
+[data-theme="bordeaux"] {
+    --c-bg:#0f0308; --c-surface:#1a0510; --c-card:#280a1a;
+    --c-accent:#cc3366; --c-err:#ff2244; --c-warn:#cc9900; --c-ok:#33aa66; --c-text:#f0dde6;
+}
+/* 62 – Slate Blue */
+[data-theme="slate-blue"] {
+    --c-bg:#080c14; --c-surface:#101520; --c-card:#1a2035;
+    --c-accent:#7799cc; --c-err:#cc4455; --c-warn:#cc9933; --c-ok:#44aa88; --c-text:#d8e0f0;
+}
+/* 63 – Tungsten */
+[data-theme="tungsten"] {
+    --c-bg:#080a08; --c-surface:#101210; --c-card:#1a1e1a;
+    --c-accent:#88aa66; --c-err:#cc4444; --c-warn:#ccaa44; --c-ok:#55cc88; --c-text:#dde8dd;
+}
+/* 64 – Charcoal */
+[data-theme="charcoal"] {
+    --c-bg:#0e0e0e; --c-surface:#181818; --c-card:#242424;
+    --c-accent:#b0b0b0; --c-err:#cc3333; --c-warn:#ccaa00; --c-ok:#44bb77; --c-text:#eeeeee;
+}
+/* 65 – Velvet Void */
+[data-theme="velvet-void"] {
+    --c-bg:#0a0614; --c-surface:#120c20; --c-card:#1c1435;
+    --c-accent:#8844cc; --c-err:#cc3366; --c-warn:#cc9944; --c-ok:#44cc99; --c-text:#e0d4f4;
+}
+/* 66 – Iron Forge */
+[data-theme="iron-forge"] {
+    --c-bg:#0a0c0e; --c-surface:#141618; --c-card:#202428;
+    --c-accent:#778899; --c-err:#cc4444; --c-warn:#ccaa44; --c-ok:#44aa77; --c-text:#d4dce4;
+}
+/* 67 – Dusk Embers */
+[data-theme="dusk-embers"] {
+    --c-bg:#100808; --c-surface:#1a1010; --c-card:#281818;
+    --c-accent:#cc7744; --c-err:#cc3322; --c-warn:#cc9933; --c-ok:#448855; --c-text:#f0e0d8;
+}
+/* 68 – Deep Burgundy */
+[data-theme="deep-burgundy"] {
+    --c-bg:#0c0408; --c-surface:#180810; --c-card:#260c18;
+    --c-accent:#aa3355; --c-err:#cc2233; --c-warn:#ccaa22; --c-ok:#338866; --c-text:#eeccdd;
+}
+/* 69 – Graphite */
+[data-theme="graphite"] {
+    --c-bg:#080a0c; --c-surface:#121418; --c-card:#1e2226;
+    --c-accent:#6688aa; --c-err:#cc4444; --c-warn:#cc9944; --c-ok:#448877; --c-text:#ccd8e0;
+}
+/* 70 – Onyx Gold */
+[data-theme="onyx-gold"] {
+    --c-bg:#080800; --c-surface:#101000; --c-card:#1c1a00;
+    --c-accent:#ccaa44; --c-err:#cc3333; --c-warn:#cc8833; --c-ok:#448844; --c-text:#f0eecc;
+}
+
+/* ══════════════════════════════════════════════════════
+   GROUP 3 · NATURE / ORGANIC  (10 more)
+══════════════════════════════════════════════════════ */
+
+/* 71 – Desert Bloom */
+[data-theme="desert-bloom"] {
+    --c-bg:#100c06; --c-surface:#1e1608; --c-card:#2e2010;
+    --c-accent:#e8aa44; --c-err:#cc3322; --c-warn:#ddaa22; --c-ok:#44aa55; --c-text:#f4e8cc;
+}
+/* 72 – Coral Reef */
+[data-theme="coral-reef"] {
+    --c-bg:#0c0800; --c-surface:#18100a; --c-card:#261814;
+    --c-accent:#ff7744; --c-err:#cc2222; --c-warn:#ccaa22; --c-ok:#44cc77; --c-text:#f4ddd0;
+}
+/* 73 – Monsoon */
+[data-theme="monsoon"] {
+    --c-bg:#06080e; --c-surface:#0c1018; --c-card:#141824;
+    --c-accent:#6688bb; --c-err:#cc4455; --c-warn:#ccbb44; --c-ok:#44aa88; --c-text:#d4dce8;
+}
+/* 74 – Redwood */
+[data-theme="redwood"] {
+    --c-bg:#0e0600; --c-surface:#1a0c06; --c-card:#281408;
+    --c-accent:#aa6633; --c-err:#cc2222; --c-warn:#cc9933; --c-ok:#448844; --c-text:#f0dcc8;
+}
+/* 75 – Wildfire */
+[data-theme="wildfire"] {
+    --c-bg:#0e0400; --c-surface:#1e0800; --c-card:#2e1000;
+    --c-accent:#ff8833; --c-err:#ff2200; --c-warn:#ffcc00; --c-ok:#44cc66; --c-text:#f8dcc0;
+}
+/* 76 – Ice Field */
+[data-theme="ice-field"] {
+    --c-bg:#06080e; --c-surface:#0c1018; --c-card:#141c28;
+    --c-accent:#88bbdd; --c-err:#cc4455; --c-warn:#cccc44; --c-ok:#44ccaa; --c-text:#ddeef8;
+}
+/* 77 – Savanna */
+[data-theme="savanna"] {
+    --c-bg:#0e0c06; --c-surface:#1a1808; --c-card:#28240e;
+    --c-accent:#ccaa44; --c-err:#cc3322; --c-warn:#ccaa00; --c-ok:#668833; --c-text:#f0e8cc;
+}
+/* 78 – Canyon */
+[data-theme="canyon"] {
+    --c-bg:#0e0800; --c-surface:#1c1008; --c-card:#2a1810;
+    --c-accent:#cc6633; --c-err:#cc2222; --c-warn:#ccaa22; --c-ok:#448855; --c-text:#f0d8c8;
+}
+/* 79 – Peatland */
+[data-theme="peatland"] {
+    --c-bg:#080c04; --c-surface:#101808; --c-card:#18240c;
+    --c-accent:#778844; --c-err:#cc4444; --c-warn:#cc9933; --c-ok:#44aa55; --c-text:#d8e0cc;
+}
+/* 80 – Estuary */
+[data-theme="estuary"] {
+    --c-bg:#040c08; --c-surface:#081810; --c-card:#0e2418;
+    --c-accent:#44aa77; --c-err:#cc4444; --c-warn:#ccbb33; --c-ok:#33bb88; --c-text:#c8e8d8;
+}
+
+/* ══════════════════════════════════════════════════════
+   GROUP 4 · PASTEL / LIGHT  (10 more)
+══════════════════════════════════════════════════════ */
+
+/* 81 – Butter */
+[data-theme="butter"] {
+    --c-bg:#fffde0; --c-surface:#fffae8; --c-card:#ffffff;
+    --c-accent:#b07700; --c-err:#aa1a1a; --c-warn:#885500; --c-ok:#1a5c1a; --c-text:#2a2008;
+    --c-text-btn:#ffffff; --text-muted:#665533;
+}
+/* 82 – Powder Pink */
+[data-theme="powder-pink"] {
+    --c-bg:#fff0f4; --c-surface:#fff5f8; --c-card:#ffffff;
+    --c-accent:#bb2255; --c-err:#aa1a1a; --c-warn:#885500; --c-ok:#1a5c33; --c-text:#2a0818;
+    --c-text-btn:#ffffff; --text-muted:#7a3355;
+}
+/* 83 – Seafoam */
+[data-theme="seafoam"] {
+    --c-bg:#eefaf6; --c-surface:#f5fdfb; --c-card:#ffffff;
+    --c-accent:#00775e; --c-err:#aa1a1a; --c-warn:#885500; --c-ok:#1a5c1a; --c-text:#082a1e;
+    --c-text-btn:#ffffff; --text-muted:#2e6655;
+}
+/* 84 – Lilac Dream */
+[data-theme="lilac-dream"] {
+    --c-bg:#f5f0ff; --c-surface:#f8f5ff; --c-card:#ffffff;
+    --c-accent:#5522aa; --c-err:#aa1a1a; --c-warn:#885500; --c-ok:#1a5c33; --c-text:#1a082e;
+    --c-text-btn:#ffffff; --text-muted:#553388;
+}
+/* 85 – Apricot */
+[data-theme="apricot"] {
+    --c-bg:#fff4ec; --c-surface:#fff8f4; --c-card:#ffffff;
+    --c-accent:#bb4400; --c-err:#aa1a1a; --c-warn:#885500; --c-ok:#1a5c1a; --c-text:#2a1008;
+    --c-text-btn:#ffffff; --text-muted:#7a4422;
+}
+/* 86 – Morning Mist */
+[data-theme="morning-mist"] {
+    --c-bg:#eef0f4; --c-surface:#f4f6f8; --c-card:#ffffff;
+    --c-accent:#245588; --c-err:#aa1a1a; --c-warn:#885500; --c-ok:#1a5c33; --c-text:#0a1830;
+    --c-text-btn:#ffffff; --text-muted:#445566;
+}
+/* 87 – Vanilla */
+[data-theme="vanilla"] {
+    --c-bg:#fdf8ee; --c-surface:#fffbf4; --c-card:#ffffff;
+    --c-accent:#885522; --c-err:#8b1a1a; --c-warn:#775500; --c-ok:#1a5c1a; --c-text:#28180a;
+    --c-text-btn:#ffffff; --text-muted:#665533;
+}
+/* 88 – Pistachio */
+[data-theme="pistachio"] {
+    --c-bg:#eefaee; --c-surface:#f5fdf5; --c-card:#ffffff;
+    --c-accent:#286633; --c-err:#8b1a1a; --c-warn:#775500; --c-ok:#1a5c1a; --c-text:#0a280a;
+    --c-text-btn:#ffffff; --text-muted:#336633;
+}
+/* 89 – Cornflower */
+[data-theme="cornflower"] {
+    --c-bg:#eef2ff; --c-surface:#f2f6ff; --c-card:#ffffff;
+    --c-accent:#2244aa; --c-err:#aa1a1a; --c-warn:#885500; --c-ok:#1a5c33; --c-text:#080e2a;
+    --c-text-btn:#ffffff; --text-muted:#334488;
+}
+/* 90 – Almond */
+[data-theme="almond"] {
+    --c-bg:#fdf4e8; --c-surface:#fff8f0; --c-card:#ffffff;
+    --c-accent:#7a481a; --c-err:#8b1a1a; --c-warn:#7a4800; --c-ok:#1a5c1a; --c-text:#2a1800;
+    --c-text-btn:#ffffff; --text-muted:#6a4422;
+}
+
+/* ══════════════════════════════════════════════════════
+   GROUP 5 · RETRO / TERMINAL  (10 more)
+══════════════════════════════════════════════════════ */
+
+/* 91 – Apple II */
+[data-theme="apple-ii"] {
+    --c-bg:#000000; --c-surface:#001000; --c-card:#002800;
+    --c-accent:#33ff33; --c-err:#ff3300; --c-warn:#cccc00; --c-ok:#00cc44; --c-text:#33ff33;
+    --text-muted:#229922;
+}
+/* 92 – Gameboy */
+[data-theme="gameboy"] {
+    --c-bg:#0f380f; --c-surface:#306230; --c-card:#8bac0f;
+    --c-accent:#9bbc0f; --c-err:#bb2200; --c-warn:#aa8800; --c-ok:#1a7a1a; --c-text:#9bbc0f;
+    --text-muted:#669944;
+}
+/* 93 – BBS Terminal */
+[data-theme="bbs"] {
+    --c-bg:#000022; --c-surface:#00004a; --c-card:#00006e;
+    --c-accent:#5555ff; --c-err:#ff5555; --c-warn:#ffff55; --c-ok:#55ff55; --c-text:#ffffff;
+}
+/* 94 – Dev Console */
+[data-theme="dev-console"] {
+    --c-bg:#1e1e1e; --c-surface:#252526; --c-card:#333333;
+    --c-accent:#569cd6; --c-err:#f44747; --c-warn:#ce9178; --c-ok:#6a9955; --c-text:#d4d4d4;
+}
+/* 95 – GitHub Dark */
+[data-theme="github-dark"] {
+    --c-bg:#0d1117; --c-surface:#161b22; --c-card:#21262d;
+    --c-accent:#58a6ff; --c-err:#f85149; --c-warn:#e3b341; --c-ok:#3fb950; --c-text:#e6edf3;
+}
+/* 96 – Sublime */
+[data-theme="sublime"] {
+    --c-bg:#272822; --c-surface:#2e2e2c; --c-card:#3e3e3c;
+    --c-accent:#66d9e8; --c-err:#f92672; --c-warn:#fd971f; --c-ok:#a6e22e; --c-text:#f8f8f2;
+}
+/* 97 – Tokyo Night */
+[data-theme="tokyo-night"] {
+    --c-bg:#1a1b26; --c-surface:#1f2335; --c-card:#24283b;
+    --c-accent:#7aa2f7; --c-err:#f7768e; --c-warn:#e0af68; --c-ok:#9ece6a; --c-text:#c0caf5;
+}
+/* 98 – One Dark */
+[data-theme="one-dark"] {
+    --c-bg:#282c34; --c-surface:#21252b; --c-card:#2c313a;
+    --c-accent:#61afef; --c-err:#e06c75; --c-warn:#e5c07b; --c-ok:#98c379; --c-text:#abb2bf;
+}
+/* 99 – Catppuccin */
+[data-theme="catppuccin"] {
+    --c-bg:#1e1e2e; --c-surface:#181825; --c-card:#313244;
+    --c-accent:#cba6f7; --c-err:#f38ba8; --c-warn:#f9e2af; --c-ok:#a6e3a1; --c-text:#cdd6f4;
+}
+/* 100 – Everforest */
+[data-theme="everforest"] {
+    --c-bg:#2d353b; --c-surface:#343f44; --c-card:#3d484d;
+    --c-accent:#83c092; --c-err:#e67e80; --c-warn:#dbbc7f; --c-ok:#a7c080; --c-text:#d3c6aa;
+}

@@ -8,6 +8,8 @@ PDFalyzer.Keyboard = (function ($, P) {
         $(document).on('keydown', function (e) {
             var tag = e.target.tagName;
             if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+            // Don't fire app shortcuts when any modal overlay is open
+            if (document.querySelector('.modal.show')) return;
 
             if ((e.ctrlKey || e.metaKey) && e.key === 'o') {
                 e.preventDefault(); $('#fileInput').trigger('click');
@@ -19,8 +21,7 @@ PDFalyzer.Keyboard = (function ($, P) {
             }
             if ((e.ctrlKey || e.metaKey) && e.key === 's') {
                 e.preventDefault();
-                if (P.state.sessionId)
-                    window.open('/api/pdf/' + P.state.sessionId + '/download', '_blank');
+                if (P.state.sessionId) P.Export.triggerDownload();
             }
             if ((e.ctrlKey || e.metaKey) && e.key === 'e') {
                 e.preventDefault();
@@ -37,6 +38,9 @@ PDFalyzer.Keyboard = (function ($, P) {
                 var idx = parseInt(e.key, 10) - 1;
                 var $tabs = $('.tab-btn');
                 if (idx < $tabs.length && P.state.sessionId) $tabs.eq(idx).trigger('click');
+            }
+            if (P.state.editMode && (e.key === 's' || e.key === 'S') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+                e.preventDefault(); $('.edit-field-btn[data-type="select"]').first().trigger('click');
             }
             if (P.state.editMode && P.EditDesigner) {
                 if ((e.ctrlKey || e.metaKey) && e.key === 'c') {

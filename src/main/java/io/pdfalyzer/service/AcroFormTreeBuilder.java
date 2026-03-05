@@ -79,6 +79,10 @@ public class AcroFormTreeBuilder {
         if (field instanceof PDComboBox comboBox) {
             node.addProperty("Editable", String.valueOf(comboBox.isEdit()));
         }
+        if (field instanceof PDListBox) {
+            int ff = field.getCOSObject().getInt(COSName.FF, 0);
+            node.addProperty("MultiSelect", String.valueOf((ff & (1 << 21)) != 0));
+        }
         if (field instanceof PDCheckBox) {
             String current = field.getValueAsString();
             boolean checked = current != null && !current.isBlank() && !"Off".equalsIgnoreCase(current);
@@ -88,6 +92,16 @@ public class AcroFormTreeBuilder {
             String options = extractChoiceOptions(field);
             if (options != null && !options.isBlank()) {
                 node.addProperty("Options", options);
+            }
+        }
+        if (field instanceof PDRadioButton rb) {
+            List<String> exports = rb.getExportValues();
+            if (exports != null && !exports.isEmpty()) {
+                node.addProperty("Options", String.join(", ", exports));
+            }
+            String val = field.getValueAsString();
+            if (val != null && !val.isBlank() && !"Off".equalsIgnoreCase(val)) {
+                node.addProperty("SelectedOption", val);
             }
         }
         String jsValidation = extractValidationJavaScript(field);

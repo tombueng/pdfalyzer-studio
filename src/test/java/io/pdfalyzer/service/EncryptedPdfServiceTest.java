@@ -10,16 +10,23 @@ import org.junit.jupiter.api.Test;
 
 import io.pdfalyzer.model.EncryptionInfo;
 import io.pdfalyzer.model.PdfSession;
-import io.pdfalyzer.tools.EncryptedPdfGenerator;
+
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 /**
  * Tests for encrypted PDF handling in {@link PdfService} and
  * {@link PdfService#buildEncryptionInfo(PDDocument, String)}.
  *
- * Uses {@link EncryptedPdfGenerator} to produce in-memory PDFs with known
- * encryption parameters, avoiding any dependency on files on disk.
+ * Uses pre-generated sample PDFs from {@code src/main/resources/sample-pdfs/}.
+ * Regenerate them with: {@code mvn test -Dtest=EncryptedPdfGeneratorTest -Dgenerate.samples=true}
  */
 class EncryptedPdfServiceTest {
+
+    static final String USER_PASSWORD  = "user123";
+    static final String OWNER_PASSWORD = "owner456";
+
+    private static final Path SAMPLE_DIR = Path.of("src/main/resources/sample-pdfs");
 
     private PdfService pdfService;
 
@@ -40,10 +47,6 @@ class EncryptedPdfServiceTest {
 
     @Test
     void uploadAndParse_unencrypted_setsEncryptionInfoNotEncrypted() throws Exception {
-        byte[] pdf = EncryptedPdfGenerator.buildEncrypted(
-                "no-enc", "", "", 128, true, true);
-        // Empty user+owner passwords mean PDFBox won't require a password but
-        // will still encrypt; let's use a genuinely plain PDF instead:
         byte[] plain = buildPlainPdf();
 
         PdfSession session = pdfService.uploadAndParse("plain.pdf", plain);
@@ -60,8 +63,7 @@ class EncryptedPdfServiceTest {
 
     @Test
     void uploadAndParse_ownerOnlyEncryption_opensWithoutPassword() throws Exception {
-        byte[] pdf = EncryptedPdfGenerator.buildOwnerOnlyEncrypted(
-                "owner-only", EncryptedPdfGenerator.OWNER_PASSWORD);
+        byte[] pdf = Files.readAllBytes(SAMPLE_DIR.resolve("sample-encrypted-owner-only.pdf"));
 
         PdfSession session = pdfService.uploadAndParse("owner-only.pdf", pdf);
 
@@ -76,11 +78,7 @@ class EncryptedPdfServiceTest {
 
     @Test
     void uploadAndParse_userPasswordRequired_setsRequiresPassword() throws Exception {
-        byte[] pdf = EncryptedPdfGenerator.buildEncrypted(
-                "aes128-test",
-                EncryptedPdfGenerator.USER_PASSWORD,
-                EncryptedPdfGenerator.OWNER_PASSWORD,
-                128, true, true);
+        byte[] pdf = Files.readAllBytes(SAMPLE_DIR.resolve("sample-encrypted-aes-128.pdf"));
 
         PdfSession session = pdfService.uploadAndParse("aes128.pdf", pdf);
 
@@ -88,24 +86,19 @@ class EncryptedPdfServiceTest {
         assertThat(session.getEncryptionInfo().isEncrypted()).isTrue();
         assertThat(session.getEncryptionInfo().isRequiresPassword()).isTrue();
         assertThat(session.getTreeRoot()).isNull();
-        assertThat(session.getPdfBytes()).isEqualTo(pdf); // bytes preserved for unlock
+        assertThat(session.getPdfBytes()).isEqualTo(pdf);
     }
 
     // ── unlockSession ─────────────────────────────────────────────────────────
 
     @Test
     void unlockSession_correctUserPassword_parsesTree() throws Exception {
-        byte[] pdf = EncryptedPdfGenerator.buildEncrypted(
-                "aes256-test",
-                EncryptedPdfGenerator.USER_PASSWORD,
-                EncryptedPdfGenerator.OWNER_PASSWORD,
-                256, true, true);
+        byte[] pdf = Files.readAllBytes(SAMPLE_DIR.resolve("sample-encrypted-aes-256.pdf"));
 
         PdfSession session = pdfService.uploadAndParse("aes256.pdf", pdf);
         assertThat(session.getEncryptionInfo().isRequiresPassword()).isTrue();
 
-        PdfSession unlocked = pdfService.unlockSession(
-                session.getId(), EncryptedPdfGenerator.USER_PASSWORD);
+        PdfSession unlocked = pdfService.unlockSession(session.getId(), USER_PASSWORD);
 
         assertThat(unlocked.getTreeRoot()).isNotNull();
         assertThat(unlocked.getPageCount()).isGreaterThan(0);
@@ -114,7 +107,6 @@ class EncryptedPdfServiceTest {
         assertThat(unlocked.getEncryptionInfo().getAlgorithm()).isEqualTo("AES-256");
         assertThat(unlocked.getEncryptionInfo().getPasswordType()).isEqualTo("user");
 
-        // The stored bytes must be openable without a password now (decrypted copy).
         try (PDDocument check = Loader.loadPDF(unlocked.getPdfBytes())) {
             assertThat(check.isEncrypted()).isFalse();
         }
@@ -122,11 +114,7 @@ class EncryptedPdfServiceTest {
 
     @Test
     void unlockSession_wrongPassword_throwsIllegalArgument() throws Exception {
-        byte[] pdf = EncryptedPdfGenerator.buildEncrypted(
-                "rc4-128-test",
-                EncryptedPdfGenerator.USER_PASSWORD,
-                EncryptedPdfGenerator.OWNER_PASSWORD,
-                128, false, true);
+        byte[] pdf = Files.readAllBytes(SAMPLE_DIR.resolve("sample-encrypted-rc4-128.pdf"));
 
         PdfSession session = pdfService.uploadAndParse("rc4-128.pdf", pdf);
         String sid = session.getId();
@@ -140,13 +128,9 @@ class EncryptedPdfServiceTest {
 
     @Test
     void buildEncryptionInfo_aes256_returnsCorrectAlgorithm() throws Exception {
-        byte[] pdf = EncryptedPdfGenerator.buildEncrypted(
-                "enc-info-test",
-                EncryptedPdfGenerator.USER_PASSWORD,
-                EncryptedPdfGenerator.OWNER_PASSWORD,
-                256, true, true);
+        byte[] pdf = Files.readAllBytes(SAMPLE_DIR.resolve("sample-encrypted-aes-256.pdf"));
 
-        try (PDDocument doc = Loader.loadPDF(pdf, EncryptedPdfGenerator.USER_PASSWORD)) {
+        try (PDDocument doc = Loader.loadPDF(pdf, USER_PASSWORD)) {
             EncryptionInfo info = PdfService.buildEncryptionInfo(doc, "user");
             assertThat(info.isEncrypted()).isTrue();
             assertThat(info.getAlgorithm()).isEqualTo("AES-256");
@@ -158,13 +142,9 @@ class EncryptedPdfServiceTest {
 
     @Test
     void buildEncryptionInfo_rc4_40_returnsCorrectAlgorithm() throws Exception {
-        byte[] pdf = EncryptedPdfGenerator.buildEncrypted(
-                "rc4-40-test",
-                EncryptedPdfGenerator.USER_PASSWORD,
-                EncryptedPdfGenerator.OWNER_PASSWORD,
-                40, false, true);
+        byte[] pdf = Files.readAllBytes(SAMPLE_DIR.resolve("sample-encrypted-rc4-40.pdf"));
 
-        try (PDDocument doc = Loader.loadPDF(pdf, EncryptedPdfGenerator.USER_PASSWORD)) {
+        try (PDDocument doc = Loader.loadPDF(pdf, USER_PASSWORD)) {
             EncryptionInfo info = PdfService.buildEncryptionInfo(doc, "user");
             assertThat(info.isEncrypted()).isTrue();
             assertThat(info.getAlgorithm()).startsWith("RC4");

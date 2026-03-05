@@ -5,8 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>PDFalyzer Studio</title>
     <link rel="icon" type="image/svg+xml" href="/icon.svg" />
+    <!-- Apply saved theme before CSS renders to prevent flash -->
+    <script>(function(){var t=localStorage.getItem('pdfalyzer-theme');if(t&&t!=='void-blue')document.documentElement.setAttribute('data-theme',t);})();</script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootswatch@5.3.2/dist/cyborg/bootstrap.min.css" />
     <link rel="stylesheet" th:href="@{/webjars/font-awesome/6.4.0/css/all.min.css}" />
+    <link rel="stylesheet" th:href="@{/colors.css}" />
     <link rel="stylesheet" th:href="@{/styles.css}" />
     <link rel="stylesheet" th:href="@{/styles-tree.css}" />
     <link rel="stylesheet" th:href="@{/styles-fonts.css}" />

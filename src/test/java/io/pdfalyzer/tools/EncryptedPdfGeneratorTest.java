@@ -1,5 +1,6 @@
 package io.pdfalyzer.tools;
 
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
 
@@ -15,6 +16,7 @@ import java.nio.file.Paths;
  *   mvn test -Dtest=EncryptedPdfGeneratorTest -Dgenerate.samples=true
  * </pre>
  */
+@Disabled("PDF generator tool — run manually when regenerating encrypted sample PDFs")
 class EncryptedPdfGeneratorTest {
 
     @Test

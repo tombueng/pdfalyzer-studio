@@ -83,25 +83,48 @@ PDFalyzer.Tabs = (function ($, P) {
         }
     }
 
-    function switchTab(tab) {
+    function switchTab(tab, onAfterRender) {
         if (!P.state.treeData || !P.state.sessionId) return;
 
         dismissTransientHoverPopups();
 
+        // Capture viewer scroll position before anything changes
+        if (P.ViewerRender && P.ViewerRender.capturePaneViewState) {
+            P.state.viewerScrollState = P.ViewerRender.capturePaneViewState();
+        }
+
         var previousTab = P.state.currentTab;
-        captureTreeViewStateForTab(previousTab);
+        if (previousTab !== tab) {
+            // Leaving a tab — save its current tree state
+            captureTreeViewStateForTab(previousTab);
+        } else if (isTreeTab(tab)) {
+            // Same-tab refresh — capture live DOM state so user-expanded nodes are preserved
+            captureTreeViewStateForTab(tab);
+        }
 
         var viewState = getTreeViewStateForTab(tab);
         updateStructureSearchControl(tab);
 
-        switch (tab) {
-            case 'structure':   P.Tree.render(P.state.treeData, { viewState: viewState }); break;
-            case 'forms':       P.Tree.renderSubtree(P.state.treeData, 'acroform', { viewState: viewState }); break;
-            case 'fonts':       P.FontsTab.loadFonts(); break;
-            case 'validation':  P.ValidationTab.loadValidation(); break;
-            case 'rawcos':      loadRawCos(viewState); break;
-            case 'bookmarks':   P.Tree.renderSubtree(P.state.treeData, 'bookmarks', { viewState: viewState }); break;
-            case 'attachments': loadAttachments(); break;
+        $('#treeContent').html(P.Utils.tabSkeleton(tab));
+
+        var doRender = function () {
+            switch (tab) {
+                case 'structure':   P.Tree.render(P.state.treeData, { viewState: viewState }); break;
+                case 'forms':       P.Tree.renderSubtree(P.state.treeData, 'acroform', { viewState: viewState }); break;
+                case 'fonts':       P.FontsTab.loadFonts(); break;
+                case 'validation':  P.ValidationTab.loadValidation(); break;
+                case 'rawcos':      loadRawCos(viewState); break;
+                case 'bookmarks':   P.Tree.renderSubtree(P.state.treeData, 'bookmarks', { viewState: viewState }); break;
+                case 'attachments': loadAttachments(); break;
+            }
+            if (typeof onAfterRender === 'function') { onAfterRender(); }
+        };
+
+        // Tree tabs render synchronously — defer one frame so skeleton is painted first
+        if (isTreeTab(tab)) {
+            requestAnimationFrame(doRender);
+        } else {
+            doRender();
         }
 
         P.state.currentTab = tab;
@@ -141,5 +164,5 @@ PDFalyzer.Tabs = (function ($, P) {
         });
     }
 
-    return { init: init, switchTab: switchTab };
+    return { init: init, switchTab: switchTab, isTreeTab: isTreeTab };
 })(jQuery, PDFalyzer);

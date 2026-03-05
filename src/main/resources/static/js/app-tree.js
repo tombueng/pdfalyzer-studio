@@ -429,9 +429,22 @@ PDFalyzer.Tree = (function ($, P) {
         return results;
     }
 
+    function selectNodeById(nodeId) {
+        if (nodeId === null || nodeId === undefined || !P.state.treeData) return;
+        var found = null;
+        var target = String(nodeId);
+        (function walk(n) {
+            if (found) return;
+            if (String(n.id) === target) { found = n; return; }
+            if (n.children) n.children.forEach(walk);
+        })(P.state.treeData);
+        if (found) selectNode(found, false, true, true);
+    }
+
     return { render: render, renderSubtree: renderSubtree,
              renderSearchResults: renderSearchResults, selectNode: selectNode,
              navigateToObject: navigateToObject, findAllByCategory: findAllByCategory,
+             selectNodeById: selectNodeById,
              applySelectionClasses: applySelectionClasses,
              captureViewState: captureViewState, restoreViewState: restoreViewState,
              refreshPendingPanel: refreshPendingPanel,
