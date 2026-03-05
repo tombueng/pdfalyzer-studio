@@ -52,17 +52,25 @@ public class ApiController {
     private final ValidationService validationService;
     private final PdfStructureParser structureParser;
     private final VeraPdfService veraPdfService;
+    private final FieldSchemaService fieldSchemaService;
 
     public ApiController(PdfService pdfService,
                          FontInspectorService fontInspectorService,
                          ValidationService validationService,
                          PdfStructureParser structureParser,
-                         VeraPdfService veraPdfService) {
+                         VeraPdfService veraPdfService,
+                         FieldSchemaService fieldSchemaService) {
         this.pdfService = pdfService;
         this.fontInspectorService = fontInspectorService;
         this.validationService = validationService;
         this.structureParser = structureParser;
         this.veraPdfService = veraPdfService;
+        this.fieldSchemaService = fieldSchemaService;
+    }
+
+    @GetMapping("/fields/schema")
+    public ResponseEntity<List<io.pdfalyzer.model.FieldPropertyDescriptor>> getFieldSchema() {
+        return ResponseEntity.ok(fieldSchemaService.getSchema());
     }
 
     @PostMapping("/upload")

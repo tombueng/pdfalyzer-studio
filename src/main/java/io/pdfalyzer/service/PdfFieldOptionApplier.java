@@ -7,26 +7,33 @@ import java.util.Map;
 
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSDictionary;
+import org.apache.pdfbox.cos.COSFloat;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.cos.COSString;
+import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationWidget;
 import org.apache.pdfbox.pdmodel.interactive.form.PDCheckBox;
 import org.apache.pdfbox.pdmodel.interactive.form.PDComboBox;
 import org.apache.pdfbox.pdmodel.interactive.form.PDField;
 import org.apache.pdfbox.pdmodel.interactive.form.PDListBox;
 import org.apache.pdfbox.pdmodel.interactive.form.PDTextField;
+import org.apache.pdfbox.pdmodel.interactive.form.PDVariableText;
 import org.springframework.stereotype.Component;
+
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Applies options and JavaScript validation to PDF form fields.
  * Called by {@link PdfEditService} and {@link PdfFormFieldBuilder}.
  */
 @Component
+@Slf4j
 public class PdfFieldOptionApplier {
 
     void applyOptionsToField(PDField field, Map<String, Object> options) throws IOException {
         if (options == null || options.isEmpty()) {
             return;
         }
+        applyAppearanceOptions(field, options);
 
         Boolean required = parseTriState(options.get("required"));
         if (required != null) field.setRequired(required);
@@ -108,6 +115,139 @@ public class PdfFieldOptionApplier {
         validateAction.setName(COSName.S, "JavaScript");
         validateAction.setString(COSName.JS, script);
         additionalActions.setItem(COSName.V, validateAction);
+    }
+
+    /**
+     * Applies appearance-related options (font, colors, border, alignment, maxLength)
+     * to a field's COS dictionary and widget MK/BS entries.
+     */
+    void applyAppearanceOptions(PDField field, Map<String, Object> options) {
+        boolean hasFontChange = options.containsKey("fontName")
+                || options.containsKey("fontSize")
+                || options.containsKey("textColor");
+        if (hasFontChange && field instanceof PDVariableText vt) {
+            String current = vt.getDefaultAppearance();
+            if (current == null) current = "/Helv 10 Tf 0 g";
+            String updated = rebuildDa(current, options);
+            vt.setDefaultAppearance(updated);
+        }
+
+        Object alignment = options.get("alignment");
+        if (alignment != null) {
+            int q = switch (alignment.toString().toLowerCase()) {
+                case "center" -> 1;
+                case "right" -> 2;
+                default -> 0;
+            };
+            field.getCOSObject().setInt(COSName.Q, q);
+        }
+
+        Object maxLength = options.get("maxLength");
+        if (maxLength != null && field instanceof PDTextField tf) {
+            try {
+                int ml = Integer.parseInt(maxLength.toString().trim());
+                if (ml > 0) tf.setMaxLen(ml);
+                else tf.getCOSObject().removeItem(COSName.getPDFName("MaxLen"));
+            } catch (NumberFormatException e) {
+                log.debug("Invalid maxLength: {}", maxLength);
+            }
+        }
+
+        boolean hasBorderOrBg = options.containsKey("borderColor")
+                || options.containsKey("backgroundColor")
+                || options.containsKey("borderWidth")
+                || options.containsKey("borderStyle");
+        if (hasBorderOrBg) {
+            for (PDAnnotationWidget widget : field.getWidgets()) {
+                applyWidgetAppearance(widget, options);
+            }
+        }
+    }
+
+    /** Rebuilds the DA string, substituting only the keys present in options. */
+    private String rebuildDa(String current, Map<String, Object> options) {
+        // Extract current font name + size
+        String fontName = "Helv";
+        String fontSize = "10";
+        String colorOp = "0 g";
+        java.util.regex.Matcher tfm = java.util.regex.Pattern
+                .compile("/([\\w+]+)\\s+(\\d+(?:\\.\\d+)?)\\s+Tf").matcher(current);
+        if (tfm.find()) { fontName = tfm.group(1); fontSize = tfm.group(2); }
+        java.util.regex.Matcher gm = java.util.regex.Pattern
+                .compile("([\\d.]+)\\s+g(?:\\s|$)").matcher(current);
+        if (gm.find()) colorOp = gm.group(1) + " g";
+        java.util.regex.Matcher rgbm = java.util.regex.Pattern
+                .compile("([\\d.]+)\\s+([\\d.]+)\\s+([\\d.]+)\\s+rg(?:\\s|$)").matcher(current);
+        if (rgbm.find()) colorOp = rgbm.group(1) + " " + rgbm.group(2) + " " + rgbm.group(3) + " rg";
+
+        Object fn = options.get("fontName");
+        if (fn != null && !fn.toString().isBlank()) fontName = fn.toString().trim();
+        Object fs = options.get("fontSize");
+        if (fs != null && !fs.toString().isBlank()) {
+            try { Float.parseFloat(fs.toString()); fontSize = fs.toString().trim(); }
+            catch (NumberFormatException e) { log.debug("Invalid fontSize: {}", fs); }
+        }
+        Object tc = options.get("textColor");
+        if (tc != null) {
+            String hex = tc.toString().trim();
+            if (hex.matches("#[0-9a-fA-F]{6}")) {
+                int r = Integer.parseInt(hex.substring(1, 3), 16);
+                int g = Integer.parseInt(hex.substring(3, 5), 16);
+                int b = Integer.parseInt(hex.substring(5, 7), 16);
+                colorOp = (r == 0 && g == 0 && b == 0) ? "0 g"
+                        : String.format("%.4f %.4f %.4f rg", r / 255f, g / 255f, b / 255f);
+            }
+        }
+        return "/" + fontName + " " + fontSize + " Tf " + colorOp;
+    }
+
+    /** Applies border color/width/style and background color to a single widget via MK and BS dicts. */
+    private void applyWidgetAppearance(PDAnnotationWidget widget, Map<String, Object> options) {
+        COSDictionary widgetDict = widget.getCOSObject();
+
+        // MK dictionary for colors
+        Object bc = options.get("borderColor");
+        Object bg = options.get("backgroundColor");
+        if (bc != null || bg != null) {
+            COSDictionary mk = (COSDictionary) widgetDict.getDictionaryObject(COSName.MK);
+            if (mk == null) { mk = new COSDictionary(); widgetDict.setItem(COSName.MK, mk); }
+            if (bc != null) { COSArray arr = hexToFloatArray(bc.toString()); if (arr != null) mk.setItem(COSName.BC, arr); }
+            if (bg != null) { COSArray arr = hexToFloatArray(bg.toString()); if (arr != null) mk.setItem(COSName.BG, arr); }
+        }
+
+        // BS dictionary for border width/style
+        Object bw = options.get("borderWidth");
+        Object bs = options.get("borderStyle");
+        if (bw != null || bs != null) {
+            COSDictionary bsDict = (COSDictionary) widgetDict.getDictionaryObject(COSName.BS);
+            if (bsDict == null) { bsDict = new COSDictionary(); widgetDict.setItem(COSName.BS, bsDict); }
+            if (bw != null) {
+                try { bsDict.setItem(COSName.W, new COSFloat(Float.parseFloat(bw.toString().trim()))); }
+                catch (NumberFormatException e) { log.debug("Invalid borderWidth: {}", bw); }
+            }
+            if (bs != null) {
+                String styleCode = switch (bs.toString().toLowerCase()) {
+                    case "dashed" -> "D";
+                    case "beveled" -> "B";
+                    case "inset" -> "I";
+                    case "underline" -> "U";
+                    default -> "S";
+                };
+                bsDict.setName(COSName.S, styleCode);
+            }
+        }
+    }
+
+    /** Converts "#RRGGBB" to a COSArray of three normalized float values. Returns null on invalid input. */
+    private COSArray hexToFloatArray(String hex) {
+        if (hex == null) return null;
+        hex = hex.trim();
+        if (!hex.matches("#[0-9a-fA-F]{6}")) return null;
+        COSArray arr = new COSArray();
+        arr.add(new COSFloat(Integer.parseInt(hex.substring(1, 3), 16) / 255f));
+        arr.add(new COSFloat(Integer.parseInt(hex.substring(3, 5), 16) / 255f));
+        arr.add(new COSFloat(Integer.parseInt(hex.substring(5, 7), 16) / 255f));
+        return arr;
     }
 
     Boolean parseTriState(Object value) {

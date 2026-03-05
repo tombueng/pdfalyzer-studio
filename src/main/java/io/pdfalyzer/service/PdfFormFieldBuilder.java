@@ -28,12 +28,14 @@ import org.apache.pdfbox.pdmodel.interactive.form.PDTextField;
 import org.springframework.stereotype.Component;
 
 import io.pdfalyzer.model.FormFieldRequest;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Creates individual form field types in a PDF document.
  * Called by {@link PdfEditService}.
  */
 @Component
+@Slf4j
 public class PdfFormFieldBuilder {
 
     private final PdfFieldOptionApplier optionApplier;
@@ -46,7 +48,7 @@ public class PdfFormFieldBuilder {
                       PDRectangle rect, FormFieldRequest request) throws IOException {
         PDTextField field = new PDTextField(acroForm);
         field.setPartialName(request.getFieldName());
-        field.setDefaultAppearance("/Helv 10 Tf 0 g");
+        field.setDefaultAppearance(buildDaString(request.getOptions()));
 
         PDAnnotationWidget widget = field.getWidgets().get(0);
         widget.setRectangle(rect);
@@ -137,7 +139,7 @@ public class PdfFormFieldBuilder {
                       PDRectangle rect, FormFieldRequest request) throws IOException {
         PDListBox field = new PDListBox(acroForm);
         field.setPartialName(request.getFieldName());
-        field.setDefaultAppearance("/Helv 10 Tf 0 g");
+        field.setDefaultAppearance(buildDaString(request.getOptions()));
 
         PDAnnotationWidget widget = field.getWidgets().get(0);
         widget.setRectangle(rect);
@@ -225,6 +227,45 @@ public class PdfFormFieldBuilder {
         Object rd = opts.remove("radioDefault");
         if (rd != null && !String.valueOf(rd).isBlank()) opts.put("defaultValue", rd);
         optionApplier.applyOptionsToField(group, opts);
+    }
+
+    /**
+     * Builds a PDF Default Appearance (DA) string from the options map.
+     * Falls back to Helvetica 10pt black if not specified.
+     * Converts a "#RRGGBB" textColor to PDF rg operator; "0 g" for black.
+     */
+    private String buildDaString(Map<String, Object> options) {
+        String fontName = "Helv";
+        String fontSize = "10";
+        String colorOp = "0 g";
+
+        if (options != null) {
+            Object fn = options.get("fontName");
+            if (fn != null && !fn.toString().isBlank()) fontName = fn.toString().trim();
+
+            Object fs = options.get("fontSize");
+            if (fs != null && !fs.toString().isBlank()) {
+                try { Float.parseFloat(fs.toString()); fontSize = fs.toString().trim(); }
+                catch (NumberFormatException e) { log.debug("Invalid fontSize: {}", fs); }
+            }
+
+            Object tc = options.get("textColor");
+            if (tc != null) {
+                String hex = tc.toString().trim();
+                if (hex.matches("#[0-9a-fA-F]{6}")) {
+                    int r = Integer.parseInt(hex.substring(1, 3), 16);
+                    int g = Integer.parseInt(hex.substring(3, 5), 16);
+                    int b = Integer.parseInt(hex.substring(5, 7), 16);
+                    if (r == 0 && g == 0 && b == 0) {
+                        colorOp = "0 g";
+                    } else {
+                        colorOp = String.format("%.4f %.4f %.4f rg", r / 255f, g / 255f, b / 255f);
+                    }
+                }
+            }
+        }
+
+        return "/" + fontName + " " + fontSize + " Tf " + colorOp;
     }
 
     void addSignatureField(PDDocument doc, PDAcroForm acroForm, PDPage page,

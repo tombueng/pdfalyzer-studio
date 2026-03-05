@@ -1,52 +1,22 @@
 /**
  * PDFalyzer Studio – Field Options dialog logic.
- * Depends on app-edit-mode.js and app-edit-field.js being loaded first.
+ * Depends on app-edit-mode.js, app-edit-field.js, and app-field-dialog.js being loaded first.
  */
 PDFalyzer.EditOptions = (function ($, P) {
     'use strict';
 
-    var TRI_STATE_GROUPS = {
-        required:    { inputName: 'optRequired',    blockSelector: '#optRequiredBlock' },
-        readonly:    { inputName: 'optReadonly',    blockSelector: '#optReadonlyBlock' },
-        multiline:   { inputName: 'optMultiline',  blockSelector: '#optMultilineBlock' },
-        editable:    { inputName: 'optEditable',   blockSelector: '#optEditableBlock' },
-        multiSelect: { inputName: 'optMultiSelect',blockSelector: '#optMultiSelectBlock' },
-        checked:     { inputName: 'optChecked',    blockSelector: '#optCheckedBlock' }
-    };
+    var _dialogState = null; // { selectedEntries, single, singleFt, fieldNames }
 
-    var JS_PRESET_OPTIONS = {
-        presetSelect: '#optJsPreset',
-        paramsContainer: '#optJsPresetParams',
-        applyButton: '#optJsPresetApplyBtn',
-        scriptTarget: '#optJavascript'
-    };
+    var BOOLEAN_KEYS = ['required', 'readonly', 'multiline', 'editable', 'multiSelect', 'checked'];
+    var APPEARANCE_KEYS = ['fontName', 'fontSize', 'textColor', 'backgroundColor', 'borderColor',
+        'borderWidth', 'borderStyle', 'alignment', 'rotation', 'maxLength'];
 
-    // ── Tri-state controls ───────────────────────────────────────────────────
-
-    function setTriStateControlValue(optionName, value, allowKeep) {
-        var group = TRI_STATE_GROUPS[optionName];
-        if (!group) return;
-        var $inputs = $('input[name="' + group.inputName + '"]');
-        if (!$inputs.length) return;
-        $inputs.closest('.tri-keep').toggle(!!allowKeep);
-        var normalized = value === 'true' || value === 'false' || value === 'keep' ? value : 'keep';
-        if (!allowKeep && normalized === 'keep') normalized = 'false';
-        $inputs.prop('checked', false);
-        var $target = $inputs.filter('[value="' + normalized + '"]');
-        if (!$target.length) $target = $inputs.filter('[value="' + (allowKeep ? 'keep' : 'false') + '"]');
-        $target.prop('checked', true);
-    }
-
-    function getTriStateControlValue(optionName) {
-        var group = TRI_STATE_GROUPS[optionName];
-        if (!group) return 'keep';
-        return $('input[name="' + group.inputName + '"]:checked').val() || 'keep';
-    }
+    // ── Tri-state value parser ────────────────────────────────────────────────
 
     function parseTriStateValue(value) {
-        if (value === 'true') return true;
-        if (value === 'false') return false;
-        return null;
+        if (value === true || value === 'true') return true;
+        if (value === false || value === 'false') return false;
+        return null; // 'keep'
     }
 
     // ── Option value readers ─────────────────────────────────────────────────
@@ -61,6 +31,16 @@ PDFalyzer.EditOptions = (function ($, P) {
         if (optionName === 'defaultValue' || optionName === 'value') return 'Value';
         if (optionName === 'choices') return 'Options';
         if (optionName === 'javascript') return 'JavaScript';
+        if (optionName === 'fontName') return 'FontName';
+        if (optionName === 'fontSize') return 'FontSize';
+        if (optionName === 'textColor') return 'TextColor';
+        if (optionName === 'backgroundColor') return 'BackgroundColor';
+        if (optionName === 'borderColor') return 'BorderColor';
+        if (optionName === 'borderWidth') return 'BorderWidth';
+        if (optionName === 'borderStyle') return 'BorderStyle';
+        if (optionName === 'alignment') return 'Alignment';
+        if (optionName === 'rotation') return 'Rotation';
+        if (optionName === 'maxLength') return 'MaxLength';
         return optionName;
     }
 
@@ -130,7 +110,47 @@ PDFalyzer.EditOptions = (function ($, P) {
         return found;
     }
 
-    // ── Option overrides ─────────────────────────────────────────────────────
+    // ── Load radio options for a single entry ─────────────────────────────────
+
+    function loadOptRadioOptions(single) {
+        if (!single) return [];
+        if (single.kind === 'pending' && single.pendingField) {
+            var groupName = single.pendingField.fieldName;
+            var groupEntries = (P.state.pendingFormAdds || []).filter(function (pa) {
+                return pa && pa.fieldName === groupName && pa._radioHandleKey;
+            });
+            return groupEntries.map(function (pa) {
+                return { value: pa.options && pa.options.exportValue || '', label: pa.options && pa.options.exportLabel || '' };
+            });
+        }
+        if (single.kind === 'persisted' && single.node) {
+            var optStr = single.node.properties && single.node.properties.Options || '';
+            return optStr.split(/,\s*/).map(function (v) { return { value: v.trim(), label: '' }; }).filter(function (r) { return r.value; });
+        }
+        return [];
+    }
+
+    // ── Build current values for the dialog ───────────────────────────────────
+
+    function buildCurrentValues(selectedEntries, single) {
+        var vals = {};
+        BOOLEAN_KEYS.forEach(function (key) {
+            vals[key] = resolveTriState(selectedEntries, key);
+        });
+        if (single) {
+            ['defaultValue', 'choices', 'javascript'].concat(APPEARANCE_KEYS).forEach(function (key) {
+                var v = readOptionValue(single, key);
+                if (v !== null && v !== undefined) vals[key] = v;
+            });
+            var singleFt = P.EditField.getEntryFieldType(single);
+            if (singleFt === 'radio') {
+                vals.radioOptions = loadOptRadioOptions(single);
+            }
+        }
+        return vals;
+    }
+
+    // ── Option overrides (for persisted fields pre-save UI) ───────────────────
 
     function applyOptionOverridesToPersistedSelection(fieldNames, options) {
         if (!fieldNames || !fieldNames.length || !options) return;
@@ -139,67 +159,16 @@ PDFalyzer.EditOptions = (function ($, P) {
             if (!fieldName) return;
             if (!overrides[fieldName]) overrides[fieldName] = {};
             var target = overrides[fieldName];
-            ['required', 'readonly', 'multiline', 'editable', 'multiSelect', 'checked'].forEach(function (key) {
+            BOOLEAN_KEYS.forEach(function (key) {
                 if (options[key] !== null && options[key] !== undefined) target[key] = options[key];
+            });
+            APPEARANCE_KEYS.forEach(function (key) {
+                if (options[key] !== undefined) target[key] = options[key];
             });
             if (options.defaultValue !== undefined) target.defaultValue = options.defaultValue;
             if (options.choices !== undefined) target.choices = P.EditMode.cloneObject(options.choices);
             if (options.javascript !== undefined) target.javascript = options.javascript;
         });
-    }
-
-    // ── Scope hint ───────────────────────────────────────────────────────────
-
-    function updateFieldOptionsScopeHint(single, selectedEntries, visibleKeys) {
-        var fieldTypes = {};
-        selectedEntries.forEach(function (entry) { fieldTypes[P.EditField.getEntryFieldType(entry)] = true; });
-        var typeCount = Object.keys(fieldTypes).length;
-        if (single) {
-            $('#fieldOptionsScopeHint').text('Showing options relevant for this ' + P.EditField.getEntryFieldType(single) + ' field.');
-            return;
-        }
-        if (typeCount > 1) { $('#fieldOptionsScopeHint').text('Mixed field types selected. Only shared options are shown.'); return; }
-        if (!Object.keys(visibleKeys).length) { $('#fieldOptionsScopeHint').text('No common editable options for current selection.'); return; }
-        $('#fieldOptionsScopeHint').text('Tri-state values apply to all selected fields.');
-    }
-
-    // ── JS preset helpers (options mode) ────────────────────────────────────
-
-    function renderJsPresetParamsOptions() { P.EditField.renderJsPresetParams('options', JS_PRESET_OPTIONS); }
-
-    function applyJsPresetToOptionsDialog() {
-        var presetKey = $(JS_PRESET_OPTIONS.presetSelect).val() || 'custom';
-        if (presetKey === 'custom') return;
-        var params = P.EditField.collectJsPresetParams('options', JS_PRESET_OPTIONS);
-        var script = P.EditField.buildPresetScript(presetKey, params);
-        if (!script) { P.Utils.toast('Please fill preset values first', 'warning'); return; }
-        $(JS_PRESET_OPTIONS.scriptTarget).val(script);
-        P.Utils.toast('Validation preset inserted', 'info');
-    }
-
-    function bindJsPresetControls() {
-        $(JS_PRESET_OPTIONS.presetSelect).on('change', renderJsPresetParamsOptions);
-        $(JS_PRESET_OPTIONS.applyButton).on('click', applyJsPresetToOptionsDialog);
-    }
-
-    function initializeJsPresetUi() {
-        $(JS_PRESET_OPTIONS.presetSelect).val('custom');
-        renderJsPresetParamsOptions();
-    }
-
-    // ── Choice options in edit dialog ────────────────────────────────────────
-
-    function loadOptChoiceOptions(entry) {
-        var raw = readOptionValue(entry, 'choices');
-        return P.EditField.parseChoicesToRows(raw);
-    }
-
-    function syncOptChoiceDefault() {
-        P.EditField.syncChoiceDefaultSelect('#optChoiceDefault', 'optChoiceOptionRows');
-    }
-
-    function syncOptRadioDefault() {
-        P.EditField.syncRadioDefaultSelect('#optRadioDefault', 'optRadioOptionRows');
     }
 
     // ── Open options popup ───────────────────────────────────────────────────
@@ -214,137 +183,70 @@ PDFalyzer.EditOptions = (function ($, P) {
 
         var selectedEntries = getSelectedFieldEntries();
         var single = selectedEntries.length === 1 ? selectedEntries[0] : null;
-        var showKeepOption = !single;
-        var visibleKeys = P.EditField.computeVisibleOptionKeys(selectedEntries);
         var singleFt = single ? P.EditField.getEntryFieldType(single) : null;
-        var isChoiceField = singleFt === 'combo' || singleFt === 'list';
-        var isRadioField = singleFt === 'radio';
 
-        $('#fieldOptionsSelectionInfo').text(
-            selected.length === 1
-                ? ('Editing: ' + selected[0])
-                : ('Editing ' + selected.length + ' fields (tri-state controls)')
-        );
+        var fieldTypes = {};
+        selectedEntries.forEach(function (e) { fieldTypes[P.EditField.getEntryFieldType(e)] = true; });
+        var intersectedType = Object.keys(fieldTypes).length === 1 ? Object.keys(fieldTypes)[0] : null;
 
-        Object.keys(TRI_STATE_GROUPS).forEach(function (optionName) {
-            var group = TRI_STATE_GROUPS[optionName];
-            P.EditField.setFieldConfigBlockVisible(group.blockSelector, !!visibleKeys[optionName]);
-            if (visibleKeys[optionName]) {
-                setTriStateControlValue(optionName, resolveTriState(selectedEntries, optionName), showKeepOption);
-            }
+        _dialogState = { selectedEntries: selectedEntries, single: single, singleFt: singleFt, fieldNames: selected.slice() };
+
+        var contextInfo = selected.length === 1
+            ? 'Editing: ' + selected[0]
+            : 'Editing ' + selected.length + ' fields';
+
+        P.FieldDialog.open('edit', intersectedType, buildCurrentValues(selectedEntries, single), {
+            isMultiEdit: !single,
+            contextInfo: contextInfo,
+            onApply: applyOptions,
+            onHide: function () { _dialogState = null; }
         });
-
-        // Default value: show for text/signature, hide for combo/list/radio (they use their own selects)
-        var canEditSingleValue = !!single && !!visibleKeys.defaultValue && !isChoiceField && !isRadioField;
-        var canEditChoices = !!single && isChoiceField;
-        var canEditRadioOptions = !!single && isRadioField;
-        var canEditJavascript = !!single && !!visibleKeys.javascript;
-
-        P.EditField.setFieldConfigBlockVisible('#optDefaultValueBlock', canEditSingleValue);
-        P.EditField.setFieldConfigBlockVisible('#optChoiceOptionsBlock', canEditChoices);
-        P.EditField.setFieldConfigBlockVisible('#optChoiceDefaultBlock', canEditChoices);
-        P.EditField.setFieldConfigBlockVisible('#optRadioOptionsBlock', canEditRadioOptions);
-        P.EditField.setFieldConfigBlockVisible('#optRadioDefaultBlock', canEditRadioOptions);
-        P.EditField.setFieldConfigBlockVisible('#optJavascriptBlock', canEditJavascript);
-
-        if (canEditSingleValue) {
-            $('#optDefaultValue').val(readOptionValue(single, 'defaultValue') || readOptionValue(single, 'value') || '');
-            $('#optDefaultValue').prop('disabled', false);
-        }
-
-        if (canEditChoices) {
-            var choiceRows = loadOptChoiceOptions(single);
-            P.EditField.renderChoiceOptionTable(choiceRows, 'optChoiceOptionRows', syncOptChoiceDefault);
-            syncOptChoiceDefault();
-            // Set current default selection
-            var curDefault = readOptionValue(single, 'defaultValue') || readOptionValue(single, 'value') || '';
-            if (curDefault) $('#optChoiceDefault').val(curDefault);
-        }
-
-        if (canEditRadioOptions) {
-            var radioRows = loadOptRadioOptions(single);
-            P.EditField.renderRadioOptionTable(radioRows, 'optRadioOptionRows', syncOptRadioDefault);
-            syncOptRadioDefault();
-            // Current default: for pending use radioDefault, for persisted use Value
-            var curRadioDefault = single.kind === 'pending'
-                ? (single.pendingField.options && single.pendingField.options.radioDefault || '')
-                : (readOptionValue(single, 'value') || '');
-            if (curRadioDefault) $('#optRadioDefault').val(curRadioDefault);
-        }
-
-        var javascriptValue = canEditJavascript ? (readOptionValue(single, 'javascript') || '') : '';
-        $('#optJavascript').val(javascriptValue).prop('disabled', !canEditJavascript);
-        initializeJsPresetUi();
-        P.EditMode.setOptionsJavascriptSectionExpanded(canEditJavascript, javascriptValue);
-        updateFieldOptionsScopeHint(single, selectedEntries, visibleKeys);
-        P.EditMode.showModal('options');
     }
 
-    function loadOptRadioOptions(single) {
-        if (!single) return [];
-        if (single.kind === 'pending' && single.pendingField) {
-            // Collect all radio group entries with same fieldName
-            var groupName = single.pendingField.fieldName;
-            var groupEntries = (P.state.pendingFormAdds || []).filter(function (pa) {
-                return pa && pa.fieldName === groupName && pa._radioHandleKey;
-            });
-            return groupEntries.map(function (pa) {
-                return { value: pa.options && pa.options.exportValue || '', label: pa.options && pa.options.exportLabel || '' };
-            });
-        }
-        if (single.kind === 'persisted' && single.node) {
-            var optStr = single.node.properties && single.node.properties.Options || '';
-            // Radio Options property is stored as "Val1, Val2, Val3"
-            return optStr.split(/,\s*/).map(function (v) { return { value: v.trim(), label: '' }; }).filter(function (r) { return r.value; });
-        }
-        return [];
-    }
+    // ── Apply options from dialog ─────────────────────────────────────────────
 
-    // ── Apply options from modal ──────────────────────────────────────────────
-
-    function applyOptionsFromModal() {
-        if (!P.state.sessionId) return;
-        var fieldNames = (P.state.selectedFieldNames || []).slice();
-        if (!fieldNames.length) return;
-
-        var selectedEntries = getSelectedFieldEntries();
-        var single = selectedEntries.length === 1 ? selectedEntries[0] : null;
-        var singleFt = single ? P.EditField.getEntryFieldType(single) : null;
+    function applyOptions(opts) {
+        if (!P.state.sessionId || !_dialogState) return;
+        var selectedEntries = _dialogState.selectedEntries;
+        var single = _dialogState.single;
+        var singleFt = _dialogState.singleFt;
+        var fieldNames = _dialogState.fieldNames;
         var isChoiceField = singleFt === 'combo' || singleFt === 'list';
         var isRadioField = singleFt === 'radio';
 
         var options = {};
-        if (P.EditField.isFieldConfigBlockVisible('#optRequiredBlock')) options.required = parseTriStateValue(getTriStateControlValue('required'));
-        if (P.EditField.isFieldConfigBlockVisible('#optReadonlyBlock')) options.readonly = parseTriStateValue(getTriStateControlValue('readonly'));
-        if (P.EditField.isFieldConfigBlockVisible('#optMultilineBlock')) options.multiline = parseTriStateValue(getTriStateControlValue('multiline'));
-        if (P.EditField.isFieldConfigBlockVisible('#optEditableBlock')) options.editable = parseTriStateValue(getTriStateControlValue('editable'));
-        if (P.EditField.isFieldConfigBlockVisible('#optMultiSelectBlock')) options.multiSelect = parseTriStateValue(getTriStateControlValue('multiSelect'));
-        if (P.EditField.isFieldConfigBlockVisible('#optCheckedBlock')) options.checked = parseTriStateValue(getTriStateControlValue('checked'));
 
-        if (P.EditField.isFieldConfigBlockVisible('#optDefaultValueBlock') && !$('#optDefaultValue').prop('disabled')) {
-            var defaultValue = $('#optDefaultValue').val();
-            if (defaultValue) options.defaultValue = defaultValue;
+        BOOLEAN_KEYS.forEach(function (key) {
+            if (opts[key] !== undefined) {
+                var v = parseTriStateValue(opts[key]);
+                if (v !== null) options[key] = v;
+            }
+        });
+
+        APPEARANCE_KEYS.forEach(function (key) {
+            if (opts[key] !== undefined && opts[key] !== '') options[key] = opts[key];
+        });
+
+        if (opts.javascript !== undefined) options.javascript = opts.javascript;
+
+        if (opts.defaultValue !== undefined && opts.defaultValue !== '') {
+            options.defaultValue = opts.defaultValue;
         }
 
-        // Combo / list choice items
-        if (P.EditField.isFieldConfigBlockVisible('#optChoiceOptionsBlock') && isChoiceField) {
-            var choiceRows = P.EditField.collectChoiceOptions('optChoiceOptionRows');
+        // Choices (combo / list)
+        if (isChoiceField && opts.choices !== undefined) {
+            var choiceRows = Array.isArray(opts.choices) ? opts.choices : [];
             if (choiceRows.length) {
                 options.choices = P.EditField.choiceRowsToBackendFormat(choiceRows);
-                options.defaultValue = $('#optChoiceDefault').val() || '';
+                options.defaultValue = opts.defaultValue || '';
             }
         }
 
-        if (P.EditField.isFieldConfigBlockVisible('#optJavascriptBlock') && !$('#optJavascript').prop('disabled')) {
-            options.javascript = $('#optJavascript').val() || '';
-        }
-
-        // ── Radio options: handle separately ────────────────────────────────
-        if (P.EditField.isFieldConfigBlockVisible('#optRadioOptionsBlock') && isRadioField && single) {
-            var radioRows = P.EditField.collectRadioOptionsFrom('optRadioOptionRows');
+        // Radio: handle separately
+        if (isRadioField && single && opts.radioOptions !== undefined) {
+            var radioRows = Array.isArray(opts.radioOptions) ? opts.radioOptions : [];
             if (!radioRows.length) { P.Utils.toast('At least one radio option is required', 'warning'); return; }
-            var radioDefault = $('#optRadioDefault').val() || '';
-
+            var radioDefault = opts.radioDefault || '';
             if (single.kind === 'pending') {
                 applyRadioOptionsToPending(single.pendingField.fieldName, radioRows, radioDefault, options);
                 finishLocalOptionsApply('Radio options updated');
@@ -355,7 +257,7 @@ PDFalyzer.EditOptions = (function ($, P) {
             }
         }
 
-        // ── Standard path ────────────────────────────────────────────────────
+        // Standard path
         if (!Object.keys(options).length && !isChoiceField) {
             P.Utils.toast('No applicable options for selected fields', 'info');
             return;
@@ -379,8 +281,11 @@ PDFalyzer.EditOptions = (function ($, P) {
             }
             targets.forEach(function (pf) {
                 if (!pf.options) pf.options = {};
-                ['required', 'readonly', 'multiline', 'editable', 'multiSelect', 'checked'].forEach(function (key) {
+                BOOLEAN_KEYS.forEach(function (key) {
                     if (options[key] !== null && options[key] !== undefined) pf.options[key] = options[key];
+                });
+                APPEARANCE_KEYS.forEach(function (key) {
+                    if (options[key] !== undefined) pf.options[key] = options[key];
                 });
                 if (options.defaultValue !== undefined) {
                     if (pf.fieldType === 'radio') pf.options.radioDefault = options.defaultValue;
@@ -402,15 +307,13 @@ PDFalyzer.EditOptions = (function ($, P) {
         finishLocalOptionsApply(pendingNames.length ? 'Field options queued (saved + pending fields)' : 'Field options queued. Click Save to persist.');
     }
 
+    // ── Radio option helpers ──────────────────────────────────────────────────
+
     function applyRadioOptionsToPending(groupName, radioRows, radioDefault, sharedOptions) {
         var existingEntries = (P.state.pendingFormAdds || []).filter(function (pa) {
             return pa && pa.fieldName === groupName && pa._radioHandleKey;
         });
         var firstEntry = existingEntries[0];
-        var existingMap = Object.create(null);
-        existingEntries.forEach(function (pa) { existingMap[pa.options && pa.options.exportValue || ''] = pa; });
-
-        // Remove entries for deleted options
         var newValues = Object.create(null);
         radioRows.forEach(function (r) { if (r.value) newValues[r.value] = true; });
         P.state.pendingFormAdds = (P.state.pendingFormAdds || []).filter(function (pa) {
@@ -419,7 +322,6 @@ PDFalyzer.EditOptions = (function ($, P) {
             return !!newValues[ev];
         });
 
-        // Add or update entries
         radioRows.forEach(function (row, i) {
             if (!row.value) return;
             var key = groupName + '\x00' + row.value;
@@ -479,33 +381,14 @@ PDFalyzer.EditOptions = (function ($, P) {
         if (P.Tabs && P.Tabs.switchTab && P.state.currentTab) P.Tabs.switchTab(P.state.currentTab);
         P.EditMode.renderFieldHandlesForAllPages();
         P.EditMode.updateSaveButton();
-        P.EditMode.hideModal('options');
+        P.FieldDialog.hide();
         P.Utils.toast(toastMessage, 'success');
     }
 
     // ── init ─────────────────────────────────────────────────────────────────
 
     function init() {
-        bindJsPresetControls();
-        $('#applyFieldOptionsBtn').on('click', applyOptionsFromModal);
         $('#formOptionsBtn').on('click', openOptionsPopup);
-        $('#optJavascriptCollapse').on('shown.bs.collapse hidden.bs.collapse', P.EditMode.syncOptionsJavascriptToggleState);
-
-        // Choice item table buttons (edit/options dialog)
-        $('#addOptChoiceOptionBtn').on('click', function () {
-            var idx = $('#optChoiceOptionRows tr').length;
-            $('#optChoiceOptionRows').append(P.EditField.buildChoiceOptionRow('', '', idx, 'optChoiceOptionRows', syncOptChoiceDefault));
-            P.EditField.renumberChoiceRows('optChoiceOptionRows');
-            syncOptChoiceDefault();
-        });
-
-        // Radio option table buttons (edit/options dialog)
-        $('#addOptRadioOptionBtn').on('click', function () {
-            var idx = $('#optRadioOptionRows tr').length;
-            $('#optRadioOptionRows').append(P.EditField.buildRadioOptionRow('', '', idx, 'optRadioOptionRows', syncOptRadioDefault));
-            P.EditField.renumberRadioRows('optRadioOptionRows');
-            syncOptRadioDefault();
-        });
     }
 
     return {

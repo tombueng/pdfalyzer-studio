@@ -2,11 +2,14 @@ package io.pdfalyzer.service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.cos.COSNumber;
 import org.apache.pdfbox.cos.COSString;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.interactive.form.PDAcroForm;
@@ -18,6 +21,7 @@ import org.apache.pdfbox.pdmodel.interactive.form.PDNonTerminalField;
 import org.apache.pdfbox.pdmodel.interactive.form.PDRadioButton;
 import org.apache.pdfbox.pdmodel.interactive.form.PDSignatureField;
 import org.apache.pdfbox.pdmodel.interactive.form.PDTextField;
+import org.apache.pdfbox.pdmodel.interactive.form.PDVariableText;
 import org.springframework.stereotype.Component;
 
 import io.pdfalyzer.model.PdfNode;
@@ -108,6 +112,7 @@ public class AcroFormTreeBuilder {
         if (jsValidation != null && !jsValidation.isBlank()) {
             node.addProperty("JavaScript", jsValidation);
         }
+        extractAppearanceProperties(field, node);
         if (!field.getWidgets().isEmpty()) {
             try {
                 if (field.getWidgets().get(0).getPage() != null) {
@@ -180,6 +185,132 @@ public class AcroFormTreeBuilder {
         String subtype = validateDict.getNameAsString(COSName.S);
         if (!"JavaScript".equals(subtype)) return null;
         return validateDict.getString(COSName.JS);
+    }
+
+    /** Extracts all visual/appearance attributes from a field and adds them as node properties. */
+    private void extractAppearanceProperties(PDField field, PdfNode node) {
+        // Default Appearance (DA) string — present on variable text fields
+        String da = null;
+        if (field instanceof PDVariableText vt) {
+            da = vt.getDefaultAppearance();
+        }
+        if (da == null || da.isBlank()) {
+            da = field.getCOSObject().getString(COSName.DA);
+        }
+        if (da != null && !da.isBlank()) {
+            parseDaString(da, node);
+        }
+
+        // MaxLen for text fields
+        if (field instanceof PDTextField tf) {
+            int maxLen = tf.getMaxLen();
+            if (maxLen > 0) node.addProperty("MaxLength", String.valueOf(maxLen));
+            // Q (quadding / text alignment) — 0=left, 1=center, 2=right
+            int q = field.getCOSObject().getInt(COSName.Q, -1);
+            if (q >= 0) {
+                String[] alignNames = {"left", "center", "right"};
+                if (q < alignNames.length) node.addProperty("Alignment", alignNames[q]);
+            }
+        }
+        if (field instanceof PDComboBox || field instanceof PDListBox) {
+            int q = field.getCOSObject().getInt(COSName.Q, -1);
+            if (q >= 0) {
+                String[] alignNames = {"left", "center", "right"};
+                if (q < alignNames.length) node.addProperty("Alignment", alignNames[q]);
+            }
+        }
+
+        // Rotation
+        int rotate = field.getCOSObject().getInt(COSName.R, -1);
+        if (rotate >= 0) node.addProperty("Rotation", String.valueOf(rotate));
+
+        // Widget-level appearance: MK dictionary and BS dictionary (from first widget)
+        if (!field.getWidgets().isEmpty()) {
+            COSDictionary widgetDict = field.getWidgets().get(0).getCOSObject();
+
+            COSBase mkBase = widgetDict.getDictionaryObject(COSName.MK);
+            if (mkBase instanceof COSDictionary mk) {
+                String bc = cosArrayToHex(mk.getDictionaryObject(COSName.BC));
+                if (bc != null) node.addProperty("BorderColor", bc);
+                String bg = cosArrayToHex(mk.getDictionaryObject(COSName.BG));
+                if (bg != null) node.addProperty("BackgroundColor", bg);
+            }
+
+            COSBase bsBase = widgetDict.getDictionaryObject(COSName.BS);
+            if (bsBase instanceof COSDictionary bs) {
+                COSBase wBase = bs.getDictionaryObject(COSName.W);
+                if (wBase instanceof COSNumber wNum) {
+                    node.addProperty("BorderWidth", String.valueOf(wNum.floatValue()));
+                }
+                String style = bs.getNameAsString(COSName.S);
+                if (style != null && !style.isBlank()) {
+                    node.addProperty("BorderStyle", mapBsStyleName(style));
+                }
+            }
+        }
+    }
+
+    /**
+     * Parses a DA string like "/Helv 10 Tf 0 g" or "/TiRo 12 Tf 0.5 0 0 rg".
+     * Adds FontName, FontSize, TextColor properties to the node.
+     */
+    private void parseDaString(String da, PdfNode node) {
+        // Font name and size: /Name size Tf
+        Pattern tfPattern = Pattern.compile("/([\\w+]+)\\s+(\\d+(?:\\.\\d+)?)\\s+Tf");
+        Matcher tfMatcher = tfPattern.matcher(da);
+        if (tfMatcher.find()) {
+            node.addProperty("FontName", tfMatcher.group(1));
+            node.addProperty("FontSize", tfMatcher.group(2));
+        }
+        // Greyscale color: <n> g  (n in 0-1)
+        Pattern gPattern = Pattern.compile("([\\d.]+)\\s+g(?:\\s|$)");
+        Matcher gMatcher = gPattern.matcher(da);
+        if (gMatcher.find()) {
+            float grey = Float.parseFloat(gMatcher.group(1));
+            int v = Math.round(grey * 255);
+            node.addProperty("TextColor", String.format("#%02x%02x%02x", v, v, v));
+            return;
+        }
+        // RGB color: <r> <g> <b> rg
+        Pattern rgbPattern = Pattern.compile("([\\d.]+)\\s+([\\d.]+)\\s+([\\d.]+)\\s+rg(?:\\s|$)");
+        Matcher rgbMatcher = rgbPattern.matcher(da);
+        if (rgbMatcher.find()) {
+            int r = Math.round(Float.parseFloat(rgbMatcher.group(1)) * 255);
+            int g = Math.round(Float.parseFloat(rgbMatcher.group(2)) * 255);
+            int b = Math.round(Float.parseFloat(rgbMatcher.group(3)) * 255);
+            node.addProperty("TextColor", String.format("#%02x%02x%02x", r, g, b));
+        }
+    }
+
+    /** Converts a COSArray of 1 (grey), 3 (RGB), or 4 (CMYK) numbers to "#RRGGBB". Returns null if not applicable. */
+    private String cosArrayToHex(COSBase base) {
+        if (!(base instanceof COSArray arr)) return null;
+        if (arr.size() == 1 && arr.get(0) instanceof COSNumber n) {
+            int v = Math.round(n.floatValue() * 255);
+            return String.format("#%02x%02x%02x", v, v, v);
+        }
+        if (arr.size() == 3
+                && arr.get(0) instanceof COSNumber r
+                && arr.get(1) instanceof COSNumber g
+                && arr.get(2) instanceof COSNumber b) {
+            return String.format("#%02x%02x%02x",
+                    Math.round(r.floatValue() * 255),
+                    Math.round(g.floatValue() * 255),
+                    Math.round(b.floatValue() * 255));
+        }
+        return null;
+    }
+
+    /** Maps PDF border style name (S, D, B, I, U) to human-readable name used in the schema. */
+    private String mapBsStyleName(String s) {
+        switch (s) {
+            case "S": return "solid";
+            case "D": return "dashed";
+            case "B": return "beveled";
+            case "I": return "inset";
+            case "U": return "underline";
+            default: return s.toLowerCase();
+        }
     }
 
     private String getFieldIcon(String fieldType) {
