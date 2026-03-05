@@ -1111,11 +1111,7 @@ public class UIRenderingTest {
 
     @Test
     public void testFieldOptionsApplyEnablesSaveButton() {
-        if (driver == null) {
-            System.out.println("Skipping testFieldOptionsApplyEnablesSaveButton - ChromeDriver not available");
-            return;
-        }
-
+     
         driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
         wait.until(ExpectedConditions.or(
@@ -1163,10 +1159,7 @@ public class UIRenderingTest {
 
     @Test
     public void testDocumentInfoCosEditsPersistToPdfAfterSave() throws Exception {
-        if (driver == null) {
-            System.out.println("Skipping testDocumentInfoCosEditsPersistToPdfAfterSave - ChromeDriver not available");
-            return;
-        }
+
 
         driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(300));
@@ -1248,11 +1241,7 @@ public class UIRenderingTest {
 
         @Test
         public void testMultiselectTriStateFieldOptionsWorkflow() {
-        if (driver == null) {
-            System.out.println("Skipping testMultiselectTriStateFieldOptionsWorkflow - ChromeDriver not available");
-            return;
-        }
-
+      
         driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
         wait.until(ExpectedConditions.or(
@@ -1307,26 +1296,19 @@ public class UIRenderingTest {
 
     @Test
     public void testSmoothRefreshPreservesTreeStateAndUsesHiddenViewerStaging() {
-        if (driver == null) {
-            System.out.println("Skipping testSmoothRefreshPreservesTreeStateAndUsesHiddenViewerStaging - ChromeDriver not available");
-            return;
-        }
-
         driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
-        wait.until(ExpectedConditions.or(
-            ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
-            ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
-        ));
-        wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector("#pdfViewer .pdf-page-wrapper")));
+        ensureTestPdfReady(wait, false);
+
+        wait.until(ExpectedConditions.elementToBeClickable(By.cssSelector(".tab-btn[data-tab='structure']")))
+            .click();
+        wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector("#treeContent .tree-node")));
 
         driver.manage().timeouts().scriptTimeout(Duration.ofSeconds(45));
         Object result = ((JavascriptExecutor) driver).executeAsyncScript(
             "const done = arguments[arguments.length - 1];" +
             "const P = window.PDFalyzer;" +
             "if(!P || !P.state || !P.state.treeData || !P.state.sessionId){ done({ok:false,msg:'missing-pdf-state'}); return; }" +
-            "P.state.currentTab = 'structure';" +
-            "if(P.Tabs && P.Tabs.switchTab){ P.Tabs.switchTab('structure'); }" +
             "const tree = document.getElementById('treeContent');" +
             "const pane = document.getElementById('pdfPane');" +
             "if(!tree || !pane){ done({ok:false,msg:'missing-tree-or-pane'}); return; }" +
@@ -1529,7 +1511,7 @@ public class UIRenderingTest {
         }
 
         if (!loaded) {
-            Path testPdf = Paths.get("src", "main", "resources", "test.pdf").toAbsolutePath();
+            Path testPdf = Paths.get("src", "main", "resources", "sample-pdfs", "test.pdf").toAbsolutePath();
             assertTrue(Files.exists(testPdf), "Expected test PDF to exist at " + testPdf);
 
             WebElement fileInput = wait.until(ExpectedConditions.presenceOfElementLocated(By.id("fileInput")));
@@ -1538,8 +1520,7 @@ public class UIRenderingTest {
         }
     }
 
-    private boolean hasUsablePdfSession() {
-        if (driver == null) return false;
+    private boolean hasUsablePdfSession() {
 
         try {
             Object loaded = ((JavascriptExecutor) driver).executeScript(
@@ -1600,8 +1581,7 @@ public class UIRenderingTest {
         }
     }
 
-    private void assertNoClientJsErrors(String context) {
-        if (driver == null) return;
+    private void assertNoClientJsErrors(String context) {
         Object raw = ((JavascriptExecutor) driver).executeScript(
                 "return Array.isArray(window.__pdfalyzerJsErrors) ? window.__pdfalyzerJsErrors : [];"
         );

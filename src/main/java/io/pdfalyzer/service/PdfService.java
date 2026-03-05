@@ -10,8 +10,10 @@ import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.encryption.AccessPermission;
 import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
 import org.apache.pdfbox.pdmodel.encryption.PDEncryption;
+import org.apache.pdfbox.pdmodel.encryption.StandardProtectionPolicy;
 import org.springframework.stereotype.Service;
 
+import io.pdfalyzer.model.DownloadProtectionRequest;
 import io.pdfalyzer.model.EncryptionInfo;
 import io.pdfalyzer.model.PdfNode;
 import io.pdfalyzer.model.PdfSession;
@@ -100,6 +102,7 @@ public class PdfService {
             openedDoc.save(out);
             session.setPdfBytes(out.toByteArray());
 
+            session.setUnlockedWithPassword(password);
             log.info("Unlocked '{}' as {} password; canModify={}",
                     session.getFilename(), passwordType, encInfo.isCanModify());
         } finally {
@@ -107,6 +110,69 @@ public class PdfService {
         }
 
         return session;
+    }
+
+    /**
+     * Returns PDF bytes for download, optionally re-applying encryption.
+     * <ul>
+     *   <li>"keep"   – re-encrypt using the stored unlock password and original algorithm.</li>
+     *   <li>"custom" – re-encrypt with caller-supplied passwords and algorithm.</li>
+     *   <li>"none"   – return the decrypted bytes as-is.</li>
+     * </ul>
+     */
+    public byte[] downloadProtected(String sessionId, DownloadProtectionRequest req) throws IOException {
+        PdfSession session = sessionService.getSession(sessionId);
+        byte[] decryptedBytes = session.getPdfBytes();
+
+        String mode = (req == null || req.getMode() == null) ? "none" : req.getMode();
+
+        if ("none".equals(mode)) {
+            return decryptedBytes;
+        }
+
+        EncryptionInfo orig = session.getEncryptionInfo();
+        String userPw, ownerPw, algorithm;
+
+        if ("keep".equals(mode)) {
+            userPw = session.getUnlockedWithPassword() != null ? session.getUnlockedWithPassword() : "";
+            ownerPw = userPw;
+            algorithm = (orig != null && orig.getAlgorithm() != null) ? orig.getAlgorithm() : "AES-256";
+        } else { // "custom"
+            userPw = req.getUserPassword() != null ? req.getUserPassword() : "";
+            String reqOwner = req.getOwnerPassword();
+            ownerPw = (reqOwner != null && !reqOwner.isEmpty()) ? reqOwner : userPw;
+            algorithm = req.getAlgorithm() != null ? req.getAlgorithm() : "AES-256";
+        }
+
+        return reEncrypt(decryptedBytes, userPw, ownerPw, algorithm, orig);
+    }
+
+    private byte[] reEncrypt(byte[] bytes, String userPw, String ownerPw,
+                             String algorithm, EncryptionInfo orig) throws IOException {
+        try (PDDocument doc = Loader.loadPDF(bytes)) {
+            AccessPermission ap = new AccessPermission();
+            if (orig != null) {
+                if (!orig.isCanModify())        ap.setCanModify(false);
+                if (!orig.isCanPrint())         ap.setCanPrint(false);
+                if (!orig.isCanExtractContent()) ap.setCanExtractContent(false);
+            }
+
+            boolean isAES = algorithm != null && algorithm.startsWith("AES");
+            int keyBits = switch (algorithm != null ? algorithm : "") {
+                case "AES-256" -> 256;
+                case "AES-128", "RC4-128" -> 128;
+                default -> 40;  // RC4-40
+            };
+
+            StandardProtectionPolicy policy = new StandardProtectionPolicy(ownerPw, userPw, ap);
+            policy.setEncryptionKeyLength(keyBits);
+            policy.setPreferAES(isAES);
+            doc.protect(policy);
+
+            ByteArrayOutputStream out = new ByteArrayOutputStream();
+            doc.save(out);
+            return out.toByteArray();
+        }
     }
 
     public byte[] getSessionPdfBytes(String sessionId) {

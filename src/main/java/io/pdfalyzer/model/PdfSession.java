@@ -18,6 +18,8 @@ public class PdfSession {
     private int pageCount;
     private long lastAccessTime;
     private EncryptionInfo encryptionInfo;
+    /** The password the user supplied to unlock this session (null if never password-protected). */
+    private String unlockedWithPassword;
 
     public PdfSession(String id, String filename, byte[] pdfBytes) {
         this.id = id;

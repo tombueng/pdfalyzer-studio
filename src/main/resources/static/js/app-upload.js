@@ -59,6 +59,10 @@ PDFalyzer.Upload = (function ($, P) {
         }
         if (opts.restoreDraft !== false) {
             restorePendingDraftForSession();
+            // Apply UI state that depends on restored values
+            if (P.Zoom && P.Zoom.setPanMode) { P.Zoom.setPanMode(!!P.state.panMode); }
+            if (P.Zoom && P.Zoom.updateButton) { P.Zoom.updateButton(); }
+            if (P.EditMode && P.EditMode.syncEditFieldTypeUI) { P.EditMode.syncEditFieldTypeUI(); }
         }
         updateEncryptionStatus(data.encryptionInfo);
 
@@ -77,12 +81,35 @@ PDFalyzer.Upload = (function ($, P) {
         if (opts.resetPending !== false && P.EditMode && P.EditMode.resetPending) {
             P.EditMode.resetPending();
         }
-        P.Tree.render(P.state.treeData);
+        // After the PDF renders: apply auto-zoom, then restore the viewer scroll position
+        var savedScroll = P.state.viewerScrollState;
+        $(document).off('pdfviewer:rendered.autorestore').one('pdfviewer:rendered.autorestore', function () {
+            if (P.state.autoZoomMode !== 'off' && P.Viewer) {
+                // Auto-zoom triggers a re-render; restore scroll after that second render
+                P.Viewer.applyAutoZoom();
+                if (savedScroll && P.ViewerRender) {
+                    $(document).one('pdfviewer:rendered.scrollrestore', function () {
+                        P.ViewerRender.restorePaneViewState(savedScroll);
+                    });
+                }
+            } else if (savedScroll && P.ViewerRender) {
+                P.ViewerRender.restorePaneViewState(savedScroll);
+            }
+        });
+        // Let switchTab handle initial tree rendering — no premature render here,
+        // otherwise captureTreeViewStateForTab overwrites the restored tabTreeViewStates
         P.Viewer.loadPdf(P.state.sessionId);
         var nextTab = P.state.currentTab || 'structure';
         selectActiveTab(nextTab);
         if (P.Tabs && P.Tabs.switchTab) {
-            P.Tabs.switchTab(nextTab);
+            // Restore selected node inside the callback so it runs after the rAF-deferred render
+            var selectedId = P.state.selectedNodeId;
+            P.Tabs.switchTab(nextTab, function () {
+                if (selectedId != null && P.Tabs.isTreeTab && P.Tabs.isTreeTab(nextTab) &&
+                        P.Tree && P.Tree.selectNodeById) {
+                    P.Tree.selectNodeById(selectedId);
+                }
+            });
         }
         if (P.EditMode && P.EditMode.updateSaveButton) {
             P.EditMode.updateSaveButton();
@@ -112,6 +139,9 @@ PDFalyzer.Upload = (function ($, P) {
         $('#pdfPasswordInput').val('').attr('type', 'password');
         $('#pdfPasswordError').hide().text('');
         $('#pdfPasswordToggle').find('i').removeClass('fa-eye-slash').addClass('fa-eye');
+        $(document.getElementById('pdfPasswordModal')).one('shown.bs.modal', function () {
+            document.getElementById('pdfPasswordInput').focus();
+        });
         modal.show();
 
         $('#pdfPasswordSubmitBtn').off('click.pw').on('click.pw', function () {
@@ -192,6 +222,7 @@ PDFalyzer.Upload = (function ($, P) {
             });
             P.Utils.toast('PDF loaded: ' + data.filename + ' (' + data.pageCount + ' pages)', 'success');
             _inFlight = false;
+            $btn.removeClass('disabled').removeAttr('aria-disabled');
             renderIdleButton();
             $('#fileInput').val('');
         })
@@ -204,6 +235,51 @@ PDFalyzer.Upload = (function ($, P) {
             renderIdleButton();
             $('#fileInput').val('');
         });
+    }
+
+    function loadSample(filename) {
+        if (_inFlight) return;
+        _inFlight = true;
+        renderUploadingButton();
+
+        P.Utils.apiFetch('/api/sample/load/' + encodeURIComponent(filename), { method: 'POST', dataType: 'json' })
+            .done(function (data) {
+                if (data.encryptionInfo && data.encryptionInfo.requiresPassword) {
+                    renderIdleButton();
+                    showPasswordPrompt(data.sessionId, data.filename, data.fileSize || 0);
+                    return;
+                }
+                var sampleSize = typeof data.fileSize === 'number' ? data.fileSize : 0;
+                applyUploadSuccess(data, sampleSize, { restoreDraft: false, resetPending: true });
+                P.Utils.toast('PDF loaded: ' + data.filename + ' (' + data.pageCount + ' pages)', 'success');
+            })
+            .fail(function (xhr) {
+                var msg = 'Failed to load sample';
+                try { msg += ': ' + JSON.parse(xhr.responseText).error; } catch (e) {}
+                P.Utils.toast(msg, 'danger');
+            })
+            .always(function () {
+                _inFlight = false;
+                renderIdleButton();
+            });
+    }
+
+    function initSamplesMenu() {
+        P.Utils.apiFetch('/api/sample/list', { method: 'GET', dataType: 'json' })
+            .done(function (names) {
+                var items = names.length
+                    ? names.map(function (name) {
+                        return '<li><button class="dropdown-item sample-item" data-name="' +
+                            $('<div>').text(name).html() + '">' +
+                            $('<div>').text(name).html() + '</button></li>';
+                    }).join('')
+                    : '<li><span class="dropdown-item text-muted small">No samples found</span></li>';
+                $('#samplesDropdownMenu, #mobileSamplesMenu').html(items);
+            })
+            .fail(function () {
+                var err = '<li><span class="dropdown-item text-muted small">Failed to load</span></li>';
+                $('#samplesDropdownMenu, #mobileSamplesMenu').html(err);
+            });
     }
 
     function loadSampleOnInit() {
@@ -264,6 +340,10 @@ PDFalyzer.Upload = (function ($, P) {
         $(document).on('change', '#fileInput', function () {
             if (this.files.length > 0) upload(this.files[0]);
         });
+        $(document).on('click', '.sample-item', function () {
+            loadSample($(this).data('name'));
+        });
+        initSamplesMenu();
         $(document).on('dragover', function (e) {
             e.preventDefault();
             $('#dropOverlay').addClass('active');
@@ -296,6 +376,7 @@ PDFalyzer.Upload = (function ($, P) {
     return {
         init: init,
         upload: upload,
+        loadSample: loadSample,
         loadSampleOnInit: loadSampleOnInit,
         restoreSessionOnInit: restoreSessionOnInit
     };

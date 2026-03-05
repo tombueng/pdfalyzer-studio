@@ -20,6 +20,14 @@
                     <label class="btn btn-accent btn-sm mb-0" id="uploadBtn" for="fileInput">
                         <i class="fas fa-upload me-1"></i> Upload PDF
                     </label>
+                    <div class="dropdown">
+                        <button class="btn btn-outline-accent btn-sm dropdown-toggle" id="samplesDropdownBtn" title="Load a sample PDF" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="fas fa-folder-open me-1"></i>Samples
+                        </button>
+                        <ul class="dropdown-menu" id="samplesDropdownMenu" aria-labelledby="samplesDropdownBtn">
+                            <li><span class="dropdown-item text-muted small">Loading…</span></li>
+                        </ul>
+                    </div>
                     <button class="btn btn-outline-accent btn-sm" id="downloadBtn" disabled title="Download PDF (Ctrl+S)">
                         <i class="fas fa-download"></i>
                     </button>
@@ -41,10 +49,13 @@
                 </div>
                 <div class="vr"></div>
                 <div id="editToolbar" class="d-flex align-items-center gap-1">
+                    <button class="edit-field-btn" data-type="select" title="Rectangle select fields — drag to select, Ctrl+drag to add (S)"><i class="fas fa-object-group"></i></button>
+                    <div class="vr mx-1"></div>
                     <span class="text-muted me-1" style="font-size:12px;">Add field:</span>
                     <button class="edit-field-btn" data-type="text"><i class="fas fa-keyboard me-1"></i>Text</button>
                     <button class="edit-field-btn" data-type="checkbox"><i class="fas fa-check-square me-1"></i>Checkbox</button>
                     <button class="edit-field-btn" data-type="combo"><i class="fas fa-list me-1"></i>Combo</button>
+                    <button class="edit-field-btn" data-type="list"><i class="fas fa-th-list me-1"></i>List</button>
                     <button class="edit-field-btn" data-type="radio"><i class="fas fa-dot-circle me-1"></i>Radio</button>
                     <button class="edit-field-btn" data-type="signature"><i class="fas fa-signature me-1"></i>Signature</button>
                     <button class="btn btn-outline-accent btn-sm" id="formOptionsBtn" disabled title="Edit options for selected field(s)">
@@ -61,7 +72,7 @@
                         <i class="fas fa-paste"></i>
                     </button>
                     <div class="dropdown">
-                        <button class="btn btn-outline-accent btn-sm dropdown-toggle" id="alignDropdownBtn" disabled title="Align / distribute selected fields (2+ required)">
+                        <button class="btn btn-outline-accent btn-sm dropdown-toggle" id="alignDropdownBtn" disabled data-bs-toggle="dropdown" aria-expanded="false" title="Align / distribute selected fields (2+ required)">
                             <i class="fas fa-align-left"></i>
                         </button>
                         <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="alignDropdownBtn">
@@ -74,6 +85,10 @@
                             <li><hr class="dropdown-divider"></li>
                             <li><button class="dropdown-item" id="distributeHBtn"><i class="fas fa-grip-lines-vertical me-2"></i>Distribute Horizontally</button></li>
                             <li><button class="dropdown-item" id="distributeVBtn"><i class="fas fa-grip-lines me-2"></i>Distribute Vertically</button></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <li><button class="dropdown-item" id="matchWidthBtn"><i class="fas fa-arrows-alt-h me-2"></i>Match Width</button></li>
+                            <li><button class="dropdown-item" id="matchHeightBtn"><i class="fas fa-arrows-alt-v me-2"></i>Match Height</button></li>
+                            <li><button class="dropdown-item" id="matchSizeBtn"><i class="fas fa-expand-arrows-alt me-2"></i>Match Size</button></li>
                         </ul>
                     </div>
                     <button class="btn btn-outline-accent btn-sm" id="formSaveBtn" disabled title="Save pending form changes">
@@ -90,6 +105,14 @@
                     <label class="navbar-mobile-item" for="fileInput">
                         <i class="fas fa-upload me-2"></i>Upload PDF
                     </label>
+                    <div class="dropdown">
+                        <button class="navbar-mobile-item dropdown-toggle w-100 text-start" id="mobileSamplesBtn" data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="fas fa-folder-open me-2"></i>Load Sample
+                        </button>
+                        <ul class="dropdown-menu" id="mobileSamplesMenu" aria-labelledby="mobileSamplesBtn">
+                            <li><span class="dropdown-item text-muted small">Loading…</span></li>
+                        </ul>
+                    </div>
                     <button class="navbar-mobile-item" onclick="document.getElementById('downloadBtn').click()">
                         <i class="fas fa-download me-2"></i>Download PDF
                     </button>
@@ -116,6 +139,9 @@
                 <hr class="navbar-mobile-divider" />
                 <div class="navbar-mobile-section">
                     <div class="navbar-mobile-header"><i class="fas fa-edit me-2"></i>Form Edit</div>
+                    <button class="navbar-mobile-item edit-field-btn" data-type="select">
+                        <i class="fas fa-object-group me-2"></i>Rectangle Select
+                    </button>
                     <button class="navbar-mobile-item edit-field-btn" data-type="text">
                         <i class="fas fa-keyboard me-2"></i>Add Text Field
                     </button>
@@ -124,6 +150,9 @@
                     </button>
                     <button class="navbar-mobile-item edit-field-btn" data-type="combo">
                         <i class="fas fa-list me-2"></i>Add Combo Box
+                    </button>
+                    <button class="navbar-mobile-item edit-field-btn" data-type="list">
+                        <i class="fas fa-th-list me-2"></i>Add List Box
                     </button>
                     <button class="navbar-mobile-item edit-field-btn" data-type="radio">
                         <i class="fas fa-dot-circle me-2"></i>Add Radio Button

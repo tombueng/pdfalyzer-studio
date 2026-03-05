@@ -64,10 +64,18 @@ var PDFalyzer = (function () {
         if (!storage) return;
 
         var payload = {
-            version: 1,
+            version: 2,
             sessionId: String(state.sessionId),
             updatedAt: Date.now(),
             currentTab: normalizeTab(state.currentTab),
+            panMode: !!(state.panMode),
+            autoZoomMode: state.autoZoomMode || 'off',
+            currentScale: (typeof state.currentScale === 'number' && state.currentScale > 0) ? state.currentScale : 1.5,
+            editFieldType: state.editFieldType || null,
+            tabTreeViewStates: (state.tabTreeViewStates && typeof state.tabTreeViewStates === 'object') ? state.tabTreeViewStates : {},
+            selectedNodeId: (state.selectedNodeId !== null && state.selectedNodeId !== undefined) ? state.selectedNodeId : null,
+            selectedFieldNames: Array.isArray(state.selectedFieldNames) ? state.selectedFieldNames : [],
+            viewerScrollState: (state.viewerScrollState && typeof state.viewerScrollState === 'object') ? state.viewerScrollState : null,
             pendingFormAdds: asArray(state.pendingFormAdds),
             pendingFieldRects: asArray(state.pendingFieldRects),
             pendingFieldOptions: asArray(state.pendingFieldOptions),
@@ -93,6 +101,14 @@ var PDFalyzer = (function () {
             if (!parsed || String(parsed.sessionId || '') !== String(sessionId)) return null;
             return {
                 currentTab: normalizeTab(parsed.currentTab),
+                panMode: !!parsed.panMode,
+                autoZoomMode: (parsed.autoZoomMode === 'width' || parsed.autoZoomMode === 'height') ? parsed.autoZoomMode : 'off',
+                currentScale: (typeof parsed.currentScale === 'number' && parsed.currentScale > 0) ? parsed.currentScale : 1.5,
+                editFieldType: parsed.editFieldType || null,
+                tabTreeViewStates: (parsed.tabTreeViewStates && typeof parsed.tabTreeViewStates === 'object') ? parsed.tabTreeViewStates : {},
+                selectedNodeId: (parsed.selectedNodeId !== null && parsed.selectedNodeId !== undefined) ? parsed.selectedNodeId : null,
+                selectedFieldNames: Array.isArray(parsed.selectedFieldNames) ? parsed.selectedFieldNames : [],
+                viewerScrollState: (parsed.viewerScrollState && typeof parsed.viewerScrollState === 'object') ? parsed.viewerScrollState : null,
                 pendingFormAdds: asArray(parsed.pendingFormAdds),
                 pendingFieldRects: asArray(parsed.pendingFieldRects),
                 pendingFieldOptions: asArray(parsed.pendingFieldOptions),
@@ -118,6 +134,16 @@ var PDFalyzer = (function () {
         if (!state) return;
         var safeDraft = draft || {};
         state.currentTab = normalizeTab(safeDraft.currentTab || state.currentTab || 'structure');
+        state.panMode = !!(safeDraft.panMode);
+        state.autoZoomMode = (safeDraft.autoZoomMode === 'width' || safeDraft.autoZoomMode === 'height') ? safeDraft.autoZoomMode : 'off';
+        if (typeof safeDraft.currentScale === 'number' && safeDraft.currentScale > 0) {
+            state.currentScale = safeDraft.currentScale;
+        }
+        state.editFieldType = safeDraft.editFieldType || null;
+        state.tabTreeViewStates = (safeDraft.tabTreeViewStates && typeof safeDraft.tabTreeViewStates === 'object') ? safeDraft.tabTreeViewStates : {};
+        state.selectedNodeId = (safeDraft.selectedNodeId !== null && safeDraft.selectedNodeId !== undefined) ? safeDraft.selectedNodeId : null;
+        state.selectedFieldNames = Array.isArray(safeDraft.selectedFieldNames) ? safeDraft.selectedFieldNames : [];
+        state.viewerScrollState = (safeDraft.viewerScrollState && typeof safeDraft.viewerScrollState === 'object') ? safeDraft.viewerScrollState : null;
         state.pendingFormAdds = asArray(safeDraft.pendingFormAdds);
         state.pendingFieldRects = asArray(safeDraft.pendingFieldRects);
         state.pendingFieldOptions = asArray(safeDraft.pendingFieldOptions);
@@ -147,6 +173,8 @@ var PDFalyzer = (function () {
             pageCanvases: [],
             currentScale: 1.5,
             autoZoomMode: 'off',   // 'off' | 'width' | 'height'
+            panMode: false,
+            viewerScrollState: null,
             basePageSize: { width: 0, height: 0 }
         },
         Storage: {
@@ -162,6 +190,9 @@ var PDFalyzer = (function () {
 
     window.addEventListener('beforeunload', function () {
         if (api && api.Storage && api.state && api.state.sessionId) {
+            if (api.ViewerRender && api.ViewerRender.capturePaneViewState) {
+                api.state.viewerScrollState = api.ViewerRender.capturePaneViewState();
+            }
             api.Storage.saveDraft(api.state);
         }
     });

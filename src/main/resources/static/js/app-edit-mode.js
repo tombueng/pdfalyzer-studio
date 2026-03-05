@@ -11,6 +11,7 @@ PDFalyzer.EditMode = (function ($, P) {
     var $drawRect = null;
     var targetPage = -1;
     var pendingCreatePayload = null;
+    var rectSelectDragJustFinished = false;
     var lastAddedFieldTemplate = null;
     var pendingFieldOptionOverrides = {};
 
@@ -41,6 +42,13 @@ PDFalyzer.EditMode = (function ($, P) {
     function updatePlaceModeCursor() {
         $('#pdfPane').toggleClass('place-mode-active', !!(hasSession() && P.state.editMode && P.state.editFieldType));
     }
+    function syncEditFieldTypeUI() {
+        $('.edit-field-btn').removeClass('active');
+        if (P.state.editFieldType) {
+            $('.edit-field-btn[data-type="' + P.state.editFieldType + '"]').addClass('active');
+        }
+        updatePlaceModeCursor();
+    }
     function syncOptionsJavascriptToggleState() {
         var $c = $('#optJavascriptCollapse'), $t = $('#optJavascriptToggle');
         if (!$c.length || !$t.length) return;
@@ -59,8 +67,11 @@ PDFalyzer.EditMode = (function ($, P) {
     // ── Pending lookups ──────────────────────────────────────────────────────
     function findPendingFormAddIndex(name) {
         if (!name || !P.state.pendingFormAdds) return -1;
-        for (var i = 0; i < P.state.pendingFormAdds.length; i++)
-            if (P.state.pendingFormAdds[i] && P.state.pendingFormAdds[i].fieldName === name) return i;
+        for (var i = 0; i < P.state.pendingFormAdds.length; i++) {
+            var pa = P.state.pendingFormAdds[i];
+            if (!pa) continue;
+            if ((pa._radioHandleKey && pa._radioHandleKey === name) || pa.fieldName === name) return i;
+        }
         return -1;
     }
     function findPendingFormAdd(name) { var i = findPendingFormAddIndex(name); return i >= 0 ? P.state.pendingFormAdds[i] : null; }
@@ -202,8 +213,12 @@ PDFalyzer.EditMode = (function ($, P) {
         $('#formSaveBtn').prop('disabled', true);
         var saveAdds = $.Deferred().resolve();
         if (P.state.pendingFormAdds.length) {
+            var addsPayload = P.state.pendingFormAdds.map(function(pa) {
+                if (!pa._radioHandleKey) return pa;
+                var clean = cloneObject(pa); delete clean._radioHandleKey; return clean;
+            });
             saveAdds = P.Utils.apiFetch('/api/edit/' + P.state.sessionId + '/add-fields',
-                { method: 'POST', contentType: 'application/json', data: JSON.stringify(P.state.pendingFormAdds) });
+                { method: 'POST', contentType: 'application/json', data: JSON.stringify(addsPayload) });
         }
         saveAdds.done(function (d) {
             if (d && d.tree) P.state.treeData = d.tree;
@@ -237,6 +252,48 @@ PDFalyzer.EditMode = (function ($, P) {
             var vp = P.state.pageViewports[pageIndex], s = vp.scale;
             var sn = P.EditDesigner ? P.EditDesigner.snapV : function (v) { return v; };
             P.EditField.openCreateFieldDialog(P.state.editFieldType, pageIndex, { x: sn(x / s), y: sn((vp.height - y - h) / s), width: sn(w / s), height: sn(h / s) });
+        };
+        $(document).on('mousemove', moveH).on('mouseup', upH);
+    }
+
+    // ── Rect select ──────────────────────────────────────────────────────────
+    function startRectSelect(e, pageIndex, wrapper, additive) {
+        var rect = wrapper.getBoundingClientRect();
+        var sX = clamp(e.clientX - rect.left, 0, rect.width);
+        var sY = clamp(e.clientY - rect.top, 0, rect.height);
+        var $selRect = $('<div>', { 'class': 'select-rect' }).css({ left: sX + 'px', top: sY + 'px', width: '0', height: '0' }).appendTo(wrapper);
+        var moveH = function (ev) {
+            var cx = clamp(ev.clientX - rect.left, 0, rect.width), cy = clamp(ev.clientY - rect.top, 0, rect.height);
+            $selRect.css({ left: Math.min(sX, cx) + 'px', top: Math.min(sY, cy) + 'px', width: Math.abs(cx - sX) + 'px', height: Math.abs(cy - sY) + 'px' });
+        };
+        var upH = function (ev) {
+            $(document).off('mousemove', moveH).off('mouseup', upH);
+            var cx = clamp(ev.clientX - rect.left, 0, rect.width), cy = clamp(ev.clientY - rect.top, 0, rect.height);
+            var sx = Math.min(sX, cx), sy = Math.min(sY, cy), sw = Math.abs(cx - sX), sh = Math.abs(cy - sY);
+            if ($selRect) $selRect.remove();
+            if (sw < 4 || sh < 4) return;
+            rectSelectDragJustFinished = true;
+            var vp = P.state.pageViewports[pageIndex]; if (!vp) return;
+            var s = vp.scale;
+            var pdfLeft = sx / s, pdfRight = (sx + sw) / s;
+            var pdfBottom = (vp.height - (sy + sh)) / s, pdfTop = (vp.height - sy) / s;
+            var newNames = [];
+            collectFieldNodesOnPage(pageIndex).forEach(function (fn) {
+                var name = fn.properties && fn.properties.FullName; if (!name) return;
+                var bb = fn.boundingBox; if (!bb || bb.length < 4) return;
+                var fx = bb[0], fy = bb[1], fw = bb[2], fh = bb[3];
+                if (fx < pdfRight && fx + fw > pdfLeft && fy < pdfTop && fy + fh > pdfBottom) newNames.push(name);
+            });
+            if (additive) {
+                if (!P.state.selectedFieldNames) P.state.selectedFieldNames = [];
+                newNames.forEach(function (n) { if (P.state.selectedFieldNames.indexOf(n) < 0) P.state.selectedFieldNames.push(n); });
+            } else {
+                P.state.selectedFieldNames = newNames;
+                P.state.selectedImageNodeIds = [];
+            }
+            syncHandleSelectionClasses();
+            refreshSelectionButtons();
+            renderFieldHandlesForAllPages();
         };
         $(document).on('mousemove', moveH).on('mouseup', upH);
     }
@@ -278,9 +335,15 @@ PDFalyzer.EditMode = (function ($, P) {
         walk(P.state.treeData);
         (P.state.pendingFormAdds || []).forEach(function (pa) {
             if (pa.pageIndex !== pageIndex) return;
+            var handleKey = pa._radioHandleKey || pa.fieldName;
+            var props = { FullName: handleKey, Pending: true, FieldType: pa.fieldType };
+            if (pa._radioHandleKey) {
+                props.RadioGroup = pa.fieldName;
+                props.ExportValue = pa.options && pa.options.exportValue ? pa.options.exportValue : '';
+            }
             result.push({ nodeCategory: 'field', pageIndex: pageIndex, pending: true,
                 boundingBox: [pa.x, pa.y, pa.width, pa.height],
-                properties: { FullName: pa.fieldName, Pending: true, FieldType: pa.fieldType },
+                properties: props,
                 options: cloneObject(pa.options || {}) });
         });
         return result;
@@ -299,18 +362,26 @@ PDFalyzer.EditMode = (function ($, P) {
     function renderFieldHandles(pageIndex, wrapperEl, viewportOverride) {
         if (!hasSession() || !wrapperEl) return;
         $(wrapperEl).find('.form-field-handle').remove();
+        $(wrapperEl).find('.radio-group-bracket').remove();
         var vp = viewportOverride || P.state.pageViewports[pageIndex]; if (!vp) return;
         collectFieldNodesOnPage(pageIndex).forEach(function (fn) {
             var bbox = fn.boundingBox, s = vp.scale;
             var fullName = fn.properties && fn.properties.FullName; if (!fullName) return;
+            var radioGroup = fn.properties && fn.properties.RadioGroup;
+            var exportValue = fn.properties && fn.properties.ExportValue;
             var $h = $('<div>', { 'class': 'form-field-handle' }).attr('data-field-name', fullName)
                 .css({ left: bbox[0] * s + 'px', top: (vp.height - (bbox[1] + bbox[3]) * s) + 'px',
                        width: bbox[2] * s + 'px', height: bbox[3] * s + 'px' });
+            if (radioGroup) $h.attr('data-radio-group', radioGroup);
             if (fn.pending) $h.addClass('pending');
             if (isFieldRequired(fn)) $h.addClass('required');
             if (isFieldReadOnly(fn)) { $h.addClass('readonly'); $h.append($('<span>', { 'class': 'form-field-readonly-badge', html: '<i class="fas fa-lock"></i>' })); }
             if ((P.state.selectedFieldNames || []).indexOf(fullName) >= 0) $h.addClass('selected');
-            if (fn.pending) { $h.attr('title', (fn.properties.FieldType ? fn.properties.FieldType + ': ' : '') + fullName + ' (pending save)'); $h.append($('<span>', { 'class': 'form-field-pending-label', text: 'Pending' })); }
+            if (fn.pending) {
+                var pendingLabel = radioGroup ? (exportValue || radioGroup) : (fn.properties.FieldType ? fn.properties.FieldType : fullName);
+                $h.attr('title', (fn.properties.FieldType ? fn.properties.FieldType + ': ' : '') + fullName + ' (pending save)');
+                $h.append($('<span>', { 'class': 'form-field-pending-label', text: pendingLabel + ' (pending)' }));
+            }
             var $optBtn = $('<button>', { 'class': 'field-handle-btn field-handle-options', title: 'Options', html: '<i class="fas fa-cog"></i>' }).on('click', function (e) {
                 e.stopPropagation(); P.state.selectedFieldNames = [fullName]; P.state.selectedImageNodeIds = [];
                 renderFieldHandlesForAllPages(); P.EditOptions.openOptionsPopup();
@@ -325,6 +396,30 @@ PDFalyzer.EditMode = (function ($, P) {
             }
             updateActionButtonsSide($h, wrapperEl);
         });
+
+        // Draw group brackets around radio buttons sharing the same group name
+        var groups = {};
+        $(wrapperEl).find('.form-field-handle[data-radio-group]').each(function () {
+            var g = $(this).data('radio-group');
+            var l = parseFloat($(this).css('left')) || 0;
+            var t = parseFloat($(this).css('top')) || 0;
+            var r = l + ($(this).outerWidth() || 0);
+            var b = t + ($(this).outerHeight() || 0);
+            if (!groups[g]) { groups[g] = { l: l, t: t, r: r, b: b, count: 0 }; }
+            else { groups[g].l = Math.min(groups[g].l, l); groups[g].t = Math.min(groups[g].t, t);
+                   groups[g].r = Math.max(groups[g].r, r); groups[g].b = Math.max(groups[g].b, b); }
+            groups[g].count++;
+        });
+        var M = 8;
+        Object.keys(groups).forEach(function (name) {
+            var g = groups[name]; if (!g.count) return;
+            $('<div>', { 'class': 'radio-group-bracket' })
+                .css({ left: (g.l - M) + 'px', top: (g.t - M) + 'px',
+                       width: (g.r - g.l + M * 2) + 'px', height: (g.b - g.t + M * 2) + 'px' })
+                .append($('<span>', { 'class': 'radio-group-label', text: name }))
+                .appendTo(wrapperEl);
+        });
+
         refreshSelectionButtons();
     }
 
@@ -407,9 +502,14 @@ PDFalyzer.EditMode = (function ($, P) {
         updatePlaceModeCursor();
         $('.edit-field-btn').on('click', function () {
             if (!hasSession()) { P.Utils.toast('Load a PDF session first', 'warning'); return; }
+            if (P.Zoom && P.Zoom.setPanMode) P.Zoom.setPanMode(false);
             $('.edit-field-btn').removeClass('active'); $(this).addClass('active');
             P.state.editFieldType = $(this).data('type'); updatePlaceModeCursor();
-            P.Utils.toast('Draw a rectangle on the PDF page to place the new ' + P.state.editFieldType + ' field', 'info');
+            if (P.state.editFieldType === 'select') {
+                P.Utils.toast('Drag on the PDF to select fields (Ctrl+drag to add to selection)', 'info');
+            } else {
+                P.Utils.toast('Draw a rectangle on the PDF page to place the new ' + P.state.editFieldType + ' field', 'info');
+            }
         });
         $('#formSaveBtn').on('click', savePendingChanges);
         P.EditField.init();
@@ -417,12 +517,15 @@ PDFalyzer.EditMode = (function ($, P) {
     }
 
     return {
-        init: init, startDraw: startDraw, deleteField: deleteField,
+        init: init, startDraw: startDraw, startRectSelect: startRectSelect,
+        isRectSelectDragJustFinished: function () { var v = rectSelectDragJustFinished; rectSelectDragJustFinished = false; return v; },
+        deleteField: deleteField,
         selectFieldFromViewer: selectFieldFromViewer, refreshFieldSelectionHighlights: refreshFieldSelectionHighlights,
         setFieldValue: setFieldValue, renderFieldHandles: renderFieldHandles,
         renderFieldHandlesForAllPages: renderFieldHandlesForAllPages,
         resetPending: resetPending, savePendingChanges: savePendingChanges, updateSaveButton: updateSaveButton,
         showModal: showModal, hideModal: hideModal,
+        syncEditFieldTypeUI: syncEditFieldTypeUI,
         syncOptionsJavascriptToggleState: syncOptionsJavascriptToggleState,
         setOptionsJavascriptSectionExpanded: setOptionsJavascriptSectionExpanded,
         cloneObject: cloneObject, mergeOptions: mergeOptions, findPendingFormAdd: findPendingFormAdd,
