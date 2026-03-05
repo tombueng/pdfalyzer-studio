@@ -18,6 +18,7 @@ import org.apache.pdfbox.pdmodel.interactive.form.PDComboBox;
 import org.apache.pdfbox.pdmodel.interactive.form.PDField;
 import org.apache.pdfbox.pdmodel.interactive.form.PDListBox;
 import org.apache.pdfbox.pdmodel.interactive.form.PDNonTerminalField;
+import org.apache.pdfbox.pdmodel.interactive.form.PDPushButton;
 import org.apache.pdfbox.pdmodel.interactive.form.PDRadioButton;
 import org.apache.pdfbox.pdmodel.interactive.form.PDSignatureField;
 import org.apache.pdfbox.pdmodel.interactive.form.PDTextField;
@@ -146,9 +147,13 @@ public class AcroFormTreeBuilder {
     }
 
     private String detectFieldSubType(PDField field) {
-        if (field instanceof PDTextField) return "text";
+        if (field instanceof PDPushButton) return "button";   // must precede PDCheckBox (both are PDButton)
         if (field instanceof PDCheckBox) return "checkbox";
         if (field instanceof PDRadioButton) return "radio";
+        if (field instanceof PDTextField tf) {
+            int ff = tf.getCOSObject().getInt(COSName.FF, 0);
+            return (ff & 0x2000) != 0 ? "password" : "text";  // bit 14 (1-indexed) = password
+        }
         if (field instanceof PDComboBox) return "combo";
         if (field instanceof PDListBox) return "list";
         if (field instanceof PDSignatureField) return "signature";
@@ -220,16 +225,15 @@ public class AcroFormTreeBuilder {
             }
         }
 
-        // Rotation
-        int rotate = field.getCOSObject().getInt(COSName.R, -1);
-        if (rotate >= 0) node.addProperty("Rotation", String.valueOf(rotate));
-
-        // Widget-level appearance: MK dictionary and BS dictionary (from first widget)
+        // Widget-level appearance: MK dictionary (rotation, border/bg colors) and BS dictionary
         if (!field.getWidgets().isEmpty()) {
             COSDictionary widgetDict = field.getWidgets().get(0).getCOSObject();
 
             COSBase mkBase = widgetDict.getDictionaryObject(COSName.MK);
             if (mkBase instanceof COSDictionary mk) {
+                // Rotation lives in /MK /R on the widget, not on the field dict itself
+                int rotate = mk.getInt(COSName.getPDFName("R"), -1);
+                if (rotate > 0) node.addProperty("Rotation", String.valueOf(rotate));
                 String bc = cosArrayToHex(mk.getDictionaryObject(COSName.BC));
                 if (bc != null) node.addProperty("BorderColor", bc);
                 String bg = cosArrayToHex(mk.getDictionaryObject(COSName.BG));

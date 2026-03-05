@@ -475,6 +475,7 @@ public class UIRenderingTest {
             ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
         ));
 
+        activateSelectEditMode();
         wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(".form-field-handle")));
 
         driver.manage().timeouts().scriptTimeout(Duration.ofSeconds(30));
@@ -560,6 +561,7 @@ public class UIRenderingTest {
             ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
             ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
         ));
+        activateSelectEditMode();
         wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(".form-field-handle[data-field-name]")));
 
         driver.manage().timeouts().scriptTimeout(Duration.ofSeconds(40));
@@ -647,6 +649,7 @@ public class UIRenderingTest {
             ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
             ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
         ));
+        activateSelectEditMode();
         wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(".form-field-handle[data-field-name]")));
 
         driver.manage().timeouts().scriptTimeout(Duration.ofSeconds(40));
@@ -1047,6 +1050,7 @@ public class UIRenderingTest {
             ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
             ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
         ));
+        activateSelectEditMode();
         wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(".form-field-handle[data-field-name]")));
 
         driver.manage().timeouts().scriptTimeout(Duration.ofSeconds(40));
@@ -1129,6 +1133,7 @@ public class UIRenderingTest {
             ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
             ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
         ));
+        activateSelectEditMode();
         wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(".form-field-handle[data-field-name]")));
 
         driver.manage().timeouts().scriptTimeout(Duration.ofSeconds(40));
@@ -1271,6 +1276,7 @@ public class UIRenderingTest {
             ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
         ));
 
+        activateSelectEditMode();
         wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(".form-field-handle")));
 
         driver.manage().timeouts().scriptTimeout(Duration.ofSeconds(40));
@@ -1500,6 +1506,18 @@ public class UIRenderingTest {
         assertTrue(Files.exists(artifactDir.resolve("frame-044.png")),
             "Expected last transition frame to be captured");
         System.out.println("Transition artifact directory: " + artifactDir.toAbsolutePath());
+    }
+
+    /** Activates the Edit Form toggle and select tool via JavaScript so field handles are rendered instead of fill overlays. */
+    private void activateSelectEditMode() {
+        ((JavascriptExecutor) driver).executeScript(
+            "var P = window.PDFalyzer;" +
+            "if (!P || !P.state) return;" +
+            "if (P.EditMode && P.EditMode.setEditFormActive) { P.EditMode.setEditFormActive(true); return; }" +
+            "P.state.editFieldType = 'select';" +
+            "if (P.EditMode && P.EditMode.syncEditFieldTypeUI) P.EditMode.syncEditFieldTypeUI();" +
+            "if (P.EditMode && P.EditMode.renderFieldHandlesForAllPages) P.EditMode.renderFieldHandlesForAllPages();"
+        );
     }
 
     private void expandNode(WebDriverWait wait, String nodeId) {

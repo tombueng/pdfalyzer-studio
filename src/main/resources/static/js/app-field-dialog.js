@@ -278,7 +278,7 @@ PDFalyzer.FieldDialog = (function ($, P) {
         _currentCallbacks = callbacks || {};
 
         var title = mode === 'create' ? 'Add Field' : 'Field Options';
-        var icon  = mode === 'create' ? 'fa-plus-square' : 'fa-sliders-h';
+        var icon  = mode === 'create' ? 'fa-square-plus' : 'fa-sliders-h';
         $('#fieldEditModalTitle').html('<i class="fas ' + icon + ' me-2"></i>' + title);
         $('#fieldEditModalApplyBtn').text(mode === 'create' ? 'Queue Field' : 'Apply');
 

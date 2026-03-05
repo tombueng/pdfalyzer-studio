@@ -4,6 +4,8 @@
 PDFalyzer.ViewerRender = (function ($, P) {
     'use strict';
 
+    var MAX_RENDER_SCALE = 4.0;
+
     function ensureStagingViewer() {
         var $staging = $('#pdfViewerStaging');
         if ($staging.length) return $staging;
@@ -129,7 +131,9 @@ PDFalyzer.ViewerRender = (function ($, P) {
     function renderPageToContainer(pdf, pageNum, $container, pageViewports, pageCanvases, disableEntryAnimation) {
         return pdf.getPage(pageNum).then(function (page) {
             var scale = P.state.currentScale;
+            var dpr = window.devicePixelRatio || 1;
             var viewport = page.getViewport({ scale: scale });
+            var hiDpiViewport = page.getViewport({ scale: Math.max(scale, MAX_RENDER_SCALE) * dpr });
             pageViewports[pageNum - 1] = viewport;
 
             var $wrapper = $('<div>', { 'class': 'pdf-page-wrapper', 'data-page': pageNum - 1 })
@@ -138,8 +142,10 @@ PDFalyzer.ViewerRender = (function ($, P) {
                 $wrapper.addClass('pdf-page-wrapper-static').css('animation-delay', '0s');
             }
             var canvas = document.createElement('canvas');
-            canvas.width = viewport.width;
-            canvas.height = viewport.height;
+            canvas.width = hiDpiViewport.width;
+            canvas.height = hiDpiViewport.height;
+            canvas.style.width = viewport.width + 'px';
+            canvas.style.height = viewport.height + 'px';
             $wrapper.append(canvas);
             pageCanvases[pageNum - 1] = canvas;
             $wrapper.append($('<div>', { 'class': 'pdf-page-label', text: 'Page ' + pageNum }));
@@ -147,7 +153,8 @@ PDFalyzer.ViewerRender = (function ($, P) {
 
             P.Viewer.attachPageListeners(canvas, pageNum - 1, $wrapper);
 
-            return page.render({ canvasContext: canvas.getContext('2d'), viewport: viewport }).promise
+            var annotMode = (P.state && P.state.showPdfAnnotations) ? 1 : 0;
+            return page.render({ canvasContext: canvas.getContext('2d'), viewport: hiDpiViewport, annotationMode: annotMode }).promise
                 .then(function () {
                     if (P.EditMode && P.EditMode.renderFieldHandles) {
                         P.EditMode.renderFieldHandles(pageNum - 1, $wrapper[0], viewport);
@@ -193,6 +200,7 @@ PDFalyzer.ViewerRender = (function ($, P) {
         waitForPaneSettle: waitForPaneSettle,
         swapStagedViewer: swapStagedViewer,
         renderPageToContainer: renderPageToContainer,
-        renderPdfIntoContainer: renderPdfIntoContainer
+        renderPdfIntoContainer: renderPdfIntoContainer,
+        MAX_RENDER_SCALE: MAX_RENDER_SCALE
     };
 })(jQuery, PDFalyzer);
