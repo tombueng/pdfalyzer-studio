@@ -110,13 +110,84 @@
                                 </div>
                             </div>
                         </div>
+                        <div class="col-6 field-config-block field-create-block field-bool-block field-option-hidden" id="createMultiSelectBlock">
+                            <label class="form-label form-label-sm"><i class="fas fa-tasks me-1"></i>Multi-select (list)</label>
+                            <div class="field-option-radios" data-option="create-multiselect">
+                                <div class="form-check form-check-sm">
+                                    <input class="form-check-input" type="radio" name="createMultiSelect" id="createMultiSelectTrue" value="true">
+                                    <label class="form-check-label" for="createMultiSelectTrue">True</label>
+                                </div>
+                                <div class="form-check form-check-sm">
+                                    <input class="form-check-input" type="radio" name="createMultiSelect" id="createMultiSelectFalse" value="false">
+                                    <label class="form-check-label" for="createMultiSelectFalse">False</label>
+                                </div>
+                            </div>
+                        </div>
                         <div class="col-12 field-config-block field-create-block" id="createDefaultValueBlock">
                             <label class="form-label form-label-sm"><i class="fas fa-i-cursor me-1"></i>Default value</label>
                             <input class="form-control form-control-sm" id="createDefaultValue" placeholder="optional" />
                         </div>
-                        <div class="col-12 field-config-block field-create-block" id="createChoicesBlock">
-                            <label class="form-label form-label-sm"><i class="fas fa-list me-1"></i>Choices comma-separated</label>
-                            <input class="form-control form-control-sm" id="createChoices" placeholder="A,B,C" />
+                        <!-- Choice item table — shown for combo and list fields -->
+                        <div class="col-12 field-config-block field-create-block field-option-hidden" id="createChoiceOptionsBlock">
+                            <label class="form-label form-label-sm">
+                                <i class="fas fa-list me-1"></i>Items
+                                <span class="text-muted ms-1" style="font-size:11px;">— one item per row</span>
+                            </label>
+                            <table class="table table-sm table-borderless radio-option-table mb-1">
+                                <thead>
+                                    <tr>
+                                        <th style="width:32px;font-size:11px;">#</th>
+                                        <th style="font-size:11px;">Value <span class="text-muted" style="font-size:10px;">(export key)</span></th>
+                                        <th style="font-size:11px;">Label <span class="text-muted" style="font-size:10px;">(display, optional)</span></th>
+                                        <th style="width:36px;"></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="createChoiceOptionRows"></tbody>
+                            </table>
+                            <button type="button" class="btn btn-outline-secondary btn-sm w-100" id="addCreateChoiceOptionBtn">
+                                <i class="fas fa-plus me-1"></i>Add item
+                            </button>
+                        </div>
+                        <!-- Choice default — shown for combo and list fields -->
+                        <div class="col-12 field-config-block field-create-block field-option-hidden" id="createChoiceDefaultBlock">
+                            <label class="form-label form-label-sm">
+                                <i class="fas fa-check-circle me-1"></i>Default selection
+                            </label>
+                            <select class="form-select form-select-sm" id="createChoiceDefault">
+                                <option value="">(none)</option>
+                            </select>
+                        </div>
+                        <!-- Radio group option table — shown only when fieldType = radio -->
+                        <div class="col-12 field-config-block field-create-block field-option-hidden" id="createRadioOptionsBlock">
+                            <label class="form-label form-label-sm">
+                                <i class="fas fa-dot-circle me-1"></i>Options
+                                <span class="text-muted ms-1" style="font-size:11px;">— one button per row, stacked vertically</span>
+                            </label>
+                            <table class="table table-sm table-borderless radio-option-table mb-1" id="radioOptionTable">
+                                <thead>
+                                    <tr>
+                                        <th style="width:32px;font-size:11px;">#</th>
+                                        <th style="font-size:11px;">Value <span class="text-muted" style="font-size:10px;">(PDF export value)</span></th>
+                                        <th style="font-size:11px;">Label <span class="text-muted" style="font-size:10px;">(display, optional)</span></th>
+                                        <th style="width:36px;"></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="radioOptionRows">
+                                    <!-- rows injected by JS -->
+                                </tbody>
+                            </table>
+                            <button type="button" class="btn btn-outline-secondary btn-sm w-100" id="addRadioOptionBtn">
+                                <i class="fas fa-plus me-1"></i>Add option
+                            </button>
+                        </div>
+                        <!-- Radio default selection — select populated live from option table -->
+                        <div class="col-12 field-config-block field-create-block field-option-hidden" id="createRadioDefaultBlock">
+                            <label class="form-label form-label-sm">
+                                <i class="fas fa-check-circle me-1"></i>Default selection
+                            </label>
+                            <select class="form-select form-select-sm" id="createRadioDefault">
+                                <option value="">(none)</option>
+                            </select>
                         </div>
                         <div class="col-12 field-config-block field-create-block" id="createJavascriptBlock">
                             <label class="form-label form-label-sm"><i class="fab fa-js me-1"></i>JavaScript validation</label>
@@ -236,6 +307,23 @@
                                 </div>
                             </div>
                         </div>
+                        <div class="col-6 field-config-block field-option-block field-bool-block" id="optMultiSelectBlock">
+                            <label class="form-label form-label-sm"><i class="fas fa-tasks me-1"></i>Multi-select (list)</label>
+                            <div class="field-option-radios" data-option="multiselect">
+                                <div class="form-check form-check-sm tri-keep">
+                                    <input class="form-check-input" type="radio" name="optMultiSelect" id="optMultiSelectKeep" value="keep">
+                                    <label class="form-check-label" for="optMultiSelectKeep">Keep current value</label>
+                                </div>
+                                <div class="form-check form-check-sm">
+                                    <input class="form-check-input" type="radio" name="optMultiSelect" id="optMultiSelectTrue" value="true">
+                                    <label class="form-check-label" for="optMultiSelectTrue">True</label>
+                                </div>
+                                <div class="form-check form-check-sm">
+                                    <input class="form-check-input" type="radio" name="optMultiSelect" id="optMultiSelectFalse" value="false">
+                                    <label class="form-check-label" for="optMultiSelectFalse">False</label>
+                                </div>
+                            </div>
+                        </div>
                         <div class="col-6 field-config-block field-option-block field-bool-block" id="optCheckedBlock">
                             <label class="form-label form-label-sm"><i class="fas fa-check-square me-1"></i>Checked (checkbox)</label>
                             <div class="field-option-radios" data-option="checked">
@@ -254,12 +342,62 @@
                             </div>
                         </div>
                         <div class="col-12 field-config-block field-option-block" id="optDefaultValueBlock">
-                            <label class="form-label form-label-sm"><i class="fas fa-i-cursor me-1"></i>Default value (single field)</label>
+                            <label class="form-label form-label-sm"><i class="fas fa-i-cursor me-1"></i>Default value</label>
                             <input class="form-control form-control-sm" id="optDefaultValue" placeholder="leave empty to keep" />
                         </div>
-                        <div class="col-12 field-config-block field-option-block" id="optChoicesBlock">
-                            <label class="form-label form-label-sm"><i class="fas fa-list me-1"></i>Choices comma-separated (single combo/list)</label>
-                            <input class="form-control form-control-sm" id="optChoices" placeholder="A,B,C" />
+                        <!-- Choice item table for combo/list in edit mode -->
+                        <div class="col-12 field-config-block field-option-block" id="optChoiceOptionsBlock">
+                            <label class="form-label form-label-sm">
+                                <i class="fas fa-list me-1"></i>Items
+                                <span class="text-muted ms-1" style="font-size:11px;">— one item per row</span>
+                            </label>
+                            <table class="table table-sm table-borderless radio-option-table mb-1">
+                                <thead>
+                                    <tr>
+                                        <th style="width:32px;font-size:11px;">#</th>
+                                        <th style="font-size:11px;">Value <span class="text-muted" style="font-size:10px;">(export key)</span></th>
+                                        <th style="font-size:11px;">Label <span class="text-muted" style="font-size:10px;">(display, optional)</span></th>
+                                        <th style="width:36px;"></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="optChoiceOptionRows"></tbody>
+                            </table>
+                            <button type="button" class="btn btn-outline-secondary btn-sm w-100" id="addOptChoiceOptionBtn">
+                                <i class="fas fa-plus me-1"></i>Add item
+                            </button>
+                        </div>
+                        <div class="col-12 field-config-block field-option-block" id="optChoiceDefaultBlock">
+                            <label class="form-label form-label-sm"><i class="fas fa-check-circle me-1"></i>Default selection</label>
+                            <select class="form-select form-select-sm" id="optChoiceDefault">
+                                <option value="">(none)</option>
+                            </select>
+                        </div>
+                        <!-- Radio options table in edit mode -->
+                        <div class="col-12 field-config-block field-option-block" id="optRadioOptionsBlock">
+                            <label class="form-label form-label-sm">
+                                <i class="fas fa-dot-circle me-1"></i>Radio options
+                                <span class="text-muted ms-1" style="font-size:11px;">— removed options are deleted; new options placed at first button's position</span>
+                            </label>
+                            <table class="table table-sm table-borderless radio-option-table mb-1">
+                                <thead>
+                                    <tr>
+                                        <th style="width:32px;font-size:11px;">#</th>
+                                        <th style="font-size:11px;">Value <span class="text-muted" style="font-size:10px;">(export value)</span></th>
+                                        <th style="font-size:11px;">Label <span class="text-muted" style="font-size:10px;">(display, optional)</span></th>
+                                        <th style="width:36px;"></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="optRadioOptionRows"></tbody>
+                            </table>
+                            <button type="button" class="btn btn-outline-secondary btn-sm w-100" id="addOptRadioOptionBtn">
+                                <i class="fas fa-plus me-1"></i>Add option
+                            </button>
+                        </div>
+                        <div class="col-12 field-config-block field-option-block" id="optRadioDefaultBlock">
+                            <label class="form-label form-label-sm"><i class="fas fa-check-circle me-1"></i>Default selection</label>
+                            <select class="form-select form-select-sm" id="optRadioDefault">
+                                <option value="">(none)</option>
+                            </select>
                         </div>
                         <div class="col-12 field-config-block field-option-block" id="optJavascriptBlock">
                             <div class="field-option-section-header">
@@ -321,7 +459,8 @@
                     <div class="input-group">
                         <span class="input-group-text"><i class="fas fa-key"></i></span>
                         <input type="password" class="form-control form-control-sm" id="pdfPasswordInput"
-                               placeholder="Password" autocomplete="current-password" />
+                               placeholder="Password" autocomplete="current-password"
+                               style="color:#e0e0e0; font-size:0.875rem;" />
                         <button class="btn btn-outline-secondary btn-sm" type="button" id="pdfPasswordToggle"
                                 title="Show/hide password">
                             <i class="fas fa-eye"></i>
@@ -333,6 +472,86 @@
                     <button type="button" class="btn btn-outline-secondary btn-sm" id="pdfPasswordCancelBtn">Cancel</button>
                     <button type="button" class="btn btn-accent btn-sm" id="pdfPasswordSubmitBtn">
                         <i class="fas fa-unlock me-1"></i>Unlock
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Export protection modal -->
+    <div class="modal fade" id="pdfExportProtectionModal" tabindex="-1" aria-labelledby="exportProtLabel" aria-hidden="true" data-bs-backdrop="static" data-bs-keyboard="false">
+        <div class="modal-dialog modal-dialog-centered" style="max-width:480px;">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="exportProtLabel">
+                        <i class="fas fa-shield-alt me-2 text-warning"></i>Export Protection
+                    </h5>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-3" style="font-size:13px;" id="exportProtDesc"></p>
+                    <!-- Protection mode radio group -->
+                    <div class="mb-1">
+                        <div class="form-check mb-1">
+                            <input class="form-check-input" type="radio" name="exportProtMode" id="exportProtKeep" value="keep" checked>
+                            <label class="form-check-label" for="exportProtKeep" style="font-size:13px;">
+                                Keep original protection <span class="text-muted">(recommended)</span>
+                            </label>
+                        </div>
+                        <div class="form-check mb-1">
+                            <input class="form-check-input" type="radio" name="exportProtMode" id="exportProtCustom" value="custom">
+                            <label class="form-check-label" for="exportProtCustom" style="font-size:13px;">
+                                Use different protection settings
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" type="radio" name="exportProtMode" id="exportProtNone" value="none">
+                            <label class="form-check-label" for="exportProtNone" style="font-size:13px;">
+                                Export without any protection
+                            </label>
+                        </div>
+                    </div>
+                    <!-- Custom settings (shown only when "custom" is selected) -->
+                    <div id="exportProtCustomSettings" style="display:none;">
+                        <hr class="my-2">
+                        <div class="mb-2">
+                            <label class="form-label mb-1" style="font-size:12px;">
+                                User Password <small class="text-muted">— required to open the PDF</small>
+                            </label>
+                            <div class="input-group input-group-sm">
+                                <input type="password" class="form-control form-control-sm" id="exportProtUserPw"
+                                       placeholder="Leave empty = no open password" autocomplete="off">
+                                <button class="btn btn-outline-secondary btn-sm" type="button" id="exportProtUserPwToggle" title="Show/hide">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label mb-1" style="font-size:12px;">
+                                Owner Password <small class="text-muted">— required to change permissions</small>
+                            </label>
+                            <div class="input-group input-group-sm">
+                                <input type="password" class="form-control form-control-sm" id="exportProtOwnerPw"
+                                       placeholder="Leave empty = same as user password" autocomplete="off">
+                                <button class="btn btn-outline-secondary btn-sm" type="button" id="exportProtOwnerPwToggle" title="Show/hide">
+                                    <i class="fas fa-eye"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div class="mb-1">
+                            <label class="form-label mb-1" style="font-size:12px;">Encryption Algorithm</label>
+                            <select class="form-select form-select-sm" id="exportProtAlgorithm">
+                                <option value="AES-256">AES-256 (strongest, recommended)</option>
+                                <option value="AES-128">AES-128</option>
+                                <option value="RC4-128">RC4-128 (legacy)</option>
+                                <option value="RC4-40">RC4-40 (weakest, legacy)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary btn-sm" id="exportProtCancelBtn">Cancel</button>
+                    <button type="button" class="btn btn-accent btn-sm" id="exportProtDownloadBtn">
+                        <i class="fas fa-download me-1"></i>Download
                     </button>
                 </div>
             </div>

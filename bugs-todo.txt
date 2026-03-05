@@ -1,17 +1,32 @@
-- add support for passowrd protected / encrypted documents. 
-    when the user upload such a document we shall detect what we need. 
-    owner or user password. let the user give us the passwrod, we will figure out 
-    which type it is (by trying out). display in the UI bottom bar the details
-    about the encryption. if we can not modify the file 
-    (we will try to figure out anyway and ignore write protection
-     if feasible) we will display that in the UI and disallow modification operations.
-     Also generate Test pdf files with all the different types of protection/encryption
-     an use them for tests.
+for form fields that came from the pdf we need to reflect more options in the ui. 
+So the UI  dialog need Tabs or other measures to group. try to kee this generic dialog description (details on the controls from backen, and layout in fronten)
+so we can easily swap tabs with acordeon or others grouping means by just chingen the generator code.
 
-- Field designer upgrades
-  - Snap-to-grid, copy/paste, align/distribute for form fields.
-  - Multi-select mass edit with live visual handles.
+all those visualization options like Font, Value, Fontsize, Border (on focus, hover, etc) everything 
+specified in the pdf MUST be in our model and the ui dialogs for create and modify. 
 
-- Smart issue explainer**
-  - For each validation issue, provide “Why this matters” + “Likely fix” text.
-  - Include confidence and direct links to relevant tree nodes.
+it shall also be editable in the ui! so we need tabs for the form fiels create and edit dialogs.
+maybe it might make sense to not have different create and edit dialog? they should not be that much of a difference between them so let's harmonize them. 
+and render hem from backend data and layout and specials from frontend. lets have a small JS engine for that.
+Also we now need tabs in the dialog for differen types of options like visual, (Options/list elements), script, etc. find out what other tools use here.
+
+
+
+take care that the ui code is well structured. my suggestion is:
+use generic code that converts backen information into a dialog as much as possible.
+so the dialog should be build from the backend model as much as possible. augment the 
+backend model if applicable (valid values, human readbale name of control and values, type of control to use)
+be generic her an e.g. say: list selection or two state, tri state, text input, etc.
+in the front end decide which control to use and build the html from that (use html templates for the controls that you just clone and modify)
+
+
+don't overengineer this! it should only help to have all of the most vital detials also on the api and backend.
+Individual JS Code for Field-Types or ceertain attributes or special Controls or situation is fine. But try to avoid it.
+
+Go on until finished. ask for script permissions first. 
+start in edit mode then after init go to planing mode and switch back to edit  when planing finished. 
+
+but first of all do a small edit to gain permission and
+also start a hello world bash as instructed in caude.md at first so you can later work unsurveiled because i go sleep now.
+
+

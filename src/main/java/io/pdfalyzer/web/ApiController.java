@@ -4,7 +4,11 @@ import io.pdfalyzer.model.*;
 import io.pdfalyzer.service.*;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.cos.COSArray;
+import org.apache.pdfbox.cos.COSDictionary;
+import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.interactive.form.PDAcroForm;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ContentDisposition;
@@ -15,6 +19,9 @@ import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.MultipartFile;
 import jakarta.servlet.http.HttpServletRequest;
 
+import org.springframework.core.io.Resource;
+import org.springframework.core.io.support.PathMatchingResourcePatternResolver;
+
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
@@ -22,9 +29,12 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
  * Core API: upload, tree, fonts, validation.
@@ -105,6 +115,30 @@ public class ApiController {
                 .body(data);
     }
 
+    @GetMapping("/sample/list")
+    public ResponseEntity<List<String>> listSamples() throws IOException {
+        List<String> names;
+        Path dir = Paths.get("src", "main", "resources", "sample-pdfs").toAbsolutePath().normalize();
+        if (Files.isDirectory(dir)) {
+            try (var stream = Files.list(dir)) {
+                names = stream
+                        .filter(p -> p.toString().toLowerCase().endsWith(".pdf"))
+                        .map(p -> p.getFileName().toString())
+                        .sorted()
+                        .collect(Collectors.toList());
+            }
+        } else {
+            Resource[] resources = new PathMatchingResourcePatternResolver()
+                    .getResources("classpath:/sample-pdfs/*.pdf");
+            names = new ArrayList<>();
+            for (Resource r : resources) {
+                if (r.getFilename() != null) names.add(r.getFilename());
+            }
+            Collections.sort(names);
+        }
+        return ResponseEntity.ok(names);
+    }
+
     @GetMapping("/sample/load")
     public ResponseEntity<Map<String, Object>> loadLatestSamplePdfSessionGet() throws IOException {
         return loadLatestSamplePdfSession();
@@ -112,18 +146,24 @@ public class ApiController {
 
     @PostMapping("/sample/load")
     public ResponseEntity<Map<String, Object>> loadLatestSamplePdfSession() throws IOException {
-        byte[] data = loadSamplePdfBytes();
+        return loadSampleByName("test.pdf");
+    }
+
+    @PostMapping("/sample/load/{filename}")
+    public ResponseEntity<Map<String, Object>> loadSampleByName(
+            @PathVariable("filename") String filename) throws IOException {
+        byte[] data = loadSamplePdfBytes(filename);
         if (data == null || data.length == 0) {
             return ResponseEntity.notFound().build();
         }
-
-        PdfSession session = pdfService.uploadAndParse("test.pdf", data);
+        PdfSession session = pdfService.uploadAndParse(filename, data);
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("sessionId", session.getId());
         result.put("filename", session.getFilename());
         result.put("pageCount", session.getPageCount());
         result.put("tree", session.getTreeRoot());
         result.put("fileSize", data.length);
+        result.put("encryptionInfo", session.getEncryptionInfo());
         return ResponseEntity.ok(result);
     }
 
@@ -140,14 +180,23 @@ public class ApiController {
     }
 
     private byte[] loadSamplePdfBytes() throws IOException {
-        Path sourceFile = Paths.get("src", "main", "resources", "test.pdf")
-                .toAbsolutePath().normalize();
+        return loadSamplePdfBytes("test.pdf");
+    }
+
+    private byte[] loadSamplePdfBytes(String filename) throws IOException {
+        if (filename == null || !filename.toLowerCase().endsWith(".pdf")
+                || filename.contains("/") || filename.contains("\\") || filename.contains("..")) {
+            return null;
+        }
+        Path samplesDir = Paths.get("src", "main", "resources", "sample-pdfs").toAbsolutePath().normalize();
+        Path sourceFile = samplesDir.resolve(filename).normalize();
+        if (!sourceFile.startsWith(samplesDir)) return null;
 
         if (Files.exists(sourceFile) && Files.isRegularFile(sourceFile)) {
             return Files.readAllBytes(sourceFile);
         }
 
-        try (InputStream in = getClass().getResourceAsStream("/test.pdf")) {
+        try (InputStream in = getClass().getResourceAsStream("/sample-pdfs/" + filename)) {
             if (in != null) {
                 ByteArrayOutputStream out = new ByteArrayOutputStream();
                 in.transferTo(out);
@@ -179,6 +228,23 @@ public class ApiController {
     public ResponseEntity<byte[]> downloadPdf(@PathVariable("sessionId") String sessionId) {
         PdfSession session = pdfService.getSession(sessionId);
         byte[] bytes = session.getPdfBytes();
+        return ResponseEntity.ok().contentType(MediaType.APPLICATION_PDF)
+                .header(HttpHeaders.CONTENT_DISPOSITION,
+                        "attachment; filename=\"" + session.getFilename() + "\"")
+                .contentLength(bytes.length).body(bytes);
+    }
+
+    /**
+     * Downloads the PDF with optional re-encryption.  The request body controls
+     * whether to keep the original protection, apply custom passwords/algorithm,
+     * or export without any protection.
+     */
+    @PostMapping("/pdf/{sessionId}/download")
+    public ResponseEntity<byte[]> downloadPdfProtected(
+            @PathVariable("sessionId") String sessionId,
+            @RequestBody(required = false) DownloadProtectionRequest req) throws IOException {
+        PdfSession session = pdfService.getSession(sessionId);
+        byte[] bytes = pdfService.downloadProtected(sessionId, req);
         return ResponseEntity.ok().contentType(MediaType.APPLICATION_PDF)
                 .header(HttpHeaders.CONTENT_DISPOSITION,
                         "attachment; filename=\"" + session.getFilename() + "\"")
@@ -275,6 +341,52 @@ public class ApiController {
             throws IOException {
         return ResponseEntity.ok(validationService.validate(
                 pdfService.getSessionPdfBytes(sessionId)));
+    }
+
+    @PostMapping("/repair/acroform/{sessionId}")
+    public ResponseEntity<Map<String, Object>> repairAcroForm(@PathVariable String sessionId)
+            throws IOException {
+        byte[] pdfBytes = pdfService.getSessionPdfBytes(sessionId);
+        int adopted = 0;
+        try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+            PDAcroForm acroForm = doc.getDocumentCatalog().getAcroForm();
+            if (acroForm == null) {
+                acroForm = new PDAcroForm(doc);
+                doc.getDocumentCatalog().setAcroForm(acroForm);
+            }
+
+            COSArray fieldsArr = (COSArray) acroForm.getCOSObject().getDictionaryObject(COSName.FIELDS);
+            if (fieldsArr == null) {
+                fieldsArr = new COSArray();
+                acroForm.getCOSObject().setItem(COSName.FIELDS, fieldsArr);
+            }
+
+            java.util.Set<COSDictionary> known = new java.util.HashSet<>();
+            for (var field : acroForm.getFields()) known.add(field.getCOSObject());
+
+            for (var page : doc.getPages()) {
+                for (var annot : page.getAnnotations()) {
+                    if (!"Widget".equals(annot.getSubtype())) continue;
+                    COSDictionary dict = annot.getCOSObject();
+                    if (known.contains(dict)) continue;
+                    if (!dict.containsKey(COSName.T)) continue;
+                    fieldsArr.add(dict);
+                    known.add(dict);
+                    adopted++;
+                }
+            }
+
+            if (adopted > 0) {
+                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                doc.save(baos);
+                pdfService.updateSessionPdf(sessionId, baos.toByteArray());
+            }
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("adopted", adopted);
+        result.put("success", adopted > 0);
+        return ResponseEntity.ok(result);
     }
 
     @GetMapping("/validate/{sessionId}/verapdf")

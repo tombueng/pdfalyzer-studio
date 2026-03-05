@@ -89,7 +89,11 @@ PDFalyzer.Viewer = (function ($, P) {
             .on('mousedown', function (e) {
                 if (tryStartPanDrag(e, pageIndex, canvas)) return;
                 if (P.state.editMode && P.state.editFieldType) {
-                    P.EditMode.startDraw(e, pageIndex, $wrapper[0]);
+                    if (P.state.editFieldType === 'select') {
+                        P.EditMode.startRectSelect(e, pageIndex, $wrapper[0], !!(e.ctrlKey || e.metaKey));
+                    } else {
+                        P.EditMode.startDraw(e, pageIndex, $wrapper[0]);
+                    }
                 }
             })
             .on('mousemove', function (e) {
@@ -341,6 +345,9 @@ PDFalyzer.Viewer = (function ($, P) {
             panDragState.suppressClick = false;
             e.preventDefault();
             e.stopPropagation();
+            return;
+        }
+        if (P.state.editMode && P.state.editFieldType === 'select' && P.EditMode && P.EditMode.isRectSelectDragJustFinished()) {
             return;
         }
 

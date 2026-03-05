@@ -229,9 +229,11 @@ public class TestPdfGenerator {
         Path zipAttachment = createZipAttachment(attachmentsDir.resolve("sample.zip"));
         Path pdfAttachment = createAttachmentPdf(attachmentsDir.resolve("sample-attachment.pdf"), freeSansForPdf);
         Path xlsAttachment = createAttachmentXls(attachmentsDir.resolve("sample.xls"));
-        ensureBaselineFilesFixture(outDir, freeSansForPdf);
 
-        Path outputPdf = resourcesDir.resolve("test.pdf");
+        Path outputPdf = hasOutputArg
+            ? outDir.resolve("test.pdf")
+            : resourcesDir.resolve("sample-pdfs").resolve("test.pdf");
+        Files.createDirectories(outputPdf.getParent());
         try (PDDocument doc = new PDDocument()) {
             PDPage page1 = new PDPage(PDRectangle.LETTER);
             PDPage page2 = new PDPage(PDRectangle.LETTER);
@@ -1470,19 +1472,6 @@ public class TestPdfGenerator {
         }
     }
 
-    private static PDFont loadOptionalEmbeddedFont(PDDocument doc, Path fontPath, String fontLabel) {
-        if (fontPath == null || !Files.exists(fontPath)) {
-            return null;
-        }
-        try {
-            try (InputStream inputStream = Files.newInputStream(fontPath)) {
-                return PDType0Font.load(doc, inputStream, false);
-            }
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
-
     private static void writeHeading(PDPageContentStream cs, PDFont headingFont, String text, float y) throws IOException {
         cs.beginText();
         cs.setFont(headingFont, 16);
@@ -1597,34 +1586,6 @@ public class TestPdfGenerator {
         String data = "Name\tValue\nalpha\t123\nbeta\t456\ngamma\t789\n";
         Files.write(path, data.getBytes(StandardCharsets.UTF_8));
         return path;
-    }
-
-    private static void ensureBaselineFilesFixture(Path outDir, Path fontPath) throws IOException {
-        Path filesDir = outDir.resolve("files");
-        Files.createDirectories(filesDir);
-        Path fixturePdf = filesDir.resolve("1.pdf");
-        if (Files.exists(fixturePdf)) {
-            return;
-        }
-
-        try (PDDocument fixtureDoc = new PDDocument()) {
-            PDPage page = new PDPage(PDRectangle.LETTER);
-            fixtureDoc.addPage(page);
-
-            PDFont bodyFont = loadOptionalEmbeddedFont(fixtureDoc, fontPath, "FixtureBodyFont");
-            if (bodyFont == null) {
-                bodyFont = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
-            }
-
-            try (PDPageContentStream cs = new PDPageContentStream(fixtureDoc, page)) {
-                drawTextLine(cs, bodyFont, 12, PAGE_MARGIN, page.getMediaBox().getHeight() - 72,
-                    "PDFalyzer fixture: files/1.pdf");
-                drawTextLine(cs, bodyFont, 10, PAGE_MARGIN, page.getMediaBox().getHeight() - 92,
-                    "Generated automatically when no mirrored test-resource fixture is present.");
-            }
-
-            fixtureDoc.save(fixturePdf.toFile());
-        }
     }
 
     private static Path createJp2Placeholder(Path target, Path sourceImage) throws IOException {

@@ -6,11 +6,12 @@ PDFalyzer.EditField = (function ($, P) {
     'use strict';
 
     var CREATE_BOOL_GROUPS = {
-        required: { inputName: 'createRequired', blockSelector: '#createRequiredBlock' },
-        readonly:  { inputName: 'createReadonly',  blockSelector: '#createReadonlyBlock' },
-        multiline: { inputName: 'createMultiline', blockSelector: '#createMultilineBlock' },
-        editable:  { inputName: 'createEditable',  blockSelector: '#createEditableBlock' },
-        checked:   { inputName: 'createChecked',   blockSelector: '#createCheckedBlock' }
+        required:    { inputName: 'createRequired',    blockSelector: '#createRequiredBlock' },
+        readonly:    { inputName: 'createReadonly',    blockSelector: '#createReadonlyBlock' },
+        multiline:   { inputName: 'createMultiline',  blockSelector: '#createMultilineBlock' },
+        editable:    { inputName: 'createEditable',   blockSelector: '#createEditableBlock' },
+        multiSelect: { inputName: 'createMultiSelect',blockSelector: '#createMultiSelectBlock' },
+        checked:     { inputName: 'createChecked',    blockSelector: '#createCheckedBlock' }
     };
     var JS_PRESET_CREATE = { presetSelect: '#createJsPreset', paramsContainer: '#createJsPresetParams',
                               applyButton: '#createJsPresetApplyBtn', scriptTarget: '#createJavascript' };
@@ -30,9 +31,10 @@ PDFalyzer.EditField = (function ($, P) {
         var s = { required: true, readonly: true };
         if (ft === 'text')      { s.multiline = true; s.defaultValue = true; s.javascript = true; }
         if (ft === 'combo')     { s.editable = true; s.defaultValue = true; s.choices = true; s.javascript = true; }
-        if (ft === 'list')      { s.defaultValue = true; s.choices = true; s.javascript = true; }
+        if (ft === 'list')      { s.multiSelect = true; s.defaultValue = true; s.choices = true; s.javascript = true; }
         if (ft === 'checkbox')  { s.checked = true; s.javascript = true; }
-        if (ft === 'radio')     { s.javascript = true; }
+        if (ft === 'radio')     { s.radioOptions = true; s.defaultValue = true; s.javascript = true; }
+        if (ft === 'signature') {}
         return s;
     }
     function computeVisibleOptionKeys(entries) {
@@ -62,7 +64,8 @@ PDFalyzer.EditField = (function ($, P) {
     // ── Field ID suggestion ──────────────────────────────────────────────────
     function getFieldIdPrefix(ft) {
         var n = (ft || '').toLowerCase();
-        return n === 'text' ? 'text' : n === 'combo' ? 'combo' : n === 'checkbox' ? 'check' : n === 'radio' ? 'radio' : n === 'signature' ? 'sign' : 'field';
+        return n === 'text' ? 'text' : n === 'combo' ? 'combo' : n === 'list' ? 'list' :
+               n === 'checkbox' ? 'check' : n === 'radio' ? 'radio' : n === 'signature' ? 'sign' : 'field';
     }
     function collectUsedFieldIds() {
         var used = Object.create(null);
@@ -80,13 +83,139 @@ PDFalyzer.EditField = (function ($, P) {
 
     // ── Default / resolved options ───────────────────────────────────────────
     function getDefaultOptions(ft) {
+        var defChoices = [{ value: 'A', label: '' }, { value: 'B', label: '' }, { value: 'C', label: '' }];
         if (ft === 'text')      return { required: false, readonly: false, multiline: false, defaultValue: '' };
         if (ft === 'checkbox')  return { required: false, readonly: false, checked: false };
-        if (ft === 'combo')     return { required: false, readonly: false, editable: false, choices: 'A,B,C', defaultValue: '' };
-        if (ft === 'radio')     return { required: false, readonly: false };
+        if (ft === 'combo')     return { required: false, readonly: false, editable: false, choices: defChoices, defaultValue: '' };
+        if (ft === 'list')      return { required: false, readonly: false, multiSelect: false, choices: defChoices, defaultValue: '' };
+        if (ft === 'radio')     return { required: false, readonly: false,
+            radioOptions: [{ value: 'Option1', label: '' }, { value: 'Option2', label: '' }],
+            radioDefault: '' };
         if (ft === 'signature') return { required: true, readonly: false };
         return {};
     }
+
+    // ── Generic choice row helpers (combo/list) ──────────────────────────────
+    function parseChoicesToRows(choices) {
+        if (!choices) return [];
+        if (Array.isArray(choices)) {
+            return choices.map(function (c) {
+                if (c && typeof c === 'object') return { value: c.value || '', label: c.label || '' };
+                return { value: String(c).trim(), label: '' };
+            }).filter(function (r) { return r.value; });
+        }
+        return String(choices).split(',').map(function (v) { return { value: v.trim(), label: '' }; }).filter(function (r) { return r.value; });
+    }
+
+    function buildChoiceOptionRow(val, lbl, idx, tbodyId, syncFn) {
+        var $tr = $('<tr>').attr('data-row-idx', idx);
+        $tr.append($('<td>').addClass('text-muted align-middle choice-row-num').text(idx + 1));
+        $tr.append($('<td>').append($('<input>').addClass('form-control form-control-sm choice-opt-value').val(val).attr('placeholder', 'value')));
+        $tr.append($('<td>').append($('<input>').addClass('form-control form-control-sm choice-opt-label').val(lbl).attr('placeholder', 'same as value')));
+        $tr.append($('<td>').append(
+            $('<button>').addClass('btn btn-sm btn-outline-danger choice-opt-remove').attr('title', 'Remove')
+                .html('<i class="fas fa-times"></i>')
+                .on('click', function () { $tr.remove(); renumberChoiceRows(tbodyId); if (syncFn) syncFn(); })
+        ));
+        $tr.find('.choice-opt-value').on('input', function () { if (syncFn) syncFn(); });
+        return $tr;
+    }
+    function renumberChoiceRows(tbodyId) {
+        $('#' + tbodyId + ' tr').each(function (i) {
+            $(this).attr('data-row-idx', i).find('.choice-row-num').text(i + 1);
+        });
+    }
+    function renderChoiceOptionTable(rows, tbodyId, syncFn) {
+        var $tbody = $('#' + tbodyId);
+        $tbody.empty();
+        var items = rows && rows.length ? rows : [{ value: 'A', label: '' }, { value: 'B', label: '' }];
+        items.forEach(function (row, i) { $tbody.append(buildChoiceOptionRow(row.value || '', row.label || '', i, tbodyId, syncFn)); });
+        renumberChoiceRows(tbodyId);
+    }
+    function collectChoiceOptions(tbodyId) {
+        var rows = [], seen = Object.create(null);
+        $('#' + tbodyId + ' tr').each(function () {
+            var v = ($(this).find('.choice-opt-value').val() || '').trim();
+            var l = ($(this).find('.choice-opt-label').val() || '').trim();
+            if (!v || seen[v]) return;
+            seen[v] = true;
+            rows.push({ value: v, label: l });
+        });
+        return rows;
+    }
+    function syncChoiceDefaultSelect(selectId, tbodyId) {
+        var prev = $(selectId).val();
+        var $sel = $(selectId).empty().append($('<option>').val('').text('(none)'));
+        collectChoiceOptions(tbodyId).forEach(function (row) {
+            var display = row.label && row.label.trim() ? row.label.trim() + ' (' + row.value + ')' : row.value;
+            $sel.append($('<option>').val(row.value).text(display));
+        });
+        if (prev) $sel.val(prev);
+        if (!$sel.val()) $sel.val('');
+    }
+    function choiceRowsToBackendFormat(rows) {
+        var hasDistinct = rows.some(function (r) { return r.label && r.label.trim() && r.label.trim() !== r.value; });
+        if (hasDistinct) return rows.map(function (r) { return { value: r.value, label: r.label || r.value }; });
+        return rows.map(function (r) { return r.value; });
+    }
+
+    // ── Radio option table helpers ────────────────────────────────────────────
+    function renderRadioOptionTable(rows, tbodyId, syncFn) {
+        tbodyId = tbodyId || 'radioOptionRows';
+        var $tbody = $('#' + tbodyId);
+        $tbody.empty();
+        var items = Array.isArray(rows) ? rows : [];
+        if (!items.length) items = [{ value: 'Option1', label: '' }, { value: 'Option2', label: '' }];
+        items.forEach(function (row, i) { $tbody.append(buildRadioOptionRow(row.value || '', row.label || '', i, tbodyId, syncFn)); });
+        renumberRadioRows(tbodyId);
+    }
+    function buildRadioOptionRow(val, lbl, idx, tbodyId, syncFn) {
+        tbodyId = tbodyId || 'radioOptionRows';
+        var $tr = $('<tr>').attr('data-row-idx', idx);
+        $tr.append($('<td>').addClass('text-muted align-middle radio-row-num').text(idx + 1));
+        $tr.append($('<td>').append($('<input>').addClass('form-control form-control-sm radio-opt-value').val(val).attr('placeholder', 'value')));
+        $tr.append($('<td>').append($('<input>').addClass('form-control form-control-sm radio-opt-label').val(lbl).attr('placeholder', 'same as value')));
+        $tr.append($('<td>').append(
+            $('<button>').addClass('btn btn-sm btn-outline-danger radio-opt-remove').attr('title', 'Remove')
+                .html('<i class="fas fa-times"></i>')
+                .on('click', function () { $tr.remove(); renumberRadioRows(tbodyId); if (syncFn) syncFn(); })
+        ));
+        $tr.find('.radio-opt-value').on('input', function () { if (syncFn) syncFn(); });
+        return $tr;
+    }
+    function renumberRadioRows(tbodyId) {
+        tbodyId = tbodyId || 'radioOptionRows';
+        $('#' + tbodyId + ' tr').each(function (i) {
+            $(this).attr('data-row-idx', i).find('.radio-row-num').text(i + 1);
+        });
+    }
+    function syncRadioDefaultSelect(selectId, tbodyId) {
+        selectId = selectId || '#createRadioDefault';
+        tbodyId = tbodyId || 'radioOptionRows';
+        var prev = $(selectId).val();
+        var $sel = $(selectId).empty().append($('<option>').val('').text('(none)'));
+        collectRadioOptionsFrom(tbodyId).forEach(function (row) {
+            var display = row.label && row.label.trim() ? row.label.trim() + ' (' + row.value + ')' : row.value;
+            $sel.append($('<option>').val(row.value).text(display));
+        });
+        if (prev) $sel.val(prev);
+        if (!$sel.val()) $sel.val('');
+    }
+    function collectRadioOptionsFrom(tbodyId) {
+        tbodyId = tbodyId || 'radioOptionRows';
+        var rows = [], seen = Object.create(null);
+        $('#' + tbodyId + ' tr').each(function () {
+            var v = ($(this).find('.radio-opt-value').val() || '').trim();
+            var l = ($(this).find('.radio-opt-label').val() || '').trim();
+            if (!v || seen[v]) return;
+            seen[v] = true;
+            rows.push({ value: v, label: l });
+        });
+        return rows;
+    }
+    // legacy alias used in init binding
+    function collectRadioOptions() { return collectRadioOptionsFrom('radioOptionRows'); }
+
     function resolveCreateOptions(ft) {
         var def = getDefaultOptions(ft);
         var tpl = P.EditMode.getLastAddedFieldTemplate();
@@ -180,16 +309,41 @@ PDFalyzer.EditField = (function ($, P) {
             setFieldConfigBlockVisible(g.blockSelector, !!visibleKeys[name]);
             if (visibleKeys[name]) setCreateBooleanControlValue(name, !!payload.options[name]);
         });
-        setFieldConfigBlockVisible('#createDefaultValueBlock', !!visibleKeys.defaultValue);
-        setFieldConfigBlockVisible('#createChoicesBlock', !!visibleKeys.choices);
+
+        var isRadio = fieldType === 'radio';
+        var isChoiceField = fieldType === 'combo' || fieldType === 'list';
+
+        setFieldConfigBlockVisible('#createDefaultValueBlock', !!visibleKeys.defaultValue && !isRadio && !isChoiceField);
+        setFieldConfigBlockVisible('#createChoiceOptionsBlock', isChoiceField);
+        setFieldConfigBlockVisible('#createChoiceDefaultBlock', isChoiceField);
+        setFieldConfigBlockVisible('#createRadioOptionsBlock', isRadio);
+        setFieldConfigBlockVisible('#createRadioDefaultBlock', isRadio);
         setFieldConfigBlockVisible('#createJavascriptBlock', !!visibleKeys.javascript);
-        $('#createDefaultValue').val(payload.options.defaultValue || '');
-        var ch = payload.options.choices; $('#createChoices').val(Array.isArray(ch) ? ch.join(',') : (ch || ''));
+
+        if (isChoiceField) {
+            var choiceRows = parseChoicesToRows(payload.options.choices);
+            var choiceSyncFn = function () { syncChoiceDefaultSelect('#createChoiceDefault', 'createChoiceOptionRows'); };
+            renderChoiceOptionTable(choiceRows, 'createChoiceOptionRows', choiceSyncFn);
+            choiceSyncFn();
+            var defVal = payload.options.defaultValue || '';
+            if (defVal) $('#createChoiceDefault').val(defVal);
+        }
+        if (isRadio) {
+            var radioSyncFn = function () { syncRadioDefaultSelect('#createRadioDefault', 'radioOptionRows'); };
+            renderRadioOptionTable(payload.options.radioOptions || [], 'radioOptionRows', radioSyncFn);
+            radioSyncFn();
+            if (payload.options.radioDefault) $('#createRadioDefault').val(payload.options.radioDefault);
+        }
+        if (!isChoiceField && !isRadio) {
+            $('#createDefaultValue').val(payload.options.defaultValue || '');
+        }
+
         $('#createJavascript').val(payload.options.javascript || '');
         $('#fieldCreateScopeHint').text('Showing options relevant for this ' + String(fieldType).toLowerCase() + ' field.');
         initializeJsPresetUi('create', JS_PRESET_CREATE);
         P.EditMode.showModal('create');
     }
+
     function applyCreateFieldFromModal() {
         var pcp = P.EditMode.getPendingCreatePayload(); if (!pcp) return;
         var fieldId = ($('#createFieldId').val() || '').trim();
@@ -199,10 +353,53 @@ PDFalyzer.EditField = (function ($, P) {
             var g = CREATE_BOOL_GROUPS[k]; if (!isFieldConfigBlockVisible(g.blockSelector)) return; opts[k] = getCreateBooleanControlValue(k);
         });
         if (isFieldConfigBlockVisible('#createDefaultValueBlock')) opts.defaultValue = $('#createDefaultValue').val() || '';
-        if (isFieldConfigBlockVisible('#createChoicesBlock')) {
-            opts.choices = ($('#createChoices').val() || '').split(',').map(function (v) { return v.trim(); }).filter(function (v) { return v.length > 0; });
+
+        // Combo / list: collect items from table
+        if (isFieldConfigBlockVisible('#createChoiceOptionsBlock')) {
+            var choiceRows = collectChoiceOptions('createChoiceOptionRows');
+            if (!choiceRows.length) { P.Utils.toast('Add at least one item', 'warning'); return; }
+            opts.choices = choiceRowsToBackendFormat(choiceRows);
+            opts.defaultValue = $('#createChoiceDefault').val() || '';
         }
+
         if (isFieldConfigBlockVisible('#createJavascriptBlock')) opts.javascript = $('#createJavascript').val() || '';
+
+        // Radio groups: fan out one pending entry per option, stacked vertically
+        if (pcp.fieldType === 'radio' && isFieldConfigBlockVisible('#createRadioOptionsBlock')) {
+            var radioRows = collectRadioOptions();
+            if (!radioRows.length) { P.Utils.toast('Add at least one radio option', 'warning'); return; }
+            var radioDefault = isFieldConfigBlockVisible('#createRadioDefaultBlock') ? ($('#createRadioDefault').val() || '') : '';
+            var gap = 4;
+            radioRows.forEach(function (row, i) {
+                P.state.pendingFormAdds.push({
+                    fieldType: 'radio',
+                    fieldName: fieldId,
+                    _radioHandleKey: fieldId + '\x00' + row.value,
+                    pageIndex: pcp.pageIndex,
+                    x: pcp.x,
+                    y: pcp.y - i * (pcp.height + gap),
+                    width: pcp.width,
+                    height: pcp.height,
+                    options: {
+                        exportValue: row.value,
+                        exportLabel: row.label || '',
+                        required: opts.required,
+                        readonly: opts.readonly,
+                        radioDefault: radioDefault,
+                        javascript: opts.javascript || ''
+                    }
+                });
+            });
+            P.EditMode.setLastAddedFieldTemplate({ fieldType: 'radio', options: P.EditMode.cloneObject(opts) });
+            P.EditMode.setPendingCreatePayload(null);
+            P.EditMode.hideModal('create');
+            P.EditMode.renderFieldHandlesForAllPages();
+            if (P.Tabs && P.Tabs.switchTab && P.state.currentTab) P.Tabs.switchTab(P.state.currentTab);
+            P.EditMode.updateSaveButton();
+            P.Utils.toast(radioRows.length + ' radio option(s) queued as group "' + fieldId + '". Click Save to persist.', 'info');
+            return;
+        }
+
         var qf = { fieldType: pcp.fieldType, fieldName: fieldId, pageIndex: pcp.pageIndex, x: pcp.x, y: pcp.y, width: pcp.width, height: pcp.height, options: opts };
         P.state.pendingFormAdds.push(qf);
         P.EditMode.setLastAddedFieldTemplate({ fieldType: qf.fieldType, options: P.EditMode.cloneObject(qf.options || {}) });
@@ -294,6 +491,24 @@ PDFalyzer.EditField = (function ($, P) {
         bindJsPresetControls();
         $('#applyCreateFieldBtn').on('click', applyCreateFieldFromModal);
         $('#fieldCreateModal').on('hidden.bs.modal', function () { P.EditMode.setPendingCreatePayload(null); });
+
+        // Radio option table buttons (create dialog)
+        $('#addRadioOptionBtn').on('click', function () {
+            var idx = $('#radioOptionRows tr').length;
+            var syncFn = function () { syncRadioDefaultSelect('#createRadioDefault', 'radioOptionRows'); };
+            $('#radioOptionRows').append(buildRadioOptionRow('', '', idx, 'radioOptionRows', syncFn));
+            renumberRadioRows('radioOptionRows');
+            syncFn();
+        });
+
+        // Choice item table buttons (create dialog)
+        $('#addCreateChoiceOptionBtn').on('click', function () {
+            var idx = $('#createChoiceOptionRows tr').length;
+            var syncFn = function () { syncChoiceDefaultSelect('#createChoiceDefault', 'createChoiceOptionRows'); };
+            $('#createChoiceOptionRows').append(buildChoiceOptionRow('', '', idx, 'createChoiceOptionRows', syncFn));
+            renumberChoiceRows('createChoiceOptionRows');
+            syncFn();
+        });
     }
 
     return {
@@ -303,6 +518,14 @@ PDFalyzer.EditField = (function ($, P) {
         setFieldConfigBlockVisible: setFieldConfigBlockVisible, isFieldConfigBlockVisible: isFieldConfigBlockVisible,
         getJsPresetDefinitions: getJsPresetDefinitions, buildPresetScript: buildPresetScript,
         renderJsPresetParams: renderJsPresetParams, collectJsPresetParams: collectJsPresetParams,
-        suggestNextFieldId: suggestNextFieldId
+        suggestNextFieldId: suggestNextFieldId,
+        collectRadioOptions: collectRadioOptions,
+        collectRadioOptionsFrom: collectRadioOptionsFrom,
+        renderRadioOptionTable: renderRadioOptionTable, buildRadioOptionRow: buildRadioOptionRow,
+        renumberRadioRows: renumberRadioRows, syncRadioDefaultSelect: syncRadioDefaultSelect,
+        renderChoiceOptionTable: renderChoiceOptionTable, buildChoiceOptionRow: buildChoiceOptionRow,
+        renumberChoiceRows: renumberChoiceRows, syncChoiceDefaultSelect: syncChoiceDefaultSelect,
+        collectChoiceOptions: collectChoiceOptions, parseChoicesToRows: parseChoicesToRows,
+        choiceRowsToBackendFormat: choiceRowsToBackendFormat
     };
 })(jQuery, PDFalyzer);

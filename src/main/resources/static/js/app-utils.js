@@ -280,10 +280,46 @@ PDFalyzer.Utils = (function ($) {
         });
     }
 
+    function tabSkeleton(tab) {
+        if (tab === 'structure' || tab === 'forms' || tab === 'bookmarks' ||
+                tab === 'rawcos' || tab === 'attachments') {
+            var rows = [
+                { w: '68%', ml: 8  }, { w: '52%', ml: 28 }, { w: '78%', ml: 28 },
+                { w: '44%', ml: 48 }, { w: '58%', ml: 48 }, { w: '71%', ml: 8  },
+                { w: '40%', ml: 28 }, { w: '83%', ml: 8  }, { w: '55%', ml: 28 },
+                { w: '47%', ml: 48 }, { w: '62%', ml: 48 }, { w: '76%', ml: 8  }
+            ];
+            return '<div style="padding:8px 4px">' +
+                rows.map(function (r) {
+                    return '<div class="skel skel-row" style="width:' + r.w + ';margin-left:' + r.ml + 'px"></div>';
+                }).join('') + '</div>';
+        }
+        if (tab === 'fonts') {
+            return '<div class="font-diag-wrap" style="padding:8px">' +
+                '<div class="font-diag-stats">' +
+                '<div class="skel skel-metric"></div>'.repeat(5) +
+                '</div>' +
+                '<div style="padding:8px 0">' +
+                '<div class="skel skel-row" style="width:100%;height:20px;margin-bottom:12px"></div>' +
+                [92, 85, 78, 90, 70, 83, 75].map(function (w) {
+                    return '<div class="skel skel-row" style="width:' + w + '%"></div>';
+                }).join('') +
+                '</div></div>';
+        }
+        if (tab === 'validation') {
+            return '<div style="padding:8px 12px">' +
+                [100, 88, 92, 75, 82].map(function (w) {
+                    return '<div class="skel skel-issue" style="width:' + w + '%"></div>';
+                }).join('') + '</div>';
+        }
+        return '';
+    }
+
     return { showLoading: showLoading, hideLoading: hideLoading,
              toast: toast, apiFetch: apiFetch, escapeHtml: escapeHtml,
              reportClientError: reportClientError, formatBytes: formatBytes,
              wireModalFocusSafety: wireModalFocusSafety, prepareModal: prepareModal,
              refreshAfterMutation: refreshAfterMutation,
-             initClearableInputs: initClearableInputs };
+             initClearableInputs: initClearableInputs,
+             tabSkeleton: tabSkeleton };
 })(jQuery);

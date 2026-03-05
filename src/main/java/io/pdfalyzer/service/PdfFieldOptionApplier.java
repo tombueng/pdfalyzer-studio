@@ -5,8 +5,10 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.cos.COSString;
 import org.apache.pdfbox.pdmodel.interactive.form.PDCheckBox;
 import org.apache.pdfbox.pdmodel.interactive.form.PDComboBox;
 import org.apache.pdfbox.pdmodel.interactive.form.PDField;
@@ -42,14 +44,19 @@ public class PdfFieldOptionApplier {
             PDComboBox comboBox = (PDComboBox) field;
             Boolean editable = parseTriState(options.get("editable"));
             if (editable != null) comboBox.setEdit(editable);
-            List<String> choices = parseChoiceList(options.get("choices"));
-            if (!choices.isEmpty()) comboBox.setOptions(choices);
+            applyChoiceOptions(comboBox, options.get("choices"));
         }
 
         if (field instanceof PDListBox) {
             PDListBox listBox = (PDListBox) field;
-            List<String> choices = parseChoiceList(options.get("choices"));
-            if (!choices.isEmpty()) listBox.setOptions(choices);
+            applyChoiceOptions(listBox, options.get("choices"));
+            Boolean multiSelect = parseTriState(options.get("multiSelect"));
+            if (multiSelect != null) {
+                int ff = listBox.getCOSObject().getInt(COSName.FF, 0);
+                if (multiSelect) ff |= (1 << 21);
+                else ff &= ~(1 << 21);
+                listBox.getCOSObject().setInt(COSName.FF, ff);
+            }
         }
 
         if (field instanceof PDCheckBox) {
@@ -111,6 +118,53 @@ public class PdfFieldOptionApplier {
         if ("true".equals(s)) return Boolean.TRUE;
         if ("false".equals(s)) return Boolean.FALSE;
         return null;
+    }
+
+    /** Applies choice options (simple strings or {value,label} maps) to a combo or list field. */
+    void applyChoiceOptions(PDField field, Object rawChoices) throws IOException {
+        if (rawChoices == null) return;
+        List<String> exportValues = new ArrayList<>();
+        List<String> displayValues = new ArrayList<>();
+        boolean hasPairs = false;
+
+        if (rawChoices instanceof List<?>) {
+            for (Object item : (List<?>) rawChoices) {
+                if (item == null) continue;
+                if (item instanceof Map<?, ?> m) {
+                    String val = m.containsKey("value") ? m.get("value").toString().trim() : "";
+                    String lbl = m.containsKey("label") ? m.get("label").toString().trim() : "";
+                    if (val.isBlank()) continue;
+                    exportValues.add(val);
+                    displayValues.add(lbl.isBlank() ? val : lbl);
+                    if (!lbl.isBlank() && !lbl.equals(val)) hasPairs = true;
+                } else {
+                    String s = item.toString().trim();
+                    if (!s.isBlank()) { exportValues.add(s); displayValues.add(s); }
+                }
+            }
+        } else {
+            String csv = rawChoices.toString();
+            for (String part : csv.split(",")) {
+                String s = part.trim();
+                if (!s.isBlank()) { exportValues.add(s); displayValues.add(s); }
+            }
+        }
+
+        if (exportValues.isEmpty()) return;
+
+        if (hasPairs) {
+            COSArray opt = new COSArray();
+            for (int i = 0; i < exportValues.size(); i++) {
+                COSArray pair = new COSArray();
+                pair.add(new COSString(exportValues.get(i)));
+                pair.add(new COSString(displayValues.get(i)));
+                opt.add(pair);
+            }
+            field.getCOSObject().setItem(COSName.OPT, opt);
+        } else {
+            if (field instanceof PDComboBox) ((PDComboBox) field).setOptions(exportValues);
+            else if (field instanceof PDListBox) ((PDListBox) field).setOptions(exportValues);
+        }
     }
 
     List<String> parseChoiceList(Object rawValue) {
