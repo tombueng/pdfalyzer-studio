@@ -5,18 +5,12 @@
     margin: 8px 12px;
 }
 
-/* === Edit Mode === */
-#editToolbar {
-    display: flex;
-    padding: 0;
-    background: transparent;
-    border-top: none;
-    gap: 6px;
-    flex-wrap: nowrap;
-    align-items: center;
+/* === Edit Form toggle & controls === */
+#editFormToggleBtn.active {
+    background: var(--accent);
+    color: #000;
+    border-color: var(--accent);
 }
-
-#editToolbar.active { display: flex; }
 
 .edit-field-btn {
     display: inline-flex;
@@ -493,6 +487,56 @@
     margin-bottom: 4px;
     font-size: 11px;
     color: var(--text-muted);
+}
+
+/* ── Form fill overlay (view mode — no tool selected) ───────────────────────── */
+.form-fill-overlay {
+    position: absolute;
+    box-sizing: border-box;
+    z-index: 4;
+    background: rgba(0, 0, 0, 0.55);
+    border: 1px solid rgba(0, 212, 255, 0.5);
+    border-radius: 2px;
+    color: var(--text, #e8e8e8);
+    font-family: inherit;
+    padding: 0 4px;
+    outline: none;
+    resize: none;
+}
+
+.form-fill-overlay:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-dim);
+    background: rgba(0, 0, 0, 0.75);
+}
+
+.form-fill-overlay.readonly {
+    opacity: 0.55;
+    cursor: not-allowed;
+    border-style: dashed;
+}
+
+/* Checkbox variant — center the native checkbox */
+.form-fill-check {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.45);
+    padding: 0;
+    cursor: pointer;
+}
+
+/* Push-button variant */
+.form-fill-button {
+    background: rgba(30, 30, 30, 0.82);
+    border: 1px solid rgba(0, 212, 255, 0.6);
+    color: var(--accent);
+    cursor: default;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 0 6px;
+    font-size: 11px;
 }
 
 /* ── Radio group bracket overlay ────────────────────────────────────────────── */

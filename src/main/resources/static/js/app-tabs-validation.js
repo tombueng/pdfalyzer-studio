@@ -130,7 +130,7 @@ PDFalyzer.ValidationTab = (function ($, P) {
             '<button class="btn btn-accent btn-sm me-2" id="runValidateBtn">' +
             '<i class="fas fa-play me-1"></i>Run Standard Validation</button>' +
             '<button class="btn btn-outline-accent btn-sm me-2" id="runVeraPdfBtn">' +
-            '<i class="fas fa-file-alt me-1"></i>Run veraPDF</button>' +
+            '<i class="fas fa-file me-1"></i>Run veraPDF</button>' +
             '<button class="btn btn-outline-accent btn-sm" id="exportValidateBtn"' + (disableExport ? ' disabled' : '') + '>' +
             '<i class="fas fa-download me-1"></i>Export Report</button></div>';
     }
@@ -190,7 +190,7 @@ PDFalyzer.ValidationTab = (function ($, P) {
         issues.forEach(function (issue) {
             var cls  = issue.severity === 'ERROR' ? 'error' : issue.severity === 'WARNING' ? 'warning' : 'info';
             var icon = issue.severity === 'ERROR' ? 'fa-times-circle text-danger'
-                     : issue.severity === 'WARNING' ? 'fa-exclamation-triangle text-warning'
+                     : issue.severity === 'WARNING' ? 'fa-alert-triangle text-warning'
                      : 'fa-info-circle text-info';
             html += '<div class="validation-issue ' + cls + '">' +
                 '<div class="issue-header"><i class="fas ' + icon + '"></i>' +

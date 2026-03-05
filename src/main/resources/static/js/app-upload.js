@@ -78,6 +78,7 @@ PDFalyzer.Upload = (function ($, P) {
         $('#zoomInBtn').prop('disabled', false);
         $('#zoomOutBtn').prop('disabled', false);
         $('#panModeBtn').prop('disabled', false);
+        $('#annotationLayerBtn').prop('disabled', false);
         if (opts.resetPending !== false && P.EditMode && P.EditMode.resetPending) {
             P.EditMode.resetPending();
         }
@@ -138,7 +139,7 @@ PDFalyzer.Upload = (function ($, P) {
         $('#pdfPasswordHint').text('Enter the password to open "' + filename + '".');
         $('#pdfPasswordInput').val('').attr('type', 'password');
         $('#pdfPasswordError').hide().text('');
-        $('#pdfPasswordToggle').find('i').removeClass('fa-eye-slash').addClass('fa-eye');
+        $('#pdfPasswordToggle').find('i').removeClass('fa-eye-off').addClass('fa-eye');
         $(document.getElementById('pdfPasswordModal')).one('shown.bs.modal', function () {
             document.getElementById('pdfPasswordInput').focus();
         });
@@ -369,7 +370,7 @@ PDFalyzer.Upload = (function ($, P) {
             $input.attr('type', isPassword ? 'text' : 'password');
             $(this).find('i')
                 .toggleClass('fa-eye', !isPassword)
-                .toggleClass('fa-eye-slash', isPassword);
+                .toggleClass('fa-eye-off', isPassword);
         });
     }
 

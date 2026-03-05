@@ -62,9 +62,9 @@ PDFalyzer.FontsTab = (function ($, P) {
         if (!focusedMode) {
             var notEmbeddedCount = (model.fonts || []).filter(function (f) { return !f.embedded; }).length;
             html += '<div class="font-diag-stats">' +
-                metricCard('Fonts', model.totalFonts || model.fonts.length, 'fa-font', 'Total unique fonts found across all page and XObject resources.') +
-                metricCard('With issues', model.fontsWithIssues || 0, 'fa-exclamation-triangle', 'Fonts flagged with one or more potential rendering, mapping, or embedding problems.') +
-                metricCard('Missing glyphs', model.fontsWithMissingGlyphs || 0, 'fa-question-circle', 'Fonts with missing glyph chars. This metric counts used character codes that have no Unicode mapping.') +
+                metricCard('Fonts', model.totalFonts || model.fonts.length, 'fa-letter-case', 'Total unique fonts found across all page and XObject resources.') +
+                metricCard('With issues', model.fontsWithIssues || 0, 'fa-alert-triangle', 'Fonts flagged with one or more potential rendering, mapping, or embedding problems.') +
+                metricCard('Missing glyphs', model.fontsWithMissingGlyphs || 0, 'fa-help-circle', 'Fonts with missing glyph chars. This metric counts used character codes that have no Unicode mapping.') +
                 metricCard('Encoding issues', model.fontsWithEncodingProblems || 0, 'fa-code', 'Fonts where used character codes have no Unicode mapping (typically ToUnicode/encoding gaps).') +
                 metricCard('Not embedded', notEmbeddedCount, 'fa-unlink', 'Fonts not embedded in the PDF. Rendering depends on viewer font substitution.') +
                 '</div>' +

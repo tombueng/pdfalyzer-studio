@@ -181,7 +181,7 @@
 <body>
 <div class="page-wrap">
     <div class="license-nav">
-        <h1 class="license-nav-title"><i class="fas fa-balance-scale me-2"></i>Licenses and Notices</h1>
+        <h1 class="license-nav-title"><i class="fas fa-scale me-2"></i>Licenses and Notices</h1>
         <a href="/" class="btn btn-outline-accent btn-sm"><i class="fas fa-arrow-left me-1"></i>Back to App</a>
     </div>
     <p class="summary-text">This page lists every bundled compliance document and links directly to the file in the packaged app.</p>
@@ -213,7 +213,7 @@
                 <tr th:each="doc : ${entry.value}">
                     <td class="ps-3">
                         <a class="doc-link" th:href="${doc.href}" target="_blank" rel="noopener">
-                            <i class="fas fa-file-alt"></i>
+                            <i class="fas fa-file"></i>
                             <span th:text="${doc.displayPath}"></span>
                         </a>
                     </td>

@@ -98,7 +98,7 @@ PDFalyzer.Tree = (function ($, P) {
                 iconHtml = '<i class="fas fa-paperclip fa-2x mb-2 text-muted"></i><br>';
                 $container.html('<div class="text-muted text-center mt-3">' + iconHtml + 'No attachments found</div>');
             } else if (category === 'forms' || category === 'acroform' || category === 'field') {
-                iconHtml = '<i class="fas fa-file-alt fa-2x mb-2 text-muted"></i><br>';
+                iconHtml = '<i class="fas fa-file fa-2x mb-2 text-muted"></i><br>';
                 $container.html('<div class="text-muted text-center mt-3">' + iconHtml + 'No forms found</div>');
             } else {
                 $container.html('<div class="text-muted text-center mt-3">No items found</div>');

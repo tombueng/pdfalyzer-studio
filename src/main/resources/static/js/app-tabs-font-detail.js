@@ -115,7 +115,7 @@ PDFalyzer.FontDetail = (function ($, P) {
 
         var $encPanel = $('#fontFocusEncodingDetails');
         if ($encPanel.length && encoding) {
-            var encHtml = '<details class="font-encoding-details"><summary><i class="fas fa-cogs me-1"></i>Encoding &amp; CMap Details</summary><div class="font-encoding-details-grid">';
+            var encHtml = '<details class="font-encoding-details"><summary><i class="fas fa-cog me-1"></i>Encoding &amp; CMap Details</summary><div class="font-encoding-details-grid">';
             if (encoding.hasToUnicode !== undefined) {
                 encHtml += '<div class="label">ToUnicode:</div><div>' +
                     (encoding.hasToUnicode ? '<i class="fas fa-check text-success"></i> present' : '<i class="fas fa-times text-danger"></i> missing') +
