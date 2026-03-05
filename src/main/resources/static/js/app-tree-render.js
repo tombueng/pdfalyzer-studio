@@ -172,7 +172,7 @@ PDFalyzer.TreeRender = (function ($, P) {
         // COS edit button (pencil)
         if (node.editable && node.rawValue !== undefined && node.rawValue !== null) {
             $('<button>', { 'class': 'cos-edit-btn', title: 'Edit value',
-                             html: '<i class="fas fa-pencil-alt"></i>' })
+                             html: '<i class="fas fa-pen"></i>' })
                 .on('click', function (e) {
                     e.stopPropagation();
                     P.CosEditor.show(node, $header);
@@ -195,7 +195,7 @@ PDFalyzer.TreeRender = (function ($, P) {
         // COS delete button (trash) – for named dictionary/array entries
         if (node.name && (/^[\/]|^\[/.test(node.name)) && node.keyPath) {
             $('<button>', { 'class': 'cos-delete-btn', title: 'Delete entry',
-                             html: '<i class="fas fa-trash-alt"></i>' })
+                             html: '<i class="fas fa-trash"></i>' })
                 .on('click', function (e) {
                     e.stopPropagation();
                     P.CosEditor.remove(node, $header);
@@ -362,7 +362,7 @@ PDFalyzer.TreeRender = (function ($, P) {
                 .appendTo($header);
             if (node.nodeCategory === 'image' && node.keyPath) {
                 $('<button>', { 'class': 'resource-delete-btn', title: 'Delete image',
-                                 html: '<i class="fas fa-trash-alt"></i>' })
+                                 html: '<i class="fas fa-trash"></i>' })
                     .on('click', function (e) {
                         e.stopPropagation();
                         P.Resource.deleteResource(node, $header);

@@ -174,6 +174,7 @@ var PDFalyzer = (function () {
             currentScale: 1.5,
             autoZoomMode: 'off',   // 'off' | 'width' | 'height'
             panMode: false,
+            showPdfAnnotations: false,
             viewerScrollState: null,
             basePageSize: { width: 0, height: 0 }
         },

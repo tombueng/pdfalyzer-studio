@@ -197,29 +197,56 @@ PDFalyzer.Viewer = (function ($, P) {
         });
     }
 
+    function rescalePages(scale) {
+        var oldScale = P.state.currentScale;
+        var ratio = scale / oldScale;
+        P.state.currentScale = scale;
+        $('#pdfViewer .pdf-page-wrapper').each(function (i) {
+            var canvas = $(this).find('canvas')[0];
+            if (!canvas) return;
+            var newW = parseFloat(canvas.style.width) * ratio;
+            var newH = parseFloat(canvas.style.height) * ratio;
+            canvas.style.width = newW + 'px';
+            canvas.style.height = newH + 'px';
+            var vp = P.state.pageViewports[i];
+            if (vp) { vp.scale = scale; vp.width = newW; vp.height = newH; }
+        });
+        if (P.EditMode && P.EditMode.renderFieldHandlesForAllPages) P.EditMode.renderFieldHandlesForAllPages();
+        if (P.Zoom && P.Zoom.updateButton) P.Zoom.updateButton();
+        $(document).trigger('pdfviewer:rendered');
+    }
+
+    function canRescaleCSS(scale) {
+        var maxRenderScale = (P.ViewerRender && P.ViewerRender.MAX_RENDER_SCALE) || 3.0;
+        return scale <= maxRenderScale && P.state.pageCanvases && P.state.pageCanvases.length > 0;
+    }
+
     function setScale(scale) {
         if (scale <= 0) return;
         if (Math.abs(scale - P.state.currentScale) < 0.01) return;
-        P.state.currentScale  = scale;
-        P.state.autoZoomMode  = 'off';
+        P.state.autoZoomMode = 'off';
+        if (canRescaleCSS(scale)) { rescalePages(scale); return; }
+        P.state.currentScale = scale;
         renderAllPages({ preserveView: true, smoothSwap: true });
         if (P.Zoom && P.Zoom.updateButton) P.Zoom.updateButton();
     }
 
     function fitWidth() {
         if (!P.state.basePageSize.width) return;
-        var avail = $('#pdfPane').width() - 40;
-        P.state.currentScale = avail / P.state.basePageSize.width;
+        var scale = ($('#pdfPane').width() - 40) / P.state.basePageSize.width;
         P.state.autoZoomMode = 'width';
+        if (canRescaleCSS(scale)) { rescalePages(scale); return; }
+        P.state.currentScale = scale;
         renderAllPages({ preserveView: true, smoothSwap: true });
         if (P.Zoom && P.Zoom.updateButton) P.Zoom.updateButton();
     }
 
     function fitHeight() {
         if (!P.state.basePageSize.height) return;
-        var avail = $('#pdfPane').height() - 40;
-        P.state.currentScale = avail / P.state.basePageSize.height;
+        var scale = ($('#pdfPane').height() - 40) / P.state.basePageSize.height;
         P.state.autoZoomMode = 'height';
+        if (canRescaleCSS(scale)) { rescalePages(scale); return; }
+        P.state.currentScale = scale;
         renderAllPages({ preserveView: true, smoothSwap: true });
         if (P.Zoom && P.Zoom.updateButton) P.Zoom.updateButton();
     }

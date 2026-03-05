@@ -33,6 +33,14 @@ PDFalyzer.Zoom = (function ($, P) {
         setPanMode(!panModeActive);
     }
 
+    function toggleAnnotationLayer() {
+        P.state.showPdfAnnotations = !P.state.showPdfAnnotations;
+        $('#annotationLayerBtn').toggleClass('active', P.state.showPdfAnnotations);
+        if (P.state.pdfDoc && P.Viewer && P.Viewer.renderAllPages) {
+            P.Viewer.renderAllPages();
+        }
+    }
+
     function init() {
         $('#zoomModeBtn').on('click', function () {
             if (P.state.autoZoomMode === 'off')    P.Viewer.fitWidth();
@@ -43,6 +51,7 @@ PDFalyzer.Zoom = (function ($, P) {
         $('#zoomOutBtn').on('click', function () { stepZoom(ZOOM_OUT_FACTOR); });
         $('#zoomInBtn').on('click', function () { stepZoom(ZOOM_IN_FACTOR); });
         $('#panModeBtn').on('click', function () { togglePanMode(); });
+        $('#annotationLayerBtn').on('click', function () { toggleAnnotationLayer(); });
 
         $('#pdfPane').on('wheel', function (e) {
             var ev = e.originalEvent;

@@ -1,5 +1,5 @@
 
-Lists of 158 third-party dependencies.
+Lists of 155 third-party dependencies.
      (Eclipse Public License - v 2.0) (GNU Lesser General Public License) Logback Classic Module (ch.qos.logback:logback-classic:1.5.32 - http://logback.qos.ch/logback-classic)
      (Eclipse Public License - v 2.0) (GNU Lesser General Public License) Logback Core Module (ch.qos.logback:logback-core:1.5.32 - http://logback.qos.ch/logback-core)
      (The Apache Software License, Version 2.0) Jackson-annotations (com.fasterxml.jackson.core:jackson-annotations:2.19.4 - https://github.com/FasterXML/jackson)
@@ -153,8 +153,5 @@ Lists of 158 third-party dependencies.
      (GNU General Public License, version 3 (GPL-3.0)) (Mozilla Public License 2.0 (MPL-2.0)) veraPDF Validation Model API (org.verapdf:pdf-model:1.26.1 - https://github.com/veraPDF/veraPDF-model/)
      (GNU General Public License, version 3 (GPL-3.0)) (Mozilla Public License 2.0 (MPL-2.0)) veraPDF Validation (org.verapdf:validation-model:1.26.1 - http://nexus.sonatype.org/oss-repository-hosting.html/verapdf-parent/validation/validation-model)
      (BSD 3-Clause License) veraPDF PDF/A XMP Library Core (org.verapdf:verapdf-xmp-core:1.26.1 - http://nexus.sonatype.org/oss-repository-hosting.html/verapdf-parent/verapdf-library/verapdf-xmp-core)
-     (Apache License, Version 2.0) Bootstrap (org.webjars:bootstrap:5.3.0 - http://webjars.org)
-     (CC BY 3.0) Font Awesome (org.webjars:font-awesome:6.4.0 - http://webjars.org)
-     (MIT License) jquery (org.webjars:jquery:3.7.1 - http://webjars.org)
      (The Apache Software License, Version 2.0) org.xmlunit:xmlunit-core (org.xmlunit:xmlunit-core:2.10.4 - https://www.xmlunit.org/)
      (Apache License, Version 2.0) SnakeYAML (org.yaml:snakeyaml:2.4 - https://bitbucket.org/snakeyaml/snakeyaml)

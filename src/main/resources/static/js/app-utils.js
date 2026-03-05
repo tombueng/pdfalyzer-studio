@@ -11,8 +11,8 @@ PDFalyzer.Utils = (function ($) {
         var normalizedType = type || 'info';
         var iconMap = {
             success: 'fa-check-circle',
-            danger:  'fa-exclamation-circle',
-            warning: 'fa-exclamation-triangle',
+            danger:  'fa-alert-circle',
+            warning: 'fa-alert-triangle',
             info:    'fa-info-circle'
         };
         var durationMap = {

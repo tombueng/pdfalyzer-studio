@@ -130,8 +130,10 @@ PDFalyzer.EditMode = (function ($, P) {
     function updateSaveButton() {
         if (!P.state.pendingFieldOptions) P.state.pendingFieldOptions = [];
         if (!P.state.pendingCosChanges)   P.state.pendingCosChanges = [];
+        if (!P.state.pendingFieldValues)  P.state.pendingFieldValues = {};
         var hp = P.state.pendingFormAdds.length || P.state.pendingFieldRects.length ||
-                 P.state.pendingFieldOptions.length || P.state.pendingCosChanges.length;
+                 P.state.pendingFieldOptions.length || P.state.pendingCosChanges.length ||
+                 Object.keys(P.state.pendingFieldValues).length;
         $('#formSaveBtn').prop('disabled', !hp || !hasSession());
         updateFailedCosBadge();
         if (P.Tree && P.Tree.refreshPendingPanel) P.Tree.refreshPendingPanel();
@@ -187,8 +189,24 @@ PDFalyzer.EditMode = (function ($, P) {
         }
         next();
     }
+    function applyPendingValueUpdates(onDone) {
+        var done = typeof onDone === 'function' ? onDone : finalizeSave;
+        var values = P.state.pendingFieldValues || {};
+        var queue = Object.keys(values).map(function (n) { return { name: n, value: values[n] }; });
+        if (!queue.length) { done(); return; }
+        function next() {
+            if (!queue.length) { done(); return; }
+            var it = queue.shift();
+            P.Utils.apiFetch('/api/edit/' + P.state.sessionId + '/field/' + encodeURIComponent(it.name) + '/value',
+                { method: 'POST', contentType: 'application/json', data: JSON.stringify({ value: it.value }) })
+                .done(function (d) { if (d && d.tree) P.state.treeData = d.tree; next(); })
+                .fail(function () { P.Utils.toast('Saving value for "' + it.name + '" failed', 'danger'); next(); });
+        }
+        next();
+    }
     function finalizeSave(cosResult) {
         P.state.pendingFormAdds = []; P.state.pendingFieldRects = []; P.state.pendingFieldOptions = [];
+        P.state.pendingFieldValues = {};
         pendingFieldOptionOverrides = {};
         if (P.state.treeData) P.Utils.refreshAfterMutation(P.state.treeData);
         refreshSelectionButtons(); updateSaveButton();
@@ -206,8 +224,10 @@ PDFalyzer.EditMode = (function ($, P) {
         if (!hasSession()) return;
         if (!P.state.pendingFieldOptions) P.state.pendingFieldOptions = [];
         if (!P.state.pendingCosChanges)   P.state.pendingCosChanges = [];
+        if (!P.state.pendingFieldValues)  P.state.pendingFieldValues = {};
         if (!P.state.pendingFormAdds.length && !P.state.pendingFieldRects.length &&
-            !P.state.pendingFieldOptions.length && !P.state.pendingCosChanges.length) {
+            !P.state.pendingFieldOptions.length && !P.state.pendingCosChanges.length &&
+            !Object.keys(P.state.pendingFieldValues).length) {
             P.Utils.toast('No pending changes', 'info'); return;
         }
         $('#formSaveBtn').prop('disabled', true);
@@ -222,11 +242,14 @@ PDFalyzer.EditMode = (function ($, P) {
         }
         saveAdds.done(function (d) {
             if (d && d.tree) P.state.treeData = d.tree;
-            applyPendingRectUpdates(function () { applyPendingOptionUpdates(function () { applyPendingCosUpdates(finalizeSave); }); });
+            applyPendingValueUpdates(function () {
+                applyPendingRectUpdates(function () { applyPendingOptionUpdates(function () { applyPendingCosUpdates(finalizeSave); }); });
+            });
         }).fail(function () { P.Utils.toast('Saving new fields failed', 'danger'); updateSaveButton(); });
     }
     function resetPending() {
-        P.state.pendingFormAdds = []; P.state.pendingFieldRects = []; P.state.pendingFieldOptions = []; P.state.pendingCosChanges = [];
+        P.state.pendingFormAdds = []; P.state.pendingFieldRects = []; P.state.pendingFieldOptions = [];
+        P.state.pendingCosChanges = []; P.state.pendingFieldValues = {};
         pendingFieldOptionOverrides = {}; P.state.selectedFieldNames = []; P.state.selectedImageNodeIds = [];
         lastAddedFieldTemplate = null; updatePlaceModeCursor(); refreshSelectionButtons(); updateSaveButton();
     }
@@ -359,11 +382,86 @@ PDFalyzer.EditMode = (function ($, P) {
         if ((parseFloat($h.css('left')) || 0) + ($h.outerWidth() || 0) + 6 + ($a.outerWidth() || 0) > (wrapperEl.clientWidth || 0))
             $a.addClass('side-left');
     }
+    function renderFormFillLayer(pageIndex, wrapperEl, vp) {
+        $(wrapperEl).find('.form-fill-overlay').remove();
+        if (!hasSession() || !wrapperEl || !vp) return;
+        var pending = P.state.pendingFieldValues || {};
+        collectFieldNodesOnPage(pageIndex).forEach(function (fn) {
+            var bbox = fn.boundingBox;
+            if (!bbox) return;
+            var s = vp.scale;
+            var fullName = fn.properties && fn.properties.FullName; if (!fullName) return;
+            var subType = ((fn.properties.FieldSubType || fn.properties.FieldType || 'text') + '').toLowerCase();
+            var currentVal = pending[fullName] !== undefined ? pending[fullName] : (fn.properties.Value || '');
+            var readOnly   = fn.properties.ReadOnly === 'true';
+            var left = bbox[0] * s, top = vp.height - (bbox[1] + bbox[3]) * s;
+            var w = bbox[2] * s, h = bbox[3] * s;
+            var pdfFontSize = parseFloat(fn.properties.FontSize);
+            var fontSize = (pdfFontSize > 0) ? pdfFontSize * s : Math.min(Math.max(h * 0.55, 9), 18);
+            var $el;
+
+            if (subType === 'text' || subType === 'password') {
+                var isMulti = fn.properties.Multiline === 'true';
+                if (isMulti) {
+                    $el = $('<textarea>', { 'class': 'form-fill-overlay', rows: 1 }).val(currentVal);
+                } else {
+                    $el = $('<input>', { 'class': 'form-fill-overlay',
+                        type: subType === 'password' ? 'password' : 'text', value: currentVal });
+                }
+            } else if (subType === 'combo') {
+                var opts = (fn.properties.Options || '').split(',').map(function (o) { return o.trim(); }).filter(Boolean);
+                $el = $('<select>', { 'class': 'form-fill-overlay' });
+                opts.forEach(function (o) { $el.append($('<option>', { value: o, text: o, selected: o === currentVal })); });
+            } else if (subType === 'list') {
+                var opts = (fn.properties.Options || '').split(',').map(function (o) { return o.trim(); }).filter(Boolean);
+                $el = $('<select>', { 'class': 'form-fill-overlay', multiple: true });
+                var selVals = currentVal.split(',').map(function (v) { return v.trim(); });
+                opts.forEach(function (o) { $el.append($('<option>', { value: o, text: o, selected: selVals.indexOf(o) >= 0 })); });
+            } else if (subType === 'checkbox') {
+                var isChecked = pending[fullName] !== undefined ? pending[fullName] === 'Yes' : fn.properties.Checked === 'true';
+                $el = $('<input>', { 'class': 'form-fill-overlay form-fill-check', type: 'checkbox' }).prop('checked', isChecked);
+            } else if (subType === 'button') {
+                $el = $('<button>', { 'class': 'form-fill-overlay form-fill-button', type: 'button',
+                    html: fn.properties.Value || fn.properties.FullName || 'Button' });
+            } else {
+                return; // radio, signature: skip
+            }
+
+            $el.css({ position: 'absolute', left: left + 'px', top: top + 'px',
+                      width: w + 'px', height: h + 'px', fontSize: fontSize + 'px' });
+            if (readOnly) $el.prop('disabled', true).addClass('readonly');
+
+            if (subType === 'checkbox') {
+                $el.on('change', function () {
+                    P.state.pendingFieldValues = P.state.pendingFieldValues || {};
+                    P.state.pendingFieldValues[fullName] = $(this).prop('checked') ? 'Yes' : 'Off';
+                    updateSaveButton();
+                });
+            } else if (subType !== 'button') {
+                $el.on('change', function () {
+                    var v = $(this).val();
+                    if (Array.isArray(v)) v = v.join(',');
+                    P.state.pendingFieldValues = P.state.pendingFieldValues || {};
+                    P.state.pendingFieldValues[fullName] = v;
+                    updateSaveButton();
+                });
+            }
+            $(wrapperEl).append($el);
+        });
+    }
+
     function renderFieldHandles(pageIndex, wrapperEl, viewportOverride) {
         if (!hasSession() || !wrapperEl) return;
         $(wrapperEl).find('.form-field-handle').remove();
         $(wrapperEl).find('.radio-group-bracket').remove();
+        $(wrapperEl).find('.form-fill-overlay').remove();
         var vp = viewportOverride || P.state.pageViewports[pageIndex]; if (!vp) return;
+
+        // Fill mode: no tool selected — show interactive inputs instead of edit handles
+        if (!P.state.editFieldType) {
+            renderFormFillLayer(pageIndex, wrapperEl, vp);
+            return;
+        }
         collectFieldNodesOnPage(pageIndex).forEach(function (fn) {
             var bbox = fn.boundingBox, s = vp.scale;
             var fullName = fn.properties && fn.properties.FullName; if (!fullName) return;
@@ -495,11 +593,30 @@ PDFalyzer.EditMode = (function ($, P) {
     }
 
     // ── init ─────────────────────────────────────────────────────────────────
+    function setEditFormActive(active) {
+        $('#editFormToggleBtn').toggleClass('active', active);
+        $('#editFieldControls').toggleClass('d-none', !active).toggleClass('d-flex', active);
+        if (active) {
+            if (!P.state.editFieldType) {
+                P.state.editFieldType = 'select';
+                syncEditFieldTypeUI();
+            }
+        } else {
+            P.state.editFieldType = null;
+            syncEditFieldTypeUI();
+        }
+        updatePlaceModeCursor();
+        renderFieldHandlesForAllPages();
+    }
+
     function init() {
-        $('#editToolbar').addClass('active');
         P.state.editMode = true; P.state.selectedFieldNames = []; P.state.selectedImageNodeIds = [];
         if (!P.state.pendingFieldDeletes) P.state.pendingFieldDeletes = {};
         updatePlaceModeCursor();
+        $('#editFormToggleBtn').on('click', function () {
+            if (!hasSession()) { P.Utils.toast('Load a PDF session first', 'warning'); return; }
+            setEditFormActive(!$(this).hasClass('active'));
+        });
         $('.edit-field-btn').on('click', function () {
             if (!hasSession()) { P.Utils.toast('Load a PDF session first', 'warning'); return; }
             if (P.Zoom && P.Zoom.setPanMode) P.Zoom.setPanMode(false);
@@ -526,6 +643,7 @@ PDFalyzer.EditMode = (function ($, P) {
         resetPending: resetPending, savePendingChanges: savePendingChanges, updateSaveButton: updateSaveButton,
         showModal: showModal, hideModal: hideModal,
         syncEditFieldTypeUI: syncEditFieldTypeUI,
+        setEditFormActive: setEditFormActive,
         syncOptionsJavascriptToggleState: syncOptionsJavascriptToggleState,
         setOptionsJavascriptSectionExpanded: setOptionsJavascriptSectionExpanded,
         cloneObject: cloneObject, mergeOptions: mergeOptions, findPendingFormAdd: findPendingFormAdd,

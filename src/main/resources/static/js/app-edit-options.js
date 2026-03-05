@@ -11,6 +11,14 @@ PDFalyzer.EditOptions = (function ($, P) {
     var APPEARANCE_KEYS = ['fontName', 'fontSize', 'textColor', 'backgroundColor', 'borderColor',
         'borderWidth', 'borderStyle', 'alignment', 'rotation', 'maxLength'];
 
+    // What the dialog displays when a field has no explicit value for a given appearance key.
+    // If the collected value equals this AND the field had no original value, we skip it
+    // to avoid inadvertently writing defaults onto fields that had no appearance settings.
+    var APPEARANCE_DISPLAY_DEFAULTS = {
+        fontName: 'Helv', textColor: '#000000', backgroundColor: '#000000',
+        borderColor: '#000000', borderStyle: 'solid', alignment: 'left', rotation: '0'
+    };
+
     // ── Tri-state value parser ────────────────────────────────────────────────
 
     function parseTriStateValue(value) {
@@ -57,6 +65,20 @@ PDFalyzer.EditOptions = (function ($, P) {
                 var ovr = overrides[entry.name];
                 if (ovr[optionName] !== undefined) return ovr[optionName];
             }
+        }
+        // Choices: prefer ChoicePairs (preserves display labels) over Options (values-only csv)
+        if (optionName === 'choices' && entry.node && entry.node.properties) {
+            var pairs = entry.node.properties.ChoicePairs;
+            if (pairs) {
+                try {
+                    return JSON.parse(pairs).map(function (p) { return { value: p.v || '', label: p.l || '' }; });
+                } catch (e) { /* fall through */ }
+            }
+            var optStr = entry.node.properties.Options || '';
+            if (optStr) {
+                return optStr.split(',').map(function (v) { return { value: v.trim(), label: '' }; }).filter(function (r) { return r.value; });
+            }
+            return null;
         }
         var propertyName = mapPropertyName(optionName);
         if (entry.node && entry.node.properties && entry.node.properties[propertyName] !== undefined) {
@@ -189,13 +211,15 @@ PDFalyzer.EditOptions = (function ($, P) {
         selectedEntries.forEach(function (e) { fieldTypes[P.EditField.getEntryFieldType(e)] = true; });
         var intersectedType = Object.keys(fieldTypes).length === 1 ? Object.keys(fieldTypes)[0] : null;
 
-        _dialogState = { selectedEntries: selectedEntries, single: single, singleFt: singleFt, fieldNames: selected.slice() };
+        var currentValues = buildCurrentValues(selectedEntries, single);
+        _dialogState = { selectedEntries: selectedEntries, single: single, singleFt: singleFt,
+            fieldNames: selected.slice(), originalValues: currentValues };
 
         var contextInfo = selected.length === 1
             ? 'Editing: ' + selected[0]
             : 'Editing ' + selected.length + ' fields';
 
-        P.FieldDialog.open('edit', intersectedType, buildCurrentValues(selectedEntries, single), {
+        P.FieldDialog.open('edit', intersectedType, currentValues, {
             isMultiEdit: !single,
             contextInfo: contextInfo,
             onApply: applyOptions,
@@ -223,8 +247,16 @@ PDFalyzer.EditOptions = (function ($, P) {
             }
         });
 
+        var origVals = _dialogState.originalValues || {};
         APPEARANCE_KEYS.forEach(function (key) {
-            if (opts[key] !== undefined && opts[key] !== '') options[key] = opts[key];
+            if (opts[key] === undefined || opts[key] === '') return;
+            var orig = origVals[key];
+            if (orig === null || orig === undefined) {
+                // Field had no value; skip if the collected value is just the dialog's display default
+                var displayDef = APPEARANCE_DISPLAY_DEFAULTS[key];
+                if (displayDef !== undefined && String(opts[key]) === String(displayDef)) return;
+            }
+            options[key] = opts[key];
         });
 
         if (opts.javascript !== undefined) options.javascript = opts.javascript;

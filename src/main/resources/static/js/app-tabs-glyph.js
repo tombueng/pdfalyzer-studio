@@ -215,7 +215,7 @@ PDFalyzer.GlyphModal = (function ($, P) {
                 html += '' +
                     '<details class="font-glyph-usage-page" data-page="' + group.pageIndex + '">' +
                     '  <summary>' +
-                    '    <span><i class="fas fa-file-alt me-1"></i>Page ' + (group.pageIndex + 1) + '</span>' +
+                    '    <span><i class="fas fa-file me-1"></i>Page ' + (group.pageIndex + 1) + '</span>' +
                     '    <span class="badge text-bg-secondary ms-2">' + group.items.length + ' hits</span>' +
                     '    <button class="btn btn-xs btn-outline-accent ms-2 glyph-usage-page-jump" data-page="' + group.pageIndex + '" title="Jump to page"><i class="fas fa-location-arrow"></i></button>' +
                     '    <button class="btn btn-xs btn-outline-accent ms-1 glyph-usage-page-highlight" data-page="' + group.pageIndex + '" title="Highlight page positions"><i class="fas fa-highlighter"></i></button>' +

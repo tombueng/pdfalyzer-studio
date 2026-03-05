@@ -62,7 +62,7 @@ PDFalyzer.Export = (function ($, P) {
 
         $('#exportProtUserPw, #exportProtOwnerPw').val('').attr('type', 'password');
         $('#exportProtUserPwToggle, #exportProtOwnerPwToggle').find('i')
-            .removeClass('fa-eye-slash').addClass('fa-eye');
+            .removeClass('fa-eye-off').addClass('fa-eye');
 
         var modal = getProtModal();
         if (modal) {
