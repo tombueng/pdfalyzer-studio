@@ -397,47 +397,186 @@ PDFalyzer.EditMode = (function ($, P) {
             var left = bbox[0] * s, top = vp.height - (bbox[1] + bbox[3]) * s;
             var w = bbox[2] * s, h = bbox[3] * s;
             var pdfFontSize = parseFloat(fn.properties.FontSize);
-            var fontSize = (pdfFontSize > 0) ? pdfFontSize * s : Math.min(Math.max(h * 0.55, 9), 18);
+            var isComb = fn.properties.Comb === 'true';
+            var combMaxLen = isComb ? parseInt(fn.properties.MaxLength || '1', 10) : 0;
+            // Per ISO 32000-1 §12.7.3.3: font-size 0 means auto-size
+            // Single-line: fill widget height; multiline/list: comfortable line-height
+            var isMultiLineType = (subType === 'text' && fn.properties.Multiline === 'true') || subType === 'list';
+            var fontSize = (pdfFontSize > 0) ? pdfFontSize * s
+                : isMultiLineType ? Math.max(h / 6, 9)
+                : Math.max((h - 4) / 1.2, 8);
+
+            // Resolve and register the PDF font for this field if we have an embedded object ref
+            var fontFamily = fn.properties.FontCssFamily || null;
+            var fontObjectRef = fn.properties.FontObjectRef || null;
+            if (fontObjectRef && P.GlyphUI && P.GlyphUI.ensureDiagnosticsFontFace) {
+                var parts = fontObjectRef.split(' ');
+                var obj = parseInt(parts[0], 10), gen = parseInt(parts[1] || '0', 10);
+                if (obj >= 0) {
+                    var loadedFamily = 'pdffont_' + obj + '_' + gen;
+                    P.GlyphUI.ensureDiagnosticsFontFace(loadedFamily, obj, gen);
+                    fontFamily = "'" + loadedFamily + "'" + (fontFamily ? ', ' + fontFamily : '');
+                }
+            }
+
             var $el;
 
             if (subType === 'text' || subType === 'password') {
                 var isMulti = fn.properties.Multiline === 'true';
                 if (isMulti) {
                     $el = $('<textarea>', { 'class': 'form-fill-overlay', rows: 1 }).val(currentVal);
+                    if (fn.properties.MaxLength) $el.attr('maxlength', fn.properties.MaxLength);
+                } else if (isComb) {
+                    var $combCells = $('<div>', { 'class': 'form-fill-comb-cells' });
+                    for (var ci = 0; ci < combMaxLen; ci++) {
+                        $combCells.append($('<span>', { 'class': 'form-fill-comb-cell',
+                            text: currentVal.charAt(ci) || '' }));
+                    }
+                    var $combInput = $('<input>', { type: 'text', 'class': 'form-fill-comb-input',
+                        maxlength: combMaxLen, value: currentVal });
+                    $combInput.on('input', function () {
+                        var v = $(this).val();
+                        $(this).closest('.form-fill-comb').find('.form-fill-comb-cell').each(function (i) {
+                            $(this).text(v.charAt(i) || '');
+                        });
+                        P.state.pendingFieldValues = P.state.pendingFieldValues || {};
+                        P.state.pendingFieldValues[fullName] = v;
+                        updateSaveButton();
+                    });
+                    $el = $('<div>', { 'class': 'form-fill-overlay form-fill-comb' })
+                        .append($combCells).append($combInput);
                 } else {
                     $el = $('<input>', { 'class': 'form-fill-overlay',
                         type: subType === 'password' ? 'password' : 'text', value: currentVal });
+                    if (fn.properties.MaxLength) $el.attr('maxlength', fn.properties.MaxLength);
                 }
+                if (fontFamily) $el.css('font-family', fontFamily);
+                var textColor = fn.properties.TextColor;
+                if (textColor) $el.css('color', textColor);
+                var alignment = fn.properties.Alignment;
+                if (alignment) $el.css('text-align', alignment);
+
             } else if (subType === 'combo') {
                 var opts = (fn.properties.Options || '').split(',').map(function (o) { return o.trim(); }).filter(Boolean);
-                $el = $('<select>', { 'class': 'form-fill-overlay' });
-                opts.forEach(function (o) { $el.append($('<option>', { value: o, text: o, selected: o === currentVal })); });
+                if (fn.properties.Editable === 'true') {
+                    var listId = 'combo_' + (fullName || '').replace(/\W/g, '_');
+                    $el = $('<input>', { 'class': 'form-fill-overlay', type: 'text', value: currentVal, list: listId });
+                    var $dl = $('<datalist>', { id: listId });
+                    opts.forEach(function (o) { $dl.append($('<option>', { value: o })); });
+                    $(wrapperEl).append($dl);
+                } else {
+                    $el = $('<select>', { 'class': 'form-fill-overlay' });
+                    opts.forEach(function (o) { $el.append($('<option>', { value: o, text: o, selected: o === currentVal })); });
+                }
+                if (fontFamily) $el.css('font-family', fontFamily);
+                var textColor = fn.properties.TextColor;
+                if (textColor) $el.css('color', textColor);
+                var alignment = fn.properties.Alignment;
+                if (alignment) $el.css('text-align', alignment);
+
             } else if (subType === 'list') {
                 var opts = (fn.properties.Options || '').split(',').map(function (o) { return o.trim(); }).filter(Boolean);
                 $el = $('<select>', { 'class': 'form-fill-overlay', multiple: true });
                 var selVals = currentVal.split(',').map(function (v) { return v.trim(); });
                 opts.forEach(function (o) { $el.append($('<option>', { value: o, text: o, selected: selVals.indexOf(o) >= 0 })); });
+                if (fontFamily) $el.css('font-family', fontFamily);
+                var textColor = fn.properties.TextColor;
+                if (textColor) $el.css('color', textColor);
+                var alignment = fn.properties.Alignment;
+                if (alignment) $el.css('text-align', alignment);
+
             } else if (subType === 'checkbox') {
-                var isChecked = pending[fullName] !== undefined ? pending[fullName] === 'Yes' : fn.properties.Checked === 'true';
-                $el = $('<input>', { 'class': 'form-fill-overlay form-fill-check', type: 'checkbox' }).prop('checked', isChecked);
+                var onValue = fn.properties.OnValue || 'Yes';
+                var isChecked = pending[fullName] !== undefined ? pending[fullName] === onValue : fn.properties.Checked === 'true';
+                var checkSymbol = fn.properties.CheckSymbol || '\u2714';
+                $el = $('<div>', { 'class': 'form-fill-overlay form-fill-check' });
+                var $inner = $('<span>', { 'class': 'form-fill-check-symbol' });
+                if (fontFamily) $inner.css('font-family', fontFamily);
+                if (isChecked) $inner.text(checkSymbol);
+                $el.append($inner);
+                $el.attr('data-checked', isChecked ? '1' : '0')
+                   .attr('data-on-value', onValue)
+                   .attr('data-check-symbol', checkSymbol);
+
+            } else if (subType === 'radio') {
+                var onValue = fn.properties.OnValue || fn.properties.ExportValue || 'Yes';
+                var radioGroup = fn.properties.RadioGroup || fullName;
+                var selectedOpt = pending[radioGroup] !== undefined ? pending[radioGroup] : (fn.properties.SelectedOption || '');
+                var isChecked = selectedOpt === onValue;
+                var checkSymbol = fn.properties.CheckSymbol || '\u25cf'; // filled circle default for radio
+                $el = $('<div>', { 'class': 'form-fill-overlay form-fill-radio' });
+                var $inner = $('<span>', { 'class': 'form-fill-check-symbol' });
+                if (fontFamily) $inner.css('font-family', fontFamily);
+                if (isChecked) $inner.text(checkSymbol);
+                $el.append($inner);
+                $el.attr('data-checked', isChecked ? '1' : '0')
+                   .attr('data-radio-group', radioGroup)
+                   .attr('data-on-value', onValue)
+                   .attr('data-check-symbol', checkSymbol);
+
             } else if (subType === 'button') {
                 $el = $('<button>', { 'class': 'form-fill-overlay form-fill-button', type: 'button',
                     html: fn.properties.Value || fn.properties.FullName || 'Button' });
             } else {
-                return; // radio, signature: skip
+                return; // signature: skip
             }
 
             $el.css({ position: 'absolute', left: left + 'px', top: top + 'px',
                       width: w + 'px', height: h + 'px', fontSize: fontSize + 'px' });
-            if (readOnly) $el.prop('disabled', true).addClass('readonly');
+            if (readOnly) $el.addClass('readonly');
+
+            // Apply MK /BG background colour
+            var bgColor = fn.properties.BackgroundColor;
+            if (bgColor) $el.css('background', bgColor);
+
+            // Apply border — all three CSS properties needed for the border to render
+            var bcColor = fn.properties.BorderColor;
+            var bWidth = fn.properties.BorderWidth;
+            var bStyle = fn.properties.BorderStyle;
+            if (bcColor || bWidth || bStyle) {
+                $el.css({
+                    'border-color': bcColor || '#000',
+                    'border-width': bWidth ? (parseFloat(bWidth) * s) + 'px' : '1px',
+                    'border-style': bStyle || 'solid'
+                });
+            }
+
+            // Widget rotation (/MK /R) — PDF rotation is CCW, CSS is CW, so negate
+            var rotation = fn.properties.Rotation ? parseInt(fn.properties.Rotation, 10) : 0;
+            if (rotation) $el.css('transform', 'rotate(-' + rotation + 'deg)');
+
+            // Required fields get a subtle dashed outline indicator
+            if (fn.properties.Required === 'true') $el.addClass('required-field');
 
             if (subType === 'checkbox') {
-                $el.on('change', function () {
-                    P.state.pendingFieldValues = P.state.pendingFieldValues || {};
-                    P.state.pendingFieldValues[fullName] = $(this).prop('checked') ? 'Yes' : 'Off';
-                    updateSaveButton();
-                });
-            } else if (subType !== 'button') {
+                if (!readOnly) {
+                    $el.on('click', function () {
+                        var nowChecked = $(this).attr('data-checked') !== '1';
+                        var sym = $(this).attr('data-check-symbol');
+                        $(this).attr('data-checked', nowChecked ? '1' : '0')
+                               .find('.form-fill-check-symbol').text(nowChecked ? sym : '');
+                        P.state.pendingFieldValues = P.state.pendingFieldValues || {};
+                        P.state.pendingFieldValues[fullName] = nowChecked ? $(this).attr('data-on-value') : 'Off';
+                        updateSaveButton();
+                    });
+                }
+            } else if (subType === 'radio') {
+                if (!readOnly) {
+                    $el.on('click', function () {
+                        var group = $(this).attr('data-radio-group');
+                        var onVal = $(this).attr('data-on-value');
+                        // Deselect all radio buttons in this group on this page
+                        $(wrapperEl).find('.form-fill-radio[data-radio-group="' + group + '"]').each(function () {
+                            $(this).attr('data-checked', '0').find('.form-fill-check-symbol').text('');
+                        });
+                        $(this).attr('data-checked', '1')
+                               .find('.form-fill-check-symbol').text($(this).attr('data-check-symbol'));
+                        P.state.pendingFieldValues = P.state.pendingFieldValues || {};
+                        P.state.pendingFieldValues[group] = onVal;
+                        updateSaveButton();
+                    });
+                }
+            } else if (subType !== 'button' && !isComb) {
                 $el.on('change', function () {
                     var v = $(this).val();
                     if (Array.isArray(v)) v = v.join(',');
@@ -467,9 +606,13 @@ PDFalyzer.EditMode = (function ($, P) {
             var fullName = fn.properties && fn.properties.FullName; if (!fullName) return;
             var radioGroup = fn.properties && fn.properties.RadioGroup;
             var exportValue = fn.properties && fn.properties.ExportValue;
-            var $h = $('<div>', { 'class': 'form-field-handle' }).attr('data-field-name', fullName)
-                .css({ left: bbox[0] * s + 'px', top: (vp.height - (bbox[1] + bbox[3]) * s) + 'px',
-                       width: bbox[2] * s + 'px', height: bbox[3] * s + 'px' });
+            var handleCss = { left: bbox[0] * s + 'px', top: (vp.height - (bbox[1] + bbox[3]) * s) + 'px',
+                               width: bbox[2] * s + 'px', height: bbox[3] * s + 'px' };
+            var hBg = fn.properties && fn.properties.BackgroundColor;
+            if (hBg) handleCss.background = hBg;
+            var hBc = fn.properties && fn.properties.BorderColor;
+            if (hBc) handleCss.borderColor = hBc;
+            var $h = $('<div>', { 'class': 'form-field-handle' }).attr('data-field-name', fullName).css(handleCss);
             if (radioGroup) $h.attr('data-radio-group', radioGroup);
             if (fn.pending) $h.addClass('pending');
             if (isFieldRequired(fn)) $h.addClass('required');

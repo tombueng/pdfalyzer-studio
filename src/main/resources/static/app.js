@@ -36,6 +36,9 @@
         if (P.Utils && P.Utils.initClearableInputs) {
             P.Utils.initClearableInputs();
         }
+        if (P.Utils && P.Utils.startRamMonitor) {
+            P.Utils.startRamMonitor();
+        }
         P.Upload.init();
         P.Search.init();
         P.Tabs.init();
