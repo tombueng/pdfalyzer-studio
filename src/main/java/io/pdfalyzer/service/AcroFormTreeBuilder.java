@@ -314,13 +314,7 @@ public class AcroFormTreeBuilder {
                 if (bg != null) node.addProperty("BackgroundColor", bg);
                 // Push-button label: /MK /CA (Normal Caption)
                 if (field instanceof PDPushButton) {
-                    COSBase ca = mk.getDictionaryObject(COSName.getPDFName("CA"));
-                    if (ca instanceof COSString caStr) {
-                        String caption = caStr.getString();
-                        if (caption != null && !caption.isBlank()) {
-                            node.addProperty("ButtonCaption", caption);
-                        }
-                    }
+                    extractButtonCaption(mk, field.getCOSObject(), node);
                 }
             }
 
@@ -334,6 +328,27 @@ public class AcroFormTreeBuilder {
                 if (style != null && !style.isBlank()) {
                     node.addProperty("BorderStyle", mapBsStyleName(style));
                 }
+            }
+        }
+    }
+
+    /**
+     * Extracts the push-button normal caption (/MK /CA) from the widget MK dict,
+     * with a fallback to the field dict's own MK entry (some PDFs merge field + widget).
+     */
+    private void extractButtonCaption(COSDictionary widgetMk, COSDictionary fieldDict, PdfNode node) {
+        COSBase ca = widgetMk.getDictionaryObject(COSName.getPDFName("CA"));
+        // Fallback: some writers place MK on the field dict when field==widget
+        if (!(ca instanceof COSString)) {
+            COSBase fieldMkBase = fieldDict.getDictionaryObject(COSName.MK);
+            if (fieldMkBase instanceof COSDictionary fieldMk) {
+                ca = fieldMk.getDictionaryObject(COSName.getPDFName("CA"));
+            }
+        }
+        if (ca instanceof COSString caStr) {
+            String caption = caStr.getString();
+            if (caption != null && !caption.isBlank()) {
+                node.addProperty("ButtonCaption", caption);
             }
         }
     }

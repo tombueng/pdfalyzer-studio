@@ -160,22 +160,35 @@
 
 .field-handle-btn {
     position: relative;
-    background: rgba(0, 0, 0, 0.75);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(12, 18, 28, 0.92);
     border: 1px solid var(--accent);
     color: var(--accent);
-    padding: 2px 6px;
-    font-size: 11px;
+    padding: 0;
+    width: 28px;
+    height: 28px;
+    font-size: 13px;
     cursor: pointer;
-    border-radius: 3px;
-    opacity: 0.92;
-    transition: opacity 0.2s, background 0.2s;
+    border-radius: 5px;
+    opacity: 0.96;
+    transition: all 0.16s ease;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.06);
     z-index: 1;
 }
 
 .field-handle-btn:hover {
     background: var(--accent);
     color: #000;
+    box-shadow: 0 3px 14px rgba(13, 202, 255, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.15);
+    transform: translateY(-1px);
     opacity: 1 !important;
+}
+
+.field-handle-btn:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.55);
 }
 
 .form-field-handle:hover .field-handle-btn {
@@ -185,18 +198,32 @@
 .field-handle-actions {
     position: absolute;
     top: 50%;
-    left: calc(100% + 6px);
+    left: calc(100% + 8px);
     transform: translateY(-50%);
     display: flex;
     flex-direction: row;
     align-items: center;
-    gap: 4px;
+    gap: 6px;
     z-index: 12;
 }
 
 .field-handle-actions.side-left {
     left: auto;
     right: calc(100% + 6px);
+    /* inherits top:50% + translateY(-50%) from base */
+}
+
+.field-handle-actions.side-top {
+    top: auto;
+    bottom: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
+}
+
+.field-handle-actions.side-bottom {
+    top: calc(100% + 6px);
+    left: 50%;
+    transform: translateX(-50%);
 }
 
 .field-handle-delete {
@@ -207,6 +234,7 @@
 .field-handle-delete:hover {
     background: var(--danger);
     color: #fff;
+    box-shadow: 0 3px 14px rgba(220, 53, 69, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
 .field-handle-undo {
@@ -217,6 +245,7 @@
 .field-handle-undo:hover {
     background: var(--success);
     color: #000;
+    box-shadow: 0 3px 14px rgba(25, 135, 84, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.15);
 }
 
 .form-field-handle.removed {

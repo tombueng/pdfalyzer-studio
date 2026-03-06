@@ -43,6 +43,9 @@ PDFalyzer.EditMode = (function ($, P) {
         $('#pdfPane').toggleClass('place-mode-active', !!(hasSession() && P.state.editMode && P.state.editFieldType));
     }
     function syncEditFieldTypeUI() {
+        var active = !!P.state.editFieldType;
+        $('#editFormToggleBtn').toggleClass('active', active);
+        $('#editFieldControls').toggleClass('d-none', !active).toggleClass('d-flex', active);
         $('.edit-field-btn').removeClass('active');
         if (P.state.editFieldType) {
             $('.edit-field-btn[data-type="' + P.state.editFieldType + '"]').addClass('active');
@@ -378,9 +381,65 @@ PDFalyzer.EditMode = (function ($, P) {
     function updateActionButtonsSide($h, wrapperEl) {
         if (!$h || !$h.length || !wrapperEl) return;
         var $a = $h.find('.field-handle-actions').first(); if (!$a.length) return;
-        $a.removeClass('side-left');
-        if ((parseFloat($h.css('left')) || 0) + ($h.outerWidth() || 0) + 6 + ($a.outerWidth() || 0) > (wrapperEl.clientWidth || 0))
-            $a.addClass('side-left');
+        $a.removeClass('side-left side-top side-bottom');
+
+        var pageW = wrapperEl.clientWidth  || 0;
+        var pageH = wrapperEl.clientHeight || 0;
+        var hL = parseFloat($h.css('left'))   || 0;
+        var hT = parseFloat($h.css('top'))    || 0;
+        var hW = $h.outerWidth()  || 0;
+        var hH = $h.outerHeight() || 0;
+        var aW = $a.outerWidth()  || 60;   // measured; fallback if not laid out yet
+        var aH = $a.outerHeight() || 28;
+        var gap = 8;
+
+        // Gather all sibling handle rects for collision testing (excluding self)
+        var siblingRects = [];
+        $(wrapperEl).find('.form-field-handle').not($h).each(function () {
+            siblingRects.push({
+                l: parseFloat($(this).css('left'))  || 0,
+                t: parseFloat($(this).css('top'))   || 0,
+                w: $(this).outerWidth()  || 0,
+                h: $(this).outerHeight() || 0
+            });
+        });
+
+        function overlaps(ax, ay) {
+            var ax2 = ax + aW, ay2 = ay + aH;
+            for (var i = 0; i < siblingRects.length; i++) {
+                var r = siblingRects[i];
+                if (ax < r.l + r.w && ax2 > r.l && ay < r.t + r.h && ay2 > r.t) return true;
+            }
+            return false;
+        }
+
+        function fits(side) {
+            var ax, ay;
+            if (side === 'right') {
+                ax = hL + hW + gap;
+                ay = hT + hH / 2 - aH / 2;
+            } else if (side === 'left') {
+                ax = hL - gap - aW;
+                ay = hT + hH / 2 - aH / 2;
+            } else if (side === 'top') {
+                ax = hL + hW / 2 - aW / 2;
+                ay = hT - gap - aH;
+            } else { // bottom
+                ax = hL + hW / 2 - aW / 2;
+                ay = hT + hH + gap;
+            }
+            if (ax < 0 || ay < 0 || ax + aW > pageW || ay + aH > pageH) return false;
+            return !overlaps(ax, ay);
+        }
+
+        var sides = ['right', 'left', 'top', 'bottom'];
+        var chosen = 'right';
+        for (var i = 0; i < sides.length; i++) {
+            if (fits(sides[i])) { chosen = sides[i]; break; }
+        }
+        if (chosen === 'left')   $a.addClass('side-left');
+        else if (chosen === 'top')    $a.addClass('side-top');
+        else if (chosen === 'bottom') $a.addClass('side-bottom');
     }
     // ── Declarative field overlay styles ─────────────────────────────────────
     // Loaded from /field-overlay-styles.json — edit that file to change appearance.
@@ -684,6 +743,9 @@ PDFalyzer.EditMode = (function ($, P) {
             } else if (subType === 'button') {
                 $el = $('<button>', { 'class': 'form-fill-overlay form-fill-button', type: 'button',
                     html: fn.properties.ButtonCaption || fn.properties.Value || fn.properties.FullName || 'Button' });
+                if (fontFamily) $el.css('font-family', fontFamily);
+                var btnTextColor = fn.properties.TextColor;
+                if (btnTextColor) { $el.css('color', btnTextColor); $el.css('-webkit-text-fill-color', btnTextColor); }
             } else if (subType === 'signature') {
                 $el = $('<div>', { 'class': 'form-fill-overlay form-fill-signature' })
                     .append($('<span>', { 'class': 'form-fill-signature-icon', html: '<i class="fas fa-signature"></i>' }));
@@ -834,8 +896,8 @@ PDFalyzer.EditMode = (function ($, P) {
         var vp = viewportOverride || P.state.pageViewports[pageIndex]; if (!vp) return;
 
         var layerDef = PDFalyzer.Zoom && PDFalyzer.Zoom.LAYER_MODES ? PDFalyzer.Zoom.LAYER_MODES[P.state.layerMode || 0] : null;
-        // Layer off: clear overlays and stop (unless an edit tool is active)
-        if (layerDef && !layerDef.form && !P.state.editFieldType) {
+        // Layer off: clear overlays and stop (always respected, even when edit tool is active)
+        if (layerDef && !layerDef.form) {
             $(wrapperEl).removeClass('fillout-mode');
             return;
         }
@@ -869,7 +931,7 @@ PDFalyzer.EditMode = (function ($, P) {
                 $h.attr('title', (fn.properties.FieldType ? fn.properties.FieldType + ': ' : '') + fullName + ' (pending save)');
                 $h.append($('<span>', { 'class': 'form-field-pending-label', text: pendingLabel + ' (pending)' }));
             }
-            var $optBtn = $('<button>', { 'class': 'field-handle-btn field-handle-options', title: 'Options', html: '<i class="fas fa-cog"></i>' }).on('click', function (e) {
+            var $optBtn = $('<button>', { 'class': 'field-handle-btn field-handle-options', title: 'Options', html: '<i class="fas fa-sliders-h"></i>' }).on('click', function (e) {
                 e.stopPropagation(); P.state.selectedFieldNames = [fullName]; P.state.selectedImageNodeIds = [];
                 renderFieldHandlesForAllPages(); P.EditOptions.openOptionsPopup();
             });
@@ -881,7 +943,11 @@ PDFalyzer.EditMode = (function ($, P) {
                 $h.append($('<div>', { 'class': 'field-handle-actions' }).append($optBtn, $delBtn), $('<div>', { 'class': 'form-field-resize' })).appendTo(wrapperEl);
                 P.EditField.bindDragResize($h, $h.find('.form-field-resize'), fn, vp);
             }
-            updateActionButtonsSide($h, wrapperEl);
+        });
+
+        // Second pass: position action buttons now that all handles are in the DOM (needed for collision detection)
+        $(wrapperEl).find('.form-field-handle').each(function () {
+            updateActionButtonsSide($(this), wrapperEl);
         });
 
         // Draw group brackets around radio buttons sharing the same group name
@@ -983,18 +1049,12 @@ PDFalyzer.EditMode = (function ($, P) {
 
     // ── init ─────────────────────────────────────────────────────────────────
     function setEditFormActive(active) {
-        $('#editFormToggleBtn').toggleClass('active', active);
-        $('#editFieldControls').toggleClass('d-none', !active).toggleClass('d-flex', active);
-        if (active) {
-            if (!P.state.editFieldType) {
-                P.state.editFieldType = 'select';
-                syncEditFieldTypeUI();
-            }
-        } else {
+        if (active && !P.state.editFieldType) {
+            P.state.editFieldType = 'select';
+        } else if (!active) {
             P.state.editFieldType = null;
-            syncEditFieldTypeUI();
         }
-        updatePlaceModeCursor();
+        syncEditFieldTypeUI();
         renderFieldHandlesForAllPages();
     }
 
