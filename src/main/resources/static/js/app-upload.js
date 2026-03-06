@@ -53,6 +53,7 @@ PDFalyzer.Upload = (function ($, P) {
         P.state.sessionId = data.sessionId;
         P.state.treeData  = data.tree;
         P.state.rawCosTreeData = null;
+        P.state.signatureData = null;
         P.state.tabTreeViewStates = {};
         if (P.Storage && P.Storage.setCurrentSessionId) {
             P.Storage.setCurrentSessionId(P.state.sessionId);
@@ -66,6 +67,9 @@ PDFalyzer.Upload = (function ($, P) {
             if (P.EditMode && P.EditMode.syncEditFieldTypeUI) { P.EditMode.syncEditFieldTypeUI(); }
         }
         updateEncryptionStatus(data.encryptionInfo);
+
+        // Show/hide signatures tab based on whether the PDF contains signature fields
+        $('#signaturesTabBtn').toggle(!!(data.hasSignatures));
 
         var sizeValue = typeof bytesSize === 'number' ? bytesSize : 0;
         var humanSize = P.Utils.formatBytes(sizeValue);

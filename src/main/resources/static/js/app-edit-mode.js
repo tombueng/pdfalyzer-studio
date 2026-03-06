@@ -251,7 +251,8 @@ PDFalyzer.EditMode = (function ($, P) {
         var hp = P.state.pendingFormAdds.length || P.state.pendingFieldRects.length ||
                  P.state.pendingFieldOptions.length || P.state.pendingCosChanges.length ||
                  Object.keys(P.state.pendingFieldValues).length ||
-                 Object.keys(P.state.pendingFieldDeletes || {}).length;
+                 Object.keys(P.state.pendingFieldDeletes || {}).length ||
+                 (P.state.pendingSignatures && P.state.pendingSignatures.length);
         $('#formSaveBtn').prop('disabled', !hp || !hasSession());
         updateFailedCosBadge();
         if (P.Tree && P.Tree.refreshPendingPanel) P.Tree.refreshPendingPanel();
@@ -339,9 +340,36 @@ PDFalyzer.EditMode = (function ($, P) {
         }
         next();
     }
+    function applyPendingSignatures(cosResult) {
+        if (!P.state.pendingSignatures || !P.state.pendingSignatures.length) {
+            finalizeSave(cosResult); return;
+        }
+        var queue = P.state.pendingSignatures.slice();
+        var signedCount = 0;
+        function nextSig() {
+            if (!queue.length) {
+                if (signedCount > 0) P.Utils.toast(signedCount + ' signature' + (signedCount > 1 ? 's' : '') + ' applied', 'success');
+                finalizeSave(cosResult); return;
+            }
+            var sig = queue.shift();
+            P.Utils.apiFetch('/api/signing/' + P.state.sessionId + '/apply-signature',
+                { method: 'POST', contentType: 'application/json', data: JSON.stringify(sig) })
+                .done(function (d) {
+                    if (d && d.tree) P.state.treeData = d.tree;
+                    signedCount++;
+                    nextSig();
+                })
+                .fail(function (xhr) {
+                    P.Utils.toast('Signing field "' + (sig.fieldName || '?') + '" failed: ' + extractApiError(xhr), 'danger');
+                    finalizeSave(cosResult);
+                });
+        }
+        nextSig();
+    }
     function finalizeSave(cosResult) {
         P.state.pendingFormAdds = []; P.state.pendingFieldRects = []; P.state.pendingFieldOptions = [];
         P.state.pendingFieldValues = {}; P.state.pendingFieldDeletes = {}; P.state.fieldUndoStacks = {};
+        P.state.pendingSignatures = []; P.state.signatureData = null;
         pendingFieldOptionOverrides = {};
         if (P.state.treeData) P.Utils.refreshAfterMutation(P.state.treeData);
         refreshSelectionButtons(); updateSaveButton();
@@ -363,7 +391,8 @@ PDFalyzer.EditMode = (function ($, P) {
         if (!P.state.pendingFormAdds.length && !P.state.pendingFieldRects.length &&
             !P.state.pendingFieldOptions.length && !P.state.pendingCosChanges.length &&
             !Object.keys(P.state.pendingFieldValues).length &&
-            !Object.keys(P.state.pendingFieldDeletes || {}).length) {
+            !Object.keys(P.state.pendingFieldDeletes || {}).length &&
+            !(P.state.pendingSignatures && P.state.pendingSignatures.length)) {
             P.Utils.toast('No pending changes', 'info'); return;
         }
         $('#formSaveBtn').prop('disabled', true);
@@ -380,7 +409,7 @@ PDFalyzer.EditMode = (function ($, P) {
             if (d && d.tree) P.state.treeData = d.tree;
             applyPendingDeletes(function () {
                 applyPendingValueUpdates(function () {
-                    applyPendingRectUpdates(function () { applyPendingOptionUpdates(function () { applyPendingCosUpdates(finalizeSave); }); });
+                    applyPendingRectUpdates(function () { applyPendingOptionUpdates(function () { applyPendingCosUpdates(function (cosResult) { applyPendingSignatures(cosResult); }); }); });
                 });
             });
         }).fail(function () { P.Utils.toast('Saving new fields failed', 'danger'); updateSaveButton(); });
@@ -388,6 +417,7 @@ PDFalyzer.EditMode = (function ($, P) {
     function resetPending() {
         P.state.pendingFormAdds = []; P.state.pendingFieldRects = []; P.state.pendingFieldOptions = [];
         P.state.pendingCosChanges = []; P.state.pendingFieldValues = {}; P.state.pendingFieldDeletes = {}; P.state.fieldUndoStacks = {};
+        P.state.pendingSignatures = [];
         pendingFieldOptionOverrides = {}; P.state.selectedFieldNames = []; P.state.selectedImageNodeIds = [];
         lastAddedFieldTemplate = null; updatePlaceModeCursor(); refreshSelectionButtons(); updateSaveButton();
     }

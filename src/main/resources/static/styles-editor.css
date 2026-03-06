@@ -899,6 +899,8 @@
 .change-type-options { border-left: 3px solid #cc5de8; }
 .change-type-value { border-left: 3px solid #fcc419; }
 .change-type-cos { border-left: 3px solid #20c997; }
+.change-type-signature .changes-entry-icon { color: #f783ac; }
+.change-type-signature { border-left: 3px solid #f783ac; }
 
 /* Fill-mode field action buttons (undo + clear) */
 .fill-field-wrap {
