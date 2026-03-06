@@ -1,0 +1,298 @@
+/* ── Signatures tab ─────────────────────────────────────────────────── */
+
+.sig-summary-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+}
+
+.sig-summary-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.sig-summary-badge.valid   { background: rgba(25, 135, 84, 0.2); color: #28a745; }
+.sig-summary-badge.invalid { background: rgba(220, 53, 69, 0.2); color: #dc3545; }
+.sig-summary-badge.indeterminate { background: rgba(255, 193, 7, 0.2); color: #ffc107; }
+.sig-summary-badge.unsigned { background: rgba(108, 117, 125, 0.2); color: #adb5bd; }
+.sig-summary-badge.total   { background: rgba(13, 202, 240, 0.15); color: #0dcaf0; }
+
+/* ── Signature cards ───────────────────────────────────────────────── */
+
+.sig-cards-container {
+    padding: 8px 10px;
+}
+
+.sig-card {
+    border: 1px solid var(--border);
+    border-left: 4px solid #6c757d;
+    border-radius: 6px;
+    margin-bottom: 8px;
+    background: var(--bg-card, #161a1f);
+    overflow: hidden;
+}
+
+.sig-card.valid   { border-left-color: #28a745; }
+.sig-card.invalid { border-left-color: #dc3545; }
+.sig-card.indeterminate { border-left-color: #ffc107; }
+.sig-card.unsigned { border-left-color: #6c757d; }
+
+.sig-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    cursor: pointer;
+    user-select: none;
+    font-size: 13px;
+}
+
+.sig-card-header:hover {
+    background: rgba(255, 255, 255, 0.03);
+}
+
+.sig-card-header .sig-expand-icon {
+    font-size: 10px;
+    transition: transform 0.15s ease;
+    color: var(--text-muted);
+    min-width: 10px;
+}
+
+.sig-card.expanded .sig-card-header .sig-expand-icon {
+    transform: rotate(90deg);
+}
+
+.sig-card-header .sig-status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.sig-status-badge.valid   { background: #28a745; color: #fff; }
+.sig-status-badge.invalid { background: #dc3545; color: #fff; }
+.sig-status-badge.indeterminate { background: #ffc107; color: #212529; }
+.sig-status-badge.unsigned { background: #495057; color: #ccc; }
+.sig-status-badge.not-validated { background: #343a40; color: #adb5bd; }
+
+.sig-card-header .sig-signer-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.sig-card-header .sig-signing-time {
+    font-size: 11px;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.sig-card-body {
+    display: none;
+    padding: 10px 12px;
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+}
+
+.sig-card.expanded .sig-card-body {
+    display: block;
+}
+
+/* ── Certificate details table ─────────────────────────────────────── */
+
+.sig-cert-table {
+    width: 100%;
+    font-size: 12px;
+    border-collapse: collapse;
+}
+
+.sig-cert-table td {
+    padding: 3px 8px;
+    vertical-align: top;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.sig-cert-table td:first-child {
+    font-weight: 600;
+    color: var(--text-muted);
+    white-space: nowrap;
+    width: 130px;
+}
+
+/* ── Byte range visualization ──────────────────────────────────────── */
+
+.sig-byte-range-bar {
+    display: flex;
+    height: 18px;
+    border-radius: 3px;
+    overflow: hidden;
+    background: #1a1e23;
+    margin: 6px 0;
+    border: 1px solid var(--border);
+}
+
+.sig-byte-range-segment {
+    position: relative;
+    min-width: 2px;
+    transition: opacity 0.2s;
+}
+
+.sig-byte-range-segment:hover {
+    opacity: 0.8;
+}
+
+.sig-byte-range-segment.covered {
+    background: rgba(25, 135, 84, 0.6);
+}
+
+.sig-byte-range-segment.gap {
+    background: rgba(220, 53, 69, 0.4);
+}
+
+.sig-byte-range-segment.uncovered {
+    background: rgba(255, 152, 0, 0.5);
+}
+
+.sig-byte-range-legend {
+    display: flex;
+    gap: 12px;
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+.sig-byte-range-legend span::before {
+    content: '';
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 2px;
+    margin-right: 3px;
+    vertical-align: middle;
+}
+
+.sig-byte-range-legend .covered::before { background: rgba(25, 135, 84, 0.6); }
+.sig-byte-range-legend .gap::before { background: rgba(220, 53, 69, 0.4); }
+.sig-byte-range-legend .uncovered::before { background: rgba(255, 152, 0, 0.5); }
+
+/* ── Modification warnings ─────────────────────────────────────────── */
+
+.sig-modification {
+    border-left: 3px solid #ffc107;
+    padding: 6px 10px;
+    margin: 6px 0;
+    border-radius: 0 4px 4px 0;
+    background: rgba(255, 193, 7, 0.06);
+    font-size: 12px;
+}
+
+.sig-modification.danger {
+    border-left-color: #dc3545;
+    background: rgba(220, 53, 69, 0.06);
+}
+
+.sig-modification-title {
+    font-weight: 600;
+    margin-bottom: 2px;
+}
+
+.sig-modification-detail {
+    color: var(--text-muted);
+    font-size: 11px;
+}
+
+/* ── Lock info ─────────────────────────────────────────────────────── */
+
+.sig-lock-info {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin: 4px 0;
+}
+
+.sig-lock-badge {
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    background: rgba(13, 202, 240, 0.1);
+    color: #0dcaf0;
+    border: 1px solid rgba(13, 202, 240, 0.2);
+}
+
+/* ── Validation detail section ─────────────────────────────────────── */
+
+.sig-validation-section {
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.sig-validation-message {
+    font-size: 11px;
+    margin-bottom: 4px;
+}
+
+.sig-validation-list {
+    list-style: none;
+    padding-left: 0;
+    margin: 4px 0;
+    font-size: 11px;
+}
+
+.sig-validation-list li {
+    padding: 2px 0;
+}
+
+.sig-validation-list li.error   { color: #dc3545; }
+.sig-validation-list li.warning { color: #ffc107; }
+
+/* ── Locate button ─────────────────────────────────────────────────── */
+
+.sig-locate-btn {
+    font-size: 11px;
+    padding: 2px 8px;
+    margin-top: 6px;
+}
+
+/* ── Section headers inside card body ──────────────────────────────── */
+
+.sig-section-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin: 8px 0 4px;
+}
+
+.sig-section-title:first-child {
+    margin-top: 0;
+}
+
+/* ── DocMDP permissions badge ──────────────────────────────────────── */
+
+.sig-docmdp-badge {
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.sig-docmdp-badge.level-1 { background: rgba(220, 53, 69, 0.15); color: #dc3545; }
+.sig-docmdp-badge.level-2 { background: rgba(255, 193, 7, 0.15); color: #ffc107; }
+.sig-docmdp-badge.level-3 { background: rgba(25, 135, 84, 0.15); color: #28a745; }

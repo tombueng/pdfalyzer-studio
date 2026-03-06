@@ -11,6 +11,9 @@ import org.apache.pdfbox.pdmodel.encryption.AccessPermission;
 import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
 import org.apache.pdfbox.pdmodel.encryption.PDEncryption;
 import org.apache.pdfbox.pdmodel.encryption.StandardProtectionPolicy;
+import org.apache.pdfbox.pdmodel.interactive.form.PDAcroForm;
+import org.apache.pdfbox.pdmodel.interactive.form.PDField;
+import org.apache.pdfbox.pdmodel.interactive.form.PDSignatureField;
 import org.springframework.stereotype.Service;
 
 import io.pdfalyzer.model.DownloadProtectionRequest;
@@ -44,8 +47,9 @@ public class PdfService {
             session.setEncryptionInfo(encInfo);
             session.setTreeRoot(structureParser.buildTree(doc));
             session.setPageCount(doc.getNumberOfPages());
-            log.info("Parsed '{}': {} pages, encrypted={}", filename,
-                    session.getPageCount(), encInfo.isEncrypted());
+            session.setHasSignatureFields(detectSignatureFields(doc));
+            log.info("Parsed '{}': {} pages, encrypted={}, signatures={}", filename,
+                    session.getPageCount(), encInfo.isEncrypted(), session.isHasSignatureFields());
         } catch (InvalidPasswordException e) {
             EncryptionInfo encInfo = EncryptionInfo.builder()
                     .encrypted(true)
@@ -94,6 +98,7 @@ public class PdfService {
             session.setEncryptionInfo(encInfo);
             session.setTreeRoot(structureParser.buildTree(openedDoc));
             session.setPageCount(openedDoc.getNumberOfPages());
+            session.setHasSignatureFields(detectSignatureFields(openedDoc));
             session.setRawCosTree(null);
 
             // Persist an unencrypted copy so PDF.js can render without a password.
@@ -221,11 +226,22 @@ public class PdfService {
         try (PDDocument doc = Loader.loadPDF(newBytes)) {
             session.setTreeRoot(structureParser.buildTree(doc));
             session.setPageCount(doc.getNumberOfPages());
+            session.setHasSignatureFields(detectSignatureFields(doc));
         }
         session.setRawCosTree(null);
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
+
+    static boolean detectSignatureFields(PDDocument doc) {
+        PDAcroForm acroForm = doc.getDocumentCatalog().getAcroForm();
+        if (acroForm == null) return false;
+        if (acroForm.isSignaturesExist()) return true;
+        for (PDField field : acroForm.getFieldTree()) {
+            if (field instanceof PDSignatureField) return true;
+        }
+        return false;
+    }
 
     static EncryptionInfo buildEncryptionInfo(PDDocument doc, String passwordType) {
         if (!doc.isEncrypted()) {

@@ -249,6 +249,7 @@ html, body {
     background: var(--highlight);
     border-radius: 2px;
     pointer-events: none;
+    z-index: 19;
     animation: highlightPulse 1.5s ease-in-out infinite;
 }
 

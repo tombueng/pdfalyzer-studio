@@ -72,7 +72,7 @@ This regenerates third-party notices and license texts from the current dependen
 |------|------------|
 | Backend | Spring Boot 3.5.11, Spring MVC |
 | Java | Java 21 |
-| PDF parsing/editing | Apache PDFBox 3.0.0, OpenPDF 1.3.30 |
+| PDF parsing/editing | Apache PDFBox 3.0.0, OpenPDF 1.3.30, BouncyCastle 1.80 |
 | PDF/A validation | veraPDF libraries 1.26.1 |
 | UI shell | Thymeleaf |
 | Frontend | Vanilla JavaScript modules + jQuery |
@@ -110,7 +110,7 @@ This regenerates third-party notices and license texts from the current dependen
 - Tree node selection can scroll/highlight matching PDF areas when geometry is available.
 - PDF click can map back to tree node/field selection.
 
-### Tabs (7)
+### Tabs (9)
 
 | Tab | Key | Behavior |
 |-----|-----|----------|
@@ -121,6 +121,8 @@ This regenerates third-party notices and license texts from the current dependen
 | Raw COS | `5` | Raw COS tree |
 | Bookmarks | `6` | Bookmark subtree |
 | Attachments | `7` | Embedded file list/actions |
+| Signatures | `8` | Signature field analysis + validation |
+| Changes | `9` | Pending edit changes |
 
 ### Font inspector
 
@@ -164,6 +166,31 @@ When downloading a PDF that was originally encrypted, an **Export Protection** d
 
 For non-encrypted PDFs the dialog is skipped and the file downloads directly.
 
+### Signature analysis
+
+- Lists all signature fields (signed and unsigned) in an expandable card UI.
+- Extracts certificate details (subject/issuer DN, serial, validity period, algorithms) from signed fields via BouncyCastle CMS parsing.
+- Visualizes byte-range coverage with a segmented bar showing signed regions, signature value gaps, and uncovered trailing bytes.
+- Basic validation checks certificate validity period and byte-range file coverage.
+- Detects post-signature modifications (trailing bytes, multiple %%EOF markers, DocMDP permission violations).
+- Shows field lock information and certification (DocMDP) permission levels.
+- "Locate in PDF" button scrolls the viewer to the signature field's visual position.
+- Tab appears automatically when a PDF contains signature fields; hidden otherwise.
+- Tab state (expanded cards, scroll position) is persisted in localStorage.
+
+### Digital signing
+
+- **Signing wizard** — multi-step modal: visual representation → certificate → options → confirm.
+- **Visual modes**: text (name + font), image upload, freehand drawing canvas, or invisible signature.
+- **Certificate management**: upload PKCS12/PFX, JKS, PEM, or DER key material; generate self-signed certificates (RSA/EC) via BouncyCastle.
+- **PAdES-B-B compliance**: CMS/PKCS#7 signing with ESS signing-certificate-v2 attribute and `ETSI.CAdES.detached` SubFilter.
+- **Certification signatures**: DocMDP transform with configurable permission levels (1–3).
+- **Incremental save**: signatures use `PDDocument.saveIncremental()` to preserve existing signatures.
+- **Save chain integration**: queued signatures are applied as the last step after all other pending changes (form fields, options, COS edits).
+- **Changes tab**: pending signatures appear with certificate details, visual mode, and undo support.
+- **IndexedDB profiles**: save and reuse visual signature configurations across sessions.
+- Private keys are held server-side only (in-memory, per-session); never serialized to JSON or sent to the browser.
+
 ### Resource and attachment handling
 
 - Preview/download stream resources (`/api/resource/...`).
@@ -178,7 +205,7 @@ For non-encrypted PDFs the dialog is skipped and the file downloads directly.
 | `Ctrl+S` | Download PDF (shows protection dialog if encrypted) |
 | `Ctrl+E` | Preselect Text field placement mode |
 | `Esc` | Clear focused search input |
-| `1`..`7` | Switch tabs |
+| `1`..`9` | Switch tabs |
 | `G` | Toggle snap-to-grid *(edit mode only)* |
 | `Ctrl+C` | Copy selected fields *(edit mode only)* |
 | `Ctrl+V` | Paste fields *(edit mode only)* |
@@ -215,6 +242,22 @@ Keyboard shortcuts are suppressed while any modal dialog is open.
 - `GET /api/validate/{sessionId}`
 - `GET /api/validate/{sessionId}/verapdf`
 - `GET /api/validate/{sessionId}/export`
+
+### Signatures
+
+- `GET /api/signatures/{sessionId}` — Analyze all signature fields (returns `SignatureAnalysisResult`)
+
+### Signing
+
+- `POST /api/signing/{sessionId}/upload-key` — Upload certificate/key material (multipart + optional password)
+- `POST /api/signing/{sessionId}/upload-key/{keyId}` — Add material to an existing key set
+- `GET /api/signing/{sessionId}/keys` — List all stored key materials
+- `GET /api/signing/{sessionId}/key/{keyId}` — Get status of one key set
+- `DELETE /api/signing/{sessionId}/key/{keyId}` — Remove key material
+- `POST /api/signing/{sessionId}/generate-self-signed` — Generate self-signed certificate
+- `GET /api/signing/{sessionId}/export-key/{keyId}?password=` — Download key as PKCS12
+- `POST /api/signing/{sessionId}/prepare-signature` — Validate and prepare a pending signature
+- `POST /api/signing/{sessionId}/apply-signature` — Apply a prepared signature to the PDF
 
 ### Editing
 
@@ -388,6 +431,12 @@ All API endpoints are under `/api/`. Responses are JSON unless otherwise noted.
 | GET | `/api/validate/{sessionId}` | Run validation | -- | `ValidationIssue[]` |
 | GET | `/api/validate/{sessionId}/verapdf` | Run embedded veraPDF validation | -- | `{available, success, report, reportFormat, ...}` |
 | GET | `/api/validate/{sessionId}/export` | Download validation report | -- | `text/plain` (attachment) |
+| GET | `/api/signatures/{sessionId}` | Analyze signature fields | -- | `SignatureAnalysisResult` |
+| POST | `/api/signing/{sid}/upload-key` | Upload certificate/key material | `multipart/form-data` with `file` + optional `password` | `KeyMaterialUploadResult` |
+| GET | `/api/signing/{sid}/keys` | List stored key materials | -- | `KeyMaterialUploadResult[]` |
+| POST | `/api/signing/{sid}/generate-self-signed` | Generate self-signed cert | `SelfSignedCertRequest` (JSON) | `KeyMaterialUploadResult` |
+| POST | `/api/signing/{sid}/prepare-signature` | Prepare a pending signature | `SigningRequest` (JSON) | `PendingSignatureData` |
+| POST | `/api/signing/{sid}/apply-signature` | Apply signature to PDF | `PendingSignatureData` (JSON) | `{sessionId, pageCount, tree, signed, fieldName}` |
 | POST | `/api/client-errors` | Log client-side JavaScript errors | JSON payload from browser | `{logged: true}` |
 | POST | `/api/edit/{sessionId}/add-field` | Add a form field | `FormFieldRequest` (JSON) | `{sessionId, pageCount, tree}` |
 
@@ -448,7 +497,14 @@ src/main/java/io/pdfalyzer/
 │   ├── DownloadProtectionRequest.java   # Export protection request DTO
 │   ├── FontInfo.java                    # Font analysis result
 │   ├── ValidationIssue.java             # Validation finding
-│   └── FormFieldRequest.java            # Edit request DTO
+│   ├── FormFieldRequest.java            # Edit request DTO
+│   ├── SignatureInfo.java               # Signature field analysis model
+│   ├── SignatureAnalysisResult.java     # Signature analysis wrapper (counts + list)
+│   ├── SigningKeyMaterial.java          # Server-side key material (private key, cert, chain)
+│   ├── KeyMaterialUploadResult.java     # JSON-safe key material status DTO
+│   ├── SelfSignedCertRequest.java       # Self-signed certificate generation request
+│   ├── SigningRequest.java              # Signing preparation request DTO
+│   └── PendingSignatureData.java        # Pending signature operation data
 ├── service/
 │   ├── SessionService.java              # In-memory session store with eviction
 │   ├── PdfService.java                  # Upload, parse, unlock, download with re-encryption
@@ -464,12 +520,17 @@ src/main/java/io/pdfalyzer/
 │   ├── ValidationService.java           # PDF structure/font/metadata validation
 │   ├── PdfEditService.java              # Form field CRUD operations
 │   ├── PdfFormFieldBuilder.java
-│   └── PdfFieldOptionApplier.java
+│   ├── PdfFieldOptionApplier.java
+│   ├── SignatureAnalysisService.java    # Signature field parsing + BouncyCastle CMS validation
+│   ├── CertificateService.java          # Certificate/key material parsing (PKCS12, PEM, DER, JKS)
+│   ├── SelfSignedCertService.java       # Self-signed cert generation + PKCS12 export
+│   └── PdfSigningService.java           # CMS/PKCS#7 signing with PDFBox incremental save
 └── web/
     ├── HomeController.java              # Serves index + license templates
     ├── ApiController.java               # REST API endpoints
     ├── EditApiController.java           # Edit-specific REST endpoints
     ├── ResourceApiController.java       # Resource/attachment endpoints
+    ├── SigningApiController.java         # Signing & certificate management REST endpoints
     └── GlobalExceptionHandler.java      # Centralized error handling
 
 src/main/resources/
@@ -492,6 +553,10 @@ src/main/resources/
     │   ├── app-tabs.js / app-tabs-fonts.js / app-tabs-font-detail.js
     │   ├── app-tabs-glyph.js / app-tabs-glyph-canvas.js / app-tabs-glyph-viewer.js / app-tabs-glyph-ui.js
     │   ├── app-tabs-validation.js       # Validation rendering + smart issue explainer
+    │   ├── app-tabs-signatures.js      # Signature field analysis cards + byte-range viz
+    │   ├── app-signing-store.js         # IndexedDB wrapper for signing profiles
+    │   ├── app-signing-canvas.js        # Freehand drawing canvas for signature visual
+    │   ├── app-signing.js               # Signing wizard modal (4-step state machine)
     │   ├── app-edit-mode.js / app-edit-field.js / app-edit-options.js
     │   ├── app-edit-designer.js         # Snap-to-grid, copy/paste, align/distribute/size
     │   ├── app-theme.js                 # Color theme picker (100 themes, status-bar panel, localStorage)
@@ -502,6 +567,8 @@ src/main/resources/
     ├── styles-fonts.css                 # Font table, font focus card, font detail tabs
     ├── styles-glyph.css                 # Glyph canvas, hero, usage panel, diagnostic badges
     ├── styles-editor.css                # Edit mode, form-field handles, pending panel, modals
+    ├── styles-signatures.css            # Signature cards, byte-range bar, cert table, badges
+    ├── styles-signing.css               # Signing wizard, drawing canvas, certificate badges
     ├── styles-common.css                # Animations, scrollbar, buttons, toasts, COS badges
     └── logo.svg                         # Application logo
 

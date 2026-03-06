@@ -53,19 +53,22 @@ public class ApiController {
     private final PdfStructureParser structureParser;
     private final VeraPdfService veraPdfService;
     private final FieldSchemaService fieldSchemaService;
+    private final SignatureAnalysisService signatureAnalysisService;
 
     public ApiController(PdfService pdfService,
                          FontInspectorService fontInspectorService,
                          ValidationService validationService,
                          PdfStructureParser structureParser,
                          VeraPdfService veraPdfService,
-                         FieldSchemaService fieldSchemaService) {
+                         FieldSchemaService fieldSchemaService,
+                         SignatureAnalysisService signatureAnalysisService) {
         this.pdfService = pdfService;
         this.fontInspectorService = fontInspectorService;
         this.validationService = validationService;
         this.structureParser = structureParser;
         this.veraPdfService = veraPdfService;
         this.fieldSchemaService = fieldSchemaService;
+        this.signatureAnalysisService = signatureAnalysisService;
     }
 
     @GetMapping("/fields/schema")
@@ -87,6 +90,7 @@ public class ApiController {
         result.put("pageCount", session.getPageCount());
         result.put("tree", session.getTreeRoot());
         result.put("encryptionInfo", session.getEncryptionInfo());
+        result.put("hasSignatures", session.isHasSignatureFields());
         return ResponseEntity.ok(result);
     }
 
@@ -102,6 +106,7 @@ public class ApiController {
         result.put("pageCount", session.getPageCount());
         result.put("tree", session.getTreeRoot());
         result.put("encryptionInfo", session.getEncryptionInfo());
+        result.put("hasSignatures", session.isHasSignatureFields());
         return ResponseEntity.ok(result);
     }
 
@@ -172,6 +177,7 @@ public class ApiController {
         result.put("tree", session.getTreeRoot());
         result.put("fileSize", data.length);
         result.put("encryptionInfo", session.getEncryptionInfo());
+        result.put("hasSignatures", session.isHasSignatureFields());
         return ResponseEntity.ok(result);
     }
 
@@ -184,6 +190,7 @@ public class ApiController {
         result.put("pageCount", session.getPageCount());
         result.put("fileSize", session.getPdfBytes() == null ? 0 : session.getPdfBytes().length);
         result.put("tree", session.getTreeRoot());
+        result.put("hasSignatures", session.isHasSignatureFields());
         return ResponseEntity.ok(result);
     }
 
@@ -342,6 +349,13 @@ public class ApiController {
                 .header(HttpHeaders.CONTENT_DISPOSITION,
                 contentDisposition)
             .contentLength(download.getData().length).body(download.getData());
+    }
+
+    @GetMapping("/signatures/{sessionId}")
+    public ResponseEntity<SignatureAnalysisResult> getSignatures(
+            @PathVariable("sessionId") String sessionId) throws IOException {
+        return ResponseEntity.ok(signatureAnalysisService.analyzeSignatures(
+                pdfService.getSessionPdfBytes(sessionId)));
     }
 
     @GetMapping("/validate/{sessionId}")

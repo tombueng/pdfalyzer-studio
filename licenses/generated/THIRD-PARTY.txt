@@ -1,5 +1,5 @@
 
-Lists of 155 third-party dependencies.
+Lists of 158 third-party dependencies.
      (Eclipse Public License - v 2.0) (GNU Lesser General Public License) Logback Classic Module (ch.qos.logback:logback-classic:1.5.32 - http://logback.qos.ch/logback-classic)
      (Eclipse Public License - v 2.0) (GNU Lesser General Public License) Logback Core Module (ch.qos.logback:logback-core:1.5.32 - http://logback.qos.ch/logback-core)
      (The Apache Software License, Version 2.0) Jackson-annotations (com.fasterxml.jackson.core:jackson-annotations:2.19.4 - https://github.com/FasterXML/jackson)
@@ -75,6 +75,9 @@ Lists of 155 third-party dependencies.
      (Apache-2.0) AssertJ Core (org.assertj:assertj-core:3.27.7 - https://assertj.github.io/doc/#assertj-core)
      (The Apache Software License, Version 2.0) attoparser (org.attoparser:attoparser:2.0.7.RELEASE - https://www.attoparser.org)
      (Apache 2.0) Awaitility (org.awaitility:awaitility:4.2.2 - http://awaitility.org)
+     (Bouncy Castle Licence) Bouncy Castle PKIX, CMS, EAC, TSP, PKCS, OCSP, CMP, and CRMF APIs (org.bouncycastle:bcpkix-jdk18on:1.80 - https://www.bouncycastle.org/download/bouncy-castle-java/)
+     (Bouncy Castle Licence) Bouncy Castle Provider (org.bouncycastle:bcprov-jdk18on:1.80 - https://www.bouncycastle.org/download/bouncy-castle-java/)
+     (Bouncy Castle Licence) Bouncy Castle ASN.1 Extension and Utility APIs (org.bouncycastle:bcutil-jdk18on:1.80 - https://www.bouncycastle.org/download/bouncy-castle-java/)
      (MIT License) org.brotli:dec (org.brotli:dec:0.1.2 - http://brotli.org/dec)
      (EDL 1.0) Angus Activation Registries (org.eclipse.angus:angus-activation:2.0.3 - https://github.com/eclipse-ee4j/angus-activation/angus-activation)
      (Eclipse Distribution License - v 1.0) JAXB Runtime (org.glassfish.jaxb:jaxb-runtime:2.3.9 - https://eclipse-ee4j.github.io/jaxb-ri/)

@@ -7,28 +7,31 @@ PDFalyzer.ChangesTab = (function ($, P) {
     'use strict';
 
     var ICONS = {
-        add:     'fa-plus-circle',
-        'delete': 'fa-trash-alt',
-        rect:    'fa-arrows-alt',
-        options: 'fa-sliders-h',
-        value:   'fa-pen',
-        cos:     'fa-database'
+        add:       'fa-plus-circle',
+        'delete':  'fa-trash-alt',
+        rect:      'fa-arrows-alt',
+        options:   'fa-sliders-h',
+        value:     'fa-pen',
+        cos:       'fa-database',
+        signature: 'fa-file-signature'
     };
     var LABELS = {
-        add:     'Add Field',
-        'delete': 'Delete Field',
-        rect:    'Move / Resize',
-        options: 'Options',
-        value:   'Value',
-        cos:     'COS Change'
+        add:       'Add Field',
+        'delete':  'Delete Field',
+        rect:      'Move / Resize',
+        options:   'Options',
+        value:     'Value',
+        cos:       'COS Change',
+        signature: 'Digital Signature'
     };
     var TYPE_CLASSES = {
-        add:     'change-type-add',
-        'delete': 'change-type-delete',
-        rect:    'change-type-rect',
-        options: 'change-type-options',
-        value:   'change-type-value',
-        cos:     'change-type-cos'
+        add:       'change-type-add',
+        'delete':  'change-type-delete',
+        rect:      'change-type-rect',
+        options:   'change-type-options',
+        value:     'change-type-value',
+        cos:       'change-type-cos',
+        signature: 'change-type-signature'
     };
 
     function esc(s) { return P.Utils.escapeHtml(String(s == null ? '' : s)); }
@@ -76,6 +79,17 @@ PDFalyzer.ChangesTab = (function ($, P) {
                 type: 'cos',
                 entry: item,
                 cosIndex: idx,
+                isLatest: true
+            });
+        });
+
+        // Pending signatures
+        (P.state.pendingSignatures || []).forEach(function (sig, idx) {
+            changes.push({
+                fieldName: sig.fieldName || 'Signature',
+                type: 'signature',
+                entry: sig,
+                sigIndex: idx,
                 isLatest: true
             });
         });
@@ -258,15 +272,29 @@ PDFalyzer.ChangesTab = (function ($, P) {
         return rows ? buildAttrTable(rows) : '';
     }
 
+    function renderSignatureDetails(sig) {
+        if (!sig) return '';
+        var rows = '';
+        if (sig.fieldName) rows += buildAttrRow('Field', '', sig.fieldName);
+        if (sig.visualMode) rows += buildAttrRow('Visual', '', sig.visualMode);
+        if (sig.signMode) rows += buildAttrRow('Mode', '', sig.signMode === 'certification' ? 'Certification (P=' + sig.docMdpLevel + ')' : 'Approval');
+        if (sig.certSubjectDN) rows += buildAttrRow('Signer', '', sig.certSubjectDN);
+        if (sig.certIssuerDN) rows += buildAttrRow('Issuer', '', sig.certIssuerDN);
+        if (sig.reason) rows += buildAttrRow('Reason', '', sig.reason);
+        if (sig.location) rows += buildAttrRow('Location', '', sig.location);
+        return rows ? buildAttrTable(rows) : '<div class="changes-detail-text">Digital signature queued</div>';
+    }
+
     function renderChangeDetails(change) {
         switch (change.type) {
-            case 'add':     return renderAddDetails(change.fieldName);
-            case 'delete':  return renderDeleteDetails(change.entry, change.fieldName);
-            case 'rect':    return renderRectDetails(change.entry, change.fieldName);
-            case 'options': return renderOptionsDetails(change.entry, change.fieldName);
-            case 'value':   return renderValueDetails(change.entry, change.fieldName);
-            case 'cos':     return renderCosDetails(change.entry);
-            default:        return '';
+            case 'add':       return renderAddDetails(change.fieldName);
+            case 'delete':    return renderDeleteDetails(change.entry, change.fieldName);
+            case 'rect':      return renderRectDetails(change.entry, change.fieldName);
+            case 'options':   return renderOptionsDetails(change.entry, change.fieldName);
+            case 'value':     return renderValueDetails(change.entry, change.fieldName);
+            case 'cos':       return renderCosDetails(change.entry);
+            case 'signature': return renderSignatureDetails(change.entry);
+            default:          return '';
         }
     }
 
@@ -302,7 +330,9 @@ PDFalyzer.ChangesTab = (function ($, P) {
                 '<span class="changes-entry-label">' + esc(label) + '</span>' +
                 '<span class="changes-entry-field">' + esc(ch.fieldName) + '</span>';
 
-            if (ch.type !== 'cos' && ch.isLatest) {
+            if (ch.type === 'signature' && ch.isLatest) {
+                html += '<button class="changes-entry-undo-sig" data-sig-index="' + ch.sigIndex + '" title="Remove queued signature"><i class="fas fa-undo"></i></button>';
+            } else if (ch.type !== 'cos' && ch.type !== 'signature' && ch.isLatest) {
                 html += '<button class="changes-entry-undo" data-undo-field="' + esc(ch.fieldName) + '" title="Undo this change"><i class="fas fa-undo"></i></button>';
             }
 
@@ -325,6 +355,17 @@ PDFalyzer.ChangesTab = (function ($, P) {
             var fn = $(this).attr('data-undo-field');
             if (fn && P.EditMode && P.EditMode.popFieldUndo) {
                 P.EditMode.popFieldUndo(fn);
+            }
+        });
+
+        // Bind signature undo buttons
+        $c.find('.changes-entry-undo-sig').on('click', function (e) {
+            e.stopPropagation();
+            var idx = parseInt($(this).attr('data-sig-index'), 10);
+            if (!isNaN(idx) && P.state.pendingSignatures && P.state.pendingSignatures[idx]) {
+                P.state.pendingSignatures.splice(idx, 1);
+                if (P.EditMode && P.EditMode.updateSaveButton) P.EditMode.updateSaveButton();
+                renderChanges();
             }
         });
 
