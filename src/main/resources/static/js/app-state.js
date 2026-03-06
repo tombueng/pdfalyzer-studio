@@ -29,7 +29,7 @@ var PDFalyzer = (function () {
     }
 
     function normalizeTab(tab) {
-        var allowed = ['structure', 'forms', 'fonts', 'validation', 'rawcos', 'bookmarks', 'attachments', 'changes'];
+        var allowed = ['structure', 'forms', 'fonts', 'validation', 'rawcos', 'bookmarks', 'attachments', 'signatures', 'changes'];
         return allowed.indexOf(tab) >= 0 ? tab : 'structure';
     }
 
@@ -88,7 +88,10 @@ var PDFalyzer = (function () {
             pendingFieldValues: asObject(state.pendingFieldValues),
             pendingFieldDeletes: asObject(state.pendingFieldDeletes),
             fieldUndoStacks: asObject(state.fieldUndoStacks),
-            treePaneWidth: (typeof state.treePaneWidth === 'number' && state.treePaneWidth > 0) ? state.treePaneWidth : null
+            treePaneWidth: (typeof state.treePaneWidth === 'number' && state.treePaneWidth > 0) ? state.treePaneWidth : null,
+            signatureTabState: state.signatureTabState || null,
+            pendingSignatures: asArray(state.pendingSignatures),
+            nextOrderIndex: (typeof state.nextOrderIndex === 'number') ? state.nextOrderIndex : 0
         };
 
         try {
@@ -126,7 +129,10 @@ var PDFalyzer = (function () {
                 pendingFieldValues: asObject(parsed.pendingFieldValues),
                 pendingFieldDeletes: asObject(parsed.pendingFieldDeletes),
                 fieldUndoStacks: asObject(parsed.fieldUndoStacks),
-                treePaneWidth: (typeof parsed.treePaneWidth === 'number' && parsed.treePaneWidth > 0) ? parsed.treePaneWidth : null
+                treePaneWidth: (typeof parsed.treePaneWidth === 'number' && parsed.treePaneWidth > 0) ? parsed.treePaneWidth : null,
+                signatureTabState: parsed.signatureTabState || null,
+                pendingSignatures: asArray(parsed.pendingSignatures),
+                nextOrderIndex: (typeof parsed.nextOrderIndex === 'number') ? parsed.nextOrderIndex : 0
             };
         } catch (e) {
             return null;
@@ -170,6 +176,9 @@ var PDFalyzer = (function () {
             state.treePaneWidth = safeDraft.treePaneWidth;
             $('#treePane').css('width', safeDraft.treePaneWidth + 'px');
         }
+        state.signatureTabState = safeDraft.signatureTabState || null;
+        state.pendingSignatures = asArray(safeDraft.pendingSignatures);
+        state.nextOrderIndex = (typeof safeDraft.nextOrderIndex === 'number') ? safeDraft.nextOrderIndex : 0;
     }
     var api = {
         state: {
@@ -199,7 +208,11 @@ var PDFalyzer = (function () {
             panMode: false,
             layerMode: 2,          // 2 = "Fill-out mode" default
             viewerScrollState: null,
-            basePageSize: { width: 0, height: 0 }
+            basePageSize: { width: 0, height: 0 },
+            signatureData: null,
+            signatureTabState: null,
+            pendingSignatures: [],
+            nextOrderIndex: 0
         },
         Storage: {
             setCurrentSessionId: setCurrentSessionId,

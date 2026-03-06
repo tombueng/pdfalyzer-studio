@@ -116,6 +116,7 @@ PDFalyzer.Tabs = (function ($, P) {
                 case 'rawcos':      loadRawCos(viewState); break;
                 case 'bookmarks':   P.Tree.renderSubtree(P.state.treeData, 'bookmarks', { viewState: viewState }); break;
                 case 'attachments': loadAttachments(); break;
+                case 'signatures':  P.SignaturesTab.loadSignatures(); break;
                 case 'changes':     P.ChangesTab.renderChanges(); break;
             }
             if (typeof onAfterRender === 'function') { onAfterRender(); }
