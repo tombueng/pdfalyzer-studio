@@ -67,6 +67,7 @@ PDFalyzer.EditDesigner = (function ($, P) {
                 x: snapV(c.fromX + offset), y: snapV(c.fromY - offset),
                 width: c.width, height: c.height,
                 options: P.EditMode.cloneObject(c.options || {}) });
+            P.EditMode.pushFieldUndo(fieldId, { type: 'add' });
         });
         P.EditMode.renderFieldHandlesForAllPages();
         P.EditMode.updateSaveButton();

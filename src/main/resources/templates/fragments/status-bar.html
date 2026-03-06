@@ -9,7 +9,10 @@
     <span class="status-item" id="statusLoading" style="display:none;">
         <span class="spinner-border spinner-border-sm" role="status"></span> Loading...
     </span>
-    <span class="status-item ms-auto" id="statusRam" style="display:none;" title="JS heap memory in use"><i class="fas fa-memory"></i> <span id="statusRamValue"></span></span>
+    <span class="status-item status-pending-changes ms-auto" id="statusPendingChanges" style="display:none;" role="button" tabindex="0" title="Pending changes — click to view">
+        <i class="fas fa-clock-rotate-left"></i> <span id="statusPendingCount">0</span> changes
+    </span>
+    <span class="status-item" id="statusRam" style="display:none;" title="JS heap memory in use"><i class="fas fa-memory"></i> <span id="statusRamValue"></span></span>
     <a class="status-item status-license-link" href="/license" title="Open licenses and notices">
         <i class="fas fa-scale"></i> Licenses
     </a>
