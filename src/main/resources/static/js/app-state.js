@@ -87,7 +87,8 @@ var PDFalyzer = (function () {
             pendingCosChanges: asArray(state.pendingCosChanges),
             pendingFieldValues: asObject(state.pendingFieldValues),
             pendingFieldDeletes: asObject(state.pendingFieldDeletes),
-            fieldUndoStacks: asObject(state.fieldUndoStacks)
+            fieldUndoStacks: asObject(state.fieldUndoStacks),
+            treePaneWidth: (typeof state.treePaneWidth === 'number' && state.treePaneWidth > 0) ? state.treePaneWidth : null
         };
 
         try {
@@ -124,7 +125,8 @@ var PDFalyzer = (function () {
                 pendingCosChanges: asArray(parsed.pendingCosChanges),
                 pendingFieldValues: asObject(parsed.pendingFieldValues),
                 pendingFieldDeletes: asObject(parsed.pendingFieldDeletes),
-                fieldUndoStacks: asObject(parsed.fieldUndoStacks)
+                fieldUndoStacks: asObject(parsed.fieldUndoStacks),
+                treePaneWidth: (typeof parsed.treePaneWidth === 'number' && parsed.treePaneWidth > 0) ? parsed.treePaneWidth : null
             };
         } catch (e) {
             return null;
@@ -164,6 +166,10 @@ var PDFalyzer = (function () {
         state.pendingFieldValues = asObject(safeDraft.pendingFieldValues);
         state.pendingFieldDeletes = asObject(safeDraft.pendingFieldDeletes);
         state.fieldUndoStacks = asObject(safeDraft.fieldUndoStacks);
+        if (typeof safeDraft.treePaneWidth === 'number' && safeDraft.treePaneWidth > 0) {
+            state.treePaneWidth = safeDraft.treePaneWidth;
+            $('#treePane').css('width', safeDraft.treePaneWidth + 'px');
+        }
     }
     var api = {
         state: {

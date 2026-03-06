@@ -4,7 +4,7 @@
 }
 /* === Tree Pane === */
 #treePane {
-    width: 50vw;
+    width: 30vw;
     min-width: 250px;
     max-width: 70vw;
     background: var(--bg-panel);
