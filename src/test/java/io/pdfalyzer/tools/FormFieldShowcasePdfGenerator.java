@@ -48,6 +48,32 @@ public class FormFieldShowcasePdfGenerator {
     static final float[] GREEN     = {0.08f, 0.52f, 0.22f};     // "correct" note text
     static final float[] MID_GRAY  = {0.55f, 0.55f, 0.60f};
 
+    // ─── Cell theme palettes for 2×3 variant grids (Blue/Green/Amber/Red/Gray/Purple) ───
+    static final float[] CELL_BG_BLUE   = {0.92f, 0.95f, 0.99f};
+    static final float[] CELL_BG_GREEN  = {0.90f, 0.97f, 0.91f};
+    static final float[] CELL_BG_AMBER  = {0.99f, 0.96f, 0.86f};
+    static final float[] CELL_BG_RED    = {0.99f, 0.92f, 0.92f};
+    static final float[] CELL_BG_GRAY   = {0.93f, 0.93f, 0.94f};
+    static final float[] CELL_BG_PURPLE = {0.95f, 0.90f, 0.99f};
+
+    static final float[] CELL_BC_BLUE   = {0.176f, 0.298f, 0.545f};
+    static final float[] CELL_BC_GREEN  = {0.08f,  0.52f,  0.22f};
+    static final float[] CELL_BC_AMBER  = {0.72f,  0.45f,  0.02f};
+    static final float[] CELL_BC_RED    = {0.70f,  0.12f,  0.12f};
+    static final float[] CELL_BC_GRAY   = {0.40f,  0.40f,  0.45f};
+    static final float[] CELL_BC_PURPLE = {0.45f,  0.12f,  0.65f};
+
+    // Parallel arrays — index 0..5 maps to Blue/Green/Amber/Red/Gray/Purple
+    static final float[][] CELL_BG_THEMES = {CELL_BG_BLUE, CELL_BG_GREEN, CELL_BG_AMBER, CELL_BG_RED, CELL_BG_GRAY, CELL_BG_PURPLE};
+    static final float[][] CELL_BC_THEMES = {CELL_BC_BLUE, CELL_BC_GREEN, CELL_BC_AMBER, CELL_BC_RED, CELL_BC_GRAY, CELL_BC_PURPLE};
+
+    // ─── Grid layout constants ───────────────────────────────────────────────────
+    static final float GRID_COL_GAP  = 10f;  // horizontal gap between the two columns
+    static final float GRID_ROW_GAP  = 8f;   // vertical gap between rows
+    static final float CELL_HDR_H    = 14f;  // mini cell title-bar height
+    static final float CELL_WGT_PAD  = 6f;   // top/bottom padding around widget in cell
+    static final float GRID_OUTER_PAD = 8f;  // padding inside outer box above/below grid
+
     // ─── Global state (one-shot generator, not thread-safe) ─────────────────────
     static PDDocument             doc;
     static PDAcroForm             acroForm;
@@ -57,15 +83,16 @@ public class FormFieldShowcasePdfGenerator {
     static PDFont                 bodyFont;
     static String                 fontResName; // resource key in AcroForm DR, e.g. "F1"
     static int                    fieldIdx = 0; // unique field-name counter
+    static Path                   fontPath;     // path to FreeSans TTF — used for re-loading font variants
 
     // ════════════════════════════════════════════════════════════════════════════
     //  ENTRY POINT
     // ════════════════════════════════════════════════════════════════════════════
 
     public static void main(String[] args) throws Exception {
-        Path outPath   = resolveOutputPath(args);
-        Path fontPath  = Paths.get("src/test/resources/fonts/FreeSans.ttf");
-        Path iconPath  = Paths.get("src/main/resources/static/icon.png");
+        Path outPath  = resolveOutputPath(args);
+        fontPath      = Paths.get("src/test/resources/fonts/FreeSans.ttf");
+        Path iconPath = Paths.get("src/main/resources/static/icon.png");
 
         Files.createDirectories(outPath.getParent());
 
@@ -75,7 +102,7 @@ public class FormFieldShowcasePdfGenerator {
         acroForm.setNeedAppearances(true); // viewers regenerate AP streams if needed
 
         // Embed FreeSans as the form's default font
-        System.out.println("[1/10] Loading font: " + fontPath);
+        System.out.println("[1/11] Loading font: " + fontPath);
         bodyFont    = PDType0Font.load(doc, Files.newInputStream(fontPath), false);
         PDResources dr = new PDResources();
         COSName cosName = dr.add(bodyFont);
@@ -84,15 +111,16 @@ public class FormFieldShowcasePdfGenerator {
         acroForm.setDefaultAppearance("/" + fontResName + " 10 Tf 0 g");
 
         // ── Title page ──────────────────────────────────────────────────────────
-        System.out.println("[2/10] Rendering title page...");
+        System.out.println("[2/11] Rendering title page...");
         startNewPage();
         renderTitlePage(iconPath);
 
         // ── Section: TEXT FIELDS ────────────────────────────────────────────────
-        System.out.println("[3/10] Section: TEXT FIELDS");
+        System.out.println("[3/11] Section: TEXT FIELDS");
         startNewPage();
         sectionHeader("TEXT FIELDS", "PDTextField — Standard & Unusual Variants");
 
+        System.out.println("  tc_textFieldStyles"); tc_textFieldStyles();
         System.out.println("  tc_requiredText"); tc_requiredText();
         System.out.println("  tc_readonlyText"); tc_readonlyText();
         System.out.println("  tc_multilineScroll"); tc_multilineScroll();
@@ -107,9 +135,10 @@ public class FormFieldShowcasePdfGenerator {
         System.out.println("  tc_negativeQuadding"); tc_negativeQuadding();
 
         // ── Section: CHECKBOXES & RADIOS ────────────────────────────────────────
-        System.out.println("[4/10] Section: CHECKBOXES & RADIO BUTTONS");
+        System.out.println("[4/11] Section: CHECKBOXES & RADIO BUTTONS");
         sectionHeader("CHECKBOXES & RADIO BUTTONS", "PDCheckBox / PDRadioButton — Flag and Appearance Quirks");
 
+        System.out.println("  tc_checkboxStyles"); tc_checkboxStyles();
         System.out.println("  tc_checkboxStandard"); tc_checkboxStandard();
         System.out.println("  tc_checkboxCustomOnState"); tc_checkboxCustomOnState();
         System.out.println("  tc_checkboxColoredBg"); tc_checkboxColoredBg();
@@ -117,9 +146,10 @@ public class FormFieldShowcasePdfGenerator {
         System.out.println("  tc_radioNoToggleToOff"); tc_radioNoToggleToOff();
 
         // ── Section: CHOICE FIELDS ──────────────────────────────────────────────
-        System.out.println("[5/10] Section: COMBO BOXES & LIST BOXES");
+        System.out.println("[5/11] Section: COMBO BOXES & LIST BOXES");
         sectionHeader("COMBO BOXES & LIST BOXES", "PDComboBox / PDListBox — Edge Cases in Options and Selection");
 
+        System.out.println("  tc_comboStyles"); tc_comboStyles();
         System.out.println("  tc_comboStandard"); tc_comboStandard();
         System.out.println("  tc_comboEditable"); tc_comboEditable();
         System.out.println("  tc_comboPairedOptions"); tc_comboPairedOptions();
@@ -128,15 +158,24 @@ public class FormFieldShowcasePdfGenerator {
         System.out.println("  tc_comboValueOutsideOpt"); tc_comboValueOutsideOpt();
 
         // ── Section: PUSH BUTTONS ───────────────────────────────────────────────
-        System.out.println("[6/10] Section: PUSH BUTTONS");
+        System.out.println("[6/11] Section: PUSH BUTTONS");
         sectionHeader("PUSH BUTTONS", "PDPushButton — Actions, Print Flags, and Embedded Actions");
 
+        System.out.println("  tc_buttonStyles"); tc_buttonStyles();
         System.out.println("  tc_resetButton"); tc_resetButton();
         System.out.println("  tc_submitButton"); tc_submitButton();
         System.out.println("  tc_printOnlyButton"); tc_printOnlyButton();
 
+        // ── Section: FONT EMBEDDING VARIANTS ────────────────────────────────────
+        System.out.println("[7/11] Section: FONT EMBEDDING VARIANTS");
+        sectionHeader("FONT EMBEDDING VARIANTS", "Embedded Full / Subset / Not-Embedded / Standard-14 — Portability, File Size, and Glyph Availability");
+
+        System.out.println("  tc_fontVariants"); tc_fontVariants();
+        System.out.println("  tc_checkboxFontVariants"); tc_checkboxFontVariants();
+        System.out.println("  tc_textFieldValueSubset"); tc_textFieldValueSubset();
+
         // ── Section: WIDGET ANNOTATION QUIRKS ───────────────────────────────────
-        System.out.println("[7/10] Section: WIDGET ANNOTATION BORDER STYLES");
+        System.out.println("[8/11] Section: WIDGET ANNOTATION BORDER STYLES");
         sectionHeader("WIDGET ANNOTATION BORDER STYLES", "Per-Widget /BS and /MK Dictionary — What Most Viewers Ignore");
 
         System.out.println("  tc_borderNone"); tc_borderNone();
@@ -148,7 +187,7 @@ public class FormFieldShowcasePdfGenerator {
         System.out.println("  tc_widgetMkColors"); tc_widgetMkColors();
 
         // ── Section: SIGNATURE FIELDS ───────────────────────────────────────────
-        System.out.println("[8/10] Section: SIGNATURE FIELDS");
+        System.out.println("[9/11] Section: SIGNATURE FIELDS");
         sectionHeader("SIGNATURE FIELDS", "PDSignatureField — Empty, Lock Dict, and DocMDP Certification");
 
         System.out.println("  tc_signatureEmpty"); tc_signatureEmpty();
@@ -156,7 +195,7 @@ public class FormFieldShowcasePdfGenerator {
         System.out.println("  tc_signatureDocMdp"); tc_signatureDocMdp();
 
         // ── Section: EXTREME EDGE CASES ─────────────────────────────────────────
-        System.out.println("[9/10] Section: EXTREME EDGE CASES");
+        System.out.println("[10/11] Section: EXTREME EDGE CASES");
         sectionHeader("EXTREME EDGE CASES", "Legal-but-Unusual PDF Structures That Break Most Parsers");
 
         System.out.println("  tc_hiddenWidget"); tc_hiddenWidget();
@@ -167,7 +206,7 @@ public class FormFieldShowcasePdfGenerator {
         System.out.println("  tc_dvVMismatch"); tc_dvVMismatch();
 
         // ── Finish ───────────────────────────────────────────────────────────────
-        System.out.println("[10/10] Saving PDF...");
+        System.out.println("[11/11] Saving PDF...");
         cs.close();
         doc.save(outPath.toFile());
         doc.close();
@@ -377,6 +416,77 @@ public class FormFieldShowcasePdfGenerator {
         return new float[]{MARGIN, wzBot, CW, widgetZoneH};
     }
 
+    /**
+     * Draw a 2-column × 3-row grid of mini field-cells inside one outer box.
+     * Each cell gets a distinct colour theme (Blue/Green/Amber/Red/Gray/Purple).
+     *
+     * @param title       Title rendered in the outer navy title bar.
+     * @param cellTitles  6 short labels for the coloured mini-bars (index 0 = top-left).
+     * @param cellWidgetH Height (pts) reserved for the widget inside each cell.
+     * @return float[6][4] — each [4] = {x, y, w, h} widget zone; caller places annotation there.
+     */
+    private static float[][] drawGrid2x3Box(String title, String[] cellTitles, float cellWidgetH) throws IOException {
+        float cellH   = CELL_HDR_H + CELL_WGT_PAD + cellWidgetH + CELL_WGT_PAD;
+        float colW    = (CW - GRID_COL_GAP) / 2f;
+        float gridH   = 3 * cellH + 2 * GRID_ROW_GAP;
+        float totalH  = TITLE_H + GRID_OUTER_PAD + gridH + GRID_OUTER_PAD;
+
+        ensureSpace(totalH + BOX_GAP);
+
+        float boxY  = cursorY - totalH;
+        cursorY     = boxY - BOX_GAP;
+
+        // Outer fill and border
+        setFill(LIGHT_BG);
+        fillRect(MARGIN, boxY, CW, totalH);
+        setStroke(BLUE);
+        cs.setLineWidth(0.75f);
+        strokeRect(MARGIN, boxY, CW, totalH);
+
+        // Title bar
+        float titleBarY = boxY + GRID_OUTER_PAD + gridH + GRID_OUTER_PAD;
+        setFill(NAVY);
+        fillRect(MARGIN, titleBarY, CW, TITLE_H);
+        setFill(WHITE);
+        drawText(bodyFont, 9f, MARGIN + 6, titleBarY + 7, title);
+
+        // 6 cells: row 0 = top visual row, row 2 = bottom visual row
+        float[][] zones    = new float[6][4];
+        float     gridBase = boxY + GRID_OUTER_PAD;
+
+        for (int row = 0; row < 3; row++) {
+            for (int col = 0; col < 2; col++) {
+                int   idx   = row * 2 + col;
+                float cellX = MARGIN + col * (colW + GRID_COL_GAP);
+                // row 0 is visually top → highest Y in PDF coords
+                float cellY = gridBase + (2 - row) * (cellH + GRID_ROW_GAP);
+
+                float[] bg = CELL_BG_THEMES[idx];
+                float[] bc = CELL_BC_THEMES[idx];
+
+                // Cell background
+                setFill(bg);
+                fillRect(cellX, cellY, colW, cellH);
+
+                // Cell border (theme colour)
+                setStroke(bc);
+                cs.setLineWidth(1.0f);
+                strokeRect(cellX, cellY, colW, cellH);
+
+                // Coloured mini header bar
+                setFill(bc);
+                fillRect(cellX, cellY + cellH - CELL_HDR_H, colW, CELL_HDR_H);
+                setFill(WHITE);
+                String label = (cellTitles != null && idx < cellTitles.length) ? cellTitles[idx] : "";
+                drawText(bodyFont, 7f, cellX + 4, cellY + cellH - CELL_HDR_H + 4, label);
+
+                // Widget zone (y = bottom of padding area, h = cellWidgetH)
+                zones[idx] = new float[]{cellX, cellY + CELL_WGT_PAD, colW, cellWidgetH};
+            }
+        }
+        return zones;
+    }
+
     private static void sectionHeader(String name, String subtitle) throws IOException {
         float h = 32f;
         ensureSpace(h + BOX_GAP * 2);
@@ -499,6 +609,160 @@ public class FormFieldShowcasePdfGenerator {
 
     private static void addField(PDField field) {
         acroForm.getFields().add(field);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════
+    //  VISUAL STYLE VARIANTS  (2-col × 3-row grids, one per major section)
+    // ════════════════════════════════════════════════════════════════════════════
+
+    private static void tc_textFieldStyles() throws IOException {
+        float[][] zones = drawGrid2x3Box(
+            "TEXT FIELDS \u2014 6 Visual Themes  (Plain / Green / Amber / Red / Gray / Purple)",
+            new String[]{
+                "Plain \u2014 no MK, no colour (baseline)",
+                "Green \u2014 success state",
+                "Amber \u2014 warning state",
+                "Red \u2014 error / invalid",
+                "Gray \u2014 disabled / read-only",
+                "Purple \u2014 custom accent",
+            }, 20f);
+
+        // i=0: completely plain — no MK colors, no custom DA colour (baseline)
+        // i=1..5: Green / Amber / Red / Gray / Purple themes
+        String[]  values   = {"Plain default (no styling)", "Valid entry [OK]", "Check this value!", "Invalid input [ERR]", "Read-only value", "Custom accent"};
+        String[]  daColors = {"0 g", "0.05 0.45 0.15 rg", "0.55 0.30 0 rg", "0.55 0.05 0.05 rg", "0.35 0.35 0.38 rg", "0.35 0.08 0.55 rg"};
+        String[]  bsStyles = {"S", "S", "S", "S", "S", "S"};
+        float[]   bsWidths = {1.0f, 1.5f, 1.5f, 2.0f, 0.75f, 1.5f};
+
+        for (int i = 0; i < 6; i++) {
+            PDTextField f = new PDTextField(acroForm);
+            f.setPartialName(uid());
+            f.setDefaultAppearance("/" + fontResName + " 10 Tf " + daColors[i]);
+            float ww = zones[i][2] - 16f;
+            float wx = zones[i][0] + 8f;
+            float wy = zones[i][1] + (zones[i][3] - 16f) / 2f;
+            PDAnnotationWidget w = mkWidget(wx, wy, ww, 16f);
+            linkWidget(f, w);
+            setBorderStyle(w, bsStyles[i], bsWidths[i]);
+            if (i > 0) setMkColors(w, CELL_BG_THEMES[i], CELL_BC_THEMES[i]); // i=0 = plain, no MK
+            if (i == 4) f.setReadOnly(true);
+            f.setValue(values[i]);
+            addField(f);
+        }
+    }
+
+    private static void tc_checkboxStyles() throws IOException {
+        float[][] zones = drawGrid2x3Box(
+            "CHECKBOXES \u2014 6 Visual Themes  (Plain / Green / Amber / Red / Gray / Purple)",
+            new String[]{
+                "Plain \u2014 no MK, no colour (baseline)",
+                "Green \u2014 checked",
+                "Amber \u2014 unchecked",
+                "Red \u2014 checked",
+                "Gray \u2014 unchecked (disabled)",
+                "Purple \u2014 checked",
+            }, 18f);
+
+        // i=0: plain default — no MK colors; i=1..5 themed
+        boolean[] checked = {true, true, false, true, false, true};
+
+        for (int i = 0; i < 6; i++) {
+            PDCheckBox f = new PDCheckBox(acroForm);
+            f.setPartialName(uid());
+            float cx = zones[i][0] + 8f;
+            float cy = zones[i][1] + (zones[i][3] - 14f) / 2f;
+            PDAnnotationWidget w = mkWidget(cx, cy, 14f, 14f);
+            linkWidget(f, w);
+            if (i > 0) setMkColors(w, CELL_BG_THEMES[i], CELL_BC_THEMES[i]); // i=0 = plain, no MK
+            if (i > 0) setBorderStyle(w, "S", 1.5f);
+            if (i == 4) f.setReadOnly(true);
+            addField(f);
+            if (checked[i]) {
+                try { f.check(); } catch (Exception ignored) {}
+            }
+            // Label next to the box
+            setFill(i > 0 ? CELL_BC_THEMES[i] : DARK_TXT);
+            drawText(bodyFont, 8f, cx + 18f, cy + 2f, checked[i] ? "Checked" : "Unchecked");
+        }
+    }
+
+    private static void tc_comboStyles() throws IOException {
+        float[][] zones = drawGrid2x3Box(
+            "COMBO BOXES \u2014 6 Visual Themes  (Plain / thick / dashed / beveled / inset / underline)",
+            new String[]{
+                "Plain \u2014 no MK, no colour (baseline)",
+                "Green \u2014 solid, 2.5 pt",
+                "Amber \u2014 dashed [4,2]",
+                "Red \u2014 beveled (/B)",
+                "Gray \u2014 inset (/I)",
+                "Purple \u2014 underline (/U)",
+            }, 18f);
+
+        // i=0: plain default — no MK colors, no explicit border style
+        // i=1..5: Green thick / Amber dashed / Red beveled / Gray inset / Purple underline
+        String[] selected  = {"Option A", "Option B", "Option C", "Option D", "Option E", "Option F"};
+        // [borderStyle, lineWidth] for each cell; index 0 is unused (plain)
+        String[][] bsCfg   = {{"S","1.0"}, {"S","2.5"}, {"D","2.0"}, {"B","2.0"}, {"I","2.0"}, {"U","2.0"}};
+
+        for (int i = 0; i < 6; i++) {
+            PDComboBox f = new PDComboBox(acroForm);
+            f.setPartialName(uid());
+            f.setOptions(Arrays.asList("Option A", "Option B", "Option C", "Option D", "Option E", "Option F"));
+            f.setDefaultAppearance("/" + fontResName + " 9 Tf 0 g");
+            float ww = zones[i][2] - 16f;
+            float wx = zones[i][0] + 8f;
+            float wy = zones[i][1] + (zones[i][3] - 16f) / 2f;
+            PDAnnotationWidget w = mkWidget(wx, wy, ww, 16f);
+            linkWidget(f, w);
+            if (i > 0) {                                     // i=0 = plain, no MK, no custom border
+                setMkColors(w, CELL_BG_THEMES[i], CELL_BC_THEMES[i]);
+                if ("D".equals(bsCfg[i][0])) {
+                    setBorderStyleDashed(w, Float.parseFloat(bsCfg[i][1]), 4, 2);
+                } else {
+                    setBorderStyle(w, bsCfg[i][0], Float.parseFloat(bsCfg[i][1]));
+                }
+            }
+            f.setValue(selected[i]);
+            addField(f);
+        }
+    }
+
+    private static void tc_buttonStyles() throws IOException {
+        float[][] zones = drawGrid2x3Box(
+            "PUSH BUTTONS \u2014 6 Visual Themes  (Plain / Green / Amber / Red / Gray / Purple)",
+            new String[]{
+                "Plain \u2014 no MK, no colour (baseline)",
+                "Green \u2014 confirm / submit",
+                "Amber \u2014 warning action",
+                "Red \u2014 destructive action",
+                "Gray \u2014 secondary / cancel",
+                "Purple \u2014 special action",
+            }, 22f);
+
+        // i=0: plain default — no MK colors, viewer-default appearance, just a caption
+        // i=1..5: solid-fill with theme colour as button background
+        String[] captions = {"Default button", "Confirm", "Warning", "Delete!", "Cancel", "Special"};
+
+        for (int i = 0; i < 6; i++) {
+            PDPushButton f = new PDPushButton(acroForm);
+            f.setPartialName(uid());
+            // Plain cell keeps default (black) text; themed cells use white text on coloured bg
+            String daColor = (i > 0) ? "1 1 1 rg" : "0 g";
+            f.getCOSObject().setString(COSName.DA, "/" + fontResName + " 9 Tf " + daColor);
+            float ww = zones[i][2] - 30f;
+            float wx = zones[i][0] + 15f;
+            float wy = zones[i][1] + (zones[i][3] - 18f) / 2f;
+            PDAnnotationWidget w = mkWidget(wx, wy, ww, 18f);
+            linkWidget(f, w);
+            if (i > 0) {                                     // i=0 = plain, no MK
+                setMkColors(w, CELL_BC_THEMES[i], CELL_BC_THEMES[i]);
+                setBorderStyle(w, "S", 1.0f);
+            }
+            COSDictionary mk = (COSDictionary) w.getCOSObject().getDictionaryObject(COSName.MK);
+            if (mk == null) { mk = new COSDictionary(); w.getCOSObject().setItem(COSName.MK, mk); }
+            mk.setString(COSName.getPDFName("CA"), captions[i]);
+            addField(f);
+        }
     }
 
     // ════════════════════════════════════════════════════════════════════════════
@@ -1527,6 +1791,192 @@ public class FormFieldShowcasePdfGenerator {
         f.setValue("Changed value  (/V)");
         f.getCOSObject().setString(COSName.DV, "Original default  (/DV, used by ResetForm)");
         addField(f);
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════
+    //  FONT EMBEDDING VARIANT TEST CASES
+    // ════════════════════════════════════════════════════════════════════════════
+
+    /** Load a font from an InputStream, add it to the AcroForm /DR /Font dict, return its resource name. */
+    private static String addFontToDR(PDFont font) {
+        PDResources dr = acroForm.getDefaultResources();
+        COSName name = dr.add(font);
+        return name.getName();
+    }
+
+    /**
+     * 2×3 grid: six text fields each using a different font embedding strategy.
+     * Cell 0: plain / no MK (inherits AcroForm default = FreeSans full-embed).
+     * Cell 1: FreeSans — explicitly fully embedded (same font, different resource entry).
+     * Cell 2: FreeSans — subset-embedded (PDType0Font embed=true; only glyphs in the value).
+     * Cell 3: Lato Regular — different TTF, fully embedded.
+     * Cell 4: Standard Type1 Helvetica — NOT embedded; viewer must supply the font.
+     * Cell 5: Standard Type1 Courier — NOT embedded; fixed-width viewer fallback.
+     */
+    private static void tc_fontVariants() throws IOException {
+        float[][] zones = drawGrid2x3Box(
+            "FONT EMBEDDING \u2014 Text Field Variants  (Plain / Full-embed / Subset / Lato / Helvetica / Courier)",
+            new String[]{
+                "Plain \u2014 no MK, inherits AcroForm DA",
+                "FreeSans \u2014 fully embedded (all glyphs)",
+                "FreeSans \u2014 subset (only glyphs in value)",
+                "Lato Regular \u2014 different TTF, full embed",
+                "Helvetica \u2014 Standard Type1, NOT embedded",
+                "Courier \u2014 Standard Type1, NOT embedded",
+            }, 20f);
+
+        // Load font variants (cell 0 reuses bodyFont implicitly; cells 1-5 load explicitly)
+        PDFont freeSansFull   = PDType0Font.load(doc, Files.newInputStream(fontPath), false);
+        PDFont freeSansSubset = PDType0Font.load(doc, Files.newInputStream(fontPath), true);
+        Path   latoPath       = fontPath.resolveSibling("Lato-Regular.ttf");
+        PDFont latoFull       = PDType0Font.load(doc, Files.newInputStream(latoPath), false);
+        PDFont helv           = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
+        PDFont courier        = new PDType1Font(Standard14Fonts.FontName.COURIER);
+
+        String fullResName   = addFontToDR(freeSansFull);
+        String subsetResName = addFontToDR(freeSansSubset);
+        String latoResName   = addFontToDR(latoFull);
+        String helvResName   = addFontToDR(helv);
+        String courierResName = addFontToDR(courier);
+
+        // Parallel arrays: da suffix, font resource name (null = use bodyFont / no MK)
+        String[] daFontNames = {null, fullResName, subsetResName, latoResName, helvResName, courierResName};
+        String[] values = {
+            "Plain default (no styling)",
+            "FreeSans fully embedded",
+            "Subset: only these chars",
+            "Lato Regular embedded",
+            "Helvetica (viewer-provided)",
+            "Courier (viewer-provided)",
+        };
+
+        // For subset font: call encode on all chars in the value so they are included in the subset
+        freeSansSubset.encode(values[2]);
+
+        for (int i = 0; i < 6; i++) {
+            PDTextField f = new PDTextField(acroForm);
+            f.setPartialName(uid());
+            String fontName = (i == 0) ? fontResName : daFontNames[i];
+            f.setDefaultAppearance("/" + fontName + " 10 Tf 0 g");
+            float ww = zones[i][2] - 16f;
+            float wx = zones[i][0] + 8f;
+            float wy = zones[i][1] + (zones[i][3] - 16f) / 2f;
+            PDAnnotationWidget w = mkWidget(wx, wy, ww, 16f);
+            linkWidget(f, w);
+            if (i > 0) setMkColors(w, CELL_BG_THEMES[i], CELL_BC_THEMES[i]);
+            f.setValue(values[i]);
+            addField(f);
+        }
+    }
+
+    /**
+     * 2×3 grid: six checkboxes / radio buttons using different font strategies in their /DA.
+     * Cell 0: plain / no MK — inherits AcroForm default DA (FreeSans full).
+     * Cell 1: explicit /DA removed — viewer must fall back to built-in heuristic.
+     * Cell 2: ZapfDingbats (/ZaDb) — traditional PDF checkbox glyph font.
+     * Cell 3: embedded TrueType (Lato) — custom font in per-field /DA.
+     * Cell 4: embedded subset (FreeSans, only 2 glyphs: on-state 'l' + off-state ' ').
+     * Cell 5: Standard Type1 Helvetica — not embedded; uses viewer-supplied Helv.
+     */
+    private static void tc_checkboxFontVariants() throws IOException {
+        float[][] zones = drawGrid2x3Box(
+            "CHECKBOXES \u2014 Font Embedding Variants  (Plain / No-DA / ZapfDingbats / Lato / 2-glyph subset / Helvetica)",
+            new String[]{
+                "Plain \u2014 inherits AcroForm DA",
+                "No /DA \u2014 viewer fallback",
+                "ZapfDingbats (/ZaDb) \u2014 traditional",
+                "Lato Regular \u2014 embedded TTF",
+                "2-glyph subset (only 'l' + ' ')",
+                "Helvetica \u2014 Standard Type1",
+            }, 18f);
+
+        // Prepare fonts for cells 2-5
+        PDFont zadb    = new PDType1Font(Standard14Fonts.FontName.ZAPF_DINGBATS);
+        Path   latoPath = fontPath.resolveSibling("Lato-Regular.ttf");
+        PDFont lato    = PDType0Font.load(doc, Files.newInputStream(latoPath), false);
+        PDFont subset2 = PDType0Font.load(doc, Files.newInputStream(fontPath), true);
+        PDFont helv    = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
+
+        // Register only 2 glyphs for subset2 (on-state char 'l' + space for off-state)
+        subset2.encode("l ");
+
+        String zadbRes   = addFontToDR(zadb);
+        String latoRes   = addFontToDR(lato);
+        String sub2Res   = addFontToDR(subset2);
+        String helvRes   = addFontToDR(helv);
+
+        // Per-cell /DA strings (null means use bodyFont)
+        String[] daStrings = {
+            null,                                              // 0: inherits
+            null,                                              // 1: will be removed
+            "/" + zadbRes   + " 12 Tf 0 g",                   // 2: ZapfDingbats
+            "/" + latoRes   + " 10 Tf 0 g",                   // 3: Lato
+            "/" + sub2Res   + " 10 Tf 0 g",                   // 4: 2-glyph subset
+            "/" + helvRes   + " 10 Tf 0 g",                   // 5: Helvetica
+        };
+
+        boolean[] checked = {true, true, true, true, true, true};
+
+        for (int i = 0; i < 6; i++) {
+            PDCheckBox f = new PDCheckBox(acroForm);
+            f.setPartialName(uid());
+            if (i == 1) {
+                // Explicitly remove /DA to force viewer fallback
+                f.getCOSObject().removeItem(COSName.DA);
+            } else if (daStrings[i] != null) {
+                f.getCOSObject().setString(COSName.DA, daStrings[i]);
+            }
+            float cx = zones[i][0] + 8f;
+            float cy = zones[i][1] + (zones[i][3] - 14f) / 2f;
+            PDAnnotationWidget w = mkWidget(cx, cy, 14f, 14f);
+            linkWidget(f, w);
+            if (i > 0) setMkColors(w, CELL_BG_THEMES[i], CELL_BC_THEMES[i]);
+            if (i > 0) setBorderStyle(w, "S", 1.5f);
+            addField(f);
+            if (checked[i]) {
+                try { f.check(); } catch (Exception ignored) {}
+            }
+            setFill(i > 0 ? CELL_BC_THEMES[i] : DARK_TXT);
+            drawText(bodyFont, 8f, cx + 18f, cy + 2f, "Checked");
+        }
+    }
+
+    /**
+     * Single detailed box: a text field whose embedded font subset contains ONLY the exact
+     * characters present in the field's value — nothing more. This minimises the embedded
+     * font byte overhead for forms with fixed, known values.
+     */
+    private static void tc_textFieldValueSubset() throws IOException {
+        String value = "AcroForm subset demo";  // 14 unique code-points
+        float[] z = drawBox(
+            "TEXT \u2014 Value-Only Font Subset  (embedded glyphs = exactly the chars in /V)",
+            new String[]{
+                "Font loaded with PDType0Font.load(doc, stream, embedSubset=true).",
+                "Before setValue(), font.encode(value) is called to register only the needed glyph IDs.",
+                "At doc.save() time, PDFBox subsets the CIDFont to those GIDs only \u2014 minimising file size.",
+                "!If /V is later changed (e.g., by a viewer) to include a new char, that glyph is MISSING.",
+                "!The subset font cannot render characters beyond those registered at generation time.",
+                "+Value: \"" + value + "\" \u2014 unique glyphs: " + uniqueCount(value) + " code-points embedded.",
+            }, 28f);
+
+        PDFont subsetFont = PDType0Font.load(doc, Files.newInputStream(fontPath), true);
+        // Register all chars in the value — this determines exactly which glyphs get embedded
+        subsetFont.encode(value);
+        String subsetRes = addFontToDR(subsetFont);
+
+        PDTextField f = new PDTextField(acroForm);
+        f.setPartialName(uid());
+        f.setDefaultAppearance("/" + subsetRes + " 11 Tf 0 g");
+        PDAnnotationWidget w = widgetInZone(z, 340f, 18f);
+        setMkColors(w, CELL_BG_BLUE, CELL_BC_BLUE);
+        linkWidget(f, w);
+        f.setValue(value);
+        addField(f);
+    }
+
+    /** Count distinct Unicode code-points in a string (used in description text). */
+    private static int uniqueCount(String s) {
+        return (int) s.codePoints().distinct().count();
     }
 
     // ════════════════════════════════════════════════════════════════════════════

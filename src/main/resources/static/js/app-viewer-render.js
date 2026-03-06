@@ -153,10 +153,13 @@ PDFalyzer.ViewerRender = (function ($, P) {
 
             P.Viewer.attachPageListeners(canvas, pageNum - 1, $wrapper);
 
-            var annotMode = (P.state && P.state.showPdfAnnotations) ? 1 : 0;
+            var layerMode = (P.state && P.state.layerMode) || 0;
+            var layerDef = PDFalyzer.Zoom && PDFalyzer.Zoom.LAYER_MODES ? PDFalyzer.Zoom.LAYER_MODES[layerMode] : null;
+            var annotMode = (layerDef ? layerDef.annot : false) ? 1 : 0;
             return page.render({ canvasContext: canvas.getContext('2d'), viewport: hiDpiViewport, annotationMode: annotMode }).promise
                 .then(function () {
-                    if (P.EditMode && P.EditMode.renderFieldHandles) {
+                    var showFormLayer = (layerDef ? layerDef.form : false) || !!(P.state && P.state.editFieldType);
+                    if (showFormLayer && P.EditMode && P.EditMode.renderFieldHandles) {
                         P.EditMode.renderFieldHandles(pageNum - 1, $wrapper[0], viewport);
                     }
                 });
