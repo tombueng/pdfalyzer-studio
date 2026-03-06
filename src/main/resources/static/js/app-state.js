@@ -24,8 +24,12 @@ var PDFalyzer = (function () {
         return Array.isArray(value) ? value : [];
     }
 
+    function asObject(value) {
+        return (value && typeof value === 'object' && !Array.isArray(value)) ? value : {};
+    }
+
     function normalizeTab(tab) {
-        var allowed = ['structure', 'forms', 'fonts', 'validation', 'rawcos', 'bookmarks', 'attachments'];
+        var allowed = ['structure', 'forms', 'fonts', 'validation', 'rawcos', 'bookmarks', 'attachments', 'changes'];
         return allowed.indexOf(tab) >= 0 ? tab : 'structure';
     }
 
@@ -80,7 +84,10 @@ var PDFalyzer = (function () {
             pendingFormAdds: asArray(state.pendingFormAdds),
             pendingFieldRects: asArray(state.pendingFieldRects),
             pendingFieldOptions: asArray(state.pendingFieldOptions),
-            pendingCosChanges: asArray(state.pendingCosChanges)
+            pendingCosChanges: asArray(state.pendingCosChanges),
+            pendingFieldValues: asObject(state.pendingFieldValues),
+            pendingFieldDeletes: asObject(state.pendingFieldDeletes),
+            fieldUndoStacks: asObject(state.fieldUndoStacks)
         };
 
         try {
@@ -114,7 +121,10 @@ var PDFalyzer = (function () {
                 pendingFormAdds: asArray(parsed.pendingFormAdds),
                 pendingFieldRects: asArray(parsed.pendingFieldRects),
                 pendingFieldOptions: asArray(parsed.pendingFieldOptions),
-                pendingCosChanges: asArray(parsed.pendingCosChanges)
+                pendingCosChanges: asArray(parsed.pendingCosChanges),
+                pendingFieldValues: asObject(parsed.pendingFieldValues),
+                pendingFieldDeletes: asObject(parsed.pendingFieldDeletes),
+                fieldUndoStacks: asObject(parsed.fieldUndoStacks)
             };
         } catch (e) {
             return null;
@@ -151,7 +161,9 @@ var PDFalyzer = (function () {
         state.pendingFieldRects = asArray(safeDraft.pendingFieldRects);
         state.pendingFieldOptions = asArray(safeDraft.pendingFieldOptions);
         state.pendingCosChanges = asArray(safeDraft.pendingCosChanges);
-        state.pendingFieldDeletes = {};
+        state.pendingFieldValues = asObject(safeDraft.pendingFieldValues);
+        state.pendingFieldDeletes = asObject(safeDraft.pendingFieldDeletes);
+        state.fieldUndoStacks = asObject(safeDraft.fieldUndoStacks);
     }
     var api = {
         state: {
@@ -169,7 +181,9 @@ var PDFalyzer = (function () {
             pendingFieldRects: [],
             pendingFieldOptions: [],
             pendingCosChanges: [],
+            pendingFieldValues: {},
             pendingFieldDeletes: {},
+            fieldUndoStacks: {},
             selectedFieldNames: [],
             selectedImageNodeIds: [],
             pageViewports: [],
