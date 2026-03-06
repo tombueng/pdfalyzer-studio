@@ -540,6 +540,9 @@
     pointer-events: none;
     user-select: none;
 }
+.fill-field-wrap.edit-mode-preview .fill-field-actions {
+    display: none;
+}
 
 .form-fill-overlay.readonly {
     cursor: default;
@@ -767,9 +770,10 @@
     color: var(--warning);
 }
 
-.changes-tab-hint {
-    font-size: 11px;
-    color: var(--text-muted);
+.changes-tab-save {
+    font-size: 12px;
+    padding: 3px 12px;
+    font-weight: 600;
 }
 
 .changes-entry {
@@ -856,15 +860,18 @@
 .changes-attr-table .attr-label {
     color: #bbb;
     font-weight: 500;
-    width: 30%;
+    width: 12%;
 }
 .changes-attr-table .attr-before {
     color: var(--text-muted);
-    width: 35%;
+    width: 22%;
 }
 .changes-attr-table .attr-after {
     color: #fff;
-    width: 35%;
+    width: 22%;
+}
+.changes-attr-table .attr-diff {
+    width: 44%;
 }
 .changes-attr-table tr.attr-changed .attr-before {
     color: #ff6b6b;

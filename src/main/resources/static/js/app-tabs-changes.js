@@ -34,18 +34,19 @@ PDFalyzer.ChangesTab = (function ($, P) {
     function esc(s) { return P.Utils.escapeHtml(String(s == null ? '' : s)); }
     function fmtNum(v) { return (typeof v === 'number') ? v.toFixed(1) : String(v == null ? '' : v); }
 
-    function buildAttrRow(label, before, after) {
+    function buildAttrRow(label, before, after, diffHtml) {
         if (String(before) === String(after)) return '';
         return '<tr class="attr-changed">' +
             '<td class="attr-label">' + esc(label) + '</td>' +
             '<td class="attr-before">' + esc(before) + '</td>' +
-            '<td class="attr-after">' + esc(after) + '</td></tr>';
+            '<td class="attr-after">' + esc(after) + '</td>' +
+            '<td class="attr-diff">' + (diffHtml || '') + '</td></tr>';
     }
 
     function buildAttrTable(rows) {
         if (!rows) return '';
         return '<table class="changes-attr-table"><thead><tr>' +
-            '<th>Attribute</th><th>Before</th><th>After</th></tr></thead><tbody>' +
+            '<th>Attribute</th><th>Before</th><th>After</th><th>Diff</th></tr></thead><tbody>' +
             rows + '</tbody></table>';
     }
 
@@ -161,33 +162,68 @@ PDFalyzer.ChangesTab = (function ($, P) {
         return rows ? buildAttrTable(rows) : '<div class="changes-detail-text">Options (no visible diff)</div>';
     }
 
+    var DIFF_MIN_MATCH = 2;   // minimum chars for a common substring to count as context
+    var DIFF_MAX_LEN   = 500; // skip diff for very long values
+
+    /** Find the longest common substring between a[aS..aE) and b[bS..bE). */
+    function findLCS(a, aS, aE, b, bS, bE) {
+        var bestLen = 0, bestA = 0, bestB = 0;
+        for (var i = aS; i < aE; i++) {
+            for (var j = bS; j < bE; j++) {
+                if (a[i] !== b[j]) continue;
+                var len = 0;
+                while (i + len < aE && j + len < bE && a[i + len] === b[j + len]) len++;
+                if (len > bestLen) { bestLen = len; bestA = i; bestB = j; }
+            }
+        }
+        if (bestLen < DIFF_MIN_MATCH) return null;
+        return { aIdx: bestA, bIdx: bestB, length: bestLen };
+    }
+
+    /** Recursively diff a[aS..aE) vs b[bS..bE), appending segments. */
+    function diffRecurse(a, aS, aE, b, bS, bE, segs) {
+        if (aS >= aE && bS >= bE) return;
+        if (aS >= aE) { segs.push({ type: 'added', text: b.substring(bS, bE) }); return; }
+        if (bS >= bE) { segs.push({ type: 'removed', text: a.substring(aS, aE) }); return; }
+        var m = findLCS(a, aS, aE, b, bS, bE);
+        if (!m) {
+            // No common substring — emit removed then added
+            segs.push({ type: 'removed', text: a.substring(aS, aE) });
+            segs.push({ type: 'added', text: b.substring(bS, bE) });
+            return;
+        }
+        diffRecurse(a, aS, m.aIdx, b, bS, m.bIdx, segs);
+        segs.push({ type: 'context', text: a.substring(m.aIdx, m.aIdx + m.length) });
+        diffRecurse(a, m.aIdx + m.length, aE, b, m.bIdx + m.length, bE, segs);
+    }
+
+    /** Merge adjacent segments of the same type. */
+    function mergeSegments(segs) {
+        var merged = [];
+        for (var i = 0; i < segs.length; i++) {
+            if (merged.length && merged[merged.length - 1].type === segs[i].type) {
+                merged[merged.length - 1].text += segs[i].text;
+            } else {
+                merged.push({ type: segs[i].type, text: segs[i].text });
+            }
+        }
+        return merged;
+    }
+
     function computeSimpleDiff(a, b) {
-        // Find common prefix
-        var prefixLen = 0;
-        while (prefixLen < a.length && prefixLen < b.length && a[prefixLen] === b[prefixLen]) prefixLen++;
-        // Find common suffix (not overlapping prefix)
-        var suffixLen = 0;
-        while (suffixLen < (a.length - prefixLen) && suffixLen < (b.length - prefixLen) &&
-               a[a.length - 1 - suffixLen] === b[b.length - 1 - suffixLen]) suffixLen++;
-        var removed = a.substring(prefixLen, a.length - suffixLen);
-        var added = b.substring(prefixLen, b.length - suffixLen);
-        // Count "segments" — if both removed and added are non-empty it's a replacement (2 ops)
-        var ops = (removed ? 1 : 0) + (added ? 1 : 0);
-        return {
-            prefix: a.substring(0, prefixLen),
-            removed: removed,
-            added: added,
-            suffix: a.substring(a.length - suffixLen),
-            ops: ops
-        };
+        if (a === b) return { segments: [{ type: 'context', text: a }] };
+        if (a.length > DIFF_MAX_LEN || b.length > DIFF_MAX_LEN) return null;
+        var segs = [];
+        diffRecurse(a, 0, a.length, b, 0, b.length, segs);
+        var merged = mergeSegments(segs);
+        return merged.length ? { segments: merged } : null;
     }
 
     function renderDiffHtml(diff) {
         var html = '<div class="value-diff">';
-        html += '<span class="diff-context">' + esc(diff.prefix) + '</span>';
-        if (diff.removed) html += '<span class="diff-removed">' + esc(diff.removed) + '</span>';
-        if (diff.added) html += '<span class="diff-added">' + esc(diff.added) + '</span>';
-        html += '<span class="diff-context">' + esc(diff.suffix) + '</span>';
+        diff.segments.forEach(function (seg) {
+            html += '<span class="diff-' + seg.type + '">' + esc(seg.text) + '</span>';
+        });
         html += '</div>';
         return html;
     }
@@ -200,11 +236,10 @@ PDFalyzer.ChangesTab = (function ($, P) {
         if (oldStr === newStr) return '<div class="changes-detail-text">No change</div>';
 
         var diff = computeSimpleDiff(oldStr, newStr);
-        // Simple diff: at most 2 ops (one removal + one addition at the same position)
-        if (diff.ops <= 2) return renderDiffHtml(diff);
-
-        // Complex: fall back to before/after table
-        var rows = buildAttrRow('value', oldStr || '(empty)', newStr || '(empty)');
+        // Skip diff for total replacements (no shared context)
+        var hasContext = diff && diff.segments.some(function (s) { return s.type === 'context'; });
+        var diffCell = hasContext ? renderDiffHtml(diff) : '';
+        var rows = buildAttrRow('value', oldStr || '(empty)', newStr || '(empty)', diffCell);
         return buildAttrTable(rows);
     }
 
@@ -251,7 +286,7 @@ PDFalyzer.ChangesTab = (function ($, P) {
         var html = '<div class="changes-tab-panel">' +
             '<div class="changes-tab-header">' +
             '<span class="changes-tab-count">' + changes.length + ' pending change' + (changes.length > 1 ? 's' : '') + '</span>' +
-            '<span class="changes-tab-hint">Click Save to persist to PDF</span>' +
+            '<button class="btn btn-sm btn-accent changes-tab-save" id="changesTabSaveBtn" title="Save all changes to PDF"><i class="fas fa-save me-1"></i>Save</button>' +
             '</div>';
 
         // Reverse so most recent changes appear first
@@ -278,6 +313,11 @@ PDFalyzer.ChangesTab = (function ($, P) {
 
         html += '</div>';
         $c.html(html);
+
+        // Bind save button
+        $c.find('#changesTabSaveBtn').on('click', function () {
+            if (P.EditMode && P.EditMode.savePendingChanges) P.EditMode.savePendingChanges();
+        });
 
         // Bind undo buttons
         $c.find('.changes-entry-undo').on('click', function (e) {
