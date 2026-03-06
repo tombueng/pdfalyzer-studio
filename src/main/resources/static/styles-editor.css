@@ -78,6 +78,12 @@
     overflow: visible;
 }
 
+/* In fillout-preview mode: handle is a ghost — field appearance comes from the fill overlay below */
+.form-field-handle.fillout-preview {
+    border-color: rgba(0, 212, 255, 0.45);
+    background: transparent;
+}
+
 .form-field-handle.selected {
     background: var(--accent-dim);
 }
@@ -522,7 +528,7 @@
 .form-fill-overlay {
     position: absolute;
     box-sizing: border-box;
-    z-index: 4;
+    z-index: 3;
     background: transparent;
     border: none;
     border-radius: 2px;
@@ -535,6 +541,12 @@
 
 .form-fill-overlay:focus {
     outline: none;
+}
+
+/* In form-edit mode: fill overlays are visual preview only — handles take all pointer events */
+.form-fill-overlay.edit-mode-preview {
+    pointer-events: none;
+    user-select: none;
 }
 
 .form-fill-overlay.readonly {

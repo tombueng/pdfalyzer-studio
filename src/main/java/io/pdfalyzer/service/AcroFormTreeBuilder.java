@@ -302,6 +302,9 @@ public class AcroFormTreeBuilder {
         // Widget-level appearance: MK dictionary (rotation, border/bg colors) and BS dictionary
         if (!field.getWidgets().isEmpty()) {
             COSDictionary widgetDict = field.getWidgets().get(0).getCOSObject();
+            // Annotation flags /F — bit 2=Hidden (never show), bit 6=NoView (screen invisible, prints)
+            int annotFlags = widgetDict.getInt(COSName.F, 0);
+            if (annotFlags != 0) node.addProperty("AnnotationFlags", String.valueOf(annotFlags));
 
             COSBase mkBase = widgetDict.getDictionaryObject(COSName.MK);
             if (mkBase instanceof COSDictionary mk) {
