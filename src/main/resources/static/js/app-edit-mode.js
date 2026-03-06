@@ -345,6 +345,21 @@ PDFalyzer.EditMode = (function ($, P) {
         if (ov && Object.prototype.hasOwnProperty.call(ov, 'readonly')) return isTruthyFlag(ov.readonly);
         return isTruthyFlag((fn.properties || {}).ReadOnly) || isTruthyFlag((fn.properties || {}).readonly);
     }
+    // Annotation flag bits (PDF spec §12.5.3)
+    var ANNOT_FLAG_HIDDEN  = 2;   // never display or print
+    var ANNOT_FLAG_NOVIEW  = 32;  // screen-invisible; prints normally
+    // Returns true if the field node should be skipped for the given layerDef.
+    // pending fields have no annotation flags, so they are always shown.
+    function shouldSkipField(fn, layerDef) {
+        if (fn.pending) return false;
+        var flags = parseInt((fn.properties || {}).AnnotationFlags || '0', 10);
+        if (flags & ANNOT_FLAG_HIDDEN) return true;          // always hidden
+        if (flags & ANNOT_FLAG_NOVIEW) {
+            // NoView fields only appear in print mode (form=true, fillout=false)
+            return !(layerDef && layerDef.print && !layerDef.fillout);
+        }
+        return false;
+    }
     function collectFieldNodesOnPage(pageIndex) {
         var result = [];
         function walk(n) {
@@ -610,6 +625,7 @@ PDFalyzer.EditMode = (function ($, P) {
             if (!bbox) return;
             var s = vp.scale;
             var fullName = fn.properties && fn.properties.FullName; if (!fullName) return;
+            if (shouldSkipField(fn, layerDef)) return;
             var subType = ((fn.properties.FieldSubType || fn.properties.FieldType || 'text') + '').toLowerCase();
             var currentVal = pending[fullName] !== undefined ? pending[fullName] : (fn.properties.Value || '');
             var readOnly   = fn.properties.ReadOnly === 'true';
@@ -907,20 +923,31 @@ PDFalyzer.EditMode = (function ($, P) {
             renderFormFillLayer(pageIndex, wrapperEl, vp);
             return;
         }
-        // Edit tool active — ensure no fillout-mode class lingers
-        $(wrapperEl).removeClass('fillout-mode');
+        // Edit tool active: render fill layer preview first (if fillout), then handles on top
+        if (layerDef && layerDef.fillout) {
+            renderFormFillLayer(pageIndex, wrapperEl, vp);
+            // Fill overlays are visual-only in edit mode — handles take pointer events
+            $(wrapperEl).find('.form-fill-overlay').addClass('edit-mode-preview');
+        } else {
+            $(wrapperEl).removeClass('fillout-mode');
+        }
         collectFieldNodesOnPage(pageIndex).forEach(function (fn) {
             var bbox = fn.boundingBox, s = vp.scale;
             var fullName = fn.properties && fn.properties.FullName; if (!fullName) return;
+            if (shouldSkipField(fn, layerDef)) return;
             var radioGroup = fn.properties && fn.properties.RadioGroup;
             var exportValue = fn.properties && fn.properties.ExportValue;
             var handleCss = { left: bbox[0] * s + 'px', top: (vp.height - (bbox[1] + bbox[3]) * s) + 'px',
                                width: bbox[2] * s + 'px', height: bbox[3] * s + 'px' };
-            var hBg = fn.properties && fn.properties.BackgroundColor;
-            if (hBg) handleCss.background = hBg;
-            var hBc = fn.properties && fn.properties.BorderColor;
-            if (hBc) handleCss.borderColor = hBc;
-            var $h = $('<div>', { 'class': 'form-field-handle' }).attr('data-field-name', fullName).css(handleCss);
+            // In fillout-preview mode the fill overlay already renders appearance — keep handle transparent
+            var isFilloutPreview = !!(layerDef && layerDef.fillout);
+            if (!isFilloutPreview) {
+                var hBg = fn.properties && fn.properties.BackgroundColor;
+                if (hBg) handleCss.background = hBg;
+                var hBc = fn.properties && fn.properties.BorderColor;
+                if (hBc) handleCss.borderColor = hBc;
+            }
+            var $h = $('<div>', { 'class': 'form-field-handle' + (isFilloutPreview ? ' fillout-preview' : '') }).attr('data-field-name', fullName).css(handleCss);
             if (radioGroup) $h.attr('data-radio-group', radioGroup);
             if (fn.pending) $h.addClass('pending');
             if (isFieldRequired(fn)) $h.addClass('required');
