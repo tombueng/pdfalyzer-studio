@@ -249,14 +249,22 @@ PDFalyzer.EditOptions = (function ($, P) {
 
         var origVals = _dialogState.originalValues || {};
         APPEARANCE_KEYS.forEach(function (key) {
-            if (opts[key] === undefined || opts[key] === '') return;
+            if (opts[key] === undefined) return;
+            var val = opts[key];
             var orig = origVals[key];
-            if (orig === null || orig === undefined) {
-                // Field had no value; skip if the collected value is just the dialog's display default
-                var displayDef = APPEARANCE_DISPLAY_DEFAULTS[key];
-                if (displayDef !== undefined && String(opts[key]) === String(displayDef)) return;
+            if (val === '') {
+                // Explicit clear: signal removal only when the attribute was previously set in the PDF
+                if (orig !== null && orig !== undefined && orig !== '') {
+                    options[key] = null; // null = remove this attribute from the PDF
+                }
+                return;
             }
-            options[key] = opts[key];
+            // Skip if field had no value AND the new value is just the unchanged dialog display default
+            if (orig === null || orig === undefined) {
+                var displayDef = APPEARANCE_DISPLAY_DEFAULTS[key];
+                if (displayDef !== undefined && String(val) === String(displayDef)) return;
+            }
+            options[key] = val;
         });
 
         if (opts.javascript !== undefined) options.javascript = opts.javascript;

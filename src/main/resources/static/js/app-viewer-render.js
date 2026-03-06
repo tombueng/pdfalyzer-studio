@@ -133,7 +133,8 @@ PDFalyzer.ViewerRender = (function ($, P) {
             var scale = P.state.currentScale;
             var dpr = window.devicePixelRatio || 1;
             var viewport = page.getViewport({ scale: scale });
-            var hiDpiViewport = page.getViewport({ scale: Math.max(scale, MAX_RENDER_SCALE) * dpr });
+            var canvasRenderScale = Math.max(scale, MAX_RENDER_SCALE) * dpr;
+            var hiDpiViewport = page.getViewport({ scale: canvasRenderScale });
             pageViewports[pageNum - 1] = viewport;
 
             var $wrapper = $('<div>', { 'class': 'pdf-page-wrapper', 'data-page': pageNum - 1 })
@@ -144,6 +145,7 @@ PDFalyzer.ViewerRender = (function ($, P) {
             var canvas = document.createElement('canvas');
             canvas.width = hiDpiViewport.width;
             canvas.height = hiDpiViewport.height;
+            canvas._pdfRenderScale = canvasRenderScale;
             canvas.style.width = viewport.width + 'px';
             canvas.style.height = viewport.height + 'px';
             $wrapper.append(canvas);
@@ -155,8 +157,7 @@ PDFalyzer.ViewerRender = (function ($, P) {
 
             var layerMode = (P.state && P.state.layerMode) || 0;
             var layerDef = PDFalyzer.Zoom && PDFalyzer.Zoom.LAYER_MODES ? PDFalyzer.Zoom.LAYER_MODES[layerMode] : null;
-            var annotMode = (layerDef ? layerDef.annot : false) ? 1 : 0;
-            return page.render({ canvasContext: canvas.getContext('2d'), viewport: hiDpiViewport, annotationMode: annotMode }).promise
+            return page.render({ canvasContext: canvas.getContext('2d'), viewport: hiDpiViewport, annotationMode: 0 }).promise
                 .then(function () {
                     var showFormLayer = (layerDef ? layerDef.form : false) || !!(P.state && P.state.editFieldType);
                     if (showFormLayer && P.EditMode && P.EditMode.renderFieldHandles) {

@@ -103,7 +103,7 @@ var PDFalyzer = (function () {
             return {
                 currentTab: normalizeTab(parsed.currentTab),
                 panMode: !!parsed.panMode,
-                layerMode: (typeof parsed.layerMode === 'number' && parsed.layerMode >= 0 && parsed.layerMode <= 3) ? parsed.layerMode : 2,
+                layerMode: (typeof parsed.layerMode === 'number' && parsed.layerMode >= 0 && parsed.layerMode <= 2) ? parsed.layerMode : 2,
                 autoZoomMode: (parsed.autoZoomMode === 'width' || parsed.autoZoomMode === 'height') ? parsed.autoZoomMode : 'off',
                 currentScale: (typeof parsed.currentScale === 'number' && parsed.currentScale > 0) ? parsed.currentScale : 1.5,
                 editFieldType: parsed.editFieldType || null,
@@ -137,7 +137,7 @@ var PDFalyzer = (function () {
         var safeDraft = draft || {};
         state.currentTab = normalizeTab(safeDraft.currentTab || state.currentTab || 'structure');
         state.panMode = !!(safeDraft.panMode);
-        state.layerMode = (typeof safeDraft.layerMode === 'number' && safeDraft.layerMode >= 0 && safeDraft.layerMode <= 3) ? safeDraft.layerMode : 2;
+        state.layerMode = (typeof safeDraft.layerMode === 'number' && safeDraft.layerMode >= 0 && safeDraft.layerMode <= 2) ? safeDraft.layerMode : 2;
         state.autoZoomMode = (safeDraft.autoZoomMode === 'width' || safeDraft.autoZoomMode === 'height') ? safeDraft.autoZoomMode : 'off';
         if (typeof safeDraft.currentScale === 'number' && safeDraft.currentScale > 0) {
             state.currentScale = safeDraft.currentScale;
@@ -177,7 +177,7 @@ var PDFalyzer = (function () {
             currentScale: 1.5,
             autoZoomMode: 'off',   // 'off' | 'width' | 'height'
             panMode: false,
-            layerMode: 2,          // 2 = "Layers: form fields" default
+            layerMode: 2,          // 2 = "Fill-out mode" default
             viewerScrollState: null,
             basePageSize: { width: 0, height: 0 }
         },

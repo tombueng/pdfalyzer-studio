@@ -62,6 +62,7 @@ PDFalyzer.Upload = (function ($, P) {
             // Apply UI state that depends on restored values
             if (P.Zoom && P.Zoom.setPanMode) { P.Zoom.setPanMode(!!P.state.panMode); }
             if (P.Zoom && P.Zoom.updateButton) { P.Zoom.updateButton(); }
+            if (P.Zoom && P.Zoom.updateLayerBtn) { P.Zoom.updateLayerBtn(); }
             if (P.EditMode && P.EditMode.syncEditFieldTypeUI) { P.EditMode.syncEditFieldTypeUI(); }
         }
         updateEncryptionStatus(data.encryptionInfo);

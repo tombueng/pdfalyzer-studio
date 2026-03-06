@@ -1,0 +1,28 @@
+{
+  "_comment": "Form field overlay style config. Edit this file to control appearance without touching app-edit-mode.js.",
+  "_keys": "Supported property keys: backgroundColor, borderColor, borderWidth, borderStyle, cursor, color (text color — also overrides -webkit-text-fill-color, so it works on all browsers including readonly fields)",
+  "_priority": "Within each mode: base → required → readonly → readonlyRequired (later entries win). focus and hover revert on blur/mouseleave. focus wins over hover (hover is ignored while element is focused).",
+  "_button": "button.hover and button.click are ADDITIVE — only the listed properties change; nothing else is cleared. Use hover to set cursor, click to set visual feedback.",
+
+  "normal": {
+    "base":             {},
+    "required":         {},
+    "readonly":         {},
+    "readonlyRequired": {},
+    "focus":            {},
+    "hover":            {}
+  },
+  "fillout": {
+    "base":             { "backgroundColor": "#cce8ff", "borderWidth": "2px", "borderStyle": "solid" },
+    "required":         { "backgroundColor": "#cce8ff", "borderWidth": "2px", "borderColor": "#cc0000", "borderStyle": "solid" },
+    "readonly":         { "backgroundColor": "#efefef", "borderWidth": "2px", "color": "#c0c0c0", "cursor": "default", "borderStyle": "solid" },
+    "readonlyRequired": { "backgroundColor": "#efefef", "borderWidth": "2px", "color": "#c0c0c0", "cursor": "default", "borderStyle": "solid" },
+    "focus":            { "borderWidth": "2px" },
+    "hover":            { "backgroundColor": "#cce8ff", "borderWidth": "2px",  "borderColor": "#000000", "borderStyle": "solid" }
+  },
+  "button": {
+    "base":  {},
+    "hover": { "cursor": "pointer" },
+    "click": {}
+  }
+}
