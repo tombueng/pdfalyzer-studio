@@ -968,6 +968,20 @@ PDFalyzer.EditMode = (function ($, P) {
             // Required fields get a dashed outline indicator (via CSS class)
             if (isRequired) $el.addClass('required-field');
 
+            // Bind input/change events BEFORE wrapping (so $el is still the actual input element)
+            if (subType !== 'checkbox' && subType !== 'radio' && subType !== 'button' && !isComb) {
+                var isTextEl = $el[0] && ($el[0].tagName === 'INPUT' || $el[0].tagName === 'TEXTAREA');
+                var evtName = isTextEl ? 'input' : 'change';
+                $el.on(evtName, function () {
+                    var $t = $(this);
+                    if ($t[0].tagName === 'TEXTAREA') adjustAutoSizeTextarea($t);
+                    else adjustAutoSize($t);
+                    var v = $t.val();
+                    if (Array.isArray(v)) v = v.join(',');
+                    trackValueChange(fullName, v);
+                });
+            }
+
             // Fill-mode action buttons (undo + clear)
             var isTextInput = subType === 'text' || subType === 'password' || subType === 'combo';
             var undoCount = getFieldUndoCount(fullName);
@@ -1030,20 +1044,6 @@ PDFalyzer.EditMode = (function ($, P) {
                         trackValueChange(group, onVal);
                     });
                 }
-            } else if (subType !== 'button' && !isComb) {
-                // Use 'input' for text fields (fires on every keystroke and datalist selection);
-                // selects use 'change' which fires on selection without needing blur.
-                var isTextEl = $el[0] && ($el[0].tagName === 'INPUT' || $el[0].tagName === 'TEXTAREA');
-                var evtName = isTextEl ? 'input' : 'change';
-                $el.on(evtName, function () {
-                    var $t = $(this);
-                    // Dynamic auto-size: shrink/grow font as text changes
-                    if ($t[0].tagName === 'TEXTAREA') adjustAutoSizeTextarea($t);
-                    else adjustAutoSize($t);
-                    var v = $t.val();
-                    if (Array.isArray(v)) v = v.join(',');
-                    trackValueChange(fullName, v);
-                });
             }
             // Rotation: wrap $el in a fixed-size container so the page-space position is unchanged,
             // then rotate (and swap dims for 90°/270°) only the inner element.
