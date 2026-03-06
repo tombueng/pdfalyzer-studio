@@ -505,13 +505,34 @@
 }
 
 .form-fill-overlay:focus {
-    outline: 2px solid var(--accent, #00d4ff);
-    outline-offset: 1px;
+    outline: none;
 }
 
 .form-fill-overlay.readonly {
-    opacity: 0.7;
-    cursor: not-allowed;
+    cursor: default;
+    /* No opacity — would shift PDF-specified colours. Stripe overlay signals readonly instead. */
+}
+.form-fill-overlay.readonly::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background: repeating-linear-gradient(
+        -45deg,
+        transparent,
+        transparent 4px,
+        rgba(128, 128, 128, 0.12) 4px,
+        rgba(128, 128, 128, 0.12) 5px
+    );
+}
+/* Override browser's native readonly/disabled colour graying */
+.form-fill-overlay.readonly,
+.form-fill-overlay.readonly input,
+.form-fill-overlay.readonly textarea,
+.form-fill-overlay.readonly select {
+    color: inherit !important;
+    -webkit-text-fill-color: inherit !important;
+    opacity: 1 !important;
 }
 
 /* Checkbox/radio variant — glyph-based symbol display */
@@ -590,7 +611,7 @@
     box-sizing: border-box;
 }
 .form-fill-comb.readonly .form-fill-comb-input {
-    cursor: not-allowed;
+    cursor: default;
     pointer-events: none;
 }
 
@@ -599,6 +620,32 @@
     outline: 1px dashed #f80 !important;
     outline-offset: 1px;
 }
+
+/* Editable combo: show a dropdown chevron so the user knows options are available */
+.form-fill-overlay[list] {
+    padding-right: 20px;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6'%3E%3Cpath fill='%23555' d='M0 0l5 6 5-6z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 5px center;
+    background-size: 8px 5px;
+}
+
+/* ── Signature field placeholder ─────────────────────────────────────────────── */
+.form-fill-signature {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: default;
+    pointer-events: none;
+}
+.form-fill-signature-icon {
+    opacity: 0.35;
+    font-size: 0.9em;
+}
+
+/* ── Fill-out mode ─────────────────────────────────────────────────────────── */
+/* Backgrounds and border overrides are now applied inline via FIELD_OVERLAY_STYLES in app-edit-mode.js.
+   Only chrome that cannot be done with inline styles stays here. */
 
 /* ── Radio group bracket overlay ────────────────────────────────────────────── */
 .radio-group-bracket {

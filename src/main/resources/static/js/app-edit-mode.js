@@ -382,9 +382,169 @@ PDFalyzer.EditMode = (function ($, P) {
         if ((parseFloat($h.css('left')) || 0) + ($h.outerWidth() || 0) + 6 + ($a.outerWidth() || 0) > (wrapperEl.clientWidth || 0))
             $a.addClass('side-left');
     }
+    // ── Declarative field overlay styles ─────────────────────────────────────
+    // Loaded from /field-overlay-styles.json — edit that file to change appearance.
+    // Supported keys: backgroundColor, borderColor, borderWidth, borderStyle, cursor, color
+    // Priority order within each mode: base → required → readonly → readonlyRequired (later merges win)
+    // focus: applied on focus, reverted on blur (readonly fields never get focus/hover styles)
+    // hover: applied on mouseenter, reverted on mouseleave; focus wins (hover is skipped while focused)
+    var FIELD_OVERLAY_STYLES = (function () {
+        try {
+            var xhr = new XMLHttpRequest();
+            xhr.open('GET', '/field-overlay-styles.json', false); // synchronous load at init
+            xhr.send();
+            if (xhr.status === 200) return JSON.parse(xhr.responseText);
+        } catch (e) { /* fall through to default */ }
+        var empty = { base: {}, required: {}, readonly: {}, readonlyRequired: {}, focus: {}, hover: {} };
+        return { normal: empty, fillout: empty };
+    }());
+
+    var _overlayStyleCssMap = {
+        backgroundColor: 'background-color',
+        borderColor:     'border-color',
+        borderWidth:     'border-width',
+        borderStyle:     'border-style',
+        cursor:          'cursor',
+        color:           'color'
+    };
+
+    function applyFieldOverlayStyles($el, modeName, isReadOnly, isRequired) {
+        var modeStyles = FIELD_OVERLAY_STYLES[modeName] || {};
+        var isButtonMode = modeName === 'button';
+        var merged = {};
+
+        function absorb(src) {
+            if (!src) return;
+            Object.keys(src).forEach(function (k) { merged[k] = src[k]; });
+        }
+        absorb(modeStyles.base);
+        if (!isButtonMode) {
+            if (isRequired) absorb(modeStyles.required);
+            if (isReadOnly)  absorb(modeStyles.readonly);
+            if (isReadOnly && isRequired) absorb(modeStyles.readonlyRequired);
+        }
+
+        function applyProps(props) {
+            Object.keys(props).forEach(function (k) {
+                var cssProp = _overlayStyleCssMap[k] || k;
+                $el.css(cssProp, props[k]);
+                // Also set -webkit-text-fill-color so color overrides the readonly 'inherit' on WebKit
+                if (cssProp === 'color') $el.css('-webkit-text-fill-color', props[k]);
+            });
+        }
+        // Clear CSS properties set by a given props object (resets them to browser/PDF defaults)
+        function clearProps(props) {
+            Object.keys(props).forEach(function (k) {
+                var cssProp = _overlayStyleCssMap[k] || k;
+                $el.css(cssProp, '');
+                if (cssProp === 'color') $el.css('-webkit-text-fill-color', '');
+            });
+        }
+        // Revert props back to whatever merged has (or '' if not in merged). Used by button mode.
+        function revertProps(props) {
+            Object.keys(props).forEach(function (k) {
+                var cssProp = _overlayStyleCssMap[k] || k;
+                $el.css(cssProp, merged[k] !== undefined ? merged[k] : '');
+            });
+        }
+        applyProps(merged);
+
+        if (!isReadOnly) {
+            var focusStyles = modeStyles.focus || {};
+            var hoverStyles = modeStyles.hover || {};
+            var clickStyles = modeStyles.click || {};
+            var hoverActive = false;
+
+            if (isButtonMode) {
+                // Button mode: hover and click are ADDITIVE — only change specified props, revert on leave.
+                if (Object.keys(hoverStyles).length > 0) {
+                    $el.on('mouseenter.overlayStyle', function () { applyProps(hoverStyles); });
+                    $el.on('mouseleave.overlayStyle', function () { revertProps(hoverStyles); });
+                }
+                if (Object.keys(clickStyles).length > 0) {
+                    $el.on('mousedown.overlayStyle', function () { applyProps(clickStyles); });
+                    $el.on('mouseup.overlayStyle mouseleave.overlayStyle', function () { revertProps(clickStyles); });
+                }
+            } else {
+                // Standard isolated mode: focus/hover replace the merged state, revert on exit.
+                if (Object.keys(focusStyles).length > 0) {
+                    $el.on('focus.overlayStyle', function () {
+                        if (hoverActive) { hoverActive = false; clearProps(hoverStyles); }
+                        clearProps(merged);
+                        applyProps(focusStyles);
+                    });
+                    $el.on('blur.overlayStyle', function () { clearProps(focusStyles); applyProps(merged); });
+                }
+                if (Object.keys(hoverStyles).length > 0) {
+                    $el.on('mouseenter.overlayStyle', function () {
+                        if (this !== document.activeElement) {
+                            hoverActive = true;
+                            clearProps(merged);
+                            applyProps(hoverStyles);
+                        }
+                    });
+                    $el.on('mouseleave.overlayStyle', function () {
+                        if (hoverActive) {
+                            hoverActive = false;
+                            clearProps(hoverStyles);
+                            applyProps(merged);
+                        }
+                    });
+                }
+            }
+        }
+    }
+
+    // ── Auto-size helpers (PDF font-size = 0 means "size to fit") ────────────
+    var _autoSizeCtx = null;
+    function getAutoSizeCtx() {
+        if (!_autoSizeCtx) _autoSizeCtx = document.createElement('canvas').getContext('2d');
+        return _autoSizeCtx;
+    }
+
+    // Single-line: shrink font until text fits within field width.
+    function adjustAutoSize($el) {
+        if ($el.attr('data-auto-size') !== '1') return;
+        var text = $el.val() || '';
+        var maxFs = parseFloat($el.attr('data-max-fs')) || 12;
+        var availW = (parseFloat($el.attr('data-field-w')) || 100) - 8;
+        if (!text) { $el.css('font-size', maxFs + 'px'); return; }
+        var ctx = getAutoSizeCtx();
+        var ff = $el.css('font-family') || 'sans-serif';
+        var fs = maxFs;
+        while (fs > 4) {
+            ctx.font = 'normal ' + fs + 'px ' + ff;
+            if (ctx.measureText(text).width <= availW) break;
+            fs = Math.max(4, fs - 0.5);
+        }
+        $el.css('font-size', fs + 'px');
+    }
+
+    // Multiline: grow/shrink font until text fits within field height (scrollHeight <= clientHeight).
+    function adjustAutoSizeTextarea($el) {
+        if ($el.attr('data-auto-size') !== '1') return;
+        var el = $el[0];
+        var maxFs = parseFloat($el.attr('data-max-fs')) || 12;
+        var fs = parseFloat($el.css('font-size')) || maxFs;
+        // Try to grow back (e.g. text was deleted)
+        while (fs < maxFs && el.scrollHeight <= el.clientHeight) {
+            $el.css('font-size', (fs + 1) + 'px');
+            if (el.scrollHeight > el.clientHeight) { $el.css('font-size', fs + 'px'); break; }
+            fs = parseFloat($el.css('font-size'));
+        }
+        // Shrink while overflowing
+        while (fs > 4 && el.scrollHeight > el.clientHeight) {
+            fs = Math.max(4, fs - 0.5);
+            $el.css('font-size', fs + 'px');
+        }
+    }
+
     function renderFormFillLayer(pageIndex, wrapperEl, vp) {
         $(wrapperEl).find('.form-fill-overlay').remove();
         if (!hasSession() || !wrapperEl || !vp) return;
+        var layerDef = PDFalyzer.Zoom && PDFalyzer.Zoom.LAYER_MODES ? PDFalyzer.Zoom.LAYER_MODES[P.state.layerMode || 0] : null;
+        var isFillout = !!(layerDef && layerDef.fillout);
+        $(wrapperEl).toggleClass('fillout-mode', isFillout);
         var pending = P.state.pendingFieldValues || {};
         collectFieldNodesOnPage(pageIndex).forEach(function (fn) {
             var bbox = fn.boundingBox;
@@ -400,10 +560,12 @@ PDFalyzer.EditMode = (function ($, P) {
             var isComb = fn.properties.Comb === 'true';
             var combMaxLen = isComb ? parseInt(fn.properties.MaxLength || '1', 10) : 0;
             // Per ISO 32000-1 §12.7.3.3: font-size 0 means auto-size
-            // Single-line: fill widget height; multiline/list: comfortable line-height
-            var isMultiLineType = (subType === 'text' && fn.properties.Multiline === 'true') || subType === 'list';
+            // Single-line: fill widget height; multiline: comfortable line-height; list: ~1/3 of height
+            var isMultiLineType = (subType === 'text' && fn.properties.Multiline === 'true');
             var fontSize = (pdfFontSize > 0) ? pdfFontSize * s
-                : isMultiLineType ? Math.max(h / 6, 9)
+                : isMultiLineType ? Math.max(h / 4, 9)
+                : subType === 'list' ? Math.max(Math.min(h / 3, 14), 8)
+                : subType === 'checkbox' || subType === 'radio' ? Math.max(h * 0.72, 8)
                 : Math.max((h - 4) / 1.2, 8);
 
             // Resolve and register the PDF font for this field if we have an embedded object ref
@@ -421,11 +583,13 @@ PDFalyzer.EditMode = (function ($, P) {
 
             var $el;
 
+            var isAutoSize = !(pdfFontSize > 0); // PDF font-size 0 = auto-fit
             if (subType === 'text' || subType === 'password') {
                 var isMulti = fn.properties.Multiline === 'true';
                 if (isMulti) {
                     $el = $('<textarea>', { 'class': 'form-fill-overlay', rows: 1 }).val(currentVal);
                     if (fn.properties.MaxLength) $el.attr('maxlength', fn.properties.MaxLength);
+                    if (isAutoSize) $el.attr('data-auto-size', '1').attr('data-max-fs', fontSize);
                 } else if (isComb) {
                     var $combCells = $('<div>', { 'class': 'form-fill-comb-cells' });
                     for (var ci = 0; ci < combMaxLen; ci++) {
@@ -449,6 +613,7 @@ PDFalyzer.EditMode = (function ($, P) {
                     $el = $('<input>', { 'class': 'form-fill-overlay',
                         type: subType === 'password' ? 'password' : 'text', value: currentVal });
                     if (fn.properties.MaxLength) $el.attr('maxlength', fn.properties.MaxLength);
+                    if (isAutoSize) $el.attr('data-auto-size', '1').attr('data-max-fs', fontSize).attr('data-field-w', w);
                 }
                 if (fontFamily) $el.css('font-family', fontFamily);
                 var textColor = fn.properties.TextColor;
@@ -466,7 +631,8 @@ PDFalyzer.EditMode = (function ($, P) {
                     $(wrapperEl).append($dl);
                 } else {
                     $el = $('<select>', { 'class': 'form-fill-overlay' });
-                    opts.forEach(function (o) { $el.append($('<option>', { value: o, text: o, selected: o === currentVal })); });
+                    opts.forEach(function (o) { $el.append($('<option>', { value: o, text: o })); });
+                    $el.val(currentVal);
                 }
                 if (fontFamily) $el.css('font-family', fontFamily);
                 var textColor = fn.properties.TextColor;
@@ -478,7 +644,8 @@ PDFalyzer.EditMode = (function ($, P) {
                 var opts = (fn.properties.Options || '').split(',').map(function (o) { return o.trim(); }).filter(Boolean);
                 $el = $('<select>', { 'class': 'form-fill-overlay', multiple: true });
                 var selVals = currentVal.split(',').map(function (v) { return v.trim(); });
-                opts.forEach(function (o) { $el.append($('<option>', { value: o, text: o, selected: selVals.indexOf(o) >= 0 })); });
+                opts.forEach(function (o) { $el.append($('<option>', { value: o, text: o })); });
+                $el.val(selVals);
                 if (fontFamily) $el.css('font-family', fontFamily);
                 var textColor = fn.properties.TextColor;
                 if (textColor) $el.css('color', textColor);
@@ -516,37 +683,66 @@ PDFalyzer.EditMode = (function ($, P) {
 
             } else if (subType === 'button') {
                 $el = $('<button>', { 'class': 'form-fill-overlay form-fill-button', type: 'button',
-                    html: fn.properties.Value || fn.properties.FullName || 'Button' });
+                    html: fn.properties.ButtonCaption || fn.properties.Value || fn.properties.FullName || 'Button' });
+            } else if (subType === 'signature') {
+                $el = $('<div>', { 'class': 'form-fill-overlay form-fill-signature' })
+                    .append($('<span>', { 'class': 'form-fill-signature-icon', html: '<i class="fas fa-signature"></i>' }));
+                readOnly = true;
             } else {
-                return; // signature: skip
+                return; // unknown: skip
             }
 
             $el.css({ position: 'absolute', left: left + 'px', top: top + 'px',
                       width: w + 'px', height: h + 'px', fontSize: fontSize + 'px' });
-            if (readOnly) $el.addClass('readonly');
-
-            // Apply MK /BG background colour
-            var bgColor = fn.properties.BackgroundColor;
-            if (bgColor) $el.css('background', bgColor);
-
-            // Apply border — all three CSS properties needed for the border to render
-            var bcColor = fn.properties.BorderColor;
-            var bWidth = fn.properties.BorderWidth;
-            var bStyle = fn.properties.BorderStyle;
-            if (bcColor || bWidth || bStyle) {
-                $el.css({
-                    'border-color': bcColor || '#000',
-                    'border-width': bWidth ? (parseFloat(bWidth) * s) + 'px' : '1px',
-                    'border-style': bStyle || 'solid'
-                });
+            if (readOnly) {
+                $el.addClass('readonly');
+                // Override browser's native readonly/disabled graying so PDF colours show accurately.
+                $el.css({ 'color': 'inherit', '-webkit-text-fill-color': 'inherit', 'opacity': '1' });
+                $el.find('input, textarea, select').css({ 'color': 'inherit', '-webkit-text-fill-color': 'inherit', 'opacity': '1' });
             }
 
-            // Widget rotation (/MK /R) — PDF rotation is CCW, CSS is CW, so negate
-            var rotation = fn.properties.Rotation ? parseInt(fn.properties.Rotation, 10) : 0;
-            if (rotation) $el.css('transform', 'rotate(-' + rotation + 'deg)');
+            // Apply MK /BG background colour using background-color to preserve background-image on combos
+            var bgColor = fn.properties.BackgroundColor;
+            if (bgColor) $el.css('background-color', bgColor);
 
-            // Required fields get a subtle dashed outline indicator
-            if (fn.properties.Required === 'true') $el.addClass('required-field');
+            // Apply PDF border values. Always set border-color (even if transparent) so that
+            // FIELD_OVERLAY_STYLES applying borderWidth/borderStyle won't fall back to browser black.
+            var bcColor = fn.properties.BorderColor;
+            var bWidth  = fn.properties.BorderWidth;
+            var bStyle  = fn.properties.BorderStyle;
+            $el.css('border-color', bcColor || 'transparent');
+            if (bStyle === 'underline') {
+                // Underline: only bottom edge visible
+                $el.css({ 'border-top-style': 'none', 'border-left-style': 'none', 'border-right-style': 'none',
+                           'border-bottom-style': 'solid',
+                           'border-bottom-width': bWidth ? (parseFloat(bWidth) * s) + 'px' : '1px',
+                           'border-bottom-color': bcColor || 'currentColor' });
+            } else if (bStyle === 'beveled') {
+                $el.css({ 'border-style': 'outset',
+                           'border-width': bWidth ? (parseFloat(bWidth) * s) + 'px' : '2px' });
+            } else if (bStyle === 'inset') {
+                $el.css({ 'border-style': 'inset',
+                           'border-width': bWidth ? (parseFloat(bWidth) * s) + 'px' : '2px' });
+            } else if (bStyle === 'dashed') {
+                $el.css({ 'border-style': 'dashed',
+                           'border-width': bWidth ? (parseFloat(bWidth) * s) + 'px' : '1px' });
+            } else if (bWidth || bStyle) {
+                // solid or explicit width with no style
+                $el.css({ 'border-style': 'solid',
+                           'border-width': bWidth ? (parseFloat(bWidth) * s) + 'px' : '1px' });
+            }
+
+            // Apply declarative overlay styles (config overrides PDF background/border per mode/condition)
+            var isRequired = fn.properties.Required === 'true';
+            var overlayMode = subType === 'button' ? 'button' : (isFillout ? 'fillout' : 'normal');
+            applyFieldOverlayStyles($el, overlayMode, readOnly, isRequired);
+
+            // Required fields get a dashed outline indicator (via CSS class)
+            if (isRequired) $el.addClass('required-field');
+
+            // Widget rotation (/MK /R) — rotate only the field content, not its page-space position.
+            // The PDF Rect is already in page coordinates; rotation only affects the appearance inside.
+            var rotation = fn.properties.Rotation ? parseInt(fn.properties.Rotation, 10) : 0;
 
             if (subType === 'checkbox') {
                 if (!readOnly) {
@@ -577,15 +773,56 @@ PDFalyzer.EditMode = (function ($, P) {
                     });
                 }
             } else if (subType !== 'button' && !isComb) {
-                $el.on('change', function () {
-                    var v = $(this).val();
+                // Use 'input' for text fields (fires on every keystroke and datalist selection);
+                // selects use 'change' which fires on selection without needing blur.
+                var isTextEl = $el[0] && ($el[0].tagName === 'INPUT' || $el[0].tagName === 'TEXTAREA');
+                var evtName = isTextEl ? 'input' : 'change';
+                $el.on(evtName, function () {
+                    var $t = $(this);
+                    // Dynamic auto-size: shrink/grow font as text changes
+                    if ($t[0].tagName === 'TEXTAREA') adjustAutoSizeTextarea($t);
+                    else adjustAutoSize($t);
+                    var v = $t.val();
                     if (Array.isArray(v)) v = v.join(',');
                     P.state.pendingFieldValues = P.state.pendingFieldValues || {};
                     P.state.pendingFieldValues[fullName] = v;
                     updateSaveButton();
                 });
             }
-            $(wrapperEl).append($el);
+            // Rotation: wrap $el in a fixed-size container so the page-space position is unchanged,
+            // then rotate (and swap dims for 90°/270°) only the inner element.
+            if (rotation === 90 || rotation === 270) {
+                var cssAngle = -rotation; // PDF CCW → CSS CW by negating
+                // Recalculate font-size for the rotated orientation (w becomes the reading-direction height)
+                var rotFs = (pdfFontSize > 0) ? pdfFontSize * s
+                    : isMultiLineType ? Math.max(w / 6, 9) : Math.max((w - 4) / 1.2, 8);
+                var $rotWrap = $('<div>').css({
+                    position: 'absolute', left: left + 'px', top: top + 'px',
+                    width: w + 'px', height: h + 'px', overflow: 'hidden'
+                });
+                $el.css({
+                    position: 'absolute',
+                    left: ((w - h) / 2) + 'px',
+                    top: ((h - w) / 2) + 'px',
+                    width: h + 'px', height: w + 'px',
+                    fontSize: rotFs + 'px',
+                    transformOrigin: 'center center',
+                    transform: 'rotate(' + cssAngle + 'deg)'
+                });
+                $rotWrap.append($el);
+                $(wrapperEl).append($rotWrap);
+            } else {
+                if (rotation === 180) $el.css('transform', 'rotate(180deg)');
+                $(wrapperEl).append($el);
+            }
+            // After append: apply initial auto-size if field has existing text
+            if ($el.attr('data-auto-size') === '1' && currentVal) {
+                if ($el[0].tagName === 'TEXTAREA') {
+                    window.requestAnimationFrame(function () { adjustAutoSizeTextarea($el); });
+                } else {
+                    adjustAutoSize($el);
+                }
+            }
         });
     }
 
@@ -596,11 +833,20 @@ PDFalyzer.EditMode = (function ($, P) {
         $(wrapperEl).find('.form-fill-overlay').remove();
         var vp = viewportOverride || P.state.pageViewports[pageIndex]; if (!vp) return;
 
+        var layerDef = PDFalyzer.Zoom && PDFalyzer.Zoom.LAYER_MODES ? PDFalyzer.Zoom.LAYER_MODES[P.state.layerMode || 0] : null;
+        // Layer off: clear overlays and stop (unless an edit tool is active)
+        if (layerDef && !layerDef.form && !P.state.editFieldType) {
+            $(wrapperEl).removeClass('fillout-mode');
+            return;
+        }
+
         // Fill mode: no tool selected — show interactive inputs instead of edit handles
         if (!P.state.editFieldType) {
             renderFormFillLayer(pageIndex, wrapperEl, vp);
             return;
         }
+        // Edit tool active — ensure no fillout-mode class lingers
+        $(wrapperEl).removeClass('fillout-mode');
         collectFieldNodesOnPage(pageIndex).forEach(function (fn) {
             var bbox = fn.boundingBox, s = vp.scale;
             var fullName = fn.properties && fn.properties.FullName; if (!fullName) return;

@@ -127,19 +127,31 @@ public class PdfFieldOptionApplier {
                 || options.containsKey("textColor");
         if (hasFontChange && field instanceof PDVariableText vt) {
             String current = vt.getDefaultAppearance();
-            if (current == null) current = "/Helv 10 Tf 0 g";
-            String updated = rebuildDa(current, options);
-            vt.setDefaultAppearance(updated);
+            // All three cleared → remove DA entirely (field inherits from AcroForm DR)
+            boolean allCleared = options.containsKey("fontName") && options.containsKey("fontSize") && options.containsKey("textColor")
+                    && (options.get("fontName") == null || options.get("fontName").toString().isBlank())
+                    && (options.get("fontSize") == null || options.get("fontSize").toString().isBlank())
+                    && (options.get("textColor") == null || options.get("textColor").toString().isBlank());
+            if (allCleared) {
+                vt.setDefaultAppearance("");
+            } else {
+                if (current == null || current.isBlank()) current = "/Helv 10 Tf 0 g";
+                vt.setDefaultAppearance(rebuildDa(current, options));
+            }
         }
 
-        Object alignment = options.get("alignment");
-        if (alignment != null) {
-            int q = switch (alignment.toString().toLowerCase()) {
-                case "center" -> 1;
-                case "right" -> 2;
-                default -> 0;
-            };
-            field.getCOSObject().setInt(COSName.Q, q);
+        if (options.containsKey("alignment")) {
+            Object alignment = options.get("alignment");
+            if (alignment == null || alignment.toString().isBlank()) {
+                field.getCOSObject().removeItem(COSName.Q);
+            } else {
+                int q = switch (alignment.toString().toLowerCase()) {
+                    case "center" -> 1;
+                    case "right" -> 2;
+                    default -> 0;
+                };
+                field.getCOSObject().setInt(COSName.Q, q);
+            }
         }
 
         Object maxLength = options.get("maxLength");
@@ -156,7 +168,8 @@ public class PdfFieldOptionApplier {
         boolean hasBorderOrBg = options.containsKey("borderColor")
                 || options.containsKey("backgroundColor")
                 || options.containsKey("borderWidth")
-                || options.containsKey("borderStyle");
+                || options.containsKey("borderStyle")
+                || options.containsKey("rotation");
         if (hasBorderOrBg) {
             for (PDAnnotationWidget widget : field.getWidgets()) {
                 applyWidgetAppearance(widget, options);
@@ -201,39 +214,74 @@ public class PdfFieldOptionApplier {
         return "/" + fontName + " " + fontSize + " Tf " + colorOp;
     }
 
-    /** Applies border color/width/style and background color to a single widget via MK and BS dicts. */
+    /** Applies (or removes) border color/width/style, background color, and rotation to a single widget. */
     private void applyWidgetAppearance(PDAnnotationWidget widget, Map<String, Object> options) {
         COSDictionary widgetDict = widget.getCOSObject();
 
-        // MK dictionary for colors
-        Object bc = options.get("borderColor");
-        Object bg = options.get("backgroundColor");
-        if (bc != null || bg != null) {
+        // MK dictionary: borderColor, backgroundColor, rotation
+        boolean needsMk = options.containsKey("borderColor") || options.containsKey("backgroundColor")
+                || options.containsKey("rotation");
+        if (needsMk) {
             COSDictionary mk = (COSDictionary) widgetDict.getDictionaryObject(COSName.MK);
-            if (mk == null) { mk = new COSDictionary(); widgetDict.setItem(COSName.MK, mk); }
-            if (bc != null) { COSArray arr = hexToFloatArray(bc.toString()); if (arr != null) mk.setItem(COSName.BC, arr); }
-            if (bg != null) { COSArray arr = hexToFloatArray(bg.toString()); if (arr != null) mk.setItem(COSName.BG, arr); }
+            if (options.containsKey("borderColor")) {
+                Object bc = options.get("borderColor");
+                if (bc == null || bc.toString().isBlank()) {
+                    if (mk != null) mk.removeItem(COSName.BC);
+                } else {
+                    if (mk == null) { mk = new COSDictionary(); widgetDict.setItem(COSName.MK, mk); }
+                    COSArray arr = hexToFloatArray(bc.toString()); if (arr != null) mk.setItem(COSName.BC, arr);
+                }
+            }
+            if (options.containsKey("backgroundColor")) {
+                Object bg = options.get("backgroundColor");
+                if (bg == null || bg.toString().isBlank()) {
+                    if (mk != null) mk.removeItem(COSName.BG);
+                } else {
+                    if (mk == null) { mk = new COSDictionary(); widgetDict.setItem(COSName.MK, mk); }
+                    COSArray arr = hexToFloatArray(bg.toString()); if (arr != null) mk.setItem(COSName.BG, arr);
+                }
+            }
+            if (options.containsKey("rotation")) {
+                Object rot = options.get("rotation");
+                if (mk == null) { mk = new COSDictionary(); widgetDict.setItem(COSName.MK, mk); }
+                if (rot == null || rot.toString().isBlank()) {
+                    mk.removeItem(COSName.getPDFName("R"));
+                } else {
+                    try { mk.setInt(COSName.getPDFName("R"), Integer.parseInt(rot.toString().trim())); }
+                    catch (NumberFormatException e) { log.debug("Invalid rotation: {}", rot); }
+                }
+            }
         }
 
-        // BS dictionary for border width/style
-        Object bw = options.get("borderWidth");
-        Object bs = options.get("borderStyle");
-        if (bw != null || bs != null) {
+        // BS dictionary: borderWidth, borderStyle
+        boolean needsBs = options.containsKey("borderWidth") || options.containsKey("borderStyle");
+        if (needsBs) {
             COSDictionary bsDict = (COSDictionary) widgetDict.getDictionaryObject(COSName.BS);
-            if (bsDict == null) { bsDict = new COSDictionary(); widgetDict.setItem(COSName.BS, bsDict); }
-            if (bw != null) {
-                try { bsDict.setItem(COSName.W, new COSFloat(Float.parseFloat(bw.toString().trim()))); }
-                catch (NumberFormatException e) { log.debug("Invalid borderWidth: {}", bw); }
+            if (options.containsKey("borderWidth")) {
+                Object bw = options.get("borderWidth");
+                if (bw == null || bw.toString().isBlank()) {
+                    if (bsDict != null) bsDict.removeItem(COSName.W);
+                } else {
+                    if (bsDict == null) { bsDict = new COSDictionary(); widgetDict.setItem(COSName.BS, bsDict); }
+                    try { bsDict.setItem(COSName.W, new COSFloat(Float.parseFloat(bw.toString().trim()))); }
+                    catch (NumberFormatException e) { log.debug("Invalid borderWidth: {}", bw); }
+                }
             }
-            if (bs != null) {
-                String styleCode = switch (bs.toString().toLowerCase()) {
-                    case "dashed" -> "D";
-                    case "beveled" -> "B";
-                    case "inset" -> "I";
-                    case "underline" -> "U";
-                    default -> "S";
-                };
-                bsDict.setName(COSName.S, styleCode);
+            if (options.containsKey("borderStyle")) {
+                Object bs = options.get("borderStyle");
+                if (bs == null || bs.toString().isBlank()) {
+                    if (bsDict != null) bsDict.removeItem(COSName.S);
+                } else {
+                    if (bsDict == null) { bsDict = new COSDictionary(); widgetDict.setItem(COSName.BS, bsDict); }
+                    String styleCode = switch (bs.toString().toLowerCase()) {
+                        case "dashed" -> "D";
+                        case "beveled" -> "B";
+                        case "inset" -> "I";
+                        case "underline" -> "U";
+                        default -> "S";
+                    };
+                    bsDict.setName(COSName.S, styleCode);
+                }
             }
         }
     }

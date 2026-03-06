@@ -112,8 +112,23 @@ public class AcroFormTreeBuilder {
         node.addProperty("FieldType", fieldType);
         if (field.getFullyQualifiedName() != null)
             node.addProperty("FullName", field.getFullyQualifiedName());
-        if (field.getValueAsString() != null && !field.getValueAsString().isEmpty())
+        // For choice fields, getValueAsString() may return bracketed array representation.
+        // Read the V entry directly from the COS dictionary to get clean value(s).
+        if (field instanceof PDComboBox || field instanceof PDListBox) {
+            COSBase vBase = field.getCOSObject().getDictionaryObject(COSName.V);
+            if (vBase instanceof COSString cosStr) {
+                if (!cosStr.getString().isBlank()) node.addProperty("Value", cosStr.getString());
+            } else if (vBase instanceof COSArray vArr && vArr.size() > 0) {
+                List<String> parts = new ArrayList<>();
+                for (int i = 0; i < vArr.size(); i++) {
+                    COSBase item = vArr.getObject(i);
+                    if (item instanceof COSString s && !s.getString().isBlank()) parts.add(s.getString());
+                }
+                if (!parts.isEmpty()) node.addProperty("Value", String.join(",", parts));
+            }
+        } else if (field.getValueAsString() != null && !field.getValueAsString().isEmpty()) {
             node.addProperty("Value", field.getValueAsString());
+        }
         node.addProperty("ReadOnly", String.valueOf(field.isReadOnly()));
         node.addProperty("Required", String.valueOf(field.isRequired()));
         node.addProperty("FieldSubType", detectFieldSubType(field));
@@ -297,6 +312,16 @@ public class AcroFormTreeBuilder {
                 if (bc != null) node.addProperty("BorderColor", bc);
                 String bg = cosArrayToHex(mk.getDictionaryObject(COSName.BG));
                 if (bg != null) node.addProperty("BackgroundColor", bg);
+                // Push-button label: /MK /CA (Normal Caption)
+                if (field instanceof PDPushButton) {
+                    COSBase ca = mk.getDictionaryObject(COSName.getPDFName("CA"));
+                    if (ca instanceof COSString caStr) {
+                        String caption = caStr.getString();
+                        if (caption != null && !caption.isBlank()) {
+                            node.addProperty("ButtonCaption", caption);
+                        }
+                    }
+                }
             }
 
             COSBase bsBase = widgetDict.getDictionaryObject(COSName.BS);
