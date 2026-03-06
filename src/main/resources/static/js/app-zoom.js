@@ -35,7 +35,7 @@ PDFalyzer.Zoom = (function ($, P) {
 
     var LAYER_MODES = [
         { icon: 'fa-eye-slash',    title: 'Layers: off',          annot: false, form: false, fillout: false, active: false },
-        { icon: 'fa-vector-square',title: 'Layers: form fields',  annot: false, form: true,  fillout: false, active: true  },
+        { icon: 'fa-print',        title: 'Layers: print mode',   annot: false, form: true,  fillout: false, print: true,  active: true  },
         { icon: 'fa-pen-to-square',title: 'Layers: fill-out mode',annot: false, form: true,  fillout: true,  active: true  }
     ];
 
