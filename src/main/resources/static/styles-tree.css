@@ -240,6 +240,17 @@
     text-decoration: underline;
 }
 
+#statusBar .status-pending-changes {
+    color: var(--warning);
+    cursor: pointer;
+    font-weight: 600;
+    opacity: 0.9;
+    transition: opacity 0.15s;
+}
+#statusBar .status-pending-changes:hover {
+    opacity: 1;
+}
+
 /* === Skeleton Loader === */
 .skeleton {
     position: relative;

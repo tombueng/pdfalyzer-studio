@@ -326,9 +326,10 @@ PDFalyzer.EditField = (function ($, P) {
             var radioDefault = opts.radioDefault || '';
             var gap = 4;
             radioRows.forEach(function (row, i) {
+                var handleKey = fieldId + '\x00' + row.value;
                 P.state.pendingFormAdds.push({
                     fieldType: 'radio', fieldName: fieldId,
-                    _radioHandleKey: fieldId + '\x00' + row.value,
+                    _radioHandleKey: handleKey,
                     pageIndex: pcp.pageIndex,
                     x: pcp.x, y: pcp.y - i * (pcp.height + gap),
                     width: pcp.width, height: pcp.height,
@@ -342,6 +343,7 @@ PDFalyzer.EditField = (function ($, P) {
                         borderStyle: mergedOpts.borderStyle
                     }
                 });
+                P.EditMode.pushFieldUndo(handleKey, { type: 'add' });
             });
             P.EditMode.setLastAddedFieldTemplate({ fieldType: 'radio', options: P.EditMode.cloneObject(mergedOpts) });
             P.EditMode.setPendingCreatePayload(null);
@@ -362,6 +364,7 @@ PDFalyzer.EditField = (function ($, P) {
 
         var qf = { fieldType: pcp.fieldType, fieldName: fieldId, pageIndex: pcp.pageIndex, x: pcp.x, y: pcp.y, width: pcp.width, height: pcp.height, options: mergedOpts };
         P.state.pendingFormAdds.push(qf);
+        P.EditMode.pushFieldUndo(fieldId, { type: 'add' });
         P.EditMode.setLastAddedFieldTemplate({ fieldType: qf.fieldType, options: P.EditMode.cloneObject(qf.options || {}) });
         P.EditMode.setPendingCreatePayload(null);
         P.FieldDialog.hide();
@@ -388,10 +391,12 @@ PDFalyzer.EditField = (function ($, P) {
                      h: clamp(start.height + (ev.clientY - start.y), 14, Math.max(14, (wEl ? wEl.clientHeight : 0) - tn)) };
         }
         function commitRect() {
+            var newW = $handle.width(), newH = $handle.height();
+            if (Math.abs(newW - start.width) < 1 && Math.abs(newH - start.height) < 1) { detach(); return; }
             var l = parseFloat($handle.css('left')), t = parseFloat($handle.css('top'));
             var s = viewport.scale, fn = fieldNode && fieldNode.properties ? fieldNode.properties.FullName : null;
             var sn = P.EditDesigner ? P.EditDesigner.snapV : function (v) { return v; };
-            if (fn) P.EditMode.queueRectChange(fn, sn(l / s), sn((viewport.height - t - $handle.height()) / s), sn($handle.width() / s), sn($handle.height() / s));
+            if (fn) P.EditMode.queueRectChange(fn, sn(l / s), sn((viewport.height - t - $handle.height()) / s), sn(newW / s), sn(newH / s));
             P.EditMode.renderFieldHandlesForAllPages(); P.EditMode.updateSaveButton(); detach();
         }
         $handle.on('dblclick', function (e) {
@@ -430,9 +435,13 @@ PDFalyzer.EditField = (function ($, P) {
                 if (!dragging && !resizing) { detach(); return; }
                 var wasDrag = dragging; dragging = false; resizing = false;
                 if (wasDrag) {
-                    var sn = P.EditDesigner ? P.EditDesigner.snapV : function (v) { return v; };
-                    (start.dragTargets || []).forEach(function (t) { if (!t.viewport || !t.rect) return; var tl = parseFloat(t.$el.css('left')) || 0, tt = parseFloat(t.$el.css('top')) || 0; P.EditMode.queueRectChange(t.fieldName, sn(t.rect.x + (tl - t.left) / t.viewport.scale), sn(t.rect.y - (tt - t.top) / t.viewport.scale), t.rect.width, t.rect.height); });
-                    P.EditMode.renderFieldHandlesForAllPages(); P.EditMode.updateSaveButton(); detach();
+                    var dx2 = ev.clientX - start.x, dy2 = ev.clientY - start.y;
+                    if (Math.abs(dx2) > 1 || Math.abs(dy2) > 1) {
+                        var sn = P.EditDesigner ? P.EditDesigner.snapV : function (v) { return v; };
+                        (start.dragTargets || []).forEach(function (t) { if (!t.viewport || !t.rect) return; var tl = parseFloat(t.$el.css('left')) || 0, tt = parseFloat(t.$el.css('top')) || 0; P.EditMode.queueRectChange(t.fieldName, sn(t.rect.x + (tl - t.left) / t.viewport.scale), sn(t.rect.y - (tt - t.top) / t.viewport.scale), t.rect.width, t.rect.height); });
+                        P.EditMode.renderFieldHandlesForAllPages(); P.EditMode.updateSaveButton();
+                    }
+                    detach();
                 } else { commitRect(); }
             };
             $(document).on('mousemove', moveH).on('mouseup', upH);

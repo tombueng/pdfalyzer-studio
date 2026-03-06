@@ -114,10 +114,124 @@ PDFalyzer.EditMode = (function ($, P) {
     function queueRectChange(name, x, y, w, h) {
         var b = clampPdfRectForField(name, x, y, w, h); x = b.x; y = b.y; w = b.width; h = b.height;
         var pf = findPendingFormAdd(name);
-        if (pf) { pf.x = x; pf.y = y; pf.width = w; pf.height = h; return; }
+        if (pf) {
+            pushFieldUndo(name, { type: 'rect', oldRect: { x: pf.x, y: pf.y, width: pf.width, height: pf.height } });
+            pf.x = x; pf.y = y; pf.width = w; pf.height = h; return;
+        }
         var idx = P.state.pendingFieldRects.findIndex(function (r) { return r.fieldName === name; });
+        var oldRect;
+        if (idx >= 0) {
+            oldRect = { x: P.state.pendingFieldRects[idx].x, y: P.state.pendingFieldRects[idx].y, width: P.state.pendingFieldRects[idx].width, height: P.state.pendingFieldRects[idx].height };
+        } else {
+            var origNode = findFieldNodeByName(name);
+            oldRect = (origNode && origNode.boundingBox && origNode.boundingBox.length >= 4)
+                ? { x: origNode.boundingBox[0], y: origNode.boundingBox[1], width: origNode.boundingBox[2], height: origNode.boundingBox[3] }
+                : null;
+        }
+        pushFieldUndo(name, { type: 'rect', oldRect: oldRect });
         var pl = { fieldName: name, x: x, y: y, width: w, height: h };
         if (idx >= 0) P.state.pendingFieldRects[idx] = pl; else P.state.pendingFieldRects.push(pl);
+    }
+
+    // ── Undo stack ──────────────────────────────────────────────────────────
+    function pushFieldUndo(fieldName, entry) {
+        if (!fieldName) return;
+        if (!P.state.fieldUndoStacks) P.state.fieldUndoStacks = {};
+        if (!P.state.fieldUndoStacks[fieldName]) P.state.fieldUndoStacks[fieldName] = [];
+        P.state.fieldUndoStacks[fieldName].push(entry);
+    }
+    function getFieldUndoCount(fieldName) {
+        return (P.state.fieldUndoStacks && P.state.fieldUndoStacks[fieldName]) ? P.state.fieldUndoStacks[fieldName].length : 0;
+    }
+    function hasUndoOfType(fieldName, type) {
+        var stack = P.state.fieldUndoStacks && P.state.fieldUndoStacks[fieldName];
+        if (!stack) return false;
+        for (var i = 0; i < stack.length; i++) { if (stack[i].type === type) return true; }
+        return false;
+    }
+    function trackValueChange(fieldName, newValue) {
+        if (!hasUndoOfType(fieldName, 'value')) {
+            var oldValue = P.state.pendingFieldValues && P.state.pendingFieldValues[fieldName] !== undefined
+                ? P.state.pendingFieldValues[fieldName]
+                : (function () { var n = findFieldNodeByName(fieldName); return n && n.properties ? (n.properties.Value || '') : ''; })();
+            pushFieldUndo(fieldName, { type: 'value', oldValue: oldValue });
+        }
+        if (!P.state.pendingFieldValues) P.state.pendingFieldValues = {};
+        P.state.pendingFieldValues[fieldName] = newValue;
+        updateSaveButton();
+    }
+    function popFieldUndo(fieldName) {
+        if (!P.state.fieldUndoStacks || !P.state.fieldUndoStacks[fieldName]) return;
+        var stack = P.state.fieldUndoStacks[fieldName];
+        if (!stack.length) return;
+        var entry = stack.pop();
+        switch (entry.type) {
+            case 'add':
+                var addIdx = findPendingFormAddIndex(fieldName);
+                if (addIdx >= 0) P.state.pendingFormAdds.splice(addIdx, 1);
+                P.state.pendingFieldRects = (P.state.pendingFieldRects || []).filter(function (r) { return r.fieldName !== fieldName; });
+                if (P.state.selectedFieldNames) P.state.selectedFieldNames = P.state.selectedFieldNames.filter(function (n) { return n !== fieldName; });
+                delete P.state.fieldUndoStacks[fieldName];
+                break;
+            case 'delete':
+                var delEntry = P.state.pendingFieldDeletes && P.state.pendingFieldDeletes[fieldName];
+                if (delEntry && delEntry.pending && delEntry.removedAdd) {
+                    P.state.pendingFormAdds.push(delEntry.removedAdd);
+                    (delEntry.removedRects || []).forEach(function (r) { P.state.pendingFieldRects.push(r); });
+                }
+                if (delEntry) delete P.state.pendingFieldDeletes[fieldName];
+                break;
+            case 'rect':
+                var rpf = findPendingFormAdd(fieldName);
+                if (rpf && entry.oldRect) {
+                    rpf.x = entry.oldRect.x; rpf.y = entry.oldRect.y;
+                    rpf.width = entry.oldRect.width; rpf.height = entry.oldRect.height;
+                } else if (!rpf) {
+                    var rIdx = P.state.pendingFieldRects.findIndex(function (r) { return r.fieldName === fieldName; });
+                    if (entry.oldRect) {
+                        if (rIdx >= 0) P.state.pendingFieldRects[rIdx] = { fieldName: fieldName, x: entry.oldRect.x, y: entry.oldRect.y, width: entry.oldRect.width, height: entry.oldRect.height };
+                    } else {
+                        if (rIdx >= 0) P.state.pendingFieldRects.splice(rIdx, 1);
+                    }
+                }
+                break;
+            case 'options':
+                if (entry.wasPendingAdd) {
+                    var opa = findPendingFormAdd(fieldName);
+                    if (opa) opa.options = entry.oldOptions || {};
+                    if (entry.siblingRestores) {
+                        entry.siblingRestores.forEach(function (sr) {
+                            var spa = findPendingFormAdd(sr.name);
+                            if (spa) spa.options = sr.oldOptions || {};
+                        });
+                    }
+                } else {
+                    if (entry.optionsEntryId && P.state.pendingFieldOptions) {
+                        P.state.pendingFieldOptions.forEach(function (e) {
+                            if (e._undoId === entry.optionsEntryId) {
+                                e.fieldNames = (e.fieldNames || []).filter(function (n) { return n !== fieldName; });
+                            }
+                        });
+                        P.state.pendingFieldOptions = P.state.pendingFieldOptions.filter(function (e) {
+                            return !e._undoId || !e.fieldNames || e.fieldNames.length > 0;
+                        });
+                    }
+                    if (entry.oldOverrides !== undefined) {
+                        if (entry.oldOverrides === null) delete pendingFieldOptionOverrides[fieldName];
+                        else pendingFieldOptionOverrides[fieldName] = entry.oldOverrides;
+                    }
+                }
+                break;
+            case 'value':
+                if (!P.state.pendingFieldValues) P.state.pendingFieldValues = {};
+                if (entry.oldValue === undefined) delete P.state.pendingFieldValues[fieldName];
+                else P.state.pendingFieldValues[fieldName] = entry.oldValue;
+                break;
+        }
+        if (!stack.length) delete P.state.fieldUndoStacks[fieldName];
+        if (P.Tabs && P.Tabs.switchTab && P.state.currentTab) P.Tabs.switchTab(P.state.currentTab);
+        renderFieldHandlesForAllPages(); updateSaveButton();
+        P.Utils.toast('Change undone', 'info');
     }
 
     // ── Save / pending ───────────────────────────────────────────────────────
@@ -136,10 +250,12 @@ PDFalyzer.EditMode = (function ($, P) {
         if (!P.state.pendingFieldValues)  P.state.pendingFieldValues = {};
         var hp = P.state.pendingFormAdds.length || P.state.pendingFieldRects.length ||
                  P.state.pendingFieldOptions.length || P.state.pendingCosChanges.length ||
-                 Object.keys(P.state.pendingFieldValues).length;
+                 Object.keys(P.state.pendingFieldValues).length ||
+                 Object.keys(P.state.pendingFieldDeletes || {}).length;
         $('#formSaveBtn').prop('disabled', !hp || !hasSession());
         updateFailedCosBadge();
         if (P.Tree && P.Tree.refreshPendingPanel) P.Tree.refreshPendingPanel();
+        if (P.ChangesTab && P.ChangesTab.refreshIfActive) P.ChangesTab.refreshIfActive();
         if (P.Storage && P.Storage.saveDraft) P.Storage.saveDraft(P.state);
     }
     function extractApiError(xhr) {
@@ -207,9 +323,25 @@ PDFalyzer.EditMode = (function ($, P) {
         }
         next();
     }
+    function applyPendingDeletes(onDone) {
+        var done = typeof onDone === 'function' ? onDone : finalizeSave;
+        var names = Object.keys(P.state.pendingFieldDeletes || {}).filter(function (n) {
+            return !P.state.pendingFieldDeletes[n].pending;
+        });
+        if (!names.length) { done(); return; }
+        var queue = names.slice();
+        function next() {
+            if (!queue.length) { done(); return; }
+            var name = queue.shift();
+            P.Utils.apiFetch('/api/edit/' + P.state.sessionId + '/field/' + encodeURIComponent(name), { method: 'DELETE' })
+                .done(function (d) { if (d && d.tree) P.state.treeData = d.tree; next(); })
+                .fail(function () { P.Utils.toast('Delete field "' + name + '" failed', 'danger'); next(); });
+        }
+        next();
+    }
     function finalizeSave(cosResult) {
         P.state.pendingFormAdds = []; P.state.pendingFieldRects = []; P.state.pendingFieldOptions = [];
-        P.state.pendingFieldValues = {};
+        P.state.pendingFieldValues = {}; P.state.pendingFieldDeletes = {}; P.state.fieldUndoStacks = {};
         pendingFieldOptionOverrides = {};
         if (P.state.treeData) P.Utils.refreshAfterMutation(P.state.treeData);
         refreshSelectionButtons(); updateSaveButton();
@@ -230,7 +362,8 @@ PDFalyzer.EditMode = (function ($, P) {
         if (!P.state.pendingFieldValues)  P.state.pendingFieldValues = {};
         if (!P.state.pendingFormAdds.length && !P.state.pendingFieldRects.length &&
             !P.state.pendingFieldOptions.length && !P.state.pendingCosChanges.length &&
-            !Object.keys(P.state.pendingFieldValues).length) {
+            !Object.keys(P.state.pendingFieldValues).length &&
+            !Object.keys(P.state.pendingFieldDeletes || {}).length) {
             P.Utils.toast('No pending changes', 'info'); return;
         }
         $('#formSaveBtn').prop('disabled', true);
@@ -245,14 +378,16 @@ PDFalyzer.EditMode = (function ($, P) {
         }
         saveAdds.done(function (d) {
             if (d && d.tree) P.state.treeData = d.tree;
-            applyPendingValueUpdates(function () {
-                applyPendingRectUpdates(function () { applyPendingOptionUpdates(function () { applyPendingCosUpdates(finalizeSave); }); });
+            applyPendingDeletes(function () {
+                applyPendingValueUpdates(function () {
+                    applyPendingRectUpdates(function () { applyPendingOptionUpdates(function () { applyPendingCosUpdates(finalizeSave); }); });
+                });
             });
         }).fail(function () { P.Utils.toast('Saving new fields failed', 'danger'); updateSaveButton(); });
     }
     function resetPending() {
         P.state.pendingFormAdds = []; P.state.pendingFieldRects = []; P.state.pendingFieldOptions = [];
-        P.state.pendingCosChanges = []; P.state.pendingFieldValues = {};
+        P.state.pendingCosChanges = []; P.state.pendingFieldValues = {}; P.state.pendingFieldDeletes = {}; P.state.fieldUndoStacks = {};
         pendingFieldOptionOverrides = {}; P.state.selectedFieldNames = []; P.state.selectedImageNodeIds = [];
         lastAddedFieldTemplate = null; updatePlaceModeCursor(); refreshSelectionButtons(); updateSaveButton();
     }
@@ -375,6 +510,23 @@ PDFalyzer.EditMode = (function ($, P) {
         }
         walk(P.state.treeData);
         (P.state.pendingFormAdds || []).forEach(function (pa) {
+            if (pa.pageIndex !== pageIndex) return;
+            var handleKey = pa._radioHandleKey || pa.fieldName;
+            var props = { FullName: handleKey, Pending: true, FieldType: pa.fieldType };
+            if (pa._radioHandleKey) {
+                props.RadioGroup = pa.fieldName;
+                props.ExportValue = pa.options && pa.options.exportValue ? pa.options.exportValue : '';
+            }
+            result.push({ nodeCategory: 'field', pageIndex: pageIndex, pending: true,
+                boundingBox: [pa.x, pa.y, pa.width, pa.height],
+                properties: props,
+                options: cloneObject(pa.options || {}) });
+        });
+        // Include pending-added fields that are queued for deletion (so the undo handle renders)
+        Object.keys(P.state.pendingFieldDeletes || {}).forEach(function (dname) {
+            var entry = P.state.pendingFieldDeletes[dname];
+            if (!entry.pending || !entry.removedAdd) return;
+            var pa = entry.removedAdd;
             if (pa.pageIndex !== pageIndex) return;
             var handleKey = pa._radioHandleKey || pa.fieldName;
             var props = { FullName: handleKey, Pending: true, FieldType: pa.fieldType };
@@ -614,7 +766,7 @@ PDFalyzer.EditMode = (function ($, P) {
     }
 
     function renderFormFillLayer(pageIndex, wrapperEl, vp) {
-        $(wrapperEl).find('.form-fill-overlay').remove();
+        $(wrapperEl).find('.form-fill-overlay, .fill-field-wrap').remove();
         if (!hasSession() || !wrapperEl || !vp) return;
         var layerDef = PDFalyzer.Zoom && PDFalyzer.Zoom.LAYER_MODES ? PDFalyzer.Zoom.LAYER_MODES[P.state.layerMode || 0] : null;
         var isFillout = !!(layerDef && layerDef.fillout);
@@ -678,9 +830,7 @@ PDFalyzer.EditMode = (function ($, P) {
                         $(this).closest('.form-fill-comb').find('.form-fill-comb-cell').each(function (i) {
                             $(this).text(v.charAt(i) || '');
                         });
-                        P.state.pendingFieldValues = P.state.pendingFieldValues || {};
-                        P.state.pendingFieldValues[fullName] = v;
-                        updateSaveButton();
+                        trackValueChange(fullName, v);
                     });
                     $el = $('<div>', { 'class': 'form-fill-overlay form-fill-comb' })
                         .append($combCells).append($combInput);
@@ -818,6 +968,40 @@ PDFalyzer.EditMode = (function ($, P) {
             // Required fields get a dashed outline indicator (via CSS class)
             if (isRequired) $el.addClass('required-field');
 
+            // Fill-mode action buttons (undo + clear)
+            var isTextInput = subType === 'text' || subType === 'password' || subType === 'combo';
+            var undoCount = getFieldUndoCount(fullName);
+            if (undoCount > 0 || (isTextInput && !readOnly && !isComb)) {
+                var $actions = $('<div>', { 'class': 'fill-field-actions' });
+                if (isTextInput && !readOnly && !isComb) {
+                    var $clearBtn = $('<button>', { 'class': 'fill-field-action-btn fill-clear-btn',
+                        title: 'Clear value', html: '<i class="fas fa-times"></i>' });
+                    $clearBtn.on('click', function (e) {
+                        e.stopPropagation();
+                        var $overlay = $(this).closest('.fill-field-wrap').find('input, textarea');
+                        if ($overlay.length) { $overlay.val('').trigger('input'); }
+                    });
+                    $actions.append($clearBtn);
+                }
+                if (undoCount > 0) {
+                    var ttip = 'Undo (' + undoCount + ' change' + (undoCount > 1 ? 's' : '') + ')';
+                    var $undoBtn = $('<button>', { 'class': 'fill-field-action-btn fill-undo-btn',
+                        title: ttip, html: '<i class="fas fa-undo"></i>' });
+                    if (undoCount > 1) $undoBtn.append($('<span>', { 'class': 'fill-undo-badge', text: String(undoCount) }));
+                    (function (fn2) {
+                        $undoBtn.on('click', function (e) { e.stopPropagation(); popFieldUndo(fn2); });
+                    })(fullName);
+                    $actions.prepend($undoBtn);
+                }
+                var $wrap = $('<div>', { 'class': 'fill-field-wrap' }).css({
+                    position: 'absolute', left: left + 'px', top: top + 'px',
+                    width: w + 'px', height: h + 'px'
+                });
+                $el.css({ position: 'absolute', left: '0', top: '0', width: '100%', height: '100%' });
+                $wrap.append($el).append($actions);
+                $el = $wrap;
+            }
+
             // Widget rotation (/MK /R) — rotate only the field content, not its page-space position.
             // The PDF Rect is already in page coordinates; rotation only affects the appearance inside.
             var rotation = fn.properties.Rotation ? parseInt(fn.properties.Rotation, 10) : 0;
@@ -829,9 +1013,7 @@ PDFalyzer.EditMode = (function ($, P) {
                         var sym = $(this).attr('data-check-symbol');
                         $(this).attr('data-checked', nowChecked ? '1' : '0')
                                .find('.form-fill-check-symbol').text(nowChecked ? sym : '');
-                        P.state.pendingFieldValues = P.state.pendingFieldValues || {};
-                        P.state.pendingFieldValues[fullName] = nowChecked ? $(this).attr('data-on-value') : 'Off';
-                        updateSaveButton();
+                        trackValueChange(fullName, nowChecked ? $(this).attr('data-on-value') : 'Off');
                     });
                 }
             } else if (subType === 'radio') {
@@ -845,9 +1027,7 @@ PDFalyzer.EditMode = (function ($, P) {
                         });
                         $(this).attr('data-checked', '1')
                                .find('.form-fill-check-symbol').text($(this).attr('data-check-symbol'));
-                        P.state.pendingFieldValues = P.state.pendingFieldValues || {};
-                        P.state.pendingFieldValues[group] = onVal;
-                        updateSaveButton();
+                        trackValueChange(group, onVal);
                     });
                 }
             } else if (subType !== 'button' && !isComb) {
@@ -862,9 +1042,7 @@ PDFalyzer.EditMode = (function ($, P) {
                     else adjustAutoSize($t);
                     var v = $t.val();
                     if (Array.isArray(v)) v = v.join(',');
-                    P.state.pendingFieldValues = P.state.pendingFieldValues || {};
-                    P.state.pendingFieldValues[fullName] = v;
-                    updateSaveButton();
+                    trackValueChange(fullName, v);
                 });
             }
             // Rotation: wrap $el in a fixed-size container so the page-space position is unchanged,
@@ -894,11 +1072,12 @@ PDFalyzer.EditMode = (function ($, P) {
                 $(wrapperEl).append($el);
             }
             // After append: apply initial auto-size if field has existing text
-            if ($el.attr('data-auto-size') === '1' && currentVal) {
-                if ($el[0].tagName === 'TEXTAREA') {
-                    window.requestAnimationFrame(function () { adjustAutoSizeTextarea($el); });
+            var $autoEl = $el.hasClass('fill-field-wrap') ? $el.find('[data-auto-size="1"]') : $el.filter('[data-auto-size="1"]');
+            if ($autoEl.length && currentVal) {
+                if ($autoEl[0].tagName === 'TEXTAREA') {
+                    window.requestAnimationFrame(function () { adjustAutoSizeTextarea($autoEl); });
                 } else {
-                    adjustAutoSize($el);
+                    adjustAutoSize($autoEl);
                 }
             }
         });
@@ -908,7 +1087,7 @@ PDFalyzer.EditMode = (function ($, P) {
         if (!hasSession() || !wrapperEl) return;
         $(wrapperEl).find('.form-field-handle').remove();
         $(wrapperEl).find('.radio-group-bracket').remove();
-        $(wrapperEl).find('.form-fill-overlay').remove();
+        $(wrapperEl).find('.form-fill-overlay, .fill-field-wrap').remove();
         var vp = viewportOverride || P.state.pageViewports[pageIndex]; if (!vp) return;
 
         var layerDef = PDFalyzer.Zoom && PDFalyzer.Zoom.LAYER_MODES ? PDFalyzer.Zoom.LAYER_MODES[P.state.layerMode || 0] : null;
@@ -923,11 +1102,11 @@ PDFalyzer.EditMode = (function ($, P) {
             renderFormFillLayer(pageIndex, wrapperEl, vp);
             return;
         }
-        // Edit tool active: render fill layer preview first (if fillout), then handles on top
-        if (layerDef && layerDef.fillout) {
+        // Edit tool active: render fill layer preview first (if form layer active), then handles on top
+        if (layerDef && layerDef.form) {
             renderFormFillLayer(pageIndex, wrapperEl, vp);
             // Fill overlays are visual-only in edit mode — handles take pointer events
-            $(wrapperEl).find('.form-fill-overlay').addClass('edit-mode-preview');
+            $(wrapperEl).find('.form-fill-overlay, .fill-field-wrap').addClass('edit-mode-preview');
         } else {
             $(wrapperEl).removeClass('fillout-mode');
         }
@@ -939,8 +1118,8 @@ PDFalyzer.EditMode = (function ($, P) {
             var exportValue = fn.properties && fn.properties.ExportValue;
             var handleCss = { left: bbox[0] * s + 'px', top: (vp.height - (bbox[1] + bbox[3]) * s) + 'px',
                                width: bbox[2] * s + 'px', height: bbox[3] * s + 'px' };
-            // In fillout-preview mode the fill overlay already renders appearance — keep handle transparent
-            var isFilloutPreview = !!(layerDef && layerDef.fillout);
+            // When any form layer is active, fill overlay renders appearance below — keep handle transparent
+            var isFilloutPreview = !!(layerDef && layerDef.form);
             if (!isFilloutPreview) {
                 var hBg = fn.properties && fn.properties.BackgroundColor;
                 if (hBg) handleCss.background = hBg;
@@ -963,9 +1142,19 @@ PDFalyzer.EditMode = (function ($, P) {
                 renderFieldHandlesForAllPages(); P.EditOptions.openOptionsPopup();
             });
             var $delBtn = $('<button>', { 'class': 'field-handle-btn field-handle-delete', title: 'Delete', html: '<i class="fas fa-trash-alt"></i>' }).on('click', function (e) { e.stopPropagation(); queueFieldDelete(fullName); });
+            var undoCount = getFieldUndoCount(fullName);
+            function makeUndoBtn(count) {
+                var ttip = 'Undo (' + count + ' change' + (count > 1 ? 's' : '') + ')';
+                var $ub = $('<button>', { 'class': 'field-handle-btn field-handle-undo', title: ttip, html: '<i class="fas fa-undo"></i>' });
+                if (count > 1) $ub.append($('<span>', { 'class': 'field-undo-badge', text: String(count) }));
+                $ub.on('click', function (e) { e.stopPropagation(); popFieldUndo(fullName); });
+                return $ub;
+            }
             if (isFieldDeletePending(fullName)) {
-                var $ub = $('<button>', { 'class': 'field-handle-btn field-handle-undo', title: 'Undo remove', html: '<i class="fas fa-undo"></i>' }).on('click', function (e) { e.stopPropagation(); undoFieldDelete(fullName); });
-                $h.addClass('removed').append($('<div>', { 'class': 'field-handle-actions' }).append($ub)).appendTo(wrapperEl);
+                $h.addClass('removed').append($('<div>', { 'class': 'field-handle-actions' }).append(makeUndoBtn(undoCount))).appendTo(wrapperEl);
+            } else if (undoCount > 0) {
+                $h.append($('<div>', { 'class': 'field-handle-actions' }).append(makeUndoBtn(undoCount), $optBtn, $delBtn), $('<div>', { 'class': 'form-field-resize' })).appendTo(wrapperEl);
+                P.EditField.bindDragResize($h, $h.find('.form-field-resize'), fn, vp);
             } else {
                 $h.append($('<div>', { 'class': 'field-handle-actions' }).append($optBtn, $delBtn), $('<div>', { 'class': 'form-field-resize' })).appendTo(wrapperEl);
                 P.EditField.bindDragResize($h, $h.find('.form-field-resize'), fn, vp);
@@ -1036,34 +1225,25 @@ PDFalyzer.EditMode = (function ($, P) {
 
     // ── Field delete ─────────────────────────────────────────────────────────
     function isFieldDeletePending(name) { return !!(P.state.pendingFieldDeletes && P.state.pendingFieldDeletes[name]); }
-    function undoFieldDelete(name) {
-        if (!P.state.pendingFieldDeletes || !P.state.pendingFieldDeletes[name]) return;
-        window.clearTimeout(P.state.pendingFieldDeletes[name].timerId);
-        delete P.state.pendingFieldDeletes[name];
-        renderFieldHandlesForAllPages(); P.Utils.toast('Removal cancelled for "' + name + '"', 'info');
-    }
-    function finalizeFieldDelete(name) {
-        if (!P.state.sessionId || !P.state.pendingFieldDeletes || !P.state.pendingFieldDeletes[name]) return;
-        window.clearTimeout(P.state.pendingFieldDeletes[name].timerId); delete P.state.pendingFieldDeletes[name];
-        P.Utils.apiFetch('/api/edit/' + P.state.sessionId + '/field/' + encodeURIComponent(name), { method: 'DELETE' })
-            .done(function (d) { P.state.treeData = d.tree; P.Tree.render(P.state.treeData); renderFieldHandlesForAllPages(); P.Utils.toast('Field "' + name + '" deleted', 'success'); })
-            .fail(function () { P.Utils.toast('Delete field failed', 'danger'); renderFieldHandlesForAllPages(); });
-    }
     function queueFieldDelete(name) {
         if (!P.state.sessionId || !name) return;
-        var pi = findPendingFormAddIndex(name);
-        if (pi >= 0) {
-            P.state.pendingFormAdds.splice(pi, 1);
-            P.state.pendingFieldRects = (P.state.pendingFieldRects || []).filter(function (r) { return r.fieldName !== name; });
-            if (P.state.selectedFieldNames) P.state.selectedFieldNames = P.state.selectedFieldNames.filter(function (n) { return n !== name; });
-            if (P.Tabs && P.Tabs.switchTab && P.state.currentTab) P.Tabs.switchTab(P.state.currentTab);
-            renderFieldHandlesForAllPages(); updateSaveButton(); P.Utils.toast('Pending field "' + name + '" removed', 'info'); return;
-        }
         if (!P.state.pendingFieldDeletes) P.state.pendingFieldDeletes = {};
         if (P.state.pendingFieldDeletes[name]) return;
-        P.state.pendingFieldDeletes[name] = { timerId: window.setTimeout(function () { finalizeFieldDelete(name); }, 5000) };
+        var pi = findPendingFormAddIndex(name);
+        if (pi >= 0) {
+            var removedAdd = P.state.pendingFormAdds.splice(pi, 1)[0];
+            var removedRects = (P.state.pendingFieldRects || []).filter(function (r) { return r.fieldName === name; });
+            P.state.pendingFieldRects = (P.state.pendingFieldRects || []).filter(function (r) { return r.fieldName !== name; });
+            if (P.state.selectedFieldNames) P.state.selectedFieldNames = P.state.selectedFieldNames.filter(function (n) { return n !== name; });
+            P.state.pendingFieldDeletes[name] = { pending: true, removedAdd: removedAdd, removedRects: removedRects };
+            pushFieldUndo(name, { type: 'delete' });
+            if (P.Tabs && P.Tabs.switchTab && P.state.currentTab) P.Tabs.switchTab(P.state.currentTab);
+            renderFieldHandlesForAllPages(); updateSaveButton(); P.Utils.toast('Field removed (click undo to restore)', 'warning'); return;
+        }
+        P.state.pendingFieldDeletes[name] = {};
+        pushFieldUndo(name, { type: 'delete' });
         if (P.state.selectedFieldNames) P.state.selectedFieldNames = P.state.selectedFieldNames.filter(function (n) { return n !== name; });
-        renderFieldHandlesForAllPages(); P.Utils.toast('Field "' + name + '" marked for removal (Undo available)', 'warning');
+        renderFieldHandlesForAllPages(); updateSaveButton(); P.Utils.toast('Field removed (click undo to restore)', 'warning');
     }
     function deleteField(name) { queueFieldDelete(name); }
     function setFieldValue(name, value) {
@@ -1088,6 +1268,7 @@ PDFalyzer.EditMode = (function ($, P) {
     function init() {
         P.state.editMode = true; P.state.selectedFieldNames = []; P.state.selectedImageNodeIds = [];
         if (!P.state.pendingFieldDeletes) P.state.pendingFieldDeletes = {};
+        if (!P.state.fieldUndoStacks) P.state.fieldUndoStacks = {};
         updatePlaceModeCursor();
         $('#editFormToggleBtn').on('click', function () {
             if (!hasSession()) { P.Utils.toast('Load a PDF session first', 'warning'); return; }
@@ -1134,6 +1315,8 @@ PDFalyzer.EditMode = (function ($, P) {
         getLastAddedFieldTemplate: function () { return lastAddedFieldTemplate; },
         setLastAddedFieldTemplate: function (v) { lastAddedFieldTemplate = v; },
         getPendingFieldOptionOverrides: function () { return pendingFieldOptionOverrides; },
-        findFieldNodeByName: findFieldNodeByName
+        findFieldNodeByName: findFieldNodeByName,
+        pushFieldUndo: pushFieldUndo, popFieldUndo: popFieldUndo,
+        getFieldUndoCount: getFieldUndoCount
     };
 })(jQuery, PDFalyzer);

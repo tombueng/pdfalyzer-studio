@@ -34,13 +34,18 @@ PDFalyzer.Keyboard = (function ($, P) {
                     if (P.state.treeData) P.Tree.render(P.state.treeData);
                 }
             }
-            if (e.key >= '1' && e.key <= '7' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+            if (e.key >= '1' && e.key <= '8' && !e.ctrlKey && !e.metaKey && !e.altKey) {
                 var idx = parseInt(e.key, 10) - 1;
                 var $tabs = $('.tab-btn');
                 if (idx < $tabs.length && P.state.sessionId) $tabs.eq(idx).trigger('click');
             }
             if (P.state.editMode && (e.key === 's' || e.key === 'S') && !e.ctrlKey && !e.metaKey && !e.altKey) {
                 e.preventDefault(); $('.edit-field-btn[data-type="select"]').first().trigger('click');
+            }
+            if (P.state.editMode && (e.ctrlKey || e.metaKey) && e.key === 'z') {
+                e.preventDefault();
+                var sel = P.state.selectedFieldNames;
+                if (sel && sel.length === 1 && P.EditMode && P.EditMode.popFieldUndo) P.EditMode.popFieldUndo(sel[0]);
             }
             if (P.state.editMode && P.EditDesigner) {
                 if ((e.ctrlKey || e.metaKey) && e.key === 'c') {

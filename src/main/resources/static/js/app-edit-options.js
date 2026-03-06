@@ -312,13 +312,19 @@ PDFalyzer.EditOptions = (function ($, P) {
         pendingNames.forEach(function (name) {
             var pendingField = P.EditMode.findPendingFormAdd(name);
             if (!pendingField) return;
+            var oldOpts = P.EditMode.cloneObject(pendingField.options || {});
             var targets = [pendingField];
+            var siblingRestores = [];
             if (pendingField._radioHandleKey && pendingField.fieldName) {
                 var groupName = pendingField.fieldName;
                 (P.state.pendingFormAdds || []).forEach(function (pa) {
-                    if (pa && pa !== pendingField && pa.fieldName === groupName && pa._radioHandleKey) targets.push(pa);
+                    if (pa && pa !== pendingField && pa.fieldName === groupName && pa._radioHandleKey) {
+                        siblingRestores.push({ name: pa._radioHandleKey, oldOptions: P.EditMode.cloneObject(pa.options || {}) });
+                        targets.push(pa);
+                    }
                 });
             }
+            P.EditMode.pushFieldUndo(name, { type: 'options', wasPendingAdd: true, oldOptions: oldOpts, siblingRestores: siblingRestores });
             targets.forEach(function (pf) {
                 if (!pf.options) pf.options = {};
                 BOOLEAN_KEYS.forEach(function (key) {
@@ -342,7 +348,12 @@ PDFalyzer.EditOptions = (function ($, P) {
         }
 
         if (!P.state.pendingFieldOptions) P.state.pendingFieldOptions = [];
-        P.state.pendingFieldOptions.push({ fieldNames: persistedNames.slice(), options: P.EditMode.cloneObject(options) });
+        var undoId = 'opt_' + Date.now() + '_' + Math.random();
+        P.state.pendingFieldOptions.push({ fieldNames: persistedNames.slice(), options: P.EditMode.cloneObject(options), _undoId: undoId });
+        var overrides = P.EditMode.getPendingFieldOptionOverrides();
+        persistedNames.forEach(function (pn) {
+            P.EditMode.pushFieldUndo(pn, { type: 'options', wasPendingAdd: false, optionsEntryId: undoId, oldOverrides: P.EditMode.cloneObject(overrides[pn] || null) });
+        });
         applyOptionOverridesToPersistedSelection(persistedNames, options);
         finishLocalOptionsApply(pendingNames.length ? 'Field options queued (saved + pending fields)' : 'Field options queued. Click Save to persist.');
     }
