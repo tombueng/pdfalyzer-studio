@@ -312,22 +312,19 @@ PDFalyzer.Viewer = (function ($, P) {
 
     function highlight(pageIndex, bbox, opts) {
         clearHighlights();
-        var didScroll = scrollToPage(pageIndex);
         var $wrapper = $('[data-page="' + pageIndex + '"]');
         if (!$wrapper.length || !P.state.pageViewports[pageIndex]) return;
         var vp    = P.state.pageViewports[pageIndex];
         var scale = vp.scale;
         var left = bbox[0] * scale, top = vp.height - (bbox[1] + bbox[3]) * scale;
         var w = bbox[2] * scale, h = bbox[3] * scale;
-        $('<div>', { 'class': 'pdf-highlight' }).css({
-            left: left + 'px', top: top + 'px', width: w + 'px', height: h + 'px'
-        }).appendTo($wrapper);
 
-        // Contracting locator ring — delay only if scroll happened
-        if (opts && opts.locator) {
-            var delay = didScroll ? 400 : 0;
-            setTimeout(function () {
-                if (!$wrapper.closest('body').length) return;
+        function showHighlightAndLocator() {
+            $('<div>', { 'class': 'pdf-highlight' }).css({
+                left: left + 'px', top: top + 'px', width: w + 'px', height: h + 'px'
+            }).appendTo($wrapper);
+
+            if (opts && opts.locator) {
                 var cx = left + w / 2, cy = top + h / 2;
                 var diag = Math.sqrt(w * w + h * h);
                 var expand = diag * 0.7;
@@ -342,25 +339,49 @@ PDFalyzer.Viewer = (function ($, P) {
                     left: (left - bw) + 'px', top: (top - bw) + 'px',
                     width: (w + bw * 2) + 'px', height: (h + bw * 2) + 'px'
                 });
-                setTimeout(function () { $ring.remove(); }, 750);
-            }, delay);
+                setTimeout(function () {
+                    $ring.removeClass('field-locator-contract').addClass('field-locator-flash');
+                    $ring[0].offsetWidth;
+                    setTimeout(function () {
+                        $ring.removeClass('field-locator-flash').addClass('field-locator-fadeout');
+                        $ring[0].offsetWidth;
+                        setTimeout(function () { $ring.remove(); }, 220);
+                    }, 100);
+                }, 300);
+            }
         }
+
+        scrollToPage(pageIndex, showHighlightAndLocator);
     }
 
     function clearHighlights() { $('.pdf-highlight, .field-locator-ring').remove(); }
 
-    /** Returns true if scrolling was needed. */
-    function scrollToPage(pageIndex) {
+    /**
+     * Scroll the PDF pane so the given page is visible.
+     * Calls onDone() once scrolling has settled (or immediately if no scroll needed).
+     */
+    function scrollToPage(pageIndex, onDone) {
         var wrapper = $('[data-page="' + pageIndex + '"]')[0];
-        if (!wrapper) return false;
+        if (!wrapper) { if (onDone) onDone(); return; }
         var pane = document.getElementById('pdfPane');
-        if (!pane) { wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' }); return true; }
+        if (!pane) {
+            wrapper.scrollIntoView({ behavior: 'instant', block: 'center' });
+            if (onDone) onDone();
+            return;
+        }
         var paneRect = pane.getBoundingClientRect();
         var wrapRect = wrapper.getBoundingClientRect();
-        // Already fully visible — no scroll needed
-        if (wrapRect.top >= paneRect.top && wrapRect.bottom <= paneRect.bottom) return false;
-        wrapper.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        return true;
+        // Already visible — no scroll needed
+        if (wrapRect.top >= paneRect.top && wrapRect.bottom <= paneRect.bottom) {
+            if (onDone) onDone();
+            return;
+        }
+        // Use instant scroll for speed, then call back
+        wrapper.scrollIntoView({ behavior: 'instant', block: 'center' });
+        // Wait one frame for layout to settle after instant scroll
+        requestAnimationFrame(function () {
+            if (onDone) onDone();
+        });
     }
 
     function getPdfPointForEvent(e, pageIndex) {
