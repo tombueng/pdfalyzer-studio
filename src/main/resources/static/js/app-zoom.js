@@ -34,17 +34,16 @@ PDFalyzer.Zoom = (function ($, P) {
     }
 
     var LAYER_MODES = [
-        { icon: 'fa-eye-slash',    title: 'Layers: off',                        annot: false, form: false, active: false },
-        { icon: 'fa-layer-group',  title: 'Layers: PDF annotations',            annot: true,  form: false, active: true  },
-        { icon: 'fa-vector-square',title: 'Layers: form fields',                annot: false, form: true,  active: true  },
-        { icon: 'fa-object-group', title: 'Layers: annotations + form fields',  annot: true,  form: true,  active: true  }
+        { icon: 'fa-eye-slash',    title: 'Layers: off',          annot: false, form: false, fillout: false, active: false },
+        { icon: 'fa-vector-square',title: 'Layers: form fields',  annot: false, form: true,  fillout: false, active: true  },
+        { icon: 'fa-pen-to-square',title: 'Layers: fill-out mode',annot: false, form: true,  fillout: true,  active: true  }
     ];
 
     function cycleLayerMode() {
-        P.state.layerMode = ((P.state.layerMode || 0) + 1) % 4;
+        P.state.layerMode = ((P.state.layerMode || 0) + 1) % 3;
         updateLayerBtn();
-        if (P.state.pdfDoc && P.Viewer && P.Viewer.renderAllPages) {
-            P.Viewer.renderAllPages();
+        if (P.state.pdfDoc && P.EditMode && P.EditMode.renderFieldHandlesForAllPages) {
+            P.EditMode.renderFieldHandlesForAllPages();
         }
     }
 

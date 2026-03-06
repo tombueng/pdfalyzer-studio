@@ -5,6 +5,7 @@ PDFalyzer.Viewer = (function ($, P) {
     'use strict';
 
     var activeRenderRequestId = 0;
+    var rerenderTimer = null;
     var panListenersAttached = false;
     var panDragState = {
         active: false,
@@ -217,10 +218,11 @@ PDFalyzer.Viewer = (function ($, P) {
 
         P.state.currentScale = scale;
         var dpr = window.devicePixelRatio || 1;
-        var renderScale = (P.ViewerRender && P.ViewerRender.MAX_RENDER_SCALE || 4.0) * dpr;
+        var fallbackRenderScale = (P.ViewerRender && P.ViewerRender.MAX_RENDER_SCALE || 4.0) * dpr;
         $('#pdfViewer .pdf-page-wrapper').each(function (i) {
             var canvas = $(this).find('canvas')[0];
             if (!canvas) return;
+            var renderScale = canvas._pdfRenderScale || fallbackRenderScale;
             var newW = canvas.width  * scale / renderScale;
             var newH = canvas.height * scale / renderScale;
             canvas.style.width  = newW + 'px';
@@ -237,11 +239,21 @@ PDFalyzer.Viewer = (function ($, P) {
         if (showFormLayer && P.EditMode && P.EditMode.renderFieldHandlesForAllPages) P.EditMode.renderFieldHandlesForAllPages();
         if (P.Zoom && P.Zoom.updateButton) P.Zoom.updateButton();
         $(document).trigger('pdfviewer:rendered');
+
+        // Schedule quality re-render after zoom settles if we are above the render scale
+        // (canvas was pre-rendered at MAX_RENDER_SCALE so > that is CSS upscale / blurry).
+        clearTimeout(rerenderTimer);
+        var maxRS = (P.ViewerRender && P.ViewerRender.MAX_RENDER_SCALE) || 4.0;
+        if (scale > maxRS) {
+            rerenderTimer = setTimeout(function () {
+                rerenderTimer = null;
+                renderAllPages({ preserveView: true, smoothSwap: true });
+            }, 600);
+        }
     }
 
-    function canRescaleCSS(scale) {
-        var maxRenderScale = (P.ViewerRender && P.ViewerRender.MAX_RENDER_SCALE) || 3.0;
-        return scale <= maxRenderScale && P.state.pageCanvases && P.state.pageCanvases.length > 0;
+    function canRescaleCSS() {
+        return !!(P.state.pageCanvases && P.state.pageCanvases.length > 0);
     }
 
     function paneCenterFocal() {
@@ -253,7 +265,7 @@ PDFalyzer.Viewer = (function ($, P) {
         if (scale <= 0) return;
         if (Math.abs(scale - P.state.currentScale) < 0.0005) return;
         P.state.autoZoomMode = 'off';
-        if (canRescaleCSS(scale)) {
+        if (canRescaleCSS()) {
             var c = paneCenterFocal();
             rescalePages(scale, c.x, c.y);
             return;
@@ -267,7 +279,7 @@ PDFalyzer.Viewer = (function ($, P) {
         if (scale <= 0) return;
         if (Math.abs(scale - P.state.currentScale) < 0.0005) return;
         P.state.autoZoomMode = 'off';
-        if (canRescaleCSS(scale)) { rescalePages(scale, screenX, screenY); return; }
+        if (canRescaleCSS()) { rescalePages(scale, screenX, screenY); return; }
         P.state.currentScale = scale;
         renderAllPages({ preserveView: true, smoothSwap: true });
         if (P.Zoom && P.Zoom.updateButton) P.Zoom.updateButton();
@@ -277,7 +289,7 @@ PDFalyzer.Viewer = (function ($, P) {
         if (!P.state.basePageSize.width) return;
         var scale = ($('#pdfPane').width() - 40) / P.state.basePageSize.width;
         P.state.autoZoomMode = 'width';
-        if (canRescaleCSS(scale)) { rescalePages(scale); return; }
+        if (canRescaleCSS()) { rescalePages(scale); return; }
         P.state.currentScale = scale;
         renderAllPages({ preserveView: true, smoothSwap: true });
         if (P.Zoom && P.Zoom.updateButton) P.Zoom.updateButton();
@@ -287,7 +299,7 @@ PDFalyzer.Viewer = (function ($, P) {
         if (!P.state.basePageSize.height) return;
         var scale = ($('#pdfPane').height() - 40) / P.state.basePageSize.height;
         P.state.autoZoomMode = 'height';
-        if (canRescaleCSS(scale)) { rescalePages(scale); return; }
+        if (canRescaleCSS()) { rescalePages(scale); return; }
         P.state.currentScale = scale;
         renderAllPages({ preserveView: true, smoothSwap: true });
         if (P.Zoom && P.Zoom.updateButton) P.Zoom.updateButton();

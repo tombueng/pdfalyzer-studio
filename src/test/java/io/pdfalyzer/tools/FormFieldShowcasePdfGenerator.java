@@ -183,6 +183,7 @@ public class FormFieldShowcasePdfGenerator {
         System.out.println("  tc_borderBeveled"); tc_borderBeveled();
         System.out.println("  tc_borderInset"); tc_borderInset();
         System.out.println("  tc_borderUnderline"); tc_borderUnderline();
+        System.out.println("  tc_borderThickness"); tc_borderThickness();
         System.out.println("  tc_widgetRotated90"); tc_widgetRotated90();
         System.out.println("  tc_widgetMkColors"); tc_widgetMkColors();
 
@@ -1514,6 +1515,37 @@ public class FormFieldShowcasePdfGenerator {
         setMkColors(w, null, new float[]{0f, 0f, 0.6f});
         f.setValue("Underline only border");
         addField(f);
+    }
+
+    private static void tc_borderThickness() throws IOException {
+        float[][] zones = drawGrid2x3Box(
+            "WIDGET \u2014 Border Thickness Comparison  (/BS /W = 0.5 / 1 / 2 / 3 / 5 / 8)",
+            new String[]{
+                "0.5 pt \u2014 hairline, barely visible",
+                "1 pt \u2014 thin (browser default)",
+                "2 pt \u2014 standard form field",
+                "3 pt \u2014 prominent / emphasized",
+                "5 pt \u2014 heavy",
+                "8 pt \u2014 very thick",
+            }, 20f);
+
+        float[] widths = {0.5f, 1f, 2f, 3f, 5f, 8f};
+        float[][] colors = {CELL_BC_GRAY, CELL_BC_BLUE, CELL_BC_BLUE, CELL_BC_GREEN, CELL_BC_AMBER, CELL_BC_RED};
+
+        for (int i = 0; i < 6; i++) {
+            PDTextField f = new PDTextField(acroForm);
+            f.setPartialName(uid());
+            f.setDefaultAppearance("/" + fontResName + " 9 Tf 0 g");
+            float ww = zones[i][2] - 16f;
+            float wx = zones[i][0] + 8f;
+            float wy = zones[i][1] + (zones[i][3] - 16f) / 2f;
+            PDAnnotationWidget w = mkWidget(wx, wy, ww, 16f);
+            linkWidget(f, w);
+            setBorderStyle(w, "S", widths[i]);
+            setMkColors(w, WHITE, colors[i]);
+            f.setValue("Border width: " + widths[i] + " pt");
+            addField(f);
+        }
     }
 
     private static void tc_widgetRotated90() throws IOException {

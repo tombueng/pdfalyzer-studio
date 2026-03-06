@@ -71,13 +71,14 @@ PDFalyzer.FieldDialog = (function ($, P) {
     }
 
     function buildColorControl(desc, value) {
-        var hex = (value && /^#[0-9a-fA-F]{6}$/.test(String(value))) ? String(value)
-                : (desc.defaultValue && /^#/.test(String(desc.defaultValue)) ? String(desc.defaultValue) : '#000000');
+        var isEmpty = (value === null || value === undefined || value === '');
+        var hex = (!isEmpty && /^#[0-9a-fA-F]{6}$/.test(String(value))) ? String(value) : '#808080';
+        var textVal = isEmpty ? '' : hex;
         var id = 'fd_' + desc.key;
         var $wrap = $(wrapControl(desc.key, desc.label,
             '<div class="d-flex align-items-center gap-2">'
             + '<input class="form-control form-control-color" id="' + id + '_picker" type="color" value="' + hex + '" style="width:40px;height:30px;padding:2px;">'
-            + '<input class="form-control form-control-sm" id="' + id + '" type="text" value="' + hex + '" placeholder="#000000" style="width:110px;">'
+            + '<input class="form-control form-control-sm" id="' + id + '" type="text" value="' + esc(textVal) + '" placeholder="(not set)" style="width:110px;">'
             + '</div>'));
         $wrap.find('#' + id + '_picker').on('input', function () { $wrap.find('#' + id).val($(this).val()); });
         $wrap.find('#' + id).on('input', function () {
@@ -89,13 +90,17 @@ PDFalyzer.FieldDialog = (function ($, P) {
 
     function buildSelectControl(desc, value) {
         var id = 'fd_' + desc.key;
-        var opts = (desc.validValues || []).map(function (v) {
+        var isEmpty = value === null || value === undefined;
+        // Prepend a "(not set)" sentinel option in edit mode when the field has no value
+        var notSetOpt = (isEmpty && _currentMode !== 'create')
+            ? '<option value="">(not set)</option>' : '';
+        var opts = notSetOpt + (desc.validValues || []).map(function (v) {
             return '<option value="' + esc(v) + '">' + esc(v) + '</option>';
         }).join('');
         var $wrap = $(wrapControl(desc.key, desc.label,
             '<select class="form-select form-select-sm" id="' + id + '"' + (desc.readOnly ? ' disabled' : '') + '>'
             + opts + '</select>'));
-        var sel = value !== null && value !== undefined ? String(value) : String(desc.defaultValue || '');
+        var sel = !isEmpty ? String(value) : (notSetOpt ? '' : String(desc.defaultValue || ''));
         $wrap.find('#' + id).val(sel);
         return $wrap;
     }
@@ -209,7 +214,11 @@ PDFalyzer.FieldDialog = (function ($, P) {
             var $pane = $('<div class="tab-pane fade' + (first ? ' show active' : '') + '" id="' + paneId + '" role="tabpanel">');
             var $grid = $('<div class="row g-2 pt-2">');
             descs.forEach(function (desc) {
-                var value = values && values[desc.key] !== undefined ? values[desc.key] : desc.defaultValue;
+                // In edit mode: if the field has no value for this attribute, show empty rather than
+                // the schema default — so the user can see what the PDF actually has set.
+                var hasValue = values && values[desc.key] !== undefined && values[desc.key] !== null;
+                var value = hasValue ? values[desc.key]
+                    : (_currentMode === 'create' ? desc.defaultValue : null);
                 var $ctrl = buildControl(desc, value, isMultiEdit);
                 var colClass = colClassFor(desc);
                 $grid.append($('<div class="' + colClass + '">').append($ctrl));
