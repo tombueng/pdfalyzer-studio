@@ -290,6 +290,47 @@ Add a new entry to [colors.css](src/main/resources/static/colors.css) and [app-t
 ['my-theme', 'My Theme', '#0d0d0d', '#2a2a2a', '#ff6600', '#44cc88'],
 ```
 
+## Design Themes
+
+In addition to the 100 color themes, PDFalyzer Studio ships with **9 design themes** that control the overall shape language, typography, shadow style, and motion of the UI.
+Click the sliders (<i class="fas fa-sliders"></i>) button in the **status bar** to open the design picker — your choice is saved to `localStorage` and applied independently of the active color theme.
+
+| Theme | Style | Key traits |
+|-------|-------|-----------|
+| **Studio** *(default)* | Balanced technical | 5px radii, monospace-friendly, subtle shadows |
+| **Blade** | Brutalist / hacker | 0px radii, 2px borders, `Courier New`, hard pixel-offset shadows, UPPERCASE buttons |
+| **Breeze** | Modern / fluent | Pill buttons, 16-20px radii, soft layered shadows, Material easing |
+| **Ether** | Glassmorphism | Frosted glass panels and modals via `backdrop-filter`, glow borders, accent bloom on hover |
+| **Neon** | Neon sign | Glowing borders, animated accent pulse, neon `text-shadow` on modal titles |
+| **Noir** | Film noir | Serif (`Georgia`), diagonal clip-path corners on buttons, dramatic double-offset shadows |
+| **Chrome** | Industrial metallic | Metallic gradient sheen on all surfaces, bevel highlight/shadow, reflective buttons |
+| **Zen** | Ultra-minimalist | Hairline 0.08-opacity borders, micro-shadows, thin font weight, 3px scrollbar |
+| **Retro** | Classic 90s UI | Raised bevel inset shadows, inset inputs, oversized scrollbar — Windows 9x / Motif |
+
+Design tokens are CSS custom properties prefixed with `--dt-` declared in [styles-design-themes.css](src/main/resources/static/styles-design-themes.css) and applied via a `data-design` attribute on `<html>`.
+The JS picker lives in [app-design-theme.js](src/main/resources/static/js/app-design-theme.js).
+
+### Adding a custom design theme
+
+1. Add token overrides + component rules in `styles-design-themes.css`:
+
+```css
+[data-design="my-design"] {
+    --dt-radius-sm: 6px;
+    --dt-radius-md: 10px;
+    --dt-font: 'Georgia', serif;
+    /* ... other --dt-* tokens */
+}
+/* Component overrides */
+[data-design="my-design"] .btn { border-radius: var(--dt-radius-sm) !important; }
+```
+
+2. Add an entry to the `DESIGNS` array in `app-design-theme.js`:
+
+```js
+{ id: 'my-design', name: 'My Design', icon: 'fa-star', desc: 'My custom style', shapes: [{ w: 28, r: 6 }, { w: 20, r: 4 }] }
+```
+
 ## Known Limitations
 
 - Session storage is in-memory only (no persistence across restart).

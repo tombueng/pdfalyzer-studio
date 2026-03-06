@@ -2,6 +2,7 @@ package io.pdfalyzer.service;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -10,8 +11,11 @@ import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.cos.COSNumber;
+import org.apache.pdfbox.cos.COSObject;
 import org.apache.pdfbox.cos.COSString;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationWidget;
+import org.apache.pdfbox.pdmodel.interactive.annotation.PDAppearanceCharacteristicsDictionary;
 import org.apache.pdfbox.pdmodel.interactive.form.PDAcroForm;
 import org.apache.pdfbox.pdmodel.interactive.form.PDCheckBox;
 import org.apache.pdfbox.pdmodel.interactive.form.PDComboBox;
@@ -35,6 +39,42 @@ import lombok.extern.slf4j.Slf4j;
 @Component
 @Slf4j
 public class AcroFormTreeBuilder {
+
+    /**
+     * ZapfDingbats character code (single byte, as it appears in MK/CA) → Unicode string.
+     * Only the subset commonly used as checkbox/radio symbols.
+     */
+    private static final Map<Character, String> ZAPF_TO_UNICODE = Map.ofEntries(
+        Map.entry('4',  "\u2714"),  // ✔ HEAVY CHECK MARK
+        Map.entry('8',  "\u2717"),  // ✗ BALLOT X
+        Map.entry('l',  "\u2713"),  // ✓ CHECK MARK
+        Map.entry('n',  "\u2715"),  // ✕ MULTIPLICATION X
+        Map.entry('m',  "\u25fc"),  // ◼ BLACK MEDIUM SQUARE
+        Map.entry('H',  "\u2022"),  // • BULLET
+        Map.entry('R',  "\u25cf"),  // ● BLACK CIRCLE
+        Map.entry('q',  "\u25a0"),  // ■ BLACK SQUARE
+        Map.entry('o',  "\u25a1"),  // □ WHITE SQUARE
+        Map.entry('r',  "\u25cb"),  // ○ WHITE CIRCLE
+        Map.entry('P',  "\u2605"),  // ★ BLACK STAR
+        Map.entry('a',  "\u25c6")   // ◆ BLACK DIAMOND
+    );
+
+    /** Standard PDF-14 font BaseFont names → CSS font-family fallback. */
+    private static final Map<String, String> STD14_CSS = Map.ofEntries(
+        Map.entry("Helv",            "Helvetica, Arial, sans-serif"),
+        Map.entry("Helvetica",       "Helvetica, Arial, sans-serif"),
+        Map.entry("Arial",           "Arial, Helvetica, sans-serif"),
+        Map.entry("TiRo",            "Times New Roman, Times, serif"),
+        Map.entry("TimesNewRoman",   "Times New Roman, Times, serif"),
+        Map.entry("Times-Roman",     "Times New Roman, Times, serif"),
+        Map.entry("Times",           "Times New Roman, Times, serif"),
+        Map.entry("Cour",            "Courier New, Courier, monospace"),
+        Map.entry("Courier",         "Courier New, Courier, monospace"),
+        Map.entry("CourierNew",      "Courier New, Courier, monospace"),
+        Map.entry("Courier-New",     "Courier New, Courier, monospace"),
+        Map.entry("Symbol",          "Symbol, serif"),
+        Map.entry("ZapfDingbats",    "'Zapf Dingbats', 'Dingbats', serif")
+    );
 
     private final CosNodeBuilder cosBuilder;
 
@@ -113,7 +153,7 @@ public class AcroFormTreeBuilder {
         if (jsValidation != null && !jsValidation.isBlank()) {
             node.addProperty("JavaScript", jsValidation);
         }
-        extractAppearanceProperties(field, node);
+        extractAppearanceProperties(field, node, ctx);
         if (!field.getWidgets().isEmpty()) {
             try {
                 if (field.getWidgets().get(0).getPage() != null) {
@@ -192,9 +232,10 @@ public class AcroFormTreeBuilder {
         return validateDict.getString(COSName.JS);
     }
 
+
     /** Extracts all visual/appearance attributes from a field and adds them as node properties. */
-    private void extractAppearanceProperties(PDField field, PdfNode node) {
-        // Default Appearance (DA) string — present on variable text fields
+    private void extractAppearanceProperties(PDField field, PdfNode node, CosNodeBuilder.ParseContext ctx) {
+        // Default Appearance (DA) string - present on variable text fields
         String da = null;
         if (field instanceof PDVariableText vt) {
             da = vt.getDefaultAppearance();
@@ -202,15 +243,33 @@ public class AcroFormTreeBuilder {
         if (da == null || da.isBlank()) {
             da = field.getCOSObject().getString(COSName.DA);
         }
+        String fontName = null;
         if (da != null && !da.isBlank()) {
-            parseDaString(da, node);
+            fontName = parseDaString(da, node);
+        }
+        // Resolve font name to an embedded font object reference or CSS fallback
+        if (fontName != null) {
+            String css = STD14_CSS.get(fontName);
+            if (css != null) {
+                node.addProperty("FontCssFamily", css);
+            }
+            String objRef = resolveFontObjectRef(fontName, field, ctx);
+            if (objRef != null) {
+                node.addProperty("FontObjectRef", objRef);
+            }
         }
 
-        // MaxLen for text fields
+        // Check/radio symbol and export value
+        if (field instanceof PDCheckBox || field instanceof PDRadioButton) {
+            extractCheckSymbol(field, node, fontName);
+        }
+
+        // MaxLen, Comb, and Password for text fields
         if (field instanceof PDTextField tf) {
             int maxLen = tf.getMaxLen();
             if (maxLen > 0) node.addProperty("MaxLength", String.valueOf(maxLen));
-            // Q (quadding / text alignment) — 0=left, 1=center, 2=right
+            if (tf.isComb() && maxLen > 0) node.addProperty("Comb", "true");
+            // Q (quadding / text alignment) - 0=left, 1=center, 2=right
             int q = field.getCOSObject().getInt(COSName.Q, -1);
             if (q >= 0) {
                 String[] alignNames = {"left", "center", "right"};
@@ -257,13 +316,16 @@ public class AcroFormTreeBuilder {
     /**
      * Parses a DA string like "/Helv 10 Tf 0 g" or "/TiRo 12 Tf 0.5 0 0 rg".
      * Adds FontName, FontSize, TextColor properties to the node.
+     * Returns the parsed font name, or null if none found.
      */
-    private void parseDaString(String da, PdfNode node) {
+    private String parseDaString(String da, PdfNode node) {
         // Font name and size: /Name size Tf
         Pattern tfPattern = Pattern.compile("/([\\w+]+)\\s+(\\d+(?:\\.\\d+)?)\\s+Tf");
         Matcher tfMatcher = tfPattern.matcher(da);
+        String fontName = null;
         if (tfMatcher.find()) {
-            node.addProperty("FontName", tfMatcher.group(1));
+            fontName = tfMatcher.group(1);
+            node.addProperty("FontName", fontName);
             node.addProperty("FontSize", tfMatcher.group(2));
         }
         // Greyscale color: <n> g  (n in 0-1)
@@ -273,7 +335,7 @@ public class AcroFormTreeBuilder {
             float grey = Float.parseFloat(gMatcher.group(1));
             int v = Math.round(grey * 255);
             node.addProperty("TextColor", String.format("#%02x%02x%02x", v, v, v));
-            return;
+            return fontName;
         }
         // RGB color: <r> <g> <b> rg
         Pattern rgbPattern = Pattern.compile("([\\d.]+)\\s+([\\d.]+)\\s+([\\d.]+)\\s+rg(?:\\s|$)");
@@ -284,6 +346,88 @@ public class AcroFormTreeBuilder {
             int b = Math.round(Float.parseFloat(rgbMatcher.group(3)) * 255);
             node.addProperty("TextColor", String.format("#%02x%02x%02x", r, g, b));
         }
+        return fontName;
+    }
+
+    /**
+     * Resolves a DA font name to a PDF object reference "objNum genNum" for embedded fonts.
+     * Checks the widget's own /Resources first, then the AcroForm /DR.
+     */
+    private String resolveFontObjectRef(String fontName, PDField field, CosNodeBuilder.ParseContext ctx) {
+        COSName cn = COSName.getPDFName(fontName);
+
+        // 1. Widget's own /Resources /Font
+        if (!field.getWidgets().isEmpty()) {
+            COSDictionary wRes = field.getWidgets().get(0).getCOSObject()
+                    .getCOSDictionary(COSName.RESOURCES);
+            if (wRes != null) {
+                COSDictionary fontDict = wRes.getCOSDictionary(COSName.FONT);
+                if (fontDict != null) {
+                    COSBase item = fontDict.getItem(cn);
+                    if (item instanceof COSObject cosObj) {
+                        return cosObj.getObjectNumber() + " " + cosObj.getGenerationNumber();
+                    }
+                }
+            }
+        }
+
+        // 2. AcroForm /DR /Font
+        try {
+            var acroForm = ctx.doc.getDocumentCatalog().getAcroForm();
+            if (acroForm != null) {
+                COSDictionary dr = acroForm.getCOSObject().getCOSDictionary(COSName.DR);
+                if (dr != null) {
+                    COSDictionary fontDict = dr.getCOSDictionary(COSName.FONT);
+                    if (fontDict != null) {
+                        COSBase item = fontDict.getItem(cn);
+                        if (item instanceof COSObject cosObj) {
+                            return cosObj.getObjectNumber() + " " + cosObj.getGenerationNumber();
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Could not resolve font object ref for {}", fontName, e);
+        }
+        return null;
+    }
+
+    /**
+     * Extracts the check/on symbol for checkbox and radio fields.
+     * Reads MK/CA from the widget, maps ZapfDingbats codes to Unicode where possible.
+     * Adds CheckSymbol and OnValue properties to the node.
+     */
+    private void extractCheckSymbol(PDField field, PdfNode node, String fontName) {
+        // OnValue: the export value for the "On" state
+        String onValue = null;
+        if (field instanceof PDCheckBox cb) {
+            try { onValue = cb.getOnValue(); } catch (Exception e) { /* ignore */ }
+        }
+        if (onValue == null || onValue.isBlank()) onValue = "Yes";
+        node.addProperty("OnValue", onValue);
+
+        // MK/CA: the caption character used in the widget appearance
+        if (field.getWidgets().isEmpty()) return;
+        PDAnnotationWidget widget = field.getWidgets().get(0);
+        PDAppearanceCharacteristicsDictionary mk = widget.getAppearanceCharacteristics();
+        if (mk == null) return;
+        String caption = mk.getNormalCaption();
+        if (caption == null || caption.isEmpty()) return;
+
+        // If font is ZapfDingbats (or unknown — default for most PDF checkboxes), map to Unicode
+        boolean isZapf = fontName == null
+                || "ZapfDingbats".equalsIgnoreCase(fontName)
+                || fontName.toLowerCase().contains("zapf");
+        if (isZapf && caption.length() == 1) {
+            String mapped = ZAPF_TO_UNICODE.get(caption.charAt(0));
+            if (mapped != null) {
+                node.addProperty("CheckSymbol", mapped);
+                return;
+            }
+        }
+        // For non-ZapfDingbats or unmapped chars: store the raw caption
+        // (browser renders it using the loaded @font-face if FontObjectRef is available)
+        node.addProperty("CheckSymbol", caption);
     }
 
     /** Converts a COSArray of 1 (grey), 3 (RGB), or 4 (CMYK) numbers to "#RRGGBB". Returns null if not applicable. */

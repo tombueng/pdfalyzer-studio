@@ -197,21 +197,44 @@ PDFalyzer.Viewer = (function ($, P) {
         });
     }
 
-    function rescalePages(scale) {
-        var oldScale = P.state.currentScale;
-        var ratio = scale / oldScale;
+    function rescalePages(scale, focalScreenX, focalScreenY) {
+        var pane = $('#pdfPane')[0];
+        var viewer = document.getElementById('pdfViewer');
+        var ratio = scale / P.state.currentScale;
+
+        // Compute new scroll BEFORE any DOM writes (reads here are uncontaminated).
+        // pane.scrollLeft alone is wrong when pages are centered (narrower than pane):
+        // the viewer's left edge is offset by the centering margin, not just -scrollLeft.
+        var newScrollLeft = null, newScrollTop = null;
+        if (pane && viewer && typeof focalScreenX === 'number') {
+            var paneRect  = pane.getBoundingClientRect();
+            var viewerRect = viewer.getBoundingClientRect();
+            var contentX = focalScreenX - (viewerRect.left - paneRect.left);
+            var contentY = focalScreenY - (viewerRect.top  - paneRect.top);
+            newScrollLeft = contentX * ratio - focalScreenX;
+            newScrollTop  = contentY * ratio - focalScreenY;
+        }
+
         P.state.currentScale = scale;
+        var dpr = window.devicePixelRatio || 1;
+        var renderScale = (P.ViewerRender && P.ViewerRender.MAX_RENDER_SCALE || 4.0) * dpr;
         $('#pdfViewer .pdf-page-wrapper').each(function (i) {
             var canvas = $(this).find('canvas')[0];
             if (!canvas) return;
-            var newW = parseFloat(canvas.style.width) * ratio;
-            var newH = parseFloat(canvas.style.height) * ratio;
-            canvas.style.width = newW + 'px';
+            var newW = canvas.width  * scale / renderScale;
+            var newH = canvas.height * scale / renderScale;
+            canvas.style.width  = newW + 'px';
             canvas.style.height = newH + 'px';
             var vp = P.state.pageViewports[i];
             if (vp) { vp.scale = scale; vp.width = newW; vp.height = newH; }
         });
-        if (P.EditMode && P.EditMode.renderFieldHandlesForAllPages) P.EditMode.renderFieldHandlesForAllPages();
+        if (newScrollLeft !== null) {
+            pane.scrollLeft = newScrollLeft;
+            pane.scrollTop  = newScrollTop;
+        }
+        var layerDef = P.Zoom && P.Zoom.LAYER_MODES ? P.Zoom.LAYER_MODES[P.state.layerMode || 0] : null;
+        var showFormLayer = (layerDef ? layerDef.form : false) || !!P.state.editFieldType;
+        if (showFormLayer && P.EditMode && P.EditMode.renderFieldHandlesForAllPages) P.EditMode.renderFieldHandlesForAllPages();
         if (P.Zoom && P.Zoom.updateButton) P.Zoom.updateButton();
         $(document).trigger('pdfviewer:rendered');
     }
@@ -221,11 +244,30 @@ PDFalyzer.Viewer = (function ($, P) {
         return scale <= maxRenderScale && P.state.pageCanvases && P.state.pageCanvases.length > 0;
     }
 
+    function paneCenterFocal() {
+        var pane = $('#pdfPane')[0];
+        return pane ? { x: pane.clientWidth / 2, y: pane.clientHeight / 2 } : { x: 0, y: 0 };
+    }
+
     function setScale(scale) {
         if (scale <= 0) return;
-        if (Math.abs(scale - P.state.currentScale) < 0.01) return;
+        if (Math.abs(scale - P.state.currentScale) < 0.0005) return;
         P.state.autoZoomMode = 'off';
-        if (canRescaleCSS(scale)) { rescalePages(scale); return; }
+        if (canRescaleCSS(scale)) {
+            var c = paneCenterFocal();
+            rescalePages(scale, c.x, c.y);
+            return;
+        }
+        P.state.currentScale = scale;
+        renderAllPages({ preserveView: true, smoothSwap: true });
+        if (P.Zoom && P.Zoom.updateButton) P.Zoom.updateButton();
+    }
+
+    function setScaleAtPoint(scale, screenX, screenY) {
+        if (scale <= 0) return;
+        if (Math.abs(scale - P.state.currentScale) < 0.0005) return;
+        P.state.autoZoomMode = 'off';
+        if (canRescaleCSS(scale)) { rescalePages(scale, screenX, screenY); return; }
         P.state.currentScale = scale;
         renderAllPages({ preserveView: true, smoothSwap: true });
         if (P.Zoom && P.Zoom.updateButton) P.Zoom.updateButton();
@@ -460,6 +502,7 @@ PDFalyzer.Viewer = (function ($, P) {
     }
 
     return { loadPdf: loadPdf, renderAllPages: renderAllPages, setScale: setScale,
+             setScaleAtPoint: setScaleAtPoint,
              fitWidth: fitWidth, fitHeight: fitHeight, applyAutoZoom: applyAutoZoom,
              highlight: highlight, clearHighlights: clearHighlights,
              scrollToPage: scrollToPage, attachPageListeners: attachPageListeners };

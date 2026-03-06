@@ -1,0 +1,1388 @@
+/* === PDFalyzer Studio — Design Themes ===
+ *
+ * Design themes control shape, spacing, shadow, font, and motion.
+ * They are orthogonal to color themes and applied via  data-design=""  on <html>.
+ *
+ * Available design themes:
+ *   (none / "studio")  — default PDFalyzer feel
+ *   "blade"            — brutalist / hacker: sharp edges, monospace, hard shadows
+ *   "breeze"           — modern / fluent: rounded, soft shadows, smooth motion
+ *   "ether"            — glassmorphism: frosted panels, glow borders, blur effects
+ *
+ * Design tokens (--dt-*) are declared on :root and overridden per theme.
+ * Component overrides follow each token block.
+ */
+
+/* ══════════════════════════════════════════════════════
+   DEFAULT DESIGN TOKENS  (Studio)
+══════════════════════════════════════════════════════ */
+:root {
+    --dt-radius-xs:  3px;
+    --dt-radius-sm:  5px;
+    --dt-radius-md:  8px;
+    --dt-radius-lg:  12px;
+    --dt-radius-pill: 999px;
+
+    --dt-shadow-sm:  0 2px 8px rgba(0,0,0,0.3);
+    --dt-shadow-md:  0 4px 16px rgba(0,0,0,0.4);
+    --dt-shadow-lg:  0 12px 30px rgba(0,0,0,0.45);
+    --dt-btn-shadow: none;
+
+    --dt-border-w:   1px;
+    --dt-transition: 0.2s ease;
+    --dt-font:       'Segoe UI', system-ui, -apple-system, sans-serif;
+    --dt-glass:      none;
+
+    --dt-btn-radius: var(--dt-radius-sm);
+    --dt-input-radius: var(--dt-radius-sm);
+    --dt-card-radius:  var(--dt-radius-md);
+    --dt-modal-radius: var(--dt-radius-lg);
+    --dt-badge-radius: var(--dt-radius-xs);
+
+    --dt-btn-text-transform: none;
+    --dt-btn-letter-spacing: normal;
+    --dt-btn-font-weight: 600;
+}
+
+/* ══════════════════════════════════════════════════════
+   BLADE — Brutalist / Hacker
+   Sharp edges, monospace font, hard pixel-offset shadows,
+   bold borders, UPPERCASE buttons.
+══════════════════════════════════════════════════════ */
+[data-design="blade"] {
+    --dt-radius-xs:  0px;
+    --dt-radius-sm:  0px;
+    --dt-radius-md:  0px;
+    --dt-radius-lg:  0px;
+    --dt-radius-pill: 0px;
+
+    --dt-shadow-sm:  3px 3px 0 rgba(0,0,0,0.7);
+    --dt-shadow-md:  4px 4px 0 rgba(0,0,0,0.85);
+    --dt-shadow-lg:  6px 6px 0 rgba(0,0,0,0.9);
+    --dt-btn-shadow: 2px 2px 0 rgba(0,0,0,0.7);
+
+    --dt-border-w:   2px;
+    --dt-transition: 0.08s linear;
+    --dt-font:       'Courier New', 'Consolas', 'Lucida Console', monospace;
+    --dt-glass:      none;
+
+    --dt-btn-radius:   0px;
+    --dt-input-radius: 0px;
+    --dt-card-radius:  0px;
+    --dt-modal-radius: 0px;
+    --dt-badge-radius: 0px;
+
+    --dt-btn-text-transform: uppercase;
+    --dt-btn-letter-spacing: 0.08em;
+    --dt-btn-font-weight: 700;
+}
+
+/* ── Blade: global font ── */
+[data-design="blade"] body,
+[data-design="blade"] input,
+[data-design="blade"] select,
+[data-design="blade"] textarea,
+[data-design="blade"] button {
+    font-family: var(--dt-font) !important;
+}
+
+/* ── Blade: buttons ── */
+[data-design="blade"] .btn,
+[data-design="blade"] .edit-field-btn {
+    border-radius: 0 !important;
+    border-width: 2px !important;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 700;
+    box-shadow: var(--dt-btn-shadow) !important;
+    transition: var(--dt-transition) !important;
+    font-family: var(--dt-font);
+}
+
+[data-design="blade"] .btn:hover,
+[data-design="blade"] .edit-field-btn:hover {
+    box-shadow: 3px 3px 0 rgba(0,0,0,0.7) !important;
+}
+
+[data-design="blade"] .btn:active,
+[data-design="blade"] .edit-field-btn:active {
+    box-shadow: 1px 1px 0 rgba(0,0,0,0.6) !important;
+    transform: translate(1px, 1px);
+}
+
+/* ── Blade: inputs ── */
+[data-design="blade"] .form-control,
+[data-design="blade"] .form-select,
+[data-design="blade"] .input-group-text {
+    border-radius: 0 !important;
+    border-width: 2px !important;
+    font-family: var(--dt-font);
+    transition: var(--dt-transition) !important;
+}
+
+/* ── Blade: modals ── */
+[data-design="blade"] .modal .modal-content {
+    border-radius: 0 !important;
+    border-width: 2px !important;
+    box-shadow: var(--dt-shadow-lg) !important;
+}
+
+[data-design="blade"] .modal .modal-header,
+[data-design="blade"] .modal .modal-footer {
+    border-radius: 0 !important;
+}
+
+[data-design="blade"] .modal .modal-title {
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 12px;
+    font-weight: 900;
+    font-family: var(--dt-font);
+}
+
+/* ── Blade: panels ── */
+[data-design="blade"] #themePickerPanel,
+[data-design="blade"] #designPickerPanel {
+    border-radius: 0 !important;
+    border-width: 2px !important;
+    box-shadow: var(--dt-shadow-lg) !important;
+}
+
+[data-design="blade"] .theme-panel-close,
+[data-design="blade"] .theme-option,
+[data-design="blade"] .theme-group-btn {
+    border-radius: 0 !important;
+}
+
+/* ── Blade: navbar ── */
+[data-design="blade"] .navbar {
+    border-radius: 0 !important;
+    backdrop-filter: none !important;
+}
+
+/* ── Blade: badges & misc ── */
+[data-design="blade"] .cos-type-badge,
+[data-design="blade"] .enc-badge-readonly,
+[data-design="blade"] .badge,
+[data-design="blade"] .toast-msg,
+[data-design="blade"] .pdf-page-label {
+    border-radius: 0 !important;
+    border-width: 1px !important;
+}
+
+[data-design="blade"] .toast-msg {
+    border-width: 2px !important;
+    box-shadow: var(--dt-shadow-md) !important;
+}
+
+/* ── Blade: tree tabs ── */
+[data-design="blade"] .tree-tabs .tab-btn,
+[data-design="blade"] .font-detail-tab-btn {
+    border-radius: 0 !important;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    font-size: 10px;
+    font-weight: 700;
+    font-family: var(--dt-font);
+}
+
+/* ── Blade: scrollbar ── */
+[data-design="blade"] ::-webkit-scrollbar { width: 6px; height: 6px; }
+[data-design="blade"] ::-webkit-scrollbar-thumb {
+    border-radius: 0 !important;
+}
+
+/* ── Blade: PDF page ── */
+[data-design="blade"] .pdf-page-wrapper {
+    border-radius: 0 !important;
+    box-shadow: var(--dt-shadow-md) !important;
+}
+
+/* ── Blade: drop overlay ── */
+[data-design="blade"] #dropOverlay {
+    border-radius: 0 !important;
+}
+
+/* ── Blade: cos inline editor ── */
+[data-design="blade"] .cos-inline-editor,
+[data-design="blade"] .cos-add-editor,
+[data-design="blade"] .cos-delete-confirm {
+    border-radius: 0 !important;
+}
+
+/* ── Blade: status bar design dot indicator ── */
+[data-design="blade"] .design-status-icon::after { content: '[//]'; font-family: monospace; font-size: 9px; }
+
+/* ══════════════════════════════════════════════════════
+   BREEZE — Modern / Fluent
+   Generous radii, soft layered shadows, Inter font,
+   smooth Material-style easing, pill buttons.
+══════════════════════════════════════════════════════ */
+[data-design="breeze"] {
+    --dt-radius-xs:  8px;
+    --dt-radius-sm:  12px;
+    --dt-radius-md:  16px;
+    --dt-radius-lg:  20px;
+    --dt-radius-pill: 999px;
+
+    --dt-shadow-sm:  0 2px 10px rgba(0,0,0,0.10), 0 1px 3px rgba(0,0,0,0.06);
+    --dt-shadow-md:  0 4px 20px rgba(0,0,0,0.14), 0 2px 8px rgba(0,0,0,0.08);
+    --dt-shadow-lg:  0 12px 40px rgba(0,0,0,0.18), 0 4px 12px rgba(0,0,0,0.10);
+    --dt-btn-shadow: 0 2px 8px rgba(0,0,0,0.15), 0 1px 3px rgba(0,0,0,0.08);
+
+    --dt-border-w:   1px;
+    --dt-transition: 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    --dt-font:       'Inter', 'Segoe UI', system-ui, sans-serif;
+    --dt-glass:      blur(4px);
+
+    --dt-btn-radius:   var(--dt-radius-pill);
+    --dt-input-radius: var(--dt-radius-sm);
+    --dt-card-radius:  var(--dt-radius-md);
+    --dt-modal-radius: var(--dt-radius-lg);
+    --dt-badge-radius: var(--dt-radius-pill);
+
+    --dt-btn-text-transform: none;
+    --dt-btn-letter-spacing: 0.015em;
+    --dt-btn-font-weight: 500;
+}
+
+/* ── Breeze: global font + transitions ── */
+[data-design="breeze"] body {
+    font-family: var(--dt-font);
+}
+
+/* ── Breeze: buttons ── */
+[data-design="breeze"] .btn,
+[data-design="breeze"] .edit-field-btn {
+    border-radius: var(--dt-btn-radius) !important;
+    box-shadow: var(--dt-btn-shadow) !important;
+    transition: var(--dt-transition) !important;
+    font-weight: var(--dt-btn-font-weight);
+    letter-spacing: var(--dt-btn-letter-spacing);
+}
+
+[data-design="breeze"] .btn:hover,
+[data-design="breeze"] .edit-field-btn:hover {
+    box-shadow: 0 4px 14px rgba(0,0,0,0.18), 0 2px 6px rgba(0,0,0,0.1) !important;
+    transform: translateY(-1px);
+}
+
+[data-design="breeze"] .btn:active,
+[data-design="breeze"] .edit-field-btn:active {
+    transform: translateY(0);
+    box-shadow: var(--dt-btn-shadow) !important;
+}
+
+[data-design="breeze"] .btn-accent {
+    background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 70%, var(--c-ok))) !important;
+}
+
+[data-design="breeze"] .btn-sm {
+    border-radius: var(--dt-btn-radius) !important;
+}
+
+/* ── Breeze: inputs ── */
+[data-design="breeze"] .form-control,
+[data-design="breeze"] .form-select,
+[data-design="breeze"] .input-group-text {
+    border-radius: var(--dt-input-radius) !important;
+    transition: var(--dt-transition) !important;
+}
+
+/* ── Breeze: modals ── */
+[data-design="breeze"] .modal .modal-content {
+    border-radius: var(--dt-modal-radius) !important;
+    box-shadow: var(--dt-shadow-lg) !important;
+    overflow: hidden;
+}
+
+[data-design="breeze"] .modal .modal-header {
+    border-radius: var(--dt-modal-radius) var(--dt-modal-radius) 0 0 !important;
+}
+
+[data-design="breeze"] .modal .modal-footer {
+    border-radius: 0 0 var(--dt-modal-radius) var(--dt-modal-radius) !important;
+}
+
+/* ── Breeze: panels ── */
+[data-design="breeze"] #themePickerPanel,
+[data-design="breeze"] #designPickerPanel {
+    border-radius: var(--dt-modal-radius) var(--dt-modal-radius) 0 0 !important;
+    box-shadow: var(--dt-shadow-lg) !important;
+}
+
+[data-design="breeze"] .theme-option {
+    border-radius: var(--dt-radius-sm) !important;
+}
+
+/* ── Breeze: badges ── */
+[data-design="breeze"] .cos-type-badge,
+[data-design="breeze"] .enc-badge-readonly,
+[data-design="breeze"] .badge {
+    border-radius: var(--dt-badge-radius) !important;
+}
+
+[data-design="breeze"] .toast-msg {
+    border-radius: var(--dt-radius-md) !important;
+    box-shadow: var(--dt-shadow-md) !important;
+}
+
+/* ── Breeze: tree tabs ── */
+[data-design="breeze"] .tree-tabs .tab-btn,
+[data-design="breeze"] .font-detail-tab-btn {
+    border-radius: var(--dt-btn-radius) !important;
+    transition: var(--dt-transition) !important;
+}
+
+/* ── Breeze: scrollbar ── */
+[data-design="breeze"] ::-webkit-scrollbar { width: 4px; height: 4px; }
+[data-design="breeze"] ::-webkit-scrollbar-thumb {
+    border-radius: var(--dt-radius-pill) !important;
+    background: rgba(255,255,255,0.2);
+}
+
+/* ── Breeze: PDF page ── */
+[data-design="breeze"] .pdf-page-wrapper {
+    border-radius: var(--dt-card-radius) !important;
+    box-shadow: var(--dt-shadow-md) !important;
+}
+
+/* ── Breeze: misc ── */
+[data-design="breeze"] .pdf-page-label {
+    border-radius: var(--dt-badge-radius) !important;
+}
+
+[data-design="breeze"] #dropOverlay {
+    border-radius: var(--dt-card-radius) !important;
+}
+
+[data-design="breeze"] .cos-inline-editor,
+[data-design="breeze"] .cos-add-editor,
+[data-design="breeze"] .cos-delete-confirm {
+    border-radius: var(--dt-radius-sm) !important;
+}
+
+/* ══════════════════════════════════════════════════════
+   ETHER — Glassmorphism / Frosted Glass
+   Backdrop blur on panels and modals, glowing accent
+   borders, semi-transparent surfaces, neon-glow buttons.
+══════════════════════════════════════════════════════ */
+[data-design="ether"] {
+    --dt-radius-xs:  5px;
+    --dt-radius-sm:  8px;
+    --dt-radius-md:  12px;
+    --dt-radius-lg:  16px;
+    --dt-radius-pill: 999px;
+
+    /* layered shadows: depth + inner highlight */
+    --dt-shadow-sm:  0 4px 12px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.07);
+    --dt-shadow-md:  0 8px 24px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.09);
+    --dt-shadow-lg:  0 16px 48px rgba(0,0,0,0.45), inset 0 1px 0 rgba(255,255,255,0.11);
+
+    --dt-border-w:   1px;
+    --dt-transition: 0.2s ease;
+    --dt-font:       'Segoe UI', system-ui, -apple-system, sans-serif;
+    --dt-glass:      blur(16px) saturate(1.4);
+
+    --dt-btn-radius:   var(--dt-radius-sm);
+    --dt-input-radius: var(--dt-radius-sm);
+    --dt-card-radius:  var(--dt-radius-md);
+    --dt-modal-radius: var(--dt-radius-lg);
+    --dt-badge-radius: var(--dt-radius-xs);
+
+    --dt-btn-text-transform: none;
+    --dt-btn-letter-spacing: normal;
+    --dt-btn-font-weight: 600;
+}
+
+/* ── Ether: buttons — glow on hover ── */
+[data-design="ether"] .btn,
+[data-design="ether"] .edit-field-btn {
+    border-radius: var(--dt-btn-radius) !important;
+    transition: var(--dt-transition) !important;
+    backdrop-filter: blur(4px);
+}
+
+[data-design="ether"] .btn:hover,
+[data-design="ether"] .edit-field-btn:hover {
+    box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 35%, transparent),
+                0 2px 8px rgba(0,0,0,0.3) !important;
+}
+
+[data-design="ether"] .btn-accent:hover {
+    box-shadow: 0 0 16px color-mix(in srgb, var(--accent) 50%, transparent),
+                0 4px 12px rgba(0,0,0,0.35) !important;
+}
+
+[data-design="ether"] .btn-outline-accent:hover {
+    box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 30%, transparent),
+                inset 0 0 8px color-mix(in srgb, var(--accent) 10%, transparent) !important;
+}
+
+/* ── Ether: inputs ── */
+[data-design="ether"] .form-control,
+[data-design="ether"] .form-select,
+[data-design="ether"] .input-group-text {
+    border-radius: var(--dt-input-radius) !important;
+    backdrop-filter: blur(4px);
+    transition: var(--dt-transition) !important;
+}
+
+[data-design="ether"] .form-control:focus,
+[data-design="ether"] .form-select:focus {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 25%, transparent),
+                0 0 8px color-mix(in srgb, var(--accent) 15%, transparent) !important;
+}
+
+/* ── Ether: modals — frosted glass ── */
+[data-design="ether"] .modal .modal-content {
+    border-radius: var(--dt-modal-radius) !important;
+    background: color-mix(in srgb, var(--c-bg) 72%, transparent) !important;
+    backdrop-filter: var(--dt-glass) !important;
+    -webkit-backdrop-filter: var(--dt-glass) !important;
+    border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border)) !important;
+    box-shadow: var(--dt-shadow-lg) !important;
+    overflow: hidden;
+}
+
+[data-design="ether"] .modal .modal-header {
+    border-radius: var(--dt-modal-radius) var(--dt-modal-radius) 0 0 !important;
+    background: color-mix(in srgb, var(--c-card) 50%, transparent) !important;
+    border-bottom: 1px solid color-mix(in srgb, var(--accent) 15%, var(--border)) !important;
+}
+
+[data-design="ether"] .modal .modal-footer {
+    border-radius: 0 0 var(--dt-modal-radius) var(--dt-modal-radius) !important;
+    background: color-mix(in srgb, var(--c-card) 40%, transparent) !important;
+    border-top: 1px solid color-mix(in srgb, var(--accent) 15%, var(--border)) !important;
+}
+
+[data-design="ether"] .modal .modal-body {
+    background: transparent !important;
+}
+
+/* ── Ether: panels — frosted ── */
+[data-design="ether"] #themePickerPanel,
+[data-design="ether"] #designPickerPanel {
+    border-radius: var(--dt-modal-radius) var(--dt-modal-radius) 0 0 !important;
+    background: color-mix(in srgb, var(--c-bg) 72%, transparent) !important;
+    backdrop-filter: var(--dt-glass) !important;
+    -webkit-backdrop-filter: var(--dt-glass) !important;
+    border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--border)) !important;
+    box-shadow: var(--dt-shadow-lg) !important;
+}
+
+/* ── Ether: navbar — subtle glass ── */
+[data-design="ether"] .navbar {
+    background: color-mix(in srgb, var(--c-card) 65%, transparent) !important;
+    backdrop-filter: blur(20px) saturate(1.3) !important;
+    -webkit-backdrop-filter: blur(20px) saturate(1.3) !important;
+    border-bottom: 1px solid color-mix(in srgb, var(--accent) 15%, var(--border)) !important;
+}
+
+/* ── Ether: badges ── */
+[data-design="ether"] .cos-type-badge,
+[data-design="ether"] .enc-badge-readonly,
+[data-design="ether"] .badge {
+    border-radius: var(--dt-badge-radius) !important;
+    backdrop-filter: blur(4px);
+}
+
+[data-design="ether"] .toast-msg {
+    border-radius: var(--dt-radius-md) !important;
+    background: color-mix(in srgb, var(--c-card) 75%, transparent) !important;
+    backdrop-filter: blur(12px) !important;
+    -webkit-backdrop-filter: blur(12px) !important;
+    border: 1px solid color-mix(in srgb, var(--accent) 15%, var(--border)) !important;
+    box-shadow: var(--dt-shadow-md) !important;
+}
+
+/* ── Ether: tree tabs ── */
+[data-design="ether"] .tree-tabs .tab-btn,
+[data-design="ether"] .font-detail-tab-btn {
+    border-radius: var(--dt-btn-radius) !important;
+    transition: var(--dt-transition) !important;
+}
+
+/* ── Ether: scrollbar ── */
+[data-design="ether"] ::-webkit-scrollbar { width: 5px; height: 5px; }
+[data-design="ether"] ::-webkit-scrollbar-thumb {
+    border-radius: var(--dt-radius-pill) !important;
+    background: color-mix(in srgb, var(--accent) 20%, rgba(255,255,255,0.1));
+}
+
+/* ── Ether: PDF page ── */
+[data-design="ether"] .pdf-page-wrapper {
+    border-radius: var(--dt-card-radius) !important;
+    box-shadow: var(--dt-shadow-md) !important;
+}
+
+/* ── Ether: misc ── */
+[data-design="ether"] .cos-inline-editor,
+[data-design="ether"] .cos-add-editor,
+[data-design="ether"] .cos-delete-confirm {
+    border-radius: var(--dt-radius-sm) !important;
+    backdrop-filter: blur(8px);
+}
+
+[data-design="ether"] #dropOverlay {
+    border-radius: var(--dt-card-radius) !important;
+    background: color-mix(in srgb, var(--accent) 8%, transparent) !important;
+    backdrop-filter: blur(4px);
+}
+
+/* ══════════════════════════════════════════════════════
+   NEON — Neon Sign
+   Glowing saturated borders, animated accent pulse,
+   neon-tube text on headings, vivid hover halos.
+══════════════════════════════════════════════════════ */
+@keyframes neon-pulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.72; }
+}
+
+[data-design="neon"] {
+    --dt-radius-xs:  4px;
+    --dt-radius-sm:  6px;
+    --dt-radius-md:  8px;
+    --dt-radius-lg:  10px;
+    --dt-radius-pill: 999px;
+
+    --dt-shadow-sm:  0 0 8px  color-mix(in srgb, var(--c-accent) 25%, transparent);
+    --dt-shadow-md:  0 0 16px color-mix(in srgb, var(--c-accent) 30%, transparent),
+                     0 4px 12px rgba(0,0,0,0.5);
+    --dt-shadow-lg:  0 0 24px color-mix(in srgb, var(--c-accent) 35%, transparent),
+                     0 8px 24px rgba(0,0,0,0.6);
+    --dt-btn-shadow: 0 0 8px  color-mix(in srgb, var(--c-accent) 40%, transparent);
+
+    --dt-border-w:   1px;
+    --dt-transition: 0.15s ease;
+    --dt-font:       'Segoe UI', system-ui, sans-serif;
+    --dt-glass:      none;
+
+    --dt-btn-radius:   var(--dt-radius-sm);
+    --dt-input-radius: var(--dt-radius-sm);
+    --dt-card-radius:  var(--dt-radius-md);
+    --dt-modal-radius: var(--dt-radius-lg);
+    --dt-badge-radius: var(--dt-radius-xs);
+}
+
+/* ── Neon: glowing borders on interactive panels ── */
+[data-design="neon"] #themePickerPanel,
+[data-design="neon"] #designPickerPanel {
+    border-radius: var(--dt-modal-radius) var(--dt-modal-radius) 0 0 !important;
+    border-color: color-mix(in srgb, var(--accent) 60%, var(--border)) !important;
+    box-shadow: var(--dt-shadow-lg), inset 0 0 30px color-mix(in srgb, var(--accent) 4%, transparent) !important;
+}
+
+/* ── Neon: buttons ── */
+[data-design="neon"] .btn,
+[data-design="neon"] .edit-field-btn {
+    border-radius: var(--dt-btn-radius) !important;
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--border)) !important;
+    box-shadow: var(--dt-btn-shadow) !important;
+    transition: var(--dt-transition) !important;
+}
+
+[data-design="neon"] .btn:hover,
+[data-design="neon"] .edit-field-btn:hover {
+    box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 55%, transparent),
+                0 0 4px  color-mix(in srgb, var(--accent) 80%, transparent) !important;
+    border-color: var(--accent) !important;
+}
+
+[data-design="neon"] .btn-accent {
+    animation: neon-pulse 3s ease-in-out infinite;
+}
+
+/* ── Neon: inputs ── */
+[data-design="neon"] .form-control,
+[data-design="neon"] .form-select {
+    border-radius: var(--dt-input-radius) !important;
+    border-color: color-mix(in srgb, var(--accent) 35%, var(--border)) !important;
+}
+
+[data-design="neon"] .form-control:focus,
+[data-design="neon"] .form-select:focus {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 30%, transparent),
+                0 0 10px color-mix(in srgb, var(--accent) 20%, transparent) !important;
+    border-color: var(--accent) !important;
+}
+
+/* ── Neon: modal title glow ── */
+[data-design="neon"] .modal .modal-content {
+    border-radius: var(--dt-modal-radius) !important;
+    border-color: color-mix(in srgb, var(--accent) 40%, var(--border)) !important;
+    box-shadow: var(--dt-shadow-lg) !important;
+}
+
+[data-design="neon"] .modal .modal-title {
+    text-shadow: 0 0 8px color-mix(in srgb, var(--accent) 70%, transparent),
+                 0 0 2px color-mix(in srgb, var(--accent) 90%, transparent);
+}
+
+/* ── Neon: scrollbar ── */
+[data-design="neon"] ::-webkit-scrollbar-thumb {
+    background: color-mix(in srgb, var(--accent) 30%, rgba(255,255,255,0.1));
+    border-radius: var(--dt-radius-pill) !important;
+}
+
+/* ── Neon: PDF page ── */
+[data-design="neon"] .pdf-page-wrapper {
+    border-radius: var(--dt-card-radius) !important;
+    box-shadow: 0 0 20px color-mix(in srgb, var(--accent) 20%, transparent),
+                0 4px 16px rgba(0,0,0,0.5) !important;
+}
+
+/* ── Neon: tree tabs ── */
+[data-design="neon"] .tree-tabs .tab-btn,
+[data-design="neon"] .font-detail-tab-btn {
+    border-radius: var(--dt-btn-radius) !important;
+}
+
+[data-design="neon"] .tree-tabs .tab-btn.active,
+[data-design="neon"] .font-detail-tab-btn.is-active {
+    box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 40%, transparent) !important;
+    border-color: color-mix(in srgb, var(--accent) 60%, var(--border)) !important;
+}
+
+/* ── Neon: toast ── */
+[data-design="neon"] .toast-msg {
+    border-radius: var(--dt-radius-md) !important;
+    border-color: color-mix(in srgb, var(--accent) 30%, var(--border)) !important;
+    box-shadow: var(--dt-shadow-md) !important;
+}
+
+/* ══════════════════════════════════════════════════════
+   NOIR — Film Noir
+   Serif typeface, diagonal-clipped button corners,
+   dramatic long-offset shadows, high-contrast frames.
+══════════════════════════════════════════════════════ */
+[data-design="noir"] {
+    --dt-radius-xs:  2px;
+    --dt-radius-sm:  2px;
+    --dt-radius-md:  4px;
+    --dt-radius-lg:  4px;
+    --dt-radius-pill: 2px;
+
+    --dt-shadow-sm:  5px 5px 0 rgba(0,0,0,0.6),  2px 2px 0 rgba(0,0,0,0.4);
+    --dt-shadow-md:  8px 8px 0 rgba(0,0,0,0.7),  3px 3px 0 rgba(0,0,0,0.5);
+    --dt-shadow-lg:  12px 12px 0 rgba(0,0,0,0.75), 4px 4px 0 rgba(0,0,0,0.55);
+    --dt-btn-shadow: 4px 4px 0 rgba(0,0,0,0.65);
+
+    --dt-border-w:   1px;
+    --dt-transition: 0.12s ease;
+    --dt-font:       'Georgia', 'Times New Roman', 'Book Antiqua', serif;
+    --dt-glass:      none;
+
+    --dt-btn-radius:   0px;
+    --dt-input-radius: 2px;
+    --dt-card-radius:  2px;
+    --dt-modal-radius: 2px;
+    --dt-badge-radius: 0px;
+}
+
+/* ── Noir: global serif font ── */
+[data-design="noir"] body,
+[data-design="noir"] input,
+[data-design="noir"] select,
+[data-design="noir"] textarea,
+[data-design="noir"] button:not(.btn-close) {
+    font-family: var(--dt-font) !important;
+}
+
+/* ── Noir: diagonal-clipped buttons ── */
+[data-design="noir"] .btn,
+[data-design="noir"] .edit-field-btn {
+    border-radius: 0 !important;
+    clip-path: polygon(10px 0, 100% 0, 100% calc(100% - 10px), calc(100% - 10px) 100%, 0 100%, 0 10px);
+    box-shadow: var(--dt-btn-shadow) !important;
+    transition: var(--dt-transition) !important;
+    letter-spacing: 0.04em;
+}
+
+[data-design="noir"] .btn:hover,
+[data-design="noir"] .edit-field-btn:hover {
+    box-shadow: 6px 6px 0 rgba(0,0,0,0.7) !important;
+}
+
+[data-design="noir"] .btn:active,
+[data-design="noir"] .edit-field-btn:active {
+    clip-path: polygon(8px 0, 100% 0, 100% calc(100% - 8px), calc(100% - 8px) 100%, 0 100%, 0 8px);
+    box-shadow: 2px 2px 0 rgba(0,0,0,0.6) !important;
+    transform: translate(2px, 2px);
+}
+
+/* ── Noir: inputs ── */
+[data-design="noir"] .form-control,
+[data-design="noir"] .form-select {
+    border-radius: var(--dt-input-radius) !important;
+    border-width: 1px !important;
+    font-family: var(--dt-font);
+}
+
+/* ── Noir: modals ── */
+[data-design="noir"] .modal .modal-content {
+    border-radius: 0 !important;
+    box-shadow: var(--dt-shadow-lg) !important;
+    border-width: 1px !important;
+}
+
+[data-design="noir"] .modal .modal-title {
+    font-style: italic;
+    letter-spacing: 0.06em;
+    font-family: var(--dt-font);
+}
+
+/* ── Noir: panels ── */
+[data-design="noir"] #themePickerPanel,
+[data-design="noir"] #designPickerPanel {
+    border-radius: 0 !important;
+    box-shadow: var(--dt-shadow-lg) !important;
+}
+
+/* ── Noir: badges ── */
+[data-design="noir"] .cos-type-badge,
+[data-design="noir"] .badge {
+    border-radius: 0 !important;
+    clip-path: polygon(6px 0, 100% 0, calc(100% - 6px) 100%, 0 100%);
+}
+
+[data-design="noir"] .toast-msg {
+    border-radius: 0 !important;
+    box-shadow: var(--dt-shadow-md) !important;
+}
+
+/* ── Noir: scrollbar ── */
+[data-design="noir"] ::-webkit-scrollbar { width: 6px; height: 6px; }
+[data-design="noir"] ::-webkit-scrollbar-thumb {
+    border-radius: 0 !important;
+    background: rgba(255,255,255,0.2);
+}
+
+/* ── Noir: PDF page ── */
+[data-design="noir"] .pdf-page-wrapper {
+    border-radius: 0 !important;
+    box-shadow: var(--dt-shadow-md) !important;
+}
+
+/* ── Noir: tabs ── */
+[data-design="noir"] .tree-tabs .tab-btn,
+[data-design="noir"] .font-detail-tab-btn {
+    border-radius: 0 !important;
+    font-style: italic;
+    letter-spacing: 0.04em;
+}
+
+/* ══════════════════════════════════════════════════════
+   CHROME — Industrial Metallic
+   Metallic gradient surfaces, bevel-effect shadows,
+   bold chrome-trim borders, industrial density.
+══════════════════════════════════════════════════════ */
+[data-design="chrome"] {
+    --dt-radius-xs:  3px;
+    --dt-radius-sm:  4px;
+    --dt-radius-md:  6px;
+    --dt-radius-lg:  8px;
+    --dt-radius-pill: 4px;
+
+    --dt-shadow-sm:  inset 0 1px 0 rgba(255,255,255,0.12),
+                     inset 0 -1px 0 rgba(0,0,0,0.25),
+                     0 2px 6px rgba(0,0,0,0.4);
+    --dt-shadow-md:  inset 0 1px 0 rgba(255,255,255,0.1),
+                     0 4px 14px rgba(0,0,0,0.5),
+                     0 1px 2px rgba(0,0,0,0.3);
+    --dt-shadow-lg:  inset 0 1px 0 rgba(255,255,255,0.08),
+                     0 10px 28px rgba(0,0,0,0.6),
+                     0 2px 4px rgba(0,0,0,0.4);
+    --dt-btn-shadow: inset 0 1px 0 rgba(255,255,255,0.18),
+                     inset 0 -1px 0 rgba(0,0,0,0.35),
+                     0 2px 5px rgba(0,0,0,0.4);
+
+    --dt-border-w:   1px;
+    --dt-transition: 0.15s ease;
+    --dt-font:       'Segoe UI', system-ui, sans-serif;
+    --dt-glass:      none;
+
+    --dt-btn-radius:   var(--dt-radius-sm);
+    --dt-input-radius: var(--dt-radius-sm);
+    --dt-card-radius:  var(--dt-radius-md);
+    --dt-modal-radius: var(--dt-radius-lg);
+    --dt-badge-radius: var(--dt-radius-xs);
+}
+
+/* ── Chrome: button metallic sheen ── */
+[data-design="chrome"] .btn,
+[data-design="chrome"] .edit-field-btn {
+    border-radius: var(--dt-btn-radius) !important;
+    box-shadow: var(--dt-btn-shadow) !important;
+    transition: var(--dt-transition) !important;
+    background-image: linear-gradient(
+        180deg,
+        rgba(255,255,255,0.10) 0%,
+        rgba(255,255,255,0.03) 40%,
+        rgba(0,0,0,0.08) 100%
+    ) !important;
+    border-color: rgba(255,255,255,0.15) !important;
+}
+
+[data-design="chrome"] .btn:hover,
+[data-design="chrome"] .edit-field-btn:hover {
+    background-image: linear-gradient(
+        180deg,
+        rgba(255,255,255,0.17) 0%,
+        rgba(255,255,255,0.06) 40%,
+        rgba(0,0,0,0.06) 100%
+    ) !important;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.22),
+                inset 0 -1px 0 rgba(0,0,0,0.3),
+                0 3px 8px rgba(0,0,0,0.45) !important;
+}
+
+[data-design="chrome"] .btn:active,
+[data-design="chrome"] .edit-field-btn:active {
+    background-image: linear-gradient(
+        180deg,
+        rgba(0,0,0,0.06) 0%,
+        rgba(255,255,255,0.03) 60%,
+        rgba(255,255,255,0.10) 100%
+    ) !important;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.5),
+                inset 0 -1px 0 rgba(255,255,255,0.1) !important;
+}
+
+/* ── Chrome: btn-accent has a metallic accent tint ── */
+[data-design="chrome"] .btn-accent {
+    background-image: linear-gradient(
+        160deg,
+        color-mix(in srgb, var(--accent) 95%, white 5%) 0%,
+        color-mix(in srgb, var(--accent) 80%, black 20%) 100%
+    ) !important;
+    border-color: color-mix(in srgb, var(--accent) 60%, rgba(255,255,255,0.3)) !important;
+}
+
+/* ── Chrome: inputs ── */
+[data-design="chrome"] .form-control,
+[data-design="chrome"] .form-select {
+    border-radius: var(--dt-input-radius) !important;
+    box-shadow: inset 0 2px 4px rgba(0,0,0,0.3),
+                inset 0 1px 0 rgba(0,0,0,0.2) !important;
+    border-color: rgba(255,255,255,0.12) !important;
+}
+
+/* ── Chrome: modals ── */
+[data-design="chrome"] .modal .modal-content {
+    border-radius: var(--dt-modal-radius) !important;
+    box-shadow: var(--dt-shadow-lg) !important;
+    border-color: rgba(255,255,255,0.12) !important;
+    background-image: linear-gradient(180deg,
+        color-mix(in srgb, var(--c-card) 90%, rgba(255,255,255,0.05)),
+        var(--c-card)) !important;
+}
+
+[data-design="chrome"] .modal .modal-header {
+    border-radius: var(--dt-modal-radius) var(--dt-modal-radius) 0 0 !important;
+    background-image: linear-gradient(180deg,
+        rgba(255,255,255,0.07),
+        rgba(255,255,255,0.02)) !important;
+    border-bottom-color: rgba(255,255,255,0.10) !important;
+}
+
+/* ── Chrome: panels ── */
+[data-design="chrome"] #themePickerPanel,
+[data-design="chrome"] #designPickerPanel {
+    border-radius: var(--dt-modal-radius) var(--dt-modal-radius) 0 0 !important;
+    box-shadow: var(--dt-shadow-lg) !important;
+    background-image: linear-gradient(180deg,
+        rgba(255,255,255,0.04),
+        transparent) !important;
+    border-color: rgba(255,255,255,0.12) !important;
+}
+
+/* ── Chrome: scrollbar ── */
+[data-design="chrome"] ::-webkit-scrollbar { width: 6px; height: 6px; }
+[data-design="chrome"] ::-webkit-scrollbar-thumb {
+    border-radius: var(--dt-radius-xs) !important;
+    background: linear-gradient(180deg, rgba(255,255,255,0.25), rgba(255,255,255,0.1));
+}
+
+/* ── Chrome: PDF page ── */
+[data-design="chrome"] .pdf-page-wrapper {
+    border-radius: var(--dt-card-radius) !important;
+    box-shadow: var(--dt-shadow-md) !important;
+}
+
+/* ── Chrome: toast ── */
+[data-design="chrome"] .toast-msg {
+    border-radius: var(--dt-radius-md) !important;
+    background-image: linear-gradient(180deg, rgba(255,255,255,0.04), transparent) !important;
+    box-shadow: var(--dt-shadow-md) !important;
+}
+
+/* ── Chrome: tree tabs ── */
+[data-design="chrome"] .tree-tabs .tab-btn,
+[data-design="chrome"] .font-detail-tab-btn {
+    border-radius: var(--dt-btn-radius) !important;
+    background-image: linear-gradient(180deg, rgba(255,255,255,0.06), transparent) !important;
+}
+
+/* ══════════════════════════════════════════════════════
+   ZEN — Ultra-Minimalist
+   Almost-invisible borders, micro-shadows, clean radii,
+   light-weight text, generous negative space.
+══════════════════════════════════════════════════════ */
+[data-design="zen"] {
+    --dt-radius-xs:  4px;
+    --dt-radius-sm:  6px;
+    --dt-radius-md:  10px;
+    --dt-radius-lg:  14px;
+    --dt-radius-pill: 999px;
+
+    --dt-shadow-sm:  0 1px 3px rgba(0,0,0,0.15);
+    --dt-shadow-md:  0 2px 8px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.08);
+    --dt-shadow-lg:  0 6px 20px rgba(0,0,0,0.14), 0 2px 6px rgba(0,0,0,0.08);
+    --dt-btn-shadow: none;
+
+    --dt-border-w:   1px;
+    --dt-transition: 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    --dt-font:       'Inter', 'Segoe UI', system-ui, sans-serif;
+    --dt-glass:      none;
+
+    --dt-btn-radius:   var(--dt-radius-sm);
+    --dt-input-radius: var(--dt-radius-sm);
+    --dt-card-radius:  var(--dt-radius-md);
+    --dt-modal-radius: var(--dt-radius-lg);
+    --dt-badge-radius: var(--dt-radius-pill);
+
+    --dt-btn-text-transform: none;
+    --dt-btn-letter-spacing: 0.01em;
+    --dt-btn-font-weight: 400;
+}
+
+/* ── Zen: global font weight ── */
+[data-design="zen"] body { font-family: var(--dt-font); }
+[data-design="zen"] button:not(.btn-close),
+[data-design="zen"] input,
+[data-design="zen"] select { font-family: var(--dt-font); font-weight: 400; }
+
+/* ── Zen: buttons — minimal, barely-there ── */
+[data-design="zen"] .btn,
+[data-design="zen"] .edit-field-btn {
+    border-radius: var(--dt-btn-radius) !important;
+    box-shadow: none !important;
+    border-color: rgba(255,255,255,0.08) !important;
+    font-weight: 400;
+    transition: var(--dt-transition) !important;
+}
+
+[data-design="zen"] .btn:hover,
+[data-design="zen"] .edit-field-btn:hover {
+    box-shadow: var(--dt-shadow-sm) !important;
+    border-color: rgba(255,255,255,0.15) !important;
+    transform: none;
+}
+
+[data-design="zen"] .btn-accent {
+    border: none !important;
+    box-shadow: var(--dt-shadow-sm) !important;
+}
+
+[data-design="zen"] .btn-outline-accent {
+    border-color: color-mix(in srgb, var(--accent) 40%, transparent) !important;
+}
+
+/* ── Zen: inputs — hairline borders ── */
+[data-design="zen"] .form-control,
+[data-design="zen"] .form-select,
+[data-design="zen"] .input-group-text {
+    border-radius: var(--dt-input-radius) !important;
+    border-color: rgba(255,255,255,0.08) !important;
+    transition: var(--dt-transition) !important;
+}
+
+[data-design="zen"] .form-control:focus,
+[data-design="zen"] .form-select:focus {
+    border-color: color-mix(in srgb, var(--accent) 50%, transparent) !important;
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 20%, transparent) !important;
+}
+
+/* ── Zen: modals ── */
+[data-design="zen"] .modal .modal-content {
+    border-radius: var(--dt-modal-radius) !important;
+    border-color: rgba(255,255,255,0.06) !important;
+    box-shadow: var(--dt-shadow-lg) !important;
+}
+
+[data-design="zen"] .modal .modal-header {
+    border-radius: var(--dt-modal-radius) var(--dt-modal-radius) 0 0 !important;
+    border-bottom-color: rgba(255,255,255,0.06) !important;
+}
+
+[data-design="zen"] .modal .modal-footer {
+    border-radius: 0 0 var(--dt-modal-radius) var(--dt-modal-radius) !important;
+    border-top-color: rgba(255,255,255,0.06) !important;
+}
+
+/* ── Zen: panels ── */
+[data-design="zen"] #themePickerPanel,
+[data-design="zen"] #designPickerPanel {
+    border-radius: var(--dt-modal-radius) var(--dt-modal-radius) 0 0 !important;
+    border-color: rgba(255,255,255,0.07) !important;
+    box-shadow: var(--dt-shadow-lg) !important;
+}
+
+/* ── Zen: badges ── */
+[data-design="zen"] .cos-type-badge,
+[data-design="zen"] .badge {
+    border-radius: var(--dt-badge-radius) !important;
+    font-weight: 400;
+}
+
+[data-design="zen"] .toast-msg {
+    border-radius: var(--dt-radius-md) !important;
+    border-color: rgba(255,255,255,0.07) !important;
+    box-shadow: var(--dt-shadow-md) !important;
+}
+
+/* ── Zen: scrollbar — hairline ── */
+[data-design="zen"] ::-webkit-scrollbar { width: 3px; height: 3px; }
+[data-design="zen"] ::-webkit-scrollbar-thumb {
+    border-radius: var(--dt-radius-pill) !important;
+    background: rgba(255,255,255,0.12);
+}
+
+/* ── Zen: PDF page ── */
+[data-design="zen"] .pdf-page-wrapper {
+    border-radius: var(--dt-card-radius) !important;
+    box-shadow: var(--dt-shadow-sm) !important;
+}
+
+/* ── Zen: tree tabs ── */
+[data-design="zen"] .tree-tabs .tab-btn,
+[data-design="zen"] .font-detail-tab-btn {
+    border-radius: var(--dt-btn-radius) !important;
+    font-weight: 400;
+    transition: var(--dt-transition) !important;
+}
+
+/* ══════════════════════════════════════════════════════
+   RETRO — Classic 90s UI
+   Raised bevelled buttons, inset panel backgrounds,
+   square corners, Windows 9x / Motif aesthetic.
+══════════════════════════════════════════════════════ */
+[data-design="retro"] {
+    --dt-radius-xs:  0px;
+    --dt-radius-sm:  0px;
+    --dt-radius-md:  0px;
+    --dt-radius-lg:  0px;
+    --dt-radius-pill: 0px;
+
+    --dt-shadow-sm:  none;
+    --dt-shadow-md:  none;
+    --dt-shadow-lg:  none;
+    --dt-btn-shadow: inset 2px 2px 0 rgba(255,255,255,0.5),
+                     inset -2px -2px 0 rgba(0,0,0,0.5);
+
+    --dt-border-w:   2px;
+    --dt-transition: 0.05s linear;
+    --dt-font:       'Arial', 'Helvetica Neue', sans-serif;
+    --dt-glass:      none;
+
+    --dt-btn-radius:   0px;
+    --dt-input-radius: 0px;
+    --dt-card-radius:  0px;
+    --dt-modal-radius: 0px;
+    --dt-badge-radius: 0px;
+}
+
+/* ── Retro: global font ── */
+[data-design="retro"] body,
+[data-design="retro"] button,
+[data-design="retro"] input,
+[data-design="retro"] select {
+    font-family: var(--dt-font) !important;
+}
+
+/* ── Retro: raised bevel buttons ── */
+[data-design="retro"] .btn,
+[data-design="retro"] .edit-field-btn {
+    border-radius: 0 !important;
+    border: 2px solid rgba(255,255,255,0.15) !important;
+    box-shadow: inset 2px 2px 0 rgba(255,255,255,0.45),
+                inset -2px -2px 0 rgba(0,0,0,0.5) !important;
+    transition: var(--dt-transition) !important;
+}
+
+[data-design="retro"] .btn:hover,
+[data-design="retro"] .edit-field-btn:hover {
+    box-shadow: inset 2px 2px 0 rgba(255,255,255,0.55),
+                inset -2px -2px 0 rgba(0,0,0,0.45) !important;
+}
+
+/* Pressed state */
+[data-design="retro"] .btn:active,
+[data-design="retro"] .edit-field-btn:active {
+    box-shadow: inset -2px -2px 0 rgba(255,255,255,0.35),
+                inset 2px 2px 0 rgba(0,0,0,0.55) !important;
+    transform: translate(1px, 1px);
+}
+
+[data-design="retro"] .btn.active,
+[data-design="retro"] .edit-field-btn.active {
+    box-shadow: inset -1px -1px 0 rgba(255,255,255,0.25),
+                inset 1px 1px 0 rgba(0,0,0,0.4) !important;
+}
+
+/* ── Retro: inputs — inset sunken look ── */
+[data-design="retro"] .form-control,
+[data-design="retro"] .form-select,
+[data-design="retro"] .input-group-text {
+    border-radius: 0 !important;
+    border: 2px solid rgba(255,255,255,0.1) !important;
+    box-shadow: inset 2px 2px 0 rgba(0,0,0,0.4),
+                inset -1px -1px 0 rgba(255,255,255,0.15) !important;
+}
+
+[data-design="retro"] .form-control:focus,
+[data-design="retro"] .form-select:focus {
+    box-shadow: inset 2px 2px 0 rgba(0,0,0,0.4),
+                inset -1px -1px 0 rgba(255,255,255,0.15),
+                0 0 0 1px var(--accent) !important;
+}
+
+/* ── Retro: modals — classic dialog box ── */
+[data-design="retro"] .modal .modal-content {
+    border-radius: 0 !important;
+    border: 2px solid rgba(255,255,255,0.15) !important;
+    box-shadow: inset 2px 2px 0 rgba(255,255,255,0.25),
+                inset -2px -2px 0 rgba(0,0,0,0.45),
+                4px 4px 0 rgba(0,0,0,0.4) !important;
+}
+
+[data-design="retro"] .modal .modal-header {
+    border-radius: 0 !important;
+}
+
+[data-design="retro"] .modal .modal-title {
+    text-transform: none;
+    font-size: 13px;
+    font-weight: 700;
+    font-family: var(--dt-font);
+}
+
+/* ── Retro: panels ── */
+[data-design="retro"] #themePickerPanel,
+[data-design="retro"] #designPickerPanel {
+    border-radius: 0 !important;
+    border: 2px solid rgba(255,255,255,0.15) !important;
+    box-shadow: inset 1px 1px 0 rgba(255,255,255,0.2),
+                inset -1px -1px 0 rgba(0,0,0,0.35),
+                4px 0 0 rgba(0,0,0,0.3) !important;
+}
+
+[data-design="retro"] .theme-option,
+[data-design="retro"] .design-option {
+    border-radius: 0 !important;
+}
+
+/* ── Retro: badges ── */
+[data-design="retro"] .cos-type-badge,
+[data-design="retro"] .badge {
+    border-radius: 0 !important;
+    border: 1px solid rgba(255,255,255,0.1) !important;
+    box-shadow: inset 1px 1px 0 rgba(255,255,255,0.15),
+                inset -1px -1px 0 rgba(0,0,0,0.2) !important;
+}
+
+[data-design="retro"] .toast-msg {
+    border-radius: 0 !important;
+    border: 2px solid rgba(255,255,255,0.12) !important;
+    box-shadow: inset 1px 1px 0 rgba(255,255,255,0.15),
+                inset -1px -1px 0 rgba(0,0,0,0.3),
+                3px 3px 0 rgba(0,0,0,0.3) !important;
+}
+
+/* ── Retro: scrollbar — blocky ── */
+[data-design="retro"] ::-webkit-scrollbar { width: 14px; height: 14px; }
+[data-design="retro"] ::-webkit-scrollbar-track {
+    background: rgba(255,255,255,0.05);
+    border-left: 1px solid rgba(255,255,255,0.1);
+}
+[data-design="retro"] ::-webkit-scrollbar-thumb {
+    border-radius: 0 !important;
+    background: rgba(128,128,128,0.6);
+    border: 2px solid transparent;
+    box-shadow: inset 1px 1px 0 rgba(255,255,255,0.3),
+                inset -1px -1px 0 rgba(0,0,0,0.3);
+}
+
+/* ── Retro: PDF page ── */
+[data-design="retro"] .pdf-page-wrapper {
+    border-radius: 0 !important;
+    box-shadow: inset -1px -1px 0 rgba(0,0,0,0.5),
+                2px 2px 0 rgba(0,0,0,0.3) !important;
+}
+
+/* ── Retro: tabs ── */
+[data-design="retro"] .tree-tabs .tab-btn,
+[data-design="retro"] .font-detail-tab-btn {
+    border-radius: 0 !important;
+    border: 1px solid rgba(255,255,255,0.1) !important;
+    box-shadow: inset 1px 1px 0 rgba(255,255,255,0.2),
+                inset -1px -1px 0 rgba(0,0,0,0.3) !important;
+}
+
+[data-design="retro"] .tree-tabs .tab-btn.active,
+[data-design="retro"] .font-detail-tab-btn.is-active {
+    box-shadow: inset -1px -1px 0 rgba(255,255,255,0.15),
+                inset 1px 1px 0 rgba(0,0,0,0.2) !important;
+}
+
+/* ══════════════════════════════════════════════════════
+   DESIGN PICKER PANEL  (shared styles)
+══════════════════════════════════════════════════════ */
+#designPickerPanel {
+    position: fixed;
+    bottom: 26px;
+    right: 388px;   /* sits left of the color theme panel */
+    width: 280px;
+    max-width: 100vw;
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-bottom: none;
+    border-radius: 8px 8px 0 0;
+    box-shadow: 0 -8px 32px rgba(0,0,0,0.65);
+    display: none;
+    z-index: 1200;
+    overflow: hidden;
+}
+
+#designPickerPanel.open { display: block; }
+
+.design-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--accent);
+}
+
+.design-panel-close {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    padding: 2px 6px;
+    font-size: 13px;
+    line-height: 1;
+    border-radius: 3px;
+}
+
+.design-panel-close:hover { color: var(--text); background: rgba(255,255,255,0.08); }
+
+.design-options-list {
+    padding: 6px 8px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+
+.design-option {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border: 1px solid transparent;
+    border-radius: 5px;
+    background: none;
+    cursor: pointer;
+    transition: background 0.12s, border-color 0.12s;
+    text-align: left;
+    width: 100%;
+    color: var(--text);
+}
+
+.design-option:hover {
+    background: rgba(255,255,255,0.07);
+    border-color: var(--border);
+}
+
+.design-option.active {
+    background: var(--accent-dim);
+    border-color: var(--accent);
+}
+
+.design-option-icon {
+    width: 32px;
+    height: 32px;
+    border-radius: 4px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    background: rgba(255,255,255,0.06);
+    flex-shrink: 0;
+    border: 1px solid rgba(255,255,255,0.1);
+    color: var(--accent);
+}
+
+.design-option-info { flex: 1; min-width: 0; }
+
+.design-option-name {
+    font-size: 13px;
+    font-weight: 600;
+    display: block;
+}
+
+.design-option-desc {
+    font-size: 11px;
+    color: var(--text-muted);
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Active check mark */
+.design-option-check {
+    font-size: 11px;
+    color: var(--accent);
+    opacity: 0;
+    flex-shrink: 0;
+}
+
+.design-option.active .design-option-check { opacity: 1; }
+
+/* Preview strip: 3 mini shapes illustrating the design */
+.design-preview {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    margin-top: 5px;
+}
+
+.dp-shape {
+    height: 8px;
+    background: currentColor;
+    opacity: 0.5;
+}
+
+/* Status bar button */
+.status-design-btn {
+    cursor: pointer;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+.status-design-btn:hover { color: var(--accent); }
+
+.design-status-label {
+    font-size: 10px;
+    opacity: 0.7;
+    letter-spacing: 0.03em;
+}

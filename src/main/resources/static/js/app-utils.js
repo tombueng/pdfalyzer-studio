@@ -315,11 +315,35 @@ PDFalyzer.Utils = (function ($) {
         return '';
     }
 
+    function calcCanvasBytes() {
+        var total = 0;
+        $('#pdfViewer canvas, #pdfViewerStaging canvas').each(function () {
+            total += this.width * this.height * 4;
+        });
+        return total;
+    }
+
+    function startRamMonitor() {
+        var $ram = $('#statusRam');
+        var $val = $('#statusRamValue');
+        $ram.show();
+        window.setInterval(function () {
+            var canvasMb = calcCanvasBytes() / 1048576;
+            if (window.performance && window.performance.memory) {
+                var heapMb = window.performance.memory.usedJSHeapSize / 1048576;
+                $val.text('heap ' + heapMb.toFixed(0) + ' MB + canvas ' + canvasMb.toFixed(0) + ' MB');
+            } else {
+                $val.text('canvas ' + canvasMb.toFixed(0) + ' MB');
+            }
+        }, 2000);
+    }
+
     return { showLoading: showLoading, hideLoading: hideLoading,
              toast: toast, apiFetch: apiFetch, escapeHtml: escapeHtml,
              reportClientError: reportClientError, formatBytes: formatBytes,
              wireModalFocusSafety: wireModalFocusSafety, prepareModal: prepareModal,
              refreshAfterMutation: refreshAfterMutation,
              initClearableInputs: initClearableInputs,
-             tabSkeleton: tabSkeleton };
+             tabSkeleton: tabSkeleton,
+             startRamMonitor: startRamMonitor };
 })(jQuery);
