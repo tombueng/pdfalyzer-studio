@@ -782,6 +782,11 @@
     border-radius: 6px;
     background: rgba(255,255,255,0.03);
     overflow: hidden;
+    cursor: pointer;
+    transition: background 0.15s;
+}
+.changes-entry:hover {
+    background: rgba(255,255,255,0.06);
 }
 
 .changes-entry-header {

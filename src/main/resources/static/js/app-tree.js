@@ -268,7 +268,7 @@ PDFalyzer.Tree = (function ($, P) {
             P.Viewer.clearHighlights();
             selectedImageNodes.forEach(function (imgNode) {
                 if (imgNode.pageIndex >= 0 && imgNode.boundingBox) {
-                    P.Viewer.highlight(imgNode.pageIndex, imgNode.boundingBox);
+                    P.Viewer.highlight(imgNode.pageIndex, imgNode.boundingBox, { locator: true });
                 }
             });
 
@@ -282,7 +282,7 @@ PDFalyzer.Tree = (function ($, P) {
 
         if (node && node.pageIndex >= 0) {
             P.Viewer.clearHighlights();
-            if (node.boundingBox) P.Viewer.highlight(node.pageIndex, node.boundingBox);
+            if (node.boundingBox) P.Viewer.highlight(node.pageIndex, node.boundingBox, { locator: true });
             else P.Viewer.scrollToPage(node.pageIndex);
         }
     }

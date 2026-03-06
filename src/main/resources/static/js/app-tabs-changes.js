@@ -327,6 +327,18 @@ PDFalyzer.ChangesTab = (function ($, P) {
                 P.EditMode.popFieldUndo(fn);
             }
         });
+
+        // Click on a change entry → scroll PDF viewer to field with locator effect
+        $c.find('.changes-entry').on('click', function () {
+            var fieldName = $(this).attr('data-field');
+            if (!fieldName || !P.EditMode || !P.Viewer) return;
+            var rect = P.EditMode.getCurrentFieldRectByName(fieldName);
+            if (!rect || rect.pageIndex == null) return;
+            P.Viewer.highlight(rect.pageIndex, [rect.x, rect.y, rect.width, rect.height], { locator: true });
+            // Select the field without switching tabs
+            P.state.selectedFieldNames = [fieldName];
+            P.state.selectedImageNodeIds = [];
+        });
     }
 
     function updateBadge(count) {
