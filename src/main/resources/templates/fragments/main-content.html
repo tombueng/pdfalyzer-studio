@@ -23,6 +23,9 @@
 
     <!-- Tree Panel -->
     <div id="treePane">
+    <script>
+    (function(){try{var s=localStorage,id=s.getItem('pdfalyzer.currentSessionId');if(!id)return;var d=JSON.parse(s.getItem('pdfalyzer.pending.'+id));if(d&&typeof d.treePaneWidth==='number'&&d.treePaneWidth>0)document.getElementById('treePane').style.width=d.treePaneWidth+'px';}catch(e){}})();
+    </script>
         <div class="tree-tabs">
             <div class="tree-tabs-list">
                 <button class="tab-btn active" data-tab="structure"><i class="fas fa-sitemap me-1"></i>Structure</button>

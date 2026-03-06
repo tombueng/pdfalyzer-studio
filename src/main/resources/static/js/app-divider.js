@@ -24,6 +24,8 @@ PDFalyzer.Divider = (function ($, P) {
                 dragging = false;
                 $('#divider').removeClass('dragging');
                 $('body').css({ cursor: '', 'user-select': '' });
+                P.state.treePaneWidth = $treePane.outerWidth();
+                P.Storage.saveDraft(P.state);
                 P.Viewer.applyAutoZoom();
             }
         });
