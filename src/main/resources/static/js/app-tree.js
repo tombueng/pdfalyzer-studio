@@ -103,11 +103,11 @@ PDFalyzer.Tree = (function ($, P) {
             } else {
                 $container.html('<div class="text-muted text-center mt-3">No items found</div>');
             }
-            appendPendingFieldPanel($container, category);
+            appendPendingFieldPanel($container);
             return;
         }
         nodes.forEach(function (n) { $container.append(P.TreeRender.buildNodeEl(n, 0)); });
-        appendPendingFieldPanel($container, category);
+        appendPendingFieldPanel($container);
         applySelectionClasses();
         restoreViewState(viewState);
     }
@@ -128,48 +128,29 @@ PDFalyzer.Tree = (function ($, P) {
         restoreViewState(viewState);
     }
 
-    function appendPendingFieldPanel($container, category) {
-        var pendingFields = P.state.pendingFormAdds || [];
-        var pendingCos = P.state.pendingCosChanges || [];
-        if (!pendingFields.length && !pendingCos.length) return;
-        if (category && category !== 'acroform' && category !== 'field' &&
-            category !== 'info' && category !== 'cos' && category !== 'raw-cos') return;
+    function appendPendingFieldPanel($container) {
+        var stacks = P.state.fieldUndoStacks || {};
+        var total = Object.keys(stacks).reduce(function (sum, k) { return sum + stacks[k].length; }, 0);
+        total += (P.state.pendingCosChanges || []).length;
+        if (!total) return;
 
-        var total = pendingFields.length + pendingCos.length;
-
-        var html = '<div class="pending-fields-panel">' +
-            '<div class="pending-fields-title">Pending changes (' + total + ')</div>' +
-            '<ul class="pending-fields-list">';
-
-        pendingFields.forEach(function (item) {
-            html += '<li><span class="pending-field-name">' + P.Utils.escapeHtml(item.fieldName || '(unnamed)') + '</span>' +
-                '<span class="pending-field-meta">' +
-                P.Utils.escapeHtml((item.fieldType || 'field') + ' \u00b7 Page ' + ((item.pageIndex || 0) + 1)) +
-                '</span></li>';
+        var $hint = $('<div>', { 'class': 'pending-changes-hint-banner' })
+            .html('<i class="fas fa-clock-rotate-left me-1"></i>' + total +
+                  ' pending change' + (total > 1 ? 's' : '') +
+                  ' <span class="pending-hint-link">View details</span>');
+        $hint.on('click', function () {
+            $('.tab-btn').removeClass('active');
+            $('#changesTabBtn').addClass('active').show();
+            P.Tabs.switchTab('changes');
         });
-
-        pendingCos.forEach(function (item) {
-            var op = item && item.operation ? String(item.operation).toUpperCase() : 'COS';
-            var summary = item && item.summary ? item.summary : 'COS change';
-            html += '<li><span class="pending-field-name">' + P.Utils.escapeHtml(summary) + '</span>' +
-                '<span class="pending-field-meta">' + P.Utils.escapeHtml(op) + '</span></li>';
-        });
-
-        html += '</ul><div class="pending-fields-hint">Click Save to persist to PDF</div></div>';
-
-        $container.prepend($(html));
+        $container.prepend($hint);
     }
 
     function refreshPendingPanel() {
         var $container = $('#treeContent');
         if (!$container.length) return;
-        $container.find('.pending-fields-panel').remove();
-
-        var category = null;
-        if (P.state.currentTab === 'forms') category = 'acroform';
-        else if (P.state.currentTab === 'rawcos') category = 'raw-cos';
-
-        appendPendingFieldPanel($container, category);
+        $container.find('.pending-changes-hint-banner').remove();
+        if (P.state.currentTab !== 'changes') appendPendingFieldPanel($container);
     }
 
     // ======================== SELECT NODE ========================
