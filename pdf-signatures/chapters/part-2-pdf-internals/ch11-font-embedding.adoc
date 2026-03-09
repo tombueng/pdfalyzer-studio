@@ -1,0 +1,813 @@
+= Font Embedding in PDF
+
+[.lead]
+Fonts are the invisible infrastructure of every PDF document.
+When they work, nobody notices.
+When they break, the document becomes unreadable -- and if that document contains a digital signature, the signature appearance becomes a row of blank rectangles or missing-glyph squares that make your legally binding signature look like a rendering error.
+
+This chapter explains how fonts work inside PDF files, how they get embedded (or not), what goes wrong when they don't, and how all of this matters specifically for digital signatures.
+We cover the font types defined by {iso32000-2}, the encoding models, the mechanics of embedding and subsetting, and the practical reality of getting text to render correctly in signature appearance streams across different viewers.
+
+If you have ever seen a signature block that shows `.notdef` squares where a signer's name should be, or a PDF where the signature text vanishes entirely on one viewer but renders fine on another, this chapter explains why.
+
+== Why Fonts Matter for Digital Signatures
+
+A PDF digital signature has two independent representations: the **cryptographic** representation (the CMS `SignedData` structure, the byte range, the certificate chain) and the **visual** representation (the appearance stream that shows the signer's name, date, and reason on the page).
+Chapter 15 covers how appearance streams are structured; this chapter covers the font infrastructure that makes the _text_ inside those appearances render correctly.
+
+The visual appearance of a signature is a Form XObject -- a miniature PDF page with its own resource dictionary, its own content stream, and its own font references.
+When that content stream contains a `Tj` or `TJ` operator to draw text, the PDF viewer must resolve the font reference, find the glyph outlines, and render them.
+If any step in that chain fails -- the font reference points to a font that isn't embedded, the encoding doesn't map the character code to the right glyph, the font descriptor is missing, the font file stream is corrupt -- the text doesn't render.
+
+This matters more for signatures than for regular document text, for three reasons:
+
+1. **Signature appearances are generated programmatically.**
+When a human creates a PDF in a word processor, the word processor embeds the fonts it uses.
+When your signing code creates a signature appearance, _your code_ is responsible for font handling.
+If you get it wrong, nobody catches the error until a user reports that the signature looks broken.
+
+2. **Signature appearances must survive across viewers.**
+A signature created on a server using PDFBox must render correctly in Adobe Acrobat, Foxit Reader, browser-based viewers using pdf.js, LibreOffice, and Preview.app.
+Each viewer has its own font fallback behavior, its own interpretation of encoding, and its own handling of missing fonts.
+The only way to guarantee consistent rendering is to embed the font.
+
+3. **Signature text often contains names with non-ASCII characters.**
+Signer names like "Muller" are fine.
+Signer names like "Muller" with an umlaut, "Gonzalez" with an accent, or any East Asian, Arabic, or Cyrillic name will fail if the font and encoding aren't set up correctly.
+In a global signing system, "works for ASCII names" is not good enough.
+
+== Font Types in PDF
+
+{iso32000-2} Section 9.6 defines several font types.
+The distinctions matter because each type has different embedding rules, different encoding models, and different failure modes.
+
+=== Type 1 Fonts (PostScript Era)
+
+Type 1 fonts are the original PostScript outline fonts, defined by Adobe in 1984.
+They use cubic Bezier curves for glyph outlines and a custom PostScript-based encoding scheme.
+
+In PDF, a Type 1 font dictionary has `/Subtype /Type1` and references a font program (the glyph outlines) via the `/FontDescriptor` dictionary's `/FontFile` entry.
+The font program is a stream containing the PostScript font data in PFB (Printer Font Binary) format.
+
+Type 1 fonts are limited to a maximum of 256 glyphs per font instance -- a consequence of the single-byte encoding model inherited from PostScript.
+This makes them unsuitable for CJK scripts, complex scripts like Arabic or Devanagari, or any language that needs more than 256 distinct glyphs.
+
+NOTE: Adobe officially ended support for Type 1 fonts in January 2023, removing the ability to author content with Type 1 fonts in their Creative Cloud applications.
+Existing PDFs with embedded Type 1 font programs still render correctly (the outlines are in the file), but this signals the industry's long-term direction: TrueType and OpenType are the future.
+
+=== The Standard 14 Fonts
+
+PDF defines fourteen fonts that conforming readers are expected to have available without embedding.
+These are the **Standard 14 fonts**, specified in {iso32000-2} Section 9.6.2.2:
+
+.The Standard 14 font families
+[cols="2,3,3", options="header"]
+|===
+| Family | Regular / Bold / Italic / BoldItalic | Notes
+
+| Helvetica
+| Helvetica, Helvetica-Bold, Helvetica-Oblique, Helvetica-BoldOblique
+| Sans-serif. The default choice for most programmatic PDF generation.
+
+| Times
+| Times-Roman, Times-Bold, Times-Italic, Times-BoldItalic
+| Serif. Common in academic and legal documents.
+
+| Courier
+| Courier, Courier-Bold, Courier-Oblique, Courier-BoldOblique
+| Monospace. Used for code listings and form data.
+
+| Symbol
+| Symbol
+| Mathematical and Greek symbols.
+
+| ZapfDingbats
+| ZapfDingbats
+| Decorative symbols (checkmarks, arrows, etc.).
+|===
+
+The critical word is "expected."
+{iso32000-2} Section 9.6.2.2 states that conforming readers _should_ provide these fonts, but PDF 2.0 actually recommends embedding even the Standard 14 fonts to ensure consistent rendering.
+The practical reality is that most viewers do provide metrics-compatible substitutes for these fonts, but the substitutes are not identical -- a document typeset with Helvetica on one viewer may render with Arial or Liberation Sans on another, causing slight differences in character widths, line breaks, and text positioning.
+
+For signature appearances, these differences are usually cosmetic and acceptable.
+But if your signature appearance calculates text positions based on precise Helvetica metrics (e.g., centering text in the signature rectangle), a substitute font with slightly different widths will misalign the text.
+
+[TIP]
+====
+For signature appearances, the Standard 14 fonts are "good enough" for ASCII text.
+They are available everywhere, they don't require embedding, and the rendering differences between substitute fonts are typically invisible at the font sizes used in signature blocks (8-12 points).
+
+For non-ASCII text -- accented characters, umlauts, CJK characters -- the Standard 14 fonts are _not_ sufficient, because their built-in encoding (WinAnsiEncoding) cannot represent characters outside the Windows-1252 code page.
+If your signers have names with characters outside that range, you must embed a TrueType or OpenType font with the appropriate glyph coverage.
+====
+
+==== PDFBox 3.x and the Standard 14 API Change
+
+If you've migrated from PDFBox 2.x to 3.x, you've likely encountered this:
+
+[source,java]
+----
+// PDFBox 2.x -- this no longer compiles in 3.x
+PDFont font = PDType1Font.HELVETICA;
+----
+
+In PDFBox 2.x, the Standard 14 fonts were available as static constants on `PDType1Font`.
+PDFBox 3.x removed these constants and replaced them with an enum-based API:
+
+[source,java]
+----
+// PDFBox 3.x -- the correct way
+PDFont font = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
+
+// Other examples:
+PDFont bold = new PDType1Font(Standard14Fonts.FontName.HELVETICA_BOLD);
+PDFont courier = new PDType1Font(Standard14Fonts.FontName.COURIER);
+PDFont times = new PDType1Font(Standard14Fonts.FontName.TIMES_ROMAN);
+----
+
+The reason for this change is that the old static constants were shared mutable objects -- every caller that obtained `PDType1Font.HELVETICA` got the same instance, which could cause subtle threading and state pollution issues when multiple documents were processed concurrently.
+The new constructor creates a fresh instance each time, eliminating the shared-state problem.
+
+WARNING: If you search the internet for PDFBox font examples, the majority of results still show the 2.x API (`PDType1Font.HELVETICA`).
+These examples will not compile with PDFBox {pdfbox-version}.
+Always verify that code examples match the major version of PDFBox you are using.
+
+=== TrueType Fonts
+
+TrueType fonts, developed jointly by Apple and Microsoft in the late 1980s as a competitor to Adobe's Type 1, use quadratic Bezier curves for glyph outlines.
+They are the most common font format in modern computing and the recommended choice for PDF font embedding.
+
+In PDF, a TrueType font dictionary has `/Subtype /TrueType`.
+The font program is embedded via the `/FontDescriptor` dictionary's `/FontFile2` entry, which contains the raw TrueType font data (a `.ttf` file, essentially).
+
+TrueType fonts in PDF can be either **simple** (single-byte encoding, max 256 glyphs per instance) or embedded as part of a **composite** font (Type 0 + CIDFont, described below) for full Unicode coverage.
+When used as a simple font, TrueType has the same 256-glyph limitation as Type 1.
+The composite font mechanism removes this limitation.
+
+[source,java]
+----
+// Loading and embedding a TrueType font in PDFBox 3.x
+PDFont font = PDType0Font.load(document, new File("/path/to/DejaVuSans.ttf"));
+
+// The font is now embedded in the document.
+// It will be automatically subsetted when the document is saved,
+// including only the glyphs actually used.
+----
+
+`PDType0Font.load()` is the PDFBox 3.x method for loading TrueType and OpenType fonts.
+Despite the name suggesting Type 0, this method creates the full composite font structure (Type 0 wrapper + CIDFont descendant) needed for Unicode text support.
+The font file is embedded in the document, and PDFBox automatically subsets it on save.
+
+=== Type 0 / CIDFont (Composite Fonts)
+
+Type 0 fonts -- also called composite fonts -- are the mechanism PDF uses to support large character sets (CJK scripts, Arabic, Devanagari, and any script requiring more than 256 glyphs).
+
+A Type 0 font consists of two linked dictionaries:
+
+1. **The Type 0 font dictionary** (`/Subtype /Type0`): the "wrapper" that the content stream references.
+It contains a `/DescendantFonts` array pointing to the CIDFont dictionary and a `/Encoding` entry specifying the CMap that maps character codes to CIDs (Character IDs).
+
+2. **The CIDFont dictionary** (`/Subtype /CIDFontType0` or `/CIDFontType2`): the actual font data.
+CIDFontType0 wraps a PostScript CID-keyed font; CIDFontType2 wraps a TrueType font.
+In practice, CIDFontType2 (TrueType-based) is overwhelmingly more common.
+
+[source]
+----
+% Type 0 composite font structure in a PDF
+10 0 obj
+<< /Type /Font
+   /Subtype /Type0
+   /BaseFont /ABCDEF+DejaVuSans         <1>
+   /Encoding /Identity-H                 <2>
+   /DescendantFonts [11 0 R]            <3>
+   /ToUnicode 12 0 R                     <4>
+>>
+endobj
+
+11 0 obj
+<< /Type /Font
+   /Subtype /CIDFontType2               <5>
+   /BaseFont /ABCDEF+DejaVuSans
+   /CIDSystemInfo << /Registry (Adobe) /Ordering (Identity) /Supplement 0 >>
+   /FontDescriptor 13 0 R
+   /W [3 [278] 36 [722] 68 [556 500]]  <6>
+>>
+endobj
+----
+<1> The `/BaseFont` name includes a subset prefix (ABCDEF+) -- we'll explain this below
+<2> `/Identity-H` means character codes map directly to CIDs (horizontal writing mode)
+<3> The descendant CIDFont dictionary
+<4> The `/ToUnicode` CMap enables text extraction -- critical for accessibility and search
+<5> CIDFontType2: the actual glyph data comes from an embedded TrueType font
+<6> The `/W` (Widths) array defines per-glyph widths for precise text positioning
+
+When PDFBox's `PDType0Font.load()` embeds a TrueType font, it creates exactly this structure.
+You don't need to build it manually, but understanding it helps when debugging font issues in existing PDFs.
+
+== Font Embedding vs. Referencing
+
+There are two ways a PDF can use a font: **embed** it (include the font program inside the PDF file) or **reference** it (include only the font name and metrics, relying on the viewer to provide the actual glyphs).
+
+=== Referenced Fonts
+
+A referenced font includes the font dictionary and metrics but _not_ the font program.
+The viewer must find a matching font on the system or use a fallback.
+The Standard 14 fonts are the canonical example -- they're designed to be used without embedding because every viewer is expected to have compatible substitutes.
+
+Referenced non-standard fonts are a recipe for rendering failures.
+If your PDF references "CompanyBrandFont-Regular" without embedding it, the viewer will substitute whatever it can find -- usually a generic serif or sans-serif font -- and the text will look wrong.
+Character widths will differ, glyphs may be missing, and text positioning will be off.
+
+For signature appearances, **never reference non-standard fonts**.
+The signing server has the font file; the recipient's PDF viewer probably doesn't.
+
+=== Embedded Fonts
+
+An embedded font includes the complete font program (or a subset of it) as a stream inside the PDF.
+The viewer uses the embedded data to render glyphs, regardless of what fonts are installed on the system.
+
+Embedding guarantees consistent rendering across all viewers and all platforms.
+It increases the PDF file size -- a full TrueType font can be several megabytes -- but subsetting (described below) reduces the impact dramatically.
+
+The font program is stored as a stream referenced by the `/FontDescriptor` dictionary:
+
+.Font embedding streams by font type -- {iso32000-2} Table 123
+[cols="2,2,4", options="header"]
+|===
+| Font Type | FontDescriptor Key | Stream Contents
+
+| Type 1
+| `/FontFile`
+| PFB (Printer Font Binary) data -- the Type 1 font program
+
+| TrueType
+| `/FontFile2`
+| Complete TrueType font file (`.ttf`)
+
+| CFF / OpenType
+| `/FontFile3`
+| CFF (Compact Font Format) data, or OpenType font program.
+The stream's `/Subtype` distinguishes: `/CIDFontType0C` for CID-keyed CFF, `/Type1C` for simple CFF, `/OpenType` for OpenType.
+|===
+
+IMPORTANT: The distinction between `/FontFile`, `/FontFile2`, and `/FontFile3` is not just metadata -- the stream contents are in fundamentally different binary formats.
+A viewer that tries to parse a CFF stream as TrueType (or vice versa) will get corrupted glyph outlines or crash.
+Getting the key wrong is a common source of font rendering failures in programmatically generated PDFs.
+
+== Font Subsetting
+
+Embedding a full font file -- especially a CJK font with tens of thousands of glyphs -- adds significant bulk to the PDF.
+**Font subsetting** solves this by embedding only the glyphs actually used in the document.
+
+A typical signature appearance uses fewer than 100 distinct glyphs (the signer's name, a date, a reason string).
+Subsetting a 2 MB TrueType font down to just those glyphs produces a subset of perhaps 10-30 KB.
+
+=== The Subset Prefix Convention
+
+{iso32000-2} Section 9.6.4 defines a naming convention for subsetted fonts: the `/BaseFont` name is prefixed with six uppercase letters followed by a plus sign.
+
+----
+/BaseFont /ABCDEF+DejaVuSans
+----
+
+The prefix "ABCDEF+" indicates that this is a subset -- it does not contain all glyphs from the original DejaVuSans font.
+The six letters are arbitrary (PDFBox generates them randomly); their only purpose is to make the subset's `/BaseFont` name unique within the document, preventing different subsets of the same font from being confused with each other.
+
+A font _without_ the subset prefix:
+
+----
+/BaseFont /DejaVuSans
+----
+
+This indicates the full font is embedded (or the font is referenced without embedding).
+
+TIP: When debugging font issues, the subset prefix is your first clue.
+If you see `/ABCDEF+Helvetica`, the font is subsetted.
+If a glyph is missing from the rendered output, it may not have been included in the subset -- meaning the glyph was not used (or not _known_ to be used) when the subset was created.
+This is a common bug when signature text is modified after the font was subsetted.
+
+=== How PDFBox Handles Subsetting
+
+PDFBox {pdfbox-version} performs automatic font subsetting when saving a document.
+When you load a TrueType font with `PDType0Font.load()`, PDFBox tracks which glyphs are used during text drawing operations and includes only those glyphs in the final embedded subset.
+
+[source,java]
+----
+// PDFBox tracks glyph usage automatically
+PDFont font = PDType0Font.load(document, new File("DejaVuSans.ttf"));
+
+// When we write text, PDFBox notes which glyphs are needed
+try (OutputStream os = formXObject.getStream().createOutputStream()) {
+    // ... write content stream using this font ...
+}
+
+// On save, PDFBox subsets the font to include only used glyphs
+document.save(outputStream);
+----
+
+There is one catch.
+If you write raw content stream operators directly (as we must for signature appearance Form XObjects in PDFBox 3.x, since `PDPageContentStream` does not support Form XObjects), PDFBox may not automatically track glyph usage.
+In this case, you must encode the text through the font to ensure the glyph tracking is triggered:
+
+[source,java]
+----
+// Ensure glyph tracking when writing raw content streams
+byte[] encodedText = font.encode("Digitally signed by: Muller");
+// Use encodedText in your content stream, not the raw string
+----
+
+WARNING: If you bypass PDFBox's text encoding and write raw character codes directly into the content stream, the subset may not include all required glyphs.
+The result: some characters render as `.notdef` (the missing glyph symbol, typically a small rectangle) in viewers.
+This is one of the most common causes of broken signature appearances.
+
+== Encoding
+
+Encoding is the mapping between **character codes** (the byte values in the content stream) and **glyphs** (the visual shapes the viewer renders).
+Getting encoding right is essential for correct text rendering, and getting it wrong is the most common cause of garbled or missing text in PDF documents.
+
+=== Simple Font Encoding (Single-Byte)
+
+For simple fonts (Type 1 and simple TrueType), each character code is a single byte (0-255).
+The encoding maps each byte value to a glyph name, and the font program maps glyph names to outlines.
+
+PDF defines two built-in encodings:
+
+**WinAnsiEncoding** ({iso32000-2} Table D.1): Corresponds closely to Windows-1252.
+Covers Western European characters: basic Latin, accented characters (a, e, u, n, etc.), and common symbols.
+This is the default for most PDF generators and the encoding used by the Standard 14 fonts.
+
+**MacRomanEncoding** ({iso32000-2} Table D.2): The classic Macintosh character set.
+Rarely used in modern PDFs, but you'll encounter it in documents created by older Mac applications.
+
+A font dictionary can also specify a **custom encoding** via the `/Encoding` key, using a `/Differences` array that overrides individual code-to-glyph mappings:
+
+[source]
+----
+/Encoding <<
+  /Type /Encoding
+  /BaseEncoding /WinAnsiEncoding
+  /Differences [
+    128 /Euro             <1>
+    160 /space /exclamdown /cent /sterling
+  ]
+>>
+----
+<1> Maps byte value 128 to the Euro sign glyph, overriding the WinAnsiEncoding mapping
+
+=== The 256-Glyph Wall
+
+Single-byte encoding means a simple font can address at most 256 glyphs.
+This is fine for English and most Western European languages, but it's a hard wall for:
+
+- **CJK languages**: Chinese alone requires thousands of glyphs
+- **Arabic and Hebrew**: need contextual glyph shaping (the same character looks different depending on position in a word)
+- **Devanagari, Thai, Georgian**: scripts with large glyph inventories
+- **Mixed-script text**: a signature appearance showing a name in Cyrillic with a date in Latin
+
+For any of these, you need a composite font (Type 0 + CIDFont) with a multi-byte encoding.
+
+=== Composite Font Encoding
+
+Composite fonts use a **CMap** (Character Map) to map multi-byte character codes to CIDs.
+The most common CMap in modern PDFs is `/Identity-H`, which maps character codes directly to CIDs as a simple identity function -- code 0 maps to CID 0, code 1 to CID 1, and so on.
+
+With `/Identity-H`, the character codes in the content stream are raw CID values encoded as two-byte big-endian integers.
+This gives access to the full 65,536 CID range, more than enough for any single font.
+
+The downside of `/Identity-H` is that the character codes have no inherent semantic meaning -- they're just glyph indices.
+Without additional mapping information, a viewer cannot extract the text content or determine what Unicode characters the glyphs represent.
+That's where the `/ToUnicode` CMap comes in.
+
+== The ToUnicode CMap
+
+The `/ToUnicode` entry in a font dictionary maps character codes to Unicode values.
+It is not used for rendering -- the viewer uses the font's glyph outlines for that.
+Instead, it is used for **text extraction**: copy-paste, search, and accessibility.
+
+For signature appearances, the `/ToUnicode` CMap matters because:
+
+1. **Accessibility tools** read the `/ToUnicode` CMap to extract text from the appearance stream.
+A signature appearance without `/ToUnicode` mappings will appear as empty or garbled text to screen readers.
+
+2. **PDF validators** (including veraPDF) check for the presence of `/ToUnicode` CMaps as a compliance requirement for PDF/A.
+If your signed PDFs must be PDF/A-compliant, the fonts in your signature appearance must have proper `/ToUnicode` entries.
+
+3. **Text search** in the document depends on `/ToUnicode`.
+Without it, searching for the signer's name will not find the text in the signature appearance.
+
+A `/ToUnicode` CMap is a PDF stream containing a CMap program in PostScript-like syntax:
+
+[source]
+----
+/CIDInit /ProcSet findresource begin
+12 dict begin
+begincmap
+/CIDSystemInfo
+  << /Registry (Adobe) /Ordering (UCS) /Supplement 0 >> def
+/CMapName /Adobe-Identity-UCS def
+/CMapType 2 def
+1 begincodespacerange
+<0000> <FFFF>
+endcodespacerange
+5 beginbfchar
+<0024> <0044>        % CID 36 -> U+0044 (D)
+<004C> <0069>        % CID 76 -> U+0069 (i)
+<004E> <0067>        % CID 78 -> U+0067 (g)
+endbfchar
+endcmap
+CMapName currentdict /CMap defineresource pop
+end
+end
+----
+
+PDFBox generates the `/ToUnicode` CMap automatically when you use `PDType0Font.load()` and write text through the font's encoding methods.
+You do not need to create it manually -- but understanding the structure helps when you're debugging a PDF where text extraction returns garbled results.
+
+IMPORTANT: In PDFBox 3.x, the method `PDFont.getToUnicodeCMap()` is _not_ publicly accessible.
+To inspect the `/ToUnicode` CMap of a font, you must access the COS dictionary directly: `font.getCOSObject().getDictionaryObject(COSName.TO_UNICODE)`.
+This is a common stumbling block when writing font inspection or diagnostic tools.
+
+== Font Descriptors
+
+Every embedded font (and many referenced fonts) has a **font descriptor** dictionary (`/Type /FontDescriptor`) that provides metrics and metadata about the font.
+The font descriptor is essential -- it tells the viewer how to render the font even before it looks at the glyph outlines.
+
+.Key entries in the font descriptor -- {iso32000-2} Table 122
+[cols="2,1,5", options="header"]
+|===
+| Key | Type | Purpose
+
+| `/FontName`
+| name
+| The PostScript name of the font (e.g., `/DejaVuSans`)
+
+| `/Flags`
+| integer
+| Bit field describing the font: FixedPitch (bit 1), Serif (bit 2), Symbolic (bit 3), Script (bit 4), Nonsymbolic (bit 6), Italic (bit 7), AllCap (bit 17), SmallCap (bit 18), ForceBold (bit 19)
+
+| `/FontBBox`
+| array
+| The bounding box of all glyphs: `[llx lly urx ury]` in glyph coordinate space
+
+| `/ItalicAngle`
+| number
+| Angle of the italic slant (0 for upright fonts)
+
+| `/Ascent`
+| number
+| The maximum height above the baseline
+
+| `/Descent`
+| number
+| The maximum depth below the baseline (typically negative)
+
+| `/CapHeight`
+| number
+| The height of capital letters
+
+| `/StemV`
+| number
+| The dominant stem width (vertical strokes) -- affects rendering weight
+
+| `/FontFile`
+| stream
+| Type 1 font program (PFB format)
+
+| `/FontFile2`
+| stream
+| TrueType font program
+
+| `/FontFile3`
+| stream
+| CFF or OpenType font program (with `/Subtype` to distinguish)
+|===
+
+NOTE: A font descriptor with all metrics but _no_ font file stream describes a **referenced** font -- the viewer must find a substitute.
+If the descriptor includes a font file stream, the font is **embedded**.
+Checking whether `/FontFile`, `/FontFile2`, or `/FontFile3` exists is the definitive way to determine if a font is embedded.
+
+== PDFBox Font Handling in 3.x
+
+PDFBox {pdfbox-version} made several breaking changes to its font API compared to 2.x.
+Understanding these changes is essential for writing correct font handling code.
+
+=== Loading Fonts
+
+[source,java]
+----
+// Standard 14 font (no embedding needed)
+PDFont helvetica = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
+
+// Embed a TrueType font from a file
+PDFont dejaVu = PDType0Font.load(document, new File("DejaVuSans.ttf"));
+
+// Embed a TrueType font from an InputStream
+try (InputStream is = getClass().getResourceAsStream("/fonts/NotoSans-Regular.ttf")) {
+    PDFont notoSans = PDType0Font.load(document, is);
+}
+
+// Embed a TrueType font WITHOUT subsetting
+// (include all glyphs -- larger file, but no risk of missing glyphs)
+PDFont fullFont = PDType0Font.load(document, new File("DejaVuSans.ttf"), false);
+----
+
+The `false` parameter to `PDType0Font.load()` disables subsetting.
+This is rarely needed, but can be useful during debugging to rule out subsetting as the cause of missing glyphs.
+
+=== The getEncoding() Removal
+
+PDFBox 2.x provided a `PDFont.getEncoding()` method that returned the font's encoding object.
+PDFBox 3.x **removed** this method.
+
+If you need to inspect a font's encoding in PDFBox {pdfbox-version}, you must access the COS dictionary directly:
+
+[source,java]
+----
+// PDFBox 2.x -- no longer works
+// Encoding encoding = font.getEncoding();
+
+// PDFBox 3.x -- access the COS dictionary
+COSBase encodingObj = font.getCOSObject().getDictionaryObject(COSName.ENCODING);
+
+if (encodingObj instanceof COSName encodingName) {
+    // Named encoding: /WinAnsiEncoding, /MacRomanEncoding, etc.
+    log.info("Font uses named encoding: {}", encodingName.getName());
+} else if (encodingObj instanceof COSDictionary encodingDict) {
+    // Custom encoding with /Differences array
+    COSArray differences = encodingDict.getDictionaryObject(
+            COSName.getPDFName("Differences"), COSArray.class);
+    if (differences != null) {
+        log.info("Font has custom encoding with {} difference entries",
+                differences.size());
+    }
+}
+----
+
+=== Inspecting Font Embedding Programmatically
+
+A common diagnostic task is checking whether a font in a PDF is embedded.
+Here's a complete example:
+
+[source,java]
+----
+private boolean isFontEmbedded(PDFont font) {
+    PDFontDescriptor descriptor = font.getFontDescriptor();
+    if (descriptor == null) {
+        // Standard 14 fonts may not have a descriptor
+        return false;
+    }
+    return descriptor.getFontFile() != null
+        || descriptor.getFontFile2() != null
+        || descriptor.getFontFile3() != null;
+}
+----
+
+== Why Signature Text Shows as Squares or Blanks
+
+This section addresses the most common font-related failures in signature appearances, what causes them, and how to fix them.
+
+=== Missing Font
+
+**Symptom**: The signature block is empty, or shows substituted text in a different font than intended.
+
+**Cause**: The signature appearance references a font that is not embedded and not available on the viewer's system.
+
+**Fix**: Always embed fonts used in signature appearances.
+For basic ASCII text, the Standard 14 fonts are a safe choice because viewers provide substitutes.
+For anything else, embed a TrueType font using `PDType0Font.load()`.
+
+=== Wrong Encoding
+
+**Symptom**: Some characters render correctly, but accented characters (e, u, n) show as wrong characters or `.notdef` squares.
+
+**Cause**: The text contains characters outside the font's encoding range.
+WinAnsiEncoding covers codes 32-255 corresponding to Windows-1252, which includes most Western European accented characters.
+But characters outside this range -- em-dash at certain positions, certain ligatures, or any non-Latin script -- will fail.
+
+**Fix**: Use a composite font (Type 0) with `/Identity-H` encoding and an embedded TrueType font.
+This provides full Unicode coverage.
+In PDFBox: use `PDType0Font.load()` instead of the Standard 14 fonts.
+
+=== Unembedded Font with Non-Standard Glyphs
+
+**Symptom**: Text renders as squares or blank space on some viewers but works on others.
+
+**Cause**: The font is referenced but not embedded.
+Viewers that happen to have a compatible font installed render the text correctly; viewers without the font substitute a generic font that may not have the required glyphs.
+
+**Fix**: Embed the font.
+
+=== Subset Missing Glyphs
+
+**Symptom**: Most text renders correctly, but specific characters are missing.
+
+**Cause**: The font was subsetted, but the subset does not include all required glyphs.
+This typically happens when text is written to the content stream _after_ the font subsetting decision was made, or when glyph usage tracking was bypassed.
+
+**Fix**: Ensure all text is written through PDFBox's font encoding methods _before_ saving.
+If the problem persists, try loading the font with subsetting disabled (`PDType0Font.load(document, file, false)`) to confirm subsetting is the cause.
+
+[CAUTION]
+====
+When writing raw content stream operators for a Form XObject (which PDFBox 3.x requires for signature appearances), make sure to encode text through the font _before_ writing the encoded bytes to the stream.
+Skipping this step means PDFBox won't know which glyphs are needed and may produce a subset that's missing characters.
+
+[source,java]
+----
+// WRONG: writing raw text bypasses glyph tracking
+os.write("(John Muller) Tj".getBytes(StandardCharsets.US_ASCII));
+
+// RIGHT: encode through the font first
+byte[] encoded = font.encode("John Muller");
+// Then write the encoded bytes as a hex string in the content stream
+os.write(("<" + bytesToHex(encoded) + "> Tj").getBytes(StandardCharsets.US_ASCII));
+----
+====
+
+== Font Licensing and the fsType Flag
+
+TrueType and OpenType fonts contain a licensing flag called **fsType** in the OS/2 table.
+This flag indicates what the font vendor permits in terms of embedding and editing:
+
+.fsType embedding permission bits
+[cols="1,2,4", options="header"]
+|===
+| Bits | Name | Meaning
+
+| 0x0000
+| Installable
+| No restrictions. The font may be embedded and used freely.
+
+| 0x0002
+| Restricted
+| The font must not be embedded in documents. Period.
+
+| 0x0004
+| Preview & Print
+| The font may be embedded in read-only documents. The recipient can view and print but should not edit.
+
+| 0x0008
+| Editable
+| The font may be embedded, and the recipient may edit the document.
+|===
+
+Most free and open-source fonts (DejaVu, Noto, Liberation) have fsType 0x0000 (Installable).
+Many commercial fonts (fonts you pay for) have restrictive fsType values.
+
+PDF generators typically respect the fsType flag -- PDFBox will emit a warning (but not throw an exception) when embedding a font with restrictive fsType.
+Some tools refuse to embed the font entirely.
+
+For signature appearances:
+
+- **Use fonts with fsType 0x0000** (Installable) to avoid any licensing complications.
+- The **Google Noto font family** (`Noto Sans`, `Noto Serif`, `Noto Sans CJK`) covers virtually every script in Unicode and is Apache-2.0 licensed with fsType 0x0000.
+It is the best general-purpose choice for internationalized signature text.
+- **DejaVu Sans** covers Latin, Greek, Cyrillic, Armenian, Georgian, and many symbols.
+Free, well-tested, and widely deployed.
+- **Liberation Sans/Serif/Mono** are metrics-compatible with Arial/Times New Roman/Courier New.
+Licensed under SIL Open Font License.
+
+WARNING: Even if your PDF generator embeds a font with restrictive fsType, the PDF viewer will render it.
+The fsType flag is a licensing statement, not a technical enforcement mechanism.
+But distributing PDFs with improperly embedded commercial fonts exposes your organization to licensing claims.
+For server-side signing operations that produce thousands of PDFs, use only fonts whose license explicitly permits embedding.
+
+== Practical Advice for Signature Appearances
+
+Drawing from everything in this chapter, here is the decision framework for choosing and configuring fonts in signature appearance streams:
+
+=== For ASCII-Only Signatures
+
+If your signer names, dates, and reasons are guaranteed to be ASCII only (a-z, A-Z, 0-9, basic punctuation):
+
+[source,java]
+----
+// Simple, reliable, zero-cost approach
+PDFont font = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
+----
+
+This works everywhere.
+No embedding needed, no licensing concerns, no subsetting complications.
+The text will render in Helvetica or a metrics-compatible substitute on every viewer.
+
+=== For International Signatures
+
+If signer names may contain non-ASCII characters (accented Latin, Cyrillic, CJK, Arabic, or anything beyond Windows-1252):
+
+[source,java]
+----
+// Embed a Unicode-capable font
+try (InputStream is = getClass().getResourceAsStream("/fonts/NotoSans-Regular.ttf")) {
+    PDFont font = PDType0Font.load(document, is);
+    // Now you can write any Unicode character the font covers
+}
+----
+
+Bundle the font file with your application (in `src/main/resources/fonts/` for a Maven project).
+Do not rely on system-installed fonts -- the signing server may not have the same fonts as your development machine.
+
+=== Font Size Guidelines
+
+Signature appearance text is typically rendered at small sizes (8-12 points) in a rectangle that's often only 150-300 points wide.
+Keep these guidelines in mind:
+
+- **10pt** is a good default for signer name and date
+- **8pt** works for secondary information (reason, location, certificate details)
+- **Never go below 7pt** -- some viewers render small text poorly, and the text becomes unreadable when printed
+- **Calculate text width** before rendering to ensure it fits the signature rectangle; truncation or overflow beyond the bounding box results in clipped text that viewers may or may not display
+
+== Debugging Font Issues
+
+When a signature appearance renders incorrectly, the following diagnostic steps will identify the root cause.
+
+=== Step 1: Identify the Font
+
+Open the PDF in a tool that shows the raw object structure (PDFalyzer, QPDF, or `PDFDebugger` from PDFBox's tools module).
+Navigate to the signature field's widget annotation, then to `/AP /N` (the normal appearance stream), then to `/Resources /Font`.
+Note the font name, subtype, and whether a font descriptor with a font file stream exists.
+
+=== Step 2: Check Embedding
+
+Look for `/FontFile`, `/FontFile2`, or `/FontFile3` in the font descriptor.
+If none exists, the font is not embedded -- that's likely the problem.
+
+=== Step 3: Check Encoding
+
+For simple fonts, check the `/Encoding` entry.
+Is it `/WinAnsiEncoding`?
+If the problematic characters are outside Windows-1252, the encoding is the cause.
+
+For composite fonts, check the `/Encoding` entry on the Type 0 dictionary.
+It should be `/Identity-H` for a properly structured modern PDF.
+
+=== Step 4: Check the ToUnicode CMap
+
+If the text _renders_ correctly but copy-paste or search returns garbled results, the `/ToUnicode` CMap is missing or incorrect.
+
+=== Step 5: veraPDF Validation
+
+veraPDF provides font-specific validation rules that catch a wide range of font issues:
+
+[source,bash]
+----
+# Run veraPDF validation focusing on font issues
+verapdf --format text --flavour 2b input.pdf 2>&1 | grep -i font
+----
+
+veraPDF checks for embedded fonts (required for PDF/A), valid `/ToUnicode` mappings, correct font descriptor entries, and consistent glyph widths.
+Its validation messages are often the fastest way to identify exactly what's wrong with a font configuration.
+
+=== Step 6: PDFBox Font Inspection
+
+For programmatic inspection, PDFBox can enumerate all fonts in a page or appearance stream:
+
+[source,java]
+----
+private void inspectAppearanceFonts(PDAnnotationWidget widget) {
+    PDAppearanceStream appearance = widget.getAppearance().getNormalAppearance();
+    if (appearance == null) {
+        log.warn("Signature widget has no normal appearance stream");
+        return;
+    }
+
+    PDResources resources = appearance.getResources();
+    if (resources == null) {
+        log.warn("Appearance stream has no resources");
+        return;
+    }
+
+    for (COSName fontName : resources.getFontNames()) {
+        PDFont font = resources.getFont(fontName);
+        log.info("Font /{}: type={}, baseFont={}, embedded={}",
+                fontName.getName(),
+                font.getClass().getSimpleName(),
+                font.getName(),
+                isFontEmbedded(font));
+
+        // Check for ToUnicode CMap
+        COSBase toUnicode = font.getCOSObject()
+                .getDictionaryObject(COSName.TO_UNICODE);
+        log.info("  ToUnicode CMap: {}",
+                toUnicode != null ? "present" : "MISSING");
+    }
+}
+----
+
+TIP: When debugging font issues in production, always capture the raw bytes of the appearance stream and the font dictionary's COS structure.
+The visual symptom (squares, blanks, wrong characters) tells you _something_ is wrong; the COS structure tells you _what_.
+A tool that shows both the rendered appearance and the underlying object tree -- the way PDFalyzer does -- saves enormous debugging time compared to flipping between a viewer and a hex editor.
+
+== Summary
+
+Fonts in PDF are a deceptively deep topic.
+For digital signatures specifically, the key takeaways are:
+
+- **Embed your fonts.** The Standard 14 fonts are safe for ASCII text; everything else must be embedded.
+- **Use composite fonts (Type 0) for non-ASCII text.** Simple fonts are limited to 256 glyphs.
+- **Encode text through the font API** to ensure glyph tracking for subsetting works correctly.
+- **Use freely licensed fonts** (Noto Sans, DejaVu, Liberation) to avoid fsType complications.
+- **Test in multiple viewers** -- what works in Adobe Acrobat may fail in pdf.js or LibreOffice.
+- **When debugging, look at the COS structure**, not just the rendered output. The font dictionary, font descriptor, encoding, and `/ToUnicode` CMap tell the full story.
+
+The next chapter -- Chapter 12 -- moves from the document infrastructure we've built up across Part II into the core subject of this book: the architecture of PDF digital signatures themselves.

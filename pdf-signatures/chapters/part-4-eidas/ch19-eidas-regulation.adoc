@@ -1,0 +1,624 @@
+= The eIDAS Regulation
+
+[.lead]
+In 2014, the European Union did something that no other jurisdiction had managed: it created a legal framework where a digital signature — a sequence of bytes produced by a cryptographic algorithm — carries the same legal weight as ink on paper, in all 27 member states simultaneously.
+That framework is called eIDAS, and whether you love it or hate it, if your software produces or validates digital signatures that touch Europe, you need to understand it.
+
+The {eidas-reg} — its full title is "Regulation (EU) No 910/2014 of the European Parliament and of the Council of 23 July 2014 on electronic identification and trust services for electronic transactions in the internal market" — is a 38-page regulation that created the legal and institutional infrastructure for electronic signatures, seals, timestamps, and related trust services across the entire European Union.
+It replaced a failed directive that had been limping along for 15 years, and it did so by making one critical architectural decision: it chose to be a _regulation_, not a _directive_.
+
+That distinction matters enormously, and understanding why requires a brief detour through European law.
+
+== A Brief History: The Electronic Signatures Directive
+
+=== Directive 1999/93/EC
+
+Before eIDAS, there was the **Electronic Signatures Directive** (Directive 1999/93/EC), adopted on December 13, 1999.
+The directive was born in the heady optimism of the dot-com era, when legislators across the world were scrambling to give electronic commerce a legal foundation.
+The United States had passed the E-Sign Act.
+UNCITRAL had published a Model Law on Electronic Signatures.
+Europe wanted its own framework, and it wanted one that would work across all (then 15) member states.
+
+The directive's core idea was sound: define what an "advanced electronic signature" is, define what a "qualified certificate" is, establish that qualified electronic signatures should not be denied legal effect, and require member states to set up supervisory bodies for certification service providers.
+
+=== Why Directives Fail
+
+Here is where European institutional mechanics become relevant to your code.
+
+In EU law, a **directive** tells member states _what result to achieve_ but lets each country decide _how_ to achieve it through national legislation.
+A **regulation**, by contrast, is directly applicable in all member states without any national transposition — it becomes law everywhere on the same day, with the same text.
+
+The Electronic Signatures Directive was a directive.
+This meant that each member state had to transpose it into national law, and each one did so differently.
+Germany created the _Signaturgesetz_ (Signature Law).
+France created _le decret n. 2001-272_.
+Italy created the _Codice dell'Amministrazione Digitale_.
+Each country interpreted the directive's requirements through its own legal tradition, its own bureaucratic structures, and its own technical preferences.
+
+The result was exactly what you would predict: 15 (later 28) different national implementations of the "same" legal framework, with subtly different definitions of what counted as an "advanced" signature, different requirements for certification service providers, different supervisory structures, and — critically for developers — different technical standards that qualified certificates had to meet.
+
+[NOTE]
+====
+The Electronic Signatures Directive used the term "Certification Service Provider" (CSP).
+eIDAS renamed these to "Trust Service Provider" (TSP) and, for the supervised ones, "Qualified Trust Service Provider" (QTSP).
+The terminology change was deliberate: eIDAS covers more than just certificates — it covers timestamps, seals, website authentication, and electronic delivery services.
+If you encounter "CSP" in older documentation, read it as "TSP."
+====
+
+=== Cross-Border Failure
+
+The most damaging consequence of the directive's fragmentation was the failure of cross-border recognition.
+In theory, a qualified electronic signature from Germany should have been accepted in France, and vice versa.
+In practice, it often was not.
+Each country's government procurement portals, tax systems, and regulatory filing platforms had been built to recognize only their own national qualified certificates.
+A German doctor trying to sign a cross-border prescription electronically for a French patient would find that the French system did not recognize the German qualified certificate.
+
+A 2012 study by the European Commission found that cross-border recognition of electronic signatures was "marginal at best."
+Of 13 member states surveyed, only 5 had any mechanism at all for recognizing qualified certificates from other EU countries.
+The directive had been in force for 13 years, and the internal market for electronic signatures was essentially non-existent.
+
+This was the political context in which eIDAS was born.
+
+=== The Lessons Learned
+
+The Commission identified several root causes for the directive's failure:
+
+1. **Directive vs. Regulation**: national transposition created divergent implementations
+2. **No mandatory trust infrastructure**: there was no EU-wide list of qualified providers that all member states were required to accept
+3. **Vague technical requirements**: the directive referenced "secure signature creation devices" without specifying what that meant technically
+4. **No supervision framework**: how supervisory bodies should operate, what they should check, and what consequences non-compliance should carry were all left to national discretion
+5. **Certificates only**: the directive covered only electronic signatures, ignoring related services like timestamps, seals, and electronic delivery
+
+eIDAS addressed every single one of these failures.
+
+== eIDAS: Architecture of the Regulation
+
+=== Regulation, Not Directive
+
+eIDAS is a regulation.
+Article 288 of the Treaty on the Functioning of the European Union says: "A regulation shall have general application. It shall be binding in its entirety and directly applicable in all Member States."
+
+This means:
+- The text is the same in all 27 member states (plus EEA countries through incorporation)
+- No national transposition is needed or permitted — the regulation _is_ the law
+- National courts apply the regulation directly; citizens and businesses can invoke it directly
+- Divergent national interpretations can be challenged at the Court of Justice of the European Union
+
+For developers, this has a profound practical consequence: the rules are the same everywhere.
+When eIDAS says that a qualified electronic signature has the legal effect equivalent to a handwritten signature, it means exactly that in Germany, France, Italy, Estonia, and all other member states.
+You do not need to check 27 different national laws to know what your signature is worth.
+
+=== Scope and Structure
+
+The eIDAS regulation has two main parts:
+
+**Chapter II: Electronic Identification** (Articles 6-12) — establishes a framework for mutual recognition of national electronic identification schemes (eID).
+This is the part that deals with government-issued digital identities (like the German _Personalausweis_ or the Estonian _ID-kaart_) and how they should be recognized across borders.
+We will not cover this in detail because it relates to identity management rather than document signing.
+
+**Chapter III: Trust Services** (Articles 13-45) — this is where the electronic signature framework lives, and it is the focus of this chapter and the next four chapters.
+
+The trust services chapter covers:
+- Electronic signatures (Articles 25-27)
+- Electronic seals (Articles 35-40)
+- Electronic timestamps (Articles 41-42)
+- Electronic delivery services (Articles 43-44)
+- Website authentication certificates (Article 45)
+- General provisions on trust service providers (Articles 13-24)
+
+[IMPORTANT]
+====
+eIDAS does not mandate _how_ electronic signatures must be implemented technically.
+It defines _legal categories_ and _legal effects_, then defers to ETSI and CEN for the technical standards.
+The regulation deliberately separates legal requirements from technical implementation — a wise decision that has allowed the technical standards (PAdES, CAdES, XAdES) to evolve independently of the legal framework.
+
+When eIDAS says "advanced electronic signature," it is defining a legal concept with four properties.
+When ETSI EN 319 142 says "PAdES-B-T," it is defining a technical implementation that satisfies those properties.
+The mapping between legal categories and technical standards is documented in Commission Implementing Decision (EU) 2015/1506.
+====
+
+== The Three Tiers of Electronic Signatures
+
+The heart of eIDAS for developers is its three-tier classification of electronic signatures.
+Each tier has progressively stricter requirements and progressively stronger legal effects.
+
+=== Tier 1: Electronic Signature (Article 3(10))
+
+The broadest tier.
+Article 3(10) defines an electronic signature as:
+
+[quote, "{eidas-reg}, Article 3(10)"]
+____
+"electronic signature" means data in electronic form which is attached to or logically associated with other data in electronic form and which is used by the signatory to sign
+____
+
+That is it.
+An electronic signature under eIDAS can be:
+- A scanned image of a handwritten signature pasted into a PDF
+- A typed name at the bottom of an email
+- A checkbox on a web form saying "I agree"
+- A click of a "Sign" button that records user intent
+
+There is no cryptographic requirement.
+There is no certificate requirement.
+There is no requirement for any specific technology at all.
+
+The legal effect of a basic electronic signature is defined in Article 25(1): it "shall not be denied legal effect and admissibility as evidence in legal proceedings solely on the grounds that it is in an electronic form."
+This is a non-discrimination principle — courts cannot reject evidence _just_ because it is electronic.
+But it says nothing about the _weight_ of that evidence.
+A typed name has much less evidentiary value than a cryptographic signature with a qualified certificate.
+
+[TIP]
+====
+For developers building signing workflows: many business processes do not require more than a basic electronic signature.
+Click-to-sign, draw-to-sign, and type-to-sign all count as electronic signatures under eIDAS.
+If your use case is internal corporate approvals, non-binding agreements, or informal consent, a basic electronic signature may be legally sufficient.
+Check with your legal team, but do not assume you always need cryptography.
+====
+
+=== Tier 2: Advanced Electronic Signature (Article 3(11) and Article 26)
+
+The middle tier.
+Article 3(11) defines an advanced electronic signature as an electronic signature that meets the requirements set out in Article 26.
+
+Article 26 specifies four requirements:
+
+[quote, "{eidas-reg}, Article 26"]
+____
+An advanced electronic signature shall meet the following requirements:
+
+(a) it is uniquely linked to the signatory;
+
+(b) it is capable of identifying the signatory;
+
+(c) it is created using electronic signature creation data that the signatory can, with a high level of confidence, use under his sole control; and
+
+(d) it is linked to the data signed therewith in such a way that any subsequent change in the data is detectable.
+____
+
+Let us examine each requirement from a technical perspective.
+
+==== (a) Uniquely linked to the signatory
+
+The signature must be produced using data (typically a private key) that is uniquely associated with one specific natural person.
+In practice, this means: a private key that belongs to exactly one person, used to produce a cryptographic signature that can only have been created with that key.
+
+A shared private key used by multiple employees would fail this requirement.
+A department-level signing key would fail this requirement.
+The key must be tied to a specific individual.
+
+==== (b) Capable of identifying the signatory
+
+The signature (together with its associated data, such as a certificate) must make it possible to determine _who_ signed.
+A raw RSA or ECDSA signature over a hash does not, by itself, identify anyone — it just proves that whoever held the private key produced the signature.
+Combined with an X.509 certificate that binds the public key to an identity (name, organization, email), the requirement is satisfied.
+
+==== (c) Sole control
+
+The signatory must be the only person who can use the signing key.
+"With a high level of confidence" is the qualifier — absolute sole control is impossible to guarantee (keys can be stolen), but the system must make unauthorized use difficult.
+
+Sole control mechanisms include:
+- **Password-protected PKCS#12 keystore**: the signer must know the password
+- **Smart card with PIN**: the signer must possess the card and know the PIN
+- **HSM with authentication**: the signer must authenticate (username + password + OTP) before the HSM will sign
+- **Biometric activation**: fingerprint or face recognition to authorize signing
+
+[WARNING]
+====
+"Sole control" is where many implementations fail the advanced signature test.
+If a signing key is stored in a server-side keystore and an application signs on behalf of users without meaningful per-signature authentication, the resulting signatures are arguably _not_ advanced electronic signatures — because the user does not have sole control over the key.
+
+The fact that the user logged into the application is not sufficient.
+The authentication must be linked to the _signing action_, not just the _session_.
+This is the distinction that the SCAL (Sole Control Assurance Level) framework addresses — more on this in Chapter 22.
+====
+
+==== (d) Linked to the data
+
+Any change to the signed data must be detectable.
+This is the integrity property that every digital signature scheme provides: if you change even one bit of the signed data, the signature will no longer verify.
+For PDF signatures, the byte range mechanism (Chapter 13) ensures this linkage.
+
+=== Tier 3: Qualified Electronic Signature (Article 3(12))
+
+The highest tier, and the most consequential.
+Article 3(12) defines a qualified electronic signature as:
+
+[quote, "{eidas-reg}, Article 3(12)"]
+____
+"qualified electronic signature" means an advanced electronic signature that is created by a qualified electronic signature creation device, and which is based on a qualified certificate for electronic signatures
+____
+
+A QES is an advanced electronic signature (all four Article 26 properties) that _additionally_:
+1. Uses a **Qualified Signature Creation Device (QSCD)** — certified hardware that protects the signing key
+2. Is based on a **Qualified Certificate** — issued by a Qualified Trust Service Provider (QTSP) listed in the EU Trusted List
+
+The legal effect of a QES is defined in Article 25(2): "A qualified electronic signature shall have the equivalent legal effect of a handwritten signature."
+This is not a non-discrimination principle — it is an _equivalence_ rule.
+A QES is legally equal to pen on paper.
+No court in any EU member state can treat it differently.
+
+Furthermore, Article 25(3) establishes mutual recognition: "A qualified electronic signature based on a qualified certificate issued in one Member State shall be recognised as a qualified electronic signature in all other Member States."
+This is the cross-border recognition that the 1999 directive failed to achieve.
+
+== Key Articles in Detail
+
+=== Article 25: Legal Effects of Electronic Signatures
+
+Article 25 is the most cited provision in eIDAS, and it deserves careful reading.
+
+.Article 25 — Legal effects summarized
+[cols="1,3,3", options="header"]
+|===
+| Paragraph | Rule | Practical Meaning
+
+| 25(1)
+| Electronic signatures shall not be denied legal effect solely because they are electronic
+| Non-discrimination: courts cannot reject electronic evidence just because it is not paper
+
+| 25(2)
+| QES shall have the equivalent legal effect of a handwritten signature
+| Legal equivalence: a QES _is_ a handwritten signature for all legal purposes
+
+| 25(3)
+| QES based on a qualified certificate from one member state shall be recognized in all member states
+| Cross-border recognition: no country can reject another country's QES
+
+|===
+
+Note what Article 25 does _not_ say: it does not say that advanced electronic signatures (AdES) have the legal effect of handwritten signatures.
+An AdES benefits only from the non-discrimination rule of 25(1) — it cannot be rejected _solely_ because it is electronic, but a court is free to assign it less evidentiary weight than a handwritten signature based on the circumstances.
+
+This creates a clear hierarchy:
+- **QES**: automatic legal equivalence to handwritten (Article 25(2))
+- **AdES**: cannot be dismissed as evidence just for being electronic (Article 25(1)), but the court decides its weight
+- **Basic electronic signature**: same as AdES — cannot be dismissed for being electronic, but its evidentiary weight is at the court's discretion
+
+[IMPORTANT]
+====
+Many developers (and their managers) misunderstand Article 25(1) as meaning "all electronic signatures are legally valid."
+That is not what it says.
+It says they cannot be denied legal effect _solely_ because they are electronic.
+A typed name at the bottom of an email is an electronic signature under eIDAS, but it provides very little evidence about who actually sent the email, whether they intended to be bound by its contents, or whether the email was tampered with.
+A court will weigh this evidence accordingly.
+
+Only QES gets automatic equivalence.
+Everything else is a matter of evidence and judicial discretion.
+====
+
+=== Article 28: Qualified Certificates for Electronic Signatures
+
+Article 28 requires that qualified certificates contain specific information, listed in Annex I of the regulation.
+A qualified certificate must contain:
+
+1. An indication (at least in machine-processable form) that the certificate is a qualified certificate
+2. A set of data representing the QTSP, including the member state where it is established and its name
+3. The signatory's name (or a pseudonym, clearly identified as such)
+4. Electronic signature validation data (the public key) corresponding to the electronic signature creation data (the private key)
+5. The period of validity
+6. The certificate serial number
+7. The advanced electronic signature or seal of the issuing QTSP
+8. The location where the certificate supporting the QTSP's signature/seal is available free of charge
+9. The location of the QTSP's certificate revocation status services
+
+In X.509 terms, this translates to specific extensions and naming conventions:
+- The certificate policies extension must contain the OID for qualified certificates (0.4.0.194112.1.2 for QES)
+- The subject DN must contain the signatory's name
+- The issuer DN identifies the QTSP
+- CRL Distribution Points and/or OCSP responder URLs must be present
+- The QCStatements extension (OID 0.4.0.1862.1) carries machine-readable qualification information
+
+[source,asn1]
+----
+-- QCStatements extension (ETSI EN 319 412-5)
+QCStatements ::= SEQUENCE OF QCStatement
+
+QCStatement ::= SEQUENCE {
+    statementId   OBJECT IDENTIFIER,
+    statementInfo ANY DEFINED BY statementId OPTIONAL
+}
+
+-- Key OIDs:
+-- id-etsi-qcs-QcCompliance  (0.4.0.1862.1.1)  = "this is a qualified cert"
+-- id-etsi-qcs-QcSSCD        (0.4.0.1862.1.4)  = "key is on a QSCD"
+-- id-etsi-qcs-QcType         (0.4.0.1862.1.6)  = type (esign, eseal, web)
+----
+
+=== Article 29: Requirements for Qualified Signature Creation Devices
+
+Article 29 states that qualified electronic signature creation data (the private key) must be managed by a QSCD that meets the requirements of Annex II.
+
+Annex II requires that QSCDs must:
+
+1. Ensure the confidentiality of the electronic signature creation data
+2. Ensure that the electronic signature creation data used for signature creation can occur only once (practical uniqueness)
+3. Ensure that the electronic signature creation data cannot be derived with reasonable assurance, and the signature is reliably protected against forgery using currently available technology
+4. Ensure that the electronic signature creation data can be reliably protected by the legitimate signatory against use by others
+
+In practice, this means: the private key must be generated on, and never leave, a certified hardware device.
+The certification is typically Common Criteria EAL4+ (or equivalent) for the device, plus specific Protection Profiles defined by CEN and ETSI.
+
+Examples of certified QSCDs:
+- Smart cards (e.g., IDPrime MD from Thales, CardOS from Atos)
+- USB tokens (e.g., SafeNet eToken 5110)
+- Hardware Security Modules (e.g., Thales Luna Network HSM, Utimaco SecurityServer)
+- Remote QSCDs operated by a QTSP (the key lives in an HSM in a data center, accessed via API)
+
+[NOTE]
+====
+The rise of remote QSCDs has been the biggest practical change since eIDAS entered into force.
+The original assumption was that QES required a physical device in the signer's possession (a smart card in their wallet).
+But eIDAS Annex II does not require _physical possession_ — it requires sole control.
+A private key in an HSM operated by a QTSP, accessible only through strong multi-factor authentication specific to the signer and the signing operation, satisfies the requirement.
+This opened the door to remote signing (Chapter 22), which is now the dominant model for QES in practice.
+====
+
+=== Article 35-40: Electronic Seals
+
+Electronic seals are the organizational counterpart to electronic signatures.
+While a signature is created by a natural person (a human), a seal is created by a legal person (a company, government agency, association).
+
+The seal articles mirror the signature articles almost exactly:
+- Article 35(1): non-discrimination for electronic seals
+- Article 35(2): qualified electronic seal enjoys a presumption of integrity and origin
+- Article 36: AdESeal requirements (same four properties as AdES, adapted for legal persons)
+- Article 38: qualified certificates for electronic seals (same as Art. 28, but for organizations)
+
+The key difference: Article 35(2) says a qualified seal enjoys a "presumption of integrity of the data and of correctness of the origin of that data."
+Note the careful wording — it says nothing about the legal _intent_ behind the seal.
+A signature expresses consent or approval.
+A seal proves origin and integrity.
+Chapter 21 explores this distinction in depth.
+
+== Mutual Recognition
+
+=== Within the EU
+
+Article 25(3) establishes that a QES based on a qualified certificate from one member state is recognized as a QES in all member states.
+Article 35(3) does the same for qualified electronic seals.
+
+This means:
+- An Austrian QES is valid in Portugal
+- A Lithuanian qualified seal is valid in Spain
+- An Estonian qualified timestamp is valid in Germany
+
+Member states **cannot** impose additional requirements for cross-border recognition.
+They cannot require that QES certificates be issued by domestic QTSPs.
+They cannot require additional technical features beyond what eIDAS specifies.
+
+The mechanism that makes this work is the **EU Trusted List (EUTL)** — a machine-readable, cryptographically signed registry of all QTSPs in the EU.
+If a certificate chains to a QTSP on the EUTL, it qualifies for cross-border recognition.
+Chapter 20 covers the EUTL in detail.
+
+[WARNING]
+====
+In practice, cross-border recognition is still imperfect.
+While the _legal_ framework is clear, many national IT systems have not been updated to consume the EUTL and accept certificates from other member states.
+A 2021 European Commission survey found that while most member states had updated their legal frameworks, actual system-level interoperability lagged significantly.
+
+If your software validates signatures against a fixed list of trusted certificates (rather than dynamically checking the EUTL), you are likely rejecting valid QES from other member states.
+This is a compliance failure under eIDAS — Article 25(3) does not have exceptions for "we haven't updated our trust store yet."
+====
+
+=== Non-EU Recognition
+
+eIDAS Article 14 allows the European Commission to adopt implementing acts recognizing electronic identification schemes from third countries, provided they meet equivalent requirements.
+
+In practice, non-EU recognition is sparse:
+- **Switzerland** has a bilateral agreement with the EU that provides for mutual recognition of qualified trust services under the ZertES (Swiss Electronic Signatures Act)
+- **United Kingdom** post-Brexit: the UK retained eIDAS as domestic law (the UK eIDAS regulation) but mutual recognition lapsed; UK QES are not automatically recognized in the EU and vice versa
+- **United States**: no formal equivalence arrangement; US digital signatures have no special status under eIDAS (and eIDAS signatures have no special status under US law)
+
+For developers serving global markets, this means: do not assume that a qualified certificate from a non-EU QTSP will be recognized as "qualified" in the EU, even if the QTSP provides technically identical services.
+Qualification is a _legal status_ granted by an EU member state's supervisory body, not a technical property of the certificate.
+
+== eIDAS 2.0: Regulation (EU) 2024/1183
+
+On April 11, 2024, the revised eIDAS regulation — commonly called **eIDAS 2.0** or {eidas2-reg} — entered into force.
+The revision keeps the trust services framework largely intact but adds a transformative new component: the **European Digital Identity Wallet (EUDI Wallet)**.
+
+=== What Changed
+
+The key changes in eIDAS 2.0:
+
+1. **EUDI Wallet**: Every member state must provide a digital identity wallet to its citizens and residents by 2026. The wallet will carry government-issued Person Identification Data (PID) and Qualified Electronic Attestations of Attributes (QEAAs). Crucially, the wallet will be able to create QES — making qualified signatures accessible to every EU citizen from their smartphone.
+
+2. **Qualified Electronic Attestations of Attributes (QEAAs)**: A new trust service type. QEAAs are digitally signed attestations of specific attributes (age, professional qualifications, university degrees) that can be presented through the EUDI wallet. Think of them as digital equivalents of physical certificates and credentials.
+
+3. **Remote QSCD in the wallet**: The EUDI wallet can use a remote QSCD operated by a QTSP for creating qualified signatures. The private key lives in an HSM in the QTSP's data center, but the wallet provides the authentication and sole control mechanisms.
+
+4. **Free QES for citizens**: Article 45e requires that natural persons be offered QES creation through the wallet free of charge for non-professional use. This is a dramatic change — until now, QES required purchasing a certificate from a commercial QTSP, which typically costs 50-300 EUR per year.
+
+5. **Qualified Electronic Ledgers**: A new trust service type for distributed ledger technology (blockchain). ETSI is currently developing the technical standards.
+
+=== Impact on Developers
+
+For PDF signature developers, eIDAS 2.0 means:
+
+- **Expect a surge in QES volume**: Free QES through the wallet will dramatically increase the number of qualified signatures in circulation. Your validation code needs to handle EUTL lookups efficiently.
+- **Wallet-initiated signing flows**: The EUDI wallet defines a new interaction pattern where the wallet app initiates a signing flow with a remote QSCD. If your application accepts signed documents, you need to support the signature formats the wallet produces.
+- **QEAA validation**: You may need to validate not just the signature on a document, but also QEAAs presented alongside it (e.g., a doctor signing a prescription presents their medical qualification attestation).
+
+[TIP]
+====
+The EUDI wallet's Architecture Reference Framework (ARF) is publicly available and under active development.
+As of early 2026, large-scale pilots are running in multiple sectors across the EU.
+The technical specifications are not yet final, but the direction is clear: QES will move from a niche enterprise technology to a consumer feature on smartphones.
+Plan your architecture accordingly.
+====
+
+== The Gap Between Regulation and Reality
+
+=== What the Regulation Says
+
+eIDAS paints an elegant picture: three clearly defined tiers, qualified trust services supervised by competent national bodies, mutual recognition across borders, machine-readable trusted lists that software can consume programmatically.
+
+=== What Actually Happens
+
+The reality is more complicated.
+
+**National implementation varies despite the regulation's direct applicability.**
+While member states cannot transpose the regulation differently (it is directly applicable), they _can_ adopt supplementary national measures.
+Germany's _Vertrauensdienstegesetz_ (Trust Services Act), France's _decret relatif a la signature electronique_, and Italy's _Codice dell'Amministrazione Digitale_ all contain national provisions that fill gaps the regulation left open.
+These national provisions sometimes create practical differences in how QES is implemented and accepted.
+
+**EUTL consumption is not universal.**
+Many government and enterprise systems still validate signatures against hardcoded trust stores rather than dynamically checking the EUTL.
+This means they accept domestic QES but reject equally valid QES from other member states.
+
+**QSCD certification is slow and expensive.**
+Getting a signature creation device certified as a QSCD takes 12-24 months and costs hundreds of thousands of euros.
+This limits the number of available QSCDs and concentrates the market among a few hardware vendors.
+
+**The "qualified" premium.**
+Qualified certificates cost significantly more than standard certificates — typically 50-300 EUR per year for individuals, and more for organizations.
+This price barrier has limited adoption, particularly among small businesses and individuals.
+eIDAS 2.0's free QES through the wallet aims to address this, but the wallet is not yet widely deployed.
+
+**Interoperability testing is ongoing.**
+The European Commission funds regular interoperability testing events (called "plugtests") through ETSI, where QTSPs and software vendors test their implementations against each other.
+These events consistently reveal interoperability issues — signatures that validate in one tool but fail in another, timestamps that are accepted by some validators but rejected by others, EUTL entries that are ambiguous about the services a QTSP provides.
+
+== Common Misconceptions
+
+=== "eIDAS makes all digital signatures legal"
+
+No.
+eIDAS creates a _framework_ with three tiers.
+Only QES gets automatic legal equivalence to handwritten signatures.
+Basic electronic signatures and advanced electronic signatures benefit only from the non-discrimination principle — they cannot be rejected _solely_ for being electronic, but their legal weight is a matter for the court to decide.
+
+=== "If my signature uses a certificate, it's advanced"
+
+Not necessarily.
+An advanced electronic signature must satisfy all four requirements of Article 26: uniquely linked to the signatory, capable of identifying them, under sole control, and linked to the data.
+A certificate-based signature where the private key is stored in a shared server-side keystore, accessible to multiple system administrators, arguably fails the "sole control" requirement.
+
+=== "PAdES = eIDAS compliance"
+
+Not automatically.
+PAdES defines technical profiles for PDF signatures.
+Using PAdES-B-LTA with a qualified certificate on a QSCD produces a QES.
+Using PAdES-B-LTA with a self-signed certificate produces a technically well-structured signature with zero eIDAS qualification.
+The eIDAS tier depends on _who issued the certificate_ and _where the key is stored_, not on the PDF signature format alone.
+
+=== "My country's signatures are recognized everywhere in the EU"
+
+Only if they are _qualified_.
+A non-qualified signature from Germany has no special status in France — it is just evidence, to be evaluated by the French court on its merits.
+Only QES enjoys automatic cross-border recognition under Article 25(3).
+
+=== "eIDAS applies outside the EU"
+
+eIDAS is EU law.
+It applies within the EU, the EEA (through the EEA Agreement), and countries with specific bilateral arrangements (Switzerland).
+It does not apply in the United States, China, Japan, or anywhere else, unless those jurisdictions choose to recognize eIDAS-qualified signatures under their own legal frameworks.
+
+However, eIDAS has become a de facto global reference model.
+Countries designing their own electronic signature frameworks often look to eIDAS for inspiration.
+The three-tier model (basic, advanced, qualified) has been adopted in various forms by multiple non-EU jurisdictions.
+
+== What Your Code Needs to Do
+
+For developers building PDF signature creation or validation software, eIDAS imposes specific technical requirements depending on the tier you are targeting:
+
+=== For Basic Electronic Signatures
+
+Nothing beyond what PDF already requires.
+Any valid PDF signature — even a simple `/SubFilter /adbe.pkcs7.detached` with a self-signed certificate — is an electronic signature under Article 3(10).
+
+=== For Advanced Electronic Signatures
+
+Your signing workflow must ensure:
+1. **Unique linkage**: one private key per signer (never share keys)
+2. **Identification**: the certificate must contain the signer's identity (name, at minimum)
+3. **Sole control**: meaningful per-signature authentication (not just session login)
+4. **Data linkage**: the signature must cover the entire document (standard byte range coverage)
+
+Technically, this means: PAdES-B-B or higher, with a certificate issued to a specific individual, and a signing flow that authenticates the signer for each signature.
+
+=== For Qualified Electronic Signatures
+
+All of the above, plus:
+1. **Qualified certificate**: issued by a QTSP listed on the EUTL
+2. **QSCD**: the private key must be on a certified qualified signature creation device
+3. **Recommendation: PAdES-B-LTA**: while not strictly required by eIDAS, PAdES-B-LTA ensures long-term verifiability
+
+=== For Validation
+
+If your software validates signatures and needs to determine the eIDAS tier:
+
+[source,java]
+----
+/**
+ * Determines the eIDAS tier of a PDF signature.
+ * This is a simplified illustration - production code should use EU DSS
+ * which handles the full complexity of EUTL parsing and chain validation.
+ */
+public EidasTier determineEidasTier(X509Certificate signerCert,
+                                     boolean keyOnQscd) {
+    // Check if the certificate is qualified (issued by a QTSP)
+    boolean isQualifiedCert = isListedOnEutl(signerCert);
+
+    // Check for QCStatements extension
+    boolean hasQcCompliance = hasQcStatement(signerCert,
+            "0.4.0.1862.1.1");  // id-etsi-qcs-QcCompliance
+    boolean hasQscdStatement = hasQcStatement(signerCert,
+            "0.4.0.1862.1.4");  // id-etsi-qcs-QcSSCD
+
+    if (isQualifiedCert && hasQcCompliance && (keyOnQscd || hasQscdStatement)) {
+        return EidasTier.QUALIFIED;     // QES - Art. 25(2) applies
+    }
+
+    if (meetsArticle26Requirements(signerCert)) {
+        return EidasTier.ADVANCED;      // AdES - Art. 25(1) applies
+    }
+
+    return EidasTier.BASIC;            // Basic - Art. 25(1) applies
+}
+
+private boolean hasQcStatement(X509Certificate cert, String oid) {
+    byte[] extValue = cert.getExtensionValue("1.3.6.1.5.5.7.1.3");
+    if (extValue == null) {
+        return false;
+    }
+    // Parse QCStatements ASN.1 structure
+    ASN1Sequence qcStatements = ASN1Sequence.getInstance(
+            ASN1OctetString.getInstance(extValue).getOctets());
+    for (ASN1Encodable statement : qcStatements) {
+        ASN1Sequence seq = ASN1Sequence.getInstance(statement);
+        ASN1ObjectIdentifier statementId =
+                ASN1ObjectIdentifier.getInstance(seq.getObjectAt(0));
+        if (statementId.getId().equals(oid)) {
+            return true;
+        }
+    }
+    return false;
+}
+----
+
+[CAUTION]
+====
+The code above is a simplified illustration.
+Production eIDAS tier determination is significantly more complex because:
+
+- EUTL lookup requires parsing the trusted list XML, validating its signature, and traversing the LOT hierarchy
+- Certificate chain validation must check revocation status for every certificate in the chain
+- QSCD status may need to be inferred from the certificate's QCStatements rather than verified directly
+- Some QTSPs issue certificates that are qualified for some services but not others
+
+For production use, the **EU DSS framework** (Chapter 23) provides a complete, tested implementation of eIDAS tier determination.
+Do not implement this from scratch unless you have very specific requirements that EU DSS cannot meet.
+====
+
+== Key Takeaways
+
+- eIDAS ({eidas-reg}) is an EU regulation — directly applicable in all member states, no national transposition required
+- It replaced the failed Electronic Signatures Directive (1999/93/EC), which suffered from fragmented national implementations
+- Three tiers: basic electronic signature (any electronic indication of signing intent), advanced electronic signature (four properties: unique linkage, identification, sole control, data linkage), qualified electronic signature (advanced + QSCD + qualified certificate)
+- Only QES has automatic legal equivalence to a handwritten signature (Article 25(2))
+- Cross-border recognition is mandatory for QES (Article 25(3)) — enforced through the EU Trusted List
+- eIDAS 2.0 ({eidas2-reg}) adds the EUDI wallet, making QES accessible to all EU citizens via smartphone
+- The gap between regulation and implementation is real — code that hardcodes trust stores instead of checking the EUTL violates the mutual recognition principle
+- For production eIDAS validation, use the EU DSS framework (Chapter 23) rather than implementing from scratch

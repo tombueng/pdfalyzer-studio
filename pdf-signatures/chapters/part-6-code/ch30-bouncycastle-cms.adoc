@@ -1,0 +1,1271 @@
+= BouncyCastle CMS Construction
+
+[.lead]
+Chapter 29 showed how PDFBox orchestrates the signing process -- creating the signature dictionary, computing the byte range, calling your `sign()` method, and writing the result into `/Contents`.
+This chapter goes inside that `sign()` method.
+We are now in BouncyCastle territory, building the CMS `SignedData` structure that is the actual cryptographic heart of every PDF signature.
+
+If you have ever looked at a CMS signature in an ASN.1 dump and wondered what each field means, why certain attributes are mandatory for PAdES, or how a timestamp token gets attached -- this chapter answers all of those questions with complete, compilable code.
+
+We cover: `CMSSignedDataGenerator` and its components, provider registration, building the `ContentSigner`, the four mandatory signed attributes for PAdES-B-B, the `ESS-signing-certificate-v2` attribute in detail, algorithm negotiation between RSA and ECDSA, timestamp tokens as unsigned attributes, debugging CMS with ASN1Dump and openssl, and complete builder classes for PAdES-B-B and PAdES-B-T.
+
+== The CMS SignedData Structure: A Quick Refresher
+
+Before we write code, let us recall what we are building.
+A CMS `SignedData` structure ({rfc5652} S5) contains:
+
+[source]
+----
+SignedData ::= SEQUENCE {
+    version            CMSVersion,
+    digestAlgorithms   SET OF AlgorithmIdentifier,
+    encapContentInfo   EncapsulatedContentInfo,
+    certificates    [0] IMPLICIT CertificateSet OPTIONAL,
+    crls            [1] IMPLICIT RevocationInfoChoices OPTIONAL,
+    signerInfos        SET OF SignerInfo
+}
+----
+
+For a PDF signature:
+
+- `version` is 1 (one signer, detached content)
+- `digestAlgorithms` contains `SHA-256` (or SHA-384, SHA-512)
+- `encapContentInfo` has `contentType = id-data` and _no content_ (detached signature -- the content lives in the PDF)
+- `certificates` contains the signer's certificate and the chain (up to but not including the root)
+- `crls` is typically empty (revocation data goes in the DSS for PAdES-B-LT)
+- `signerInfos` contains exactly one `SignerInfo` with signed attributes, the signature value, and optionally unsigned attributes (the timestamp)
+
+The `SignerInfo` is where most of the action is:
+
+[source]
+----
+SignerInfo ::= SEQUENCE {
+    version              CMSVersion,
+    sid                  SignerIdentifier,
+    digestAlgorithm      AlgorithmIdentifier,
+    signedAttrs      [0] IMPLICIT SignedAttributes OPTIONAL,
+    signatureAlgorithm   AlgorithmIdentifier,
+    signature            SignatureValue,
+    unsignedAttrs    [1] IMPLICIT UnsignedAttributes OPTIONAL
+}
+----
+
+The `signedAttrs` (signed attributes) are hashed and signed -- they form the binding between the document content and the signer's identity.
+The `unsignedAttrs` (unsigned attributes) are _not_ covered by the signature -- this is where the timestamp goes, because the timestamp is created _after_ the signature.
+
+== BouncyCastle Provider Registration
+
+Every BouncyCastle crypto operation requires the provider to be registered with the JCA (Java Cryptography Architecture).
+Without it, calls to `JcaContentSignerBuilder`, `JcaDigestCalculatorProviderBuilder`, and `JcaCertStore` fail with `NoSuchProviderException`.
+
+[source,java]
+----
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
+
+// Register once, at application startup
+if (java.security.Security.getProvider("BC") == null) {
+    java.security.Security.addProvider(new BouncyCastleProvider());
+}
+----
+
+In a Spring Boot application, the cleanest approach is a configuration class:
+
+[source,java]
+----
+import jakarta.annotation.PostConstruct;
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+public class BouncyCastleConfig {
+
+    @PostConstruct
+    public void init() {
+        if (java.security.Security.getProvider("BC") == null) {
+            java.security.Security.addProvider(new BouncyCastleProvider());
+        }
+    }
+}
+----
+
+WARNING: If you register the provider in a `static` block, it races with other static initializers. In complex applications with multiple classloaders (application servers, OSGi), the provider may not be visible where you need it. The `@PostConstruct` approach avoids both problems.
+
+TIP: You can verify the registration by calling `java.security.Security.getProvider("BC")`. If it returns `null`, BouncyCastle is not registered. If it returns a `Provider` object, check its version: `provider.getVersion()` should return `{bc-version}` (or whatever version you have on the classpath).
+
+== Building a Basic CMS Signature
+
+Let us build a CMS `SignedData` from scratch, step by step.
+We will start with the simplest possible version and then add PAdES requirements.
+
+=== Step 1: The ContentSigner
+
+The `ContentSigner` is BouncyCastle's abstraction over the private key and signature algorithm.
+It provides an `OutputStream` that you write data into, and when you are done, it produces the raw signature bytes.
+
+[source,java]
+----
+import org.bouncycastle.operator.ContentSigner;
+import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
+
+// For RSA keys:
+ContentSigner signer = new JcaContentSignerBuilder("SHA256withRSA")
+        .setProvider("BC")
+        .build(privateKey);
+
+// For EC keys:
+ContentSigner signer = new JcaContentSignerBuilder("SHA256withECDSA")
+        .setProvider("BC")
+        .build(privateKey);
+----
+
+The `JcaContentSignerBuilder` takes a JCA algorithm string and a private key.
+The `.setProvider("BC")` ensures BouncyCastle handles the actual signing, not the JDK's default provider (which may not support all algorithms or may behave differently for edge cases like PSS padding).
+
+=== Step 2: The DigestCalculatorProvider
+
+BouncyCastle needs a way to compute message digests.
+The `DigestCalculatorProvider` is the factory for digest calculators:
+
+[source,java]
+----
+import org.bouncycastle.operator.DigestCalculatorProvider;
+import org.bouncycastle.operator.jcajce.JcaDigestCalculatorProviderBuilder;
+
+DigestCalculatorProvider dcProvider =
+        new JcaDigestCalculatorProviderBuilder()
+                .setProvider("BC")
+                .build();
+----
+
+This provider is used internally by the signer info generator to compute the message digest of the signed content and the signed attributes.
+
+=== Step 3: The SignerInfoGenerator
+
+The `SignerInfoGenerator` combines the `ContentSigner`, the `DigestCalculatorProvider`, and the signer's certificate into a component that can produce a `SignerInfo`:
+
+[source,java]
+----
+import org.bouncycastle.cms.SignerInfoGenerator;
+import org.bouncycastle.cms.jcajce.JcaSignerInfoGeneratorBuilder;
+
+SignerInfoGenerator signerInfoGen =
+        new JcaSignerInfoGeneratorBuilder(dcProvider)
+                .build(signer, certificate);
+----
+
+At this point, the `signerInfoGen` knows which key to use, which algorithm, which certificate identifies the signer, and how to compute digests.
+It does _not_ yet know about signed attributes -- we will add those next.
+
+=== Step 4: The CMSSignedDataGenerator
+
+Now we wire everything together:
+
+[source,java]
+----
+import org.bouncycastle.cert.jcajce.JcaCertStore;
+import org.bouncycastle.cms.CMSProcessableByteArray;
+import org.bouncycastle.cms.CMSSignedData;
+import org.bouncycastle.cms.CMSSignedDataGenerator;
+
+// Certificate store -- signer cert + chain
+List<X509Certificate> certList = new ArrayList<>(chain);
+JcaCertStore certStore = new JcaCertStore(certList);
+
+CMSSignedDataGenerator gen = new CMSSignedDataGenerator();
+gen.addSignerInfoGenerator(signerInfoGen);
+gen.addCertificates(certStore); // <1>
+
+// The content to be signed -- this is the byte range content from PDFBox
+CMSProcessableByteArray cmsContent =
+        new CMSProcessableByteArray(contentBytes);
+
+// Generate the SignedData -- false = detached (content not embedded)
+CMSSignedData signedData = gen.generate(cmsContent, false); // <2>
+
+// Get the DER-encoded result
+byte[] cmsBytes = signedData.getEncoded();
+----
+<1> The certificates are embedded in the CMS `certificates` field. Include the signer's certificate and all intermediate certificates. Do _not_ include the root CA certificate -- validators are expected to have the root in their trust store already, and including it wastes space without adding trust.
+<2> The second parameter `false` means detached signature. For PDF signatures, this must always be `false`. If you pass `true`, the content is embedded inside the CMS structure, which doubles the size and does not match what PDF validators expect for `ETSI.CAdES.detached` or `adbe.pkcs7.detached`.
+
+== Signed Attributes: What PAdES Requires
+
+A basic CMS signature (without signed attributes) signs the content directly -- the hash of the content is what the signature covers.
+When signed attributes are present, the signature covers the hash of the _signed attributes_ instead, and the signed attributes contain the hash of the content.
+This indirection is how CMS allows metadata (signing time, content type, certificate binding) to be included in the signed data.
+
+For PAdES-B-B compliance ({etsi-pades}), four signed attributes are required.
+
+.Mandatory Signed Attributes for PAdES-B-B
+[cols="3,3,5", options="header"]
+|===
+| Attribute | OID | Purpose
+
+| `content-type`
+| 1.2.840.113549.1.9.3
+| Identifies the type of content being signed. Must be `id-data` (OID 1.2.840.113549.1.7.1). BouncyCastle adds this automatically.
+
+| `message-digest`
+| 1.2.840.113549.1.9.4
+| The hash of the signed content (the byte range bytes). BouncyCastle computes and adds this automatically.
+
+| `signing-time`
+| 1.2.840.113549.1.9.5
+| The claimed signing time. BouncyCastle adds this automatically when using `DefaultSignedAttributeTableGenerator`. Note: PAdES validators prefer the TSA timestamp over this value.
+
+| `ESS-signing-certificate-v2`
+| 1.2.840.113549.1.9.16.2.47
+| Binds the signature to a specific certificate by its hash. This is the one you must add manually. Without it, you have a valid CMS signature but _not_ a PAdES-B-B signature.
+
+|===
+
+NOTE: BouncyCastle's `DefaultSignedAttributeTableGenerator` automatically adds `content-type`, `message-digest`, and `signing-time`. You only need to explicitly construct `ESS-signing-certificate-v2` and pass it in. The generator merges your custom attributes with the automatic ones.
+
+== Creating ESS-signing-certificate-v2
+
+The `ESS-signing-certificate-v2` attribute ({rfc5652} and RFC 5035) prevents certificate substitution attacks.
+It contains a hash of the signer's certificate, so a validator can verify that the certificate embedded in the CMS `certificates` field is the one the signer intended to use.
+
+The ASN.1 structure:
+
+[source]
+----
+SigningCertificateV2 ::= SEQUENCE {
+    certs    SEQUENCE OF ESSCertIDv2,
+    policies SEQUENCE OF PolicyInformation OPTIONAL
+}
+
+ESSCertIDv2 ::= SEQUENCE {
+    hashAlgorithm  AlgorithmIdentifier DEFAULT {sha-256},
+    certHash       OCTET STRING,
+    issuerSerial   IssuerSerial OPTIONAL
+}
+----
+
+Here is the complete code to build this attribute:
+
+[source,java]
+----
+import java.security.MessageDigest;
+import java.security.cert.X509Certificate;
+
+import org.bouncycastle.asn1.ASN1EncodableVector;
+import org.bouncycastle.asn1.DERSet;
+import org.bouncycastle.asn1.cms.Attribute;
+import org.bouncycastle.asn1.cms.AttributeTable;
+import org.bouncycastle.asn1.ess.ESSCertIDv2;
+import org.bouncycastle.asn1.ess.SigningCertificateV2;
+import org.bouncycastle.asn1.nist.NISTObjectIdentifiers;
+import org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers;
+import org.bouncycastle.asn1.x509.AlgorithmIdentifier;
+
+/**
+ * Builds the ESS-signing-certificate-v2 signed attribute
+ * required for PAdES-B-B compliance.
+ */
+public class EssCertAttributeBuilder {
+
+    /**
+     * Creates an AttributeTable containing the
+     * ESS-signing-certificate-v2 attribute.
+     *
+     * @param certificate the signer's X.509 certificate
+     * @return an AttributeTable that can be passed to
+     *         DefaultSignedAttributeTableGenerator
+     */
+    public static AttributeTable build(X509Certificate certificate)
+            throws Exception {
+
+        // 1. Hash the DER-encoded certificate with SHA-256
+        MessageDigest md = MessageDigest.getInstance("SHA-256");
+        byte[] certHash = md.digest(certificate.getEncoded()); // <1>
+
+        // 2. Create the AlgorithmIdentifier for SHA-256
+        AlgorithmIdentifier hashAlgo = new AlgorithmIdentifier(
+                NISTObjectIdentifiers.id_sha256); // <2>
+
+        // 3. Create the ESSCertIDv2 (hash + algorithm)
+        ESSCertIDv2 essCertId = new ESSCertIDv2(hashAlgo, certHash);
+
+        // 4. Wrap in SigningCertificateV2 (array of ESSCertIDv2)
+        SigningCertificateV2 sigCertV2 = new SigningCertificateV2(
+                new ESSCertIDv2[]{essCertId}); // <3>
+
+        // 5. Create the CMS Attribute
+        ASN1EncodableVector v = new ASN1EncodableVector();
+        v.add(new Attribute(
+                PKCSObjectIdentifiers.id_aa_signingCertificateV2, // <4>
+                new DERSet(sigCertV2)));
+
+        return new AttributeTable(v);
+    }
+}
+----
+<1> `certificate.getEncoded()` returns the DER-encoded X.509 certificate. We hash this entire byte sequence, not just the public key or the subject name. This ensures that any change to the certificate (even adding an extension) changes the hash.
+<2> The hash algorithm identifier must match the algorithm used to compute the hash. SHA-256 is the standard choice. If you use SHA-384 or SHA-512 for the signature algorithm, you may use the matching digest here, but SHA-256 is always acceptable.
+<3> The `SigningCertificateV2` wraps an array of `ESSCertIDv2`. For a single signer, there is one entry. If your signing certificate was issued by an intermediate CA, you may optionally include the intermediate's hash as well, but this is not required by PAdES.
+<4> The OID `1.2.840.113549.1.9.16.2.47` identifies this as the `ESS-signing-certificate-v2` attribute. Do not confuse it with the older `ESS-signing-certificate` (v1, OID 1.2.840.113549.1.9.16.2.12), which uses SHA-1. PAdES requires v2.
+
+CAUTION: Using `ESS-signing-certificate` v1 (with SHA-1) instead of v2 (with SHA-256) is a PAdES compliance failure. Some older code examples on the internet still use v1. SHA-1 is considered cryptographically broken for collision resistance since the SHAttered attack (2017). Always use v2 with SHA-256 or stronger.
+
+=== Wiring ESS-signing-certificate-v2 into the Generator
+
+Now we pass the attribute table to the `SignerInfoGenerator`:
+
+[source,java]
+----
+import org.bouncycastle.cms.DefaultSignedAttributeTableGenerator;
+import org.bouncycastle.cms.jcajce.JcaSignerInfoGeneratorBuilder;
+
+// Build the ESS attribute table
+AttributeTable essAttrs = EssCertAttributeBuilder.build(certificate);
+
+// Create a generator that merges ESS attribute with the automatic ones
+DefaultSignedAttributeTableGenerator attrGen =
+        new DefaultSignedAttributeTableGenerator(essAttrs); // <1>
+
+JcaSignerInfoGeneratorBuilder signerBuilder =
+        new JcaSignerInfoGeneratorBuilder(dcProvider);
+signerBuilder.setSignedAttributeGenerator(attrGen);
+
+SignerInfoGenerator signerInfoGen =
+        signerBuilder.build(signer, certificate);
+----
+<1> `DefaultSignedAttributeTableGenerator` accepts an initial `AttributeTable` and _merges_ it with the attributes it generates automatically (`content-type`, `message-digest`, `signing-time`). Your `ESS-signing-certificate-v2` is included alongside the automatic attributes. You do not need to manually construct the other three.
+
+== Algorithm Negotiation: RSA vs. ECDSA
+
+The signature algorithm depends on the private key type.
+You must match the algorithm string to the key, or the `ContentSigner` construction fails.
+
+[source,java]
+----
+/**
+ * Determines the JCA signature algorithm string for a given private key.
+ * Supports RSA, RSA-PSS, ECDSA, Ed25519, and Ed448.
+ */
+public static String resolveSignatureAlgorithm(PrivateKey privateKey) {
+    String keyAlgo = privateKey.getAlgorithm();
+
+    return switch (keyAlgo) {
+        case "RSA" -> "SHA256withRSA";
+        case "RSASSA-PSS" -> "SHA256withRSAandMGF1"; // <1>
+        case "EC", "ECDSA" -> "SHA256withECDSA";
+        case "Ed25519" -> "Ed25519"; // <2>
+        case "Ed448" -> "Ed448";
+        default -> throw new IllegalArgumentException(
+                "Unsupported key algorithm: " + keyAlgo);
+    };
+}
+----
+<1> RSA-PSS (Probabilistic Signature Scheme) is increasingly preferred over PKCS#1 v1.5 padding (`SHA256withRSA`). Some EU validation services flag PKCS#1 v1.5 as deprecated. If your key was generated as RSASSA-PSS, you must use the PSS algorithm string.
+<2> Ed25519 and Ed448 (Edwards curves) use the algorithm name directly -- there is no separate hash algorithm because the hash is built into the signature scheme. These are not yet widely supported by PDF validators (Adobe Acrobat does not validate Ed25519 signatures as of 2026), but they are valid per {iso32000-2} and will gain support over time.
+
+.Signature Algorithm Matrix
+[cols="2,3,3,3", options="header"]
+|===
+| Key Type | Algorithm String | Hash | Notes
+
+| RSA-2048+
+| `SHA256withRSA`
+| SHA-256
+| Most compatible. Works everywhere.
+
+| RSA-2048+
+| `SHA256withRSAandMGF1`
+| SHA-256
+| RSA-PSS. Better security properties. Some legacy validators do not support it.
+
+| RSA-3072+
+| `SHA384withRSA`
+| SHA-384
+| For higher security requirements.
+
+| EC P-256
+| `SHA256withECDSA`
+| SHA-256
+| Compact signatures (64 bytes vs. 256 for RSA-2048). Widely supported.
+
+| EC P-384
+| `SHA384withECDSA`
+| SHA-384
+| Higher security level.
+
+| EC P-521
+| `SHA512withECDSA`
+| SHA-512
+| Maximum EC security. Rarely needed.
+
+| Ed25519
+| `Ed25519`
+| Built-in
+| Modern curve. Limited validator support (as of 2026).
+
+| Ed448
+| `Ed448`
+| Built-in
+| Higher security Ed curve. Very limited support.
+
+|===
+
+TIP: For maximum compatibility in 2026, use `SHA256withRSA` (RSA-2048 key) or `SHA256withECDSA` (P-256 key). These work with every PDF validator we have tested, including Adobe Acrobat, Foxit Reader, and the EU DSS validation service.
+
+== Timestamp Token as Unsigned Attribute
+
+A PAdES-B-T signature contains a timestamp token as an unsigned attribute on the `SignerInfo`.
+The timestamp proves when the signature was created.
+
+The attribute is identified by OID `1.2.840.113549.1.9.16.2.14` (`id-aa-signatureTimeStampToken`), and its value is a complete CMS `SignedData` structure -- the timestamp is itself a CMS signature, created by the TSA.
+
+=== The Timestamping Flow
+
+1. Generate the CMS `SignedData` for the document signature (PAdES-B-B)
+2. Extract the raw signature value (`SignerInfo.signature`)
+3. Hash the signature value with SHA-256
+4. Send the hash to the TSA in an RFC 3161 `TimeStampRequest`
+5. Receive the `TimeStampResponse`, extract the `TimeStampToken`
+6. Encode the token as an ASN.1 structure
+7. Attach it as an unsigned attribute on the `SignerInfo`
+8. Replace the `SignerInfo` in the `CMSSignedData`
+9. Return the modified `CMSSignedData`
+
+=== Complete Implementation
+
+[source,java]
+----
+import java.security.MessageDigest;
+import java.util.Collections;
+
+import org.bouncycastle.asn1.ASN1EncodableVector;
+import org.bouncycastle.asn1.ASN1Primitive;
+import org.bouncycastle.asn1.DERSet;
+import org.bouncycastle.asn1.cms.Attribute;
+import org.bouncycastle.asn1.cms.AttributeTable;
+import org.bouncycastle.asn1.nist.NISTObjectIdentifiers;
+import org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers;
+import org.bouncycastle.cms.CMSSignedData;
+import org.bouncycastle.cms.SignerInformation;
+import org.bouncycastle.cms.SignerInformationStore;
+import org.bouncycastle.tsp.TimeStampRequest;
+import org.bouncycastle.tsp.TimeStampRequestGenerator;
+import org.bouncycastle.tsp.TimeStampResponse;
+import org.bouncycastle.tsp.TimeStampToken;
+
+/**
+ * Adds an RFC 3161 timestamp to a CMS SignedData, upgrading it
+ * from PAdES-B-B to PAdES-B-T.
+ */
+public class TimestampEmbedder {
+
+    /**
+     * Embeds a timestamp token as an unsigned attribute.
+     *
+     * @param signedData the original CMS SignedData (PAdES-B-B)
+     * @param tsaUrl     the RFC 3161 TSA endpoint URL
+     * @return the modified CMS SignedData (PAdES-B-T)
+     */
+    public static CMSSignedData addTimestamp(CMSSignedData signedData,
+                                              String tsaUrl)
+            throws Exception {
+
+        // Get the first (only) signer info
+        SignerInformation signerInfo = signedData.getSignerInfos()
+                .getSigners().iterator().next();
+
+        // The timestamp covers the signature value, not the content
+        byte[] signatureBytes = signerInfo.getSignature(); // <1>
+
+        // Hash the signature for the TSA request
+        MessageDigest md = MessageDigest.getInstance("SHA-256");
+        byte[] hash = md.digest(signatureBytes);
+
+        // Build and send the RFC 3161 request
+        TimeStampRequestGenerator reqGen =
+                new TimeStampRequestGenerator();
+        reqGen.setCertReq(true); // <2>
+        TimeStampRequest tsReq = reqGen.generate(
+                NISTObjectIdentifiers.id_sha256, hash);
+
+        byte[] tsRespBytes = sendTsaRequest(tsaUrl, tsReq.getEncoded());
+
+        // Parse and validate the response
+        TimeStampResponse tsResponse =
+                new TimeStampResponse(tsRespBytes);
+        tsResponse.validate(tsReq); // <3>
+
+        TimeStampToken tsToken = tsResponse.getTimeStampToken();
+        if (tsToken == null) {
+            throw new IllegalStateException(
+                    "TSA response contains no timestamp token");
+        }
+
+        // Convert to ASN.1 for embedding
+        ASN1Primitive tsAsn1 = ASN1Primitive.fromByteArray(
+                tsToken.getEncoded());
+
+        // Build the unsigned attribute
+        ASN1EncodableVector unsignedVec = new ASN1EncodableVector();
+        unsignedVec.add(new Attribute(
+                PKCSObjectIdentifiers.id_aa_signatureTimeStampToken,
+                new DERSet(tsAsn1))); // <4>
+        AttributeTable unsignedAttrs = new AttributeTable(unsignedVec);
+
+        // Replace the signer's unsigned attributes
+        SignerInformation newSignerInfo =
+                SignerInformation.replaceUnsignedAttributes(
+                        signerInfo, unsignedAttrs); // <5>
+
+        SignerInformationStore newSignerInfos =
+                new SignerInformationStore(
+                        Collections.singletonList(newSignerInfo));
+
+        return CMSSignedData.replaceSigners(
+                signedData, newSignerInfos);
+    }
+
+    /** Sends an RFC 3161 request to a TSA endpoint via HTTP POST. */
+    private static byte[] sendTsaRequest(String tsaUrl, byte[] reqBytes)
+            throws Exception {
+
+        java.net.http.HttpClient client =
+                java.net.http.HttpClient.newBuilder()
+                        .connectTimeout(java.time.Duration.ofSeconds(15))
+                        .build();
+
+        java.net.http.HttpRequest request =
+                java.net.http.HttpRequest.newBuilder()
+                        .uri(java.net.URI.create(tsaUrl))
+                        .header("Content-Type",
+                                "application/timestamp-query")
+                        .timeout(java.time.Duration.ofSeconds(30))
+                        .POST(java.net.http.HttpRequest.BodyPublishers
+                                .ofByteArray(reqBytes))
+                        .build();
+
+        java.net.http.HttpResponse<byte[]> response = client.send(
+                request,
+                java.net.http.HttpResponse.BodyHandlers.ofByteArray());
+
+        if (response.statusCode() != 200) {
+            throw new java.io.IOException(
+                    "TSA returned HTTP " + response.statusCode()
+                            + " from " + tsaUrl);
+        }
+
+        byte[] body = response.body();
+        if (body == null || body.length == 0) {
+            throw new java.io.IOException(
+                    "TSA returned empty response from " + tsaUrl);
+        }
+
+        return body;
+    }
+}
+----
+<1> `getSignature()` returns the raw signature bytes from the `SignerInfo` -- this is the value that was produced by the `ContentSigner`. For RSA-2048, this is 256 bytes. For ECDSA P-256, it is approximately 72 bytes (DER-encoded).
+<2> `setCertReq(true)` tells the TSA to include its signing certificate in the response. This is important: without the TSA's certificate, a validator cannot verify the timestamp without separately fetching the TSA's certificate.
+<3> `validate()` checks that the response corresponds to our request (matching nonce, hash algorithm, and hash value). If the TSA returned a response for a different request, this throws a `TSPValidationException`.
+<4> The timestamp token is wrapped in a `DERSet` and assigned OID `1.2.840.113549.1.9.16.2.14`. This is the standard way to embed a timestamp in CMS ({rfc5652}).
+<5> `replaceUnsignedAttributes()` creates a new `SignerInformation` with the same signed attributes and signature value, but with the specified unsigned attributes. The original `SignerInformation` is immutable.
+
+== Debugging CMS Structures
+
+When a signature fails validation, you need to look inside the CMS blob.
+There are two indispensable tools: BouncyCastle's `ASN1Dump` (Java) and OpenSSL (command line).
+
+=== ASN1Dump: Java-Side Inspection
+
+[source,java]
+----
+import org.bouncycastle.asn1.ASN1InputStream;
+import org.bouncycastle.asn1.ASN1Primitive;
+import org.bouncycastle.asn1.util.ASN1Dump;
+
+/**
+ * Dumps the ASN.1 structure of a CMS blob to stdout.
+ * Invaluable for debugging signature construction.
+ */
+public static void dumpCms(byte[] cmsBytes) throws Exception {
+    try (ASN1InputStream asn1In = new ASN1InputStream(cmsBytes)) {
+        ASN1Primitive obj = asn1In.readObject();
+        String dump = ASN1Dump.dumpAsString(obj, true); // <1>
+        System.out.println(dump);
+    }
+}
+----
+<1> The `true` parameter enables verbose mode, which shows the full content of OCTET STRING and BIT STRING values. Without it, large values are truncated.
+
+The output looks like this (truncated for readability):
+
+[source]
+----
+SEQUENCE
+  OBJECT IDENTIFIER 1.2.840.113549.1.7.2    (signedData)
+  [0]
+    SEQUENCE
+      INTEGER 1                               (version)
+      SET
+        SEQUENCE
+          OBJECT IDENTIFIER 2.16.840.1.101.3.4.2.1 (SHA-256)
+      SEQUENCE
+        OBJECT IDENTIFIER 1.2.840.113549.1.7.1     (data)
+      [0]                                     (certificates)
+        SEQUENCE
+          ...                                 (X.509 certificate)
+      SET
+        SEQUENCE                              (SignerInfo)
+          INTEGER 1                           (version)
+          SEQUENCE                            (sid - issuerAndSerialNumber)
+            ...
+          SEQUENCE                            (digestAlgorithm)
+            OBJECT IDENTIFIER 2.16.840.1.101.3.4.2.1 (SHA-256)
+          [0]                                 (signedAttrs)
+            SEQUENCE
+              OBJECT IDENTIFIER 1.2.840.113549.1.9.3  (content-type)
+              ...
+            SEQUENCE
+              OBJECT IDENTIFIER 1.2.840.113549.1.9.4  (message-digest)
+              ...
+            SEQUENCE
+              OBJECT IDENTIFIER 1.2.840.113549.1.9.5  (signing-time)
+              ...
+            SEQUENCE
+              OBJECT IDENTIFIER 1.2.840.113549.1.9.16.2.47 (ESS-signing-cert-v2)
+              ...
+          SEQUENCE                            (signatureAlgorithm)
+            OBJECT IDENTIFIER 1.2.840.113549.1.1.1 (RSA)
+          OCTET STRING                        (signature value)
+            ...
+          [1]                                 (unsignedAttrs)
+            SEQUENCE
+              OBJECT IDENTIFIER 1.2.840.113549.1.9.16.2.14 (timestamp)
+              ...
+----
+
+When debugging, check for:
+
+1. Is `ESS-signing-certificate-v2` (OID ...16.2.47) present in the signed attributes? If not, the signature is not PAdES-B-B compliant.
+2. Is `message-digest` present? If not, the signature structure is malformed.
+3. Is the timestamp (OID ...16.2.14) in the unsigned attributes? If not, it is not PAdES-B-T.
+4. Are certificates present in the `[0]` IMPLICIT set? If not, validators cannot build the chain.
+
+=== OpenSSL: Command-Line Inspection
+
+Extract the CMS blob from the PDF (it is the hex-encoded content of `/Contents`), decode it, and use OpenSSL:
+
+[source,bash]
+----
+# Decode the hex string from /Contents to binary
+xxd -r -p signature-hex.txt > signature.der
+
+# Parse the CMS structure
+openssl cms -inform DER -in signature.der -cmsout -print
+
+# Verify the CMS signature (requires the signed content)
+openssl cms -verify -inform DER -in signature.der \
+    -content signed-bytes.bin -noverify -out /dev/null
+
+# Extract and examine the signing certificate
+openssl cms -inform DER -in signature.der -cmsout -print \
+    | grep -A 50 "cert:"
+
+# View the timestamp token (if present)
+openssl ts -reply -in timestamp-token.der -text
+----
+
+TIP: To extract the `/Contents` hex string from a PDF, search for `/Contents <` in the raw file. The hex string starts after the `<` and ends at `>`. It is zero-padded -- strip trailing zeros before decoding. You can also use PDFBox's `PDSignature.getContents(byte[])` to extract the raw bytes programmatically.
+
+== Complete PAdES-B-B Builder
+
+Here is a self-contained class that builds a PAdES-B-B compliant CMS `SignedData`:
+
+[source,java]
+----
+import java.io.IOException;
+import java.io.InputStream;
+import java.security.MessageDigest;
+import java.security.PrivateKey;
+import java.security.cert.X509Certificate;
+import java.util.ArrayList;
+import java.util.List;
+
+import org.bouncycastle.asn1.ASN1EncodableVector;
+import org.bouncycastle.asn1.DERSet;
+import org.bouncycastle.asn1.cms.Attribute;
+import org.bouncycastle.asn1.cms.AttributeTable;
+import org.bouncycastle.asn1.ess.ESSCertIDv2;
+import org.bouncycastle.asn1.ess.SigningCertificateV2;
+import org.bouncycastle.asn1.nist.NISTObjectIdentifiers;
+import org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers;
+import org.bouncycastle.asn1.x509.AlgorithmIdentifier;
+import org.bouncycastle.cert.jcajce.JcaCertStore;
+import org.bouncycastle.cms.CMSProcessableByteArray;
+import org.bouncycastle.cms.CMSSignedData;
+import org.bouncycastle.cms.CMSSignedDataGenerator;
+import org.bouncycastle.cms.DefaultSignedAttributeTableGenerator;
+import org.bouncycastle.cms.SignerInfoGenerator;
+import org.bouncycastle.cms.jcajce.JcaSignerInfoGeneratorBuilder;
+import org.bouncycastle.operator.ContentSigner;
+import org.bouncycastle.operator.DigestCalculatorProvider;
+import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
+import org.bouncycastle.operator.jcajce.JcaDigestCalculatorProviderBuilder;
+
+/**
+ * Builds a PAdES-B-B compliant CMS SignedData structure.
+ *
+ * Implements SignatureInterface for use with PDFBox's
+ * PDDocument.addSignature().
+ *
+ * Produces:
+ * - Detached CMS SignedData (SubFilter: ETSI.CAdES.detached)
+ * - Signed attributes: content-type, message-digest, signing-time,
+ *   ESS-signing-certificate-v2
+ * - Certificate chain embedded in CMS certificates field
+ */
+public class PadesBBBuilder
+        implements org.apache.pdfbox.pdmodel.interactive
+                .digitalsignature.SignatureInterface {
+
+    private final PrivateKey privateKey;
+    private final X509Certificate certificate;
+    private final List<X509Certificate> chain;
+
+    public PadesBBBuilder(PrivateKey privateKey,
+                           X509Certificate certificate,
+                           List<X509Certificate> chain) {
+        this.privateKey = privateKey;
+        this.certificate = certificate;
+        this.chain = chain;
+    }
+
+    @Override
+    public byte[] sign(InputStream content) throws IOException {
+        try {
+            byte[] contentBytes = content.readAllBytes();
+            return buildSignedData(contentBytes);
+        } catch (IOException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IOException("PAdES-B-B signing failed: "
+                    + e.getMessage(), e);
+        }
+    }
+
+    /**
+     * Builds the CMS SignedData from the byte range content.
+     * This method can also be called directly for testing.
+     */
+    public byte[] buildSignedData(byte[] contentBytes) throws Exception {
+
+        // 1. Determine signature algorithm
+        String sigAlgo = resolveAlgorithm(privateKey);
+
+        // 2. Content signer
+        ContentSigner signer = new JcaContentSignerBuilder(sigAlgo)
+                .setProvider("BC")
+                .build(privateKey);
+
+        // 3. Digest calculator provider
+        DigestCalculatorProvider dcProvider =
+                new JcaDigestCalculatorProviderBuilder()
+                        .setProvider("BC").build();
+
+        // 4. ESS-signing-certificate-v2 attribute
+        AttributeTable essAttrs = buildEssAttribute(certificate);
+
+        // 5. Signer info generator with custom signed attributes
+        JcaSignerInfoGeneratorBuilder signerBuilder =
+                new JcaSignerInfoGeneratorBuilder(dcProvider);
+        signerBuilder.setSignedAttributeGenerator(
+                new DefaultSignedAttributeTableGenerator(essAttrs));
+
+        SignerInfoGenerator signerInfoGen =
+                signerBuilder.build(signer, certificate);
+
+        // 6. Certificate store
+        List<X509Certificate> certs = new ArrayList<>(chain);
+        JcaCertStore certStore = new JcaCertStore(certs);
+
+        // 7. Assemble and generate
+        CMSSignedDataGenerator gen = new CMSSignedDataGenerator();
+        gen.addSignerInfoGenerator(signerInfoGen);
+        gen.addCertificates(certStore);
+
+        CMSProcessableByteArray cmsContent =
+                new CMSProcessableByteArray(contentBytes);
+        CMSSignedData signedData = gen.generate(cmsContent, false);
+
+        return signedData.getEncoded();
+    }
+
+    private static AttributeTable buildEssAttribute(
+            X509Certificate cert) throws Exception {
+        MessageDigest md = MessageDigest.getInstance("SHA-256");
+        byte[] certHash = md.digest(cert.getEncoded());
+
+        AlgorithmIdentifier hashAlgo = new AlgorithmIdentifier(
+                NISTObjectIdentifiers.id_sha256);
+        ESSCertIDv2 essCertId = new ESSCertIDv2(hashAlgo, certHash);
+        SigningCertificateV2 sigCertV2 = new SigningCertificateV2(
+                new ESSCertIDv2[]{essCertId});
+
+        ASN1EncodableVector v = new ASN1EncodableVector();
+        v.add(new Attribute(
+                PKCSObjectIdentifiers.id_aa_signingCertificateV2,
+                new DERSet(sigCertV2)));
+        return new AttributeTable(v);
+    }
+
+    private static String resolveAlgorithm(PrivateKey key) {
+        String algo = key.getAlgorithm();
+        return switch (algo) {
+            case "RSA" -> "SHA256withRSA";
+            case "RSASSA-PSS" -> "SHA256withRSAandMGF1";
+            case "EC", "ECDSA" -> "SHA256withECDSA";
+            case "Ed25519" -> "Ed25519";
+            case "Ed448" -> "Ed448";
+            default -> throw new IllegalArgumentException(
+                    "Unsupported key algorithm: " + algo);
+        };
+    }
+}
+----
+
+== Complete PAdES-B-T Builder
+
+The PAdES-B-T builder extends B-B by adding a timestamp after the signature is generated:
+
+[source,java]
+----
+import java.io.IOException;
+import java.io.InputStream;
+import java.security.MessageDigest;
+import java.security.PrivateKey;
+import java.security.cert.X509Certificate;
+import java.util.Collections;
+import java.util.List;
+
+import org.bouncycastle.asn1.ASN1EncodableVector;
+import org.bouncycastle.asn1.ASN1Primitive;
+import org.bouncycastle.asn1.DERSet;
+import org.bouncycastle.asn1.cms.Attribute;
+import org.bouncycastle.asn1.cms.AttributeTable;
+import org.bouncycastle.asn1.nist.NISTObjectIdentifiers;
+import org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers;
+import org.bouncycastle.cms.CMSSignedData;
+import org.bouncycastle.cms.SignerInformation;
+import org.bouncycastle.cms.SignerInformationStore;
+import org.bouncycastle.tsp.TimeStampRequest;
+import org.bouncycastle.tsp.TimeStampRequestGenerator;
+import org.bouncycastle.tsp.TimeStampResponse;
+import org.bouncycastle.tsp.TimeStampToken;
+
+/**
+ * Builds a PAdES-B-T compliant CMS SignedData structure.
+ *
+ * Extends PAdES-B-B by adding an RFC 3161 timestamp token
+ * as an unsigned attribute on the SignerInfo.
+ *
+ * Usage with PDFBox:
+ * <pre>
+ * PadesBTBuilder builder = new PadesBTBuilder(
+ *     privateKey, certificate, chain, "http://tsa.example.com");
+ * doc.addSignature(signature, builder, options);
+ * doc.saveIncremental(outputStream);
+ * </pre>
+ */
+public class PadesBTBuilder
+        implements org.apache.pdfbox.pdmodel.interactive
+                .digitalsignature.SignatureInterface {
+
+    private final PadesBBBuilder bbBuilder;
+    private final String tsaUrl;
+
+    public PadesBTBuilder(PrivateKey privateKey,
+                           X509Certificate certificate,
+                           List<X509Certificate> chain,
+                           String tsaUrl) {
+        this.bbBuilder = new PadesBBBuilder(
+                privateKey, certificate, chain);
+        this.tsaUrl = tsaUrl;
+    }
+
+    @Override
+    public byte[] sign(InputStream content) throws IOException {
+        try {
+            byte[] contentBytes = content.readAllBytes();
+
+            // Step 1: Build PAdES-B-B SignedData
+            byte[] bbBytes = bbBuilder.buildSignedData(contentBytes);
+            CMSSignedData signedData = new CMSSignedData(bbBytes);
+
+            // Step 2: Add timestamp
+            CMSSignedData timestamped =
+                    embedTimestamp(signedData, tsaUrl);
+
+            return timestamped.getEncoded();
+        } catch (IOException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IOException("PAdES-B-T signing failed: "
+                    + e.getMessage(), e);
+        }
+    }
+
+    private static CMSSignedData embedTimestamp(
+            CMSSignedData signedData, String tsaUrl)
+            throws Exception {
+
+        // Extract signature value
+        SignerInformation signerInfo = signedData.getSignerInfos()
+                .getSigners().iterator().next();
+        byte[] sigBytes = signerInfo.getSignature();
+
+        // Hash for TSA request
+        MessageDigest md = MessageDigest.getInstance("SHA-256");
+        byte[] hash = md.digest(sigBytes);
+
+        // Build RFC 3161 request
+        TimeStampRequestGenerator reqGen =
+                new TimeStampRequestGenerator();
+        reqGen.setCertReq(true);
+        TimeStampRequest tsReq = reqGen.generate(
+                NISTObjectIdentifiers.id_sha256, hash);
+
+        // Send to TSA
+        byte[] tsRespBytes = sendTsaRequest(tsaUrl, tsReq.getEncoded());
+
+        // Parse and validate
+        TimeStampResponse tsResp = new TimeStampResponse(tsRespBytes);
+        tsResp.validate(tsReq);
+
+        int status = tsResp.getStatus();
+        if (status != 0 && status != 1) { // <1>
+            String msg = tsResp.getStatusString();
+            throw new IOException("TSA error: "
+                    + (msg != null ? msg : "status=" + status));
+        }
+
+        TimeStampToken tsToken = tsResp.getTimeStampToken();
+        if (tsToken == null) {
+            throw new IOException("TSA returned no timestamp token");
+        }
+
+        // Embed as unsigned attribute
+        ASN1Primitive tsAsn1 = ASN1Primitive.fromByteArray(
+                tsToken.getEncoded());
+
+        ASN1EncodableVector vec = new ASN1EncodableVector();
+        vec.add(new Attribute(
+                PKCSObjectIdentifiers.id_aa_signatureTimeStampToken,
+                new DERSet(tsAsn1)));
+        AttributeTable unsignedAttrs = new AttributeTable(vec);
+
+        SignerInformation newSignerInfo =
+                SignerInformation.replaceUnsignedAttributes(
+                        signerInfo, unsignedAttrs);
+
+        return CMSSignedData.replaceSigners(signedData,
+                new SignerInformationStore(
+                        Collections.singletonList(newSignerInfo)));
+    }
+
+    private static byte[] sendTsaRequest(String tsaUrl, byte[] reqBytes)
+            throws Exception {
+
+        java.net.http.HttpClient client =
+                java.net.http.HttpClient.newBuilder()
+                        .connectTimeout(java.time.Duration.ofSeconds(15))
+                        .followRedirects(
+                                java.net.http.HttpClient.Redirect.NORMAL)
+                        .build();
+
+        java.net.http.HttpRequest request =
+                java.net.http.HttpRequest.newBuilder()
+                        .uri(java.net.URI.create(tsaUrl))
+                        .header("Content-Type",
+                                "application/timestamp-query")
+                        .timeout(java.time.Duration.ofSeconds(30))
+                        .POST(java.net.http.HttpRequest.BodyPublishers
+                                .ofByteArray(reqBytes))
+                        .build();
+
+        java.net.http.HttpResponse<byte[]> response = client.send(
+                request,
+                java.net.http.HttpResponse.BodyHandlers.ofByteArray());
+
+        if (response.statusCode() != 200) {
+            throw new IOException("TSA HTTP " + response.statusCode()
+                    + " from " + tsaUrl);
+        }
+
+        byte[] body = response.body();
+        if (body == null || body.length == 0) {
+            throw new IOException("TSA empty response from " + tsaUrl);
+        }
+
+        return body;
+    }
+}
+----
+<1> TSA status 0 = `granted`, 1 = `grantedWithMods`. Any other status (2 = rejection, 3 = waiting, 4 = revocationWarning, 5 = revocationNotification) means the TSA refused to issue a timestamp. Handle this gracefully -- some TSAs reject requests during maintenance windows.
+
+== CMS Construction for Remote Signing (CSC API)
+
+When using a remote signing service via the CSC API (Chapter 22), you cannot use BouncyCastle's `CMSSignedDataGenerator` in the normal way — because you do not have the private key locally.
+The generator expects a `ContentSigner` that performs the signing operation, but with CSC, the signing happens on a remote HSM.
+You must build the CMS `SignedData` structure _manually_ using BouncyCastle's low-level ASN.1 classes.
+
+=== The Challenge
+
+The remote signing flow splits the CMS construction into three phases:
+
+1. **Build signed attributes** (local) — content-type, message-digest, ESS-signing-certificate-v2
+2. **Hash and send to CSC** (remote) — the server signs the DER-encoded signed attributes hash
+3. **Assemble CMS** (local) — combine the signed attributes, the remote signature value, and the certificate chain into a valid `SignedData` structure
+
+Phase 2 returns raw signature bytes — not a CMS structure, not a PKCS#7 blob, just the naked RSA or ECDSA signature value.
+You must wrap those bytes into a complete CMS `SignedData` yourself.
+
+=== Manual CMS Assembly
+
+[source,java]
+----
+/**
+ * Assembles a CMS SignedData structure from pre-computed components.
+ * Used when the signature value comes from a remote signing service
+ * (CSC API) and the CMS must be constructed locally.
+ */
+public byte[] assembleCmsForRemoteSigning(
+        byte[] contentHash,
+        byte[] remoteSignatureValue,
+        X509Certificate signerCert,
+        List<X509Certificate> certChain,
+        String signAlgoOid) throws Exception {
+
+    // --- 1. Build the signed attributes ---
+    ASN1EncodableVector signedAttrs = new ASN1EncodableVector();
+
+    // content-type = id-data
+    signedAttrs.add(new Attribute(
+            CMSAttributes.contentType,
+            new DERSet(CMSObjectIdentifiers.data)));
+
+    // message-digest = hash of byte range content
+    signedAttrs.add(new Attribute(
+            CMSAttributes.messageDigest,
+            new DERSet(new DEROctetString(contentHash))));
+
+    // signing-time
+    signedAttrs.add(new Attribute(
+            CMSAttributes.signingTime,
+            new DERSet(new ASN1UTCTime(new Date()))));
+
+    // ESS-signing-certificate-v2 (mandatory for PAdES)
+    byte[] certHash = MessageDigest.getInstance("SHA-256")
+            .digest(signerCert.getEncoded());
+    ESSCertIDv2 essCertId = new ESSCertIDv2(
+            new AlgorithmIdentifier(NISTObjectIdentifiers.id_sha256),
+            certHash);
+    signedAttrs.add(new Attribute(
+            PKCSObjectIdentifiers.id_aa_signingCertificateV2,
+            new DERSet(new SigningCertificateV2(
+                    new ESSCertIDv2[]{essCertId}))));
+
+    DERSet signedAttrSet = new DERSet(signedAttrs);
+
+    // --- 2. Build the SignerInfo ---
+    X509CertificateHolder certHolder =
+            new JcaX509CertificateHolder(signerCert);
+    IssuerAndSerialNumber issuerAndSerial =
+            new IssuerAndSerialNumber(
+                    certHolder.getIssuer(),
+                    certHolder.getSerialNumber());
+
+    // Determine digest algorithm from signature algorithm
+    AlgorithmIdentifier digestAlgId = new AlgorithmIdentifier(
+            NISTObjectIdentifiers.id_sha256);
+    AlgorithmIdentifier sigAlgId = new AlgorithmIdentifier(
+            new ASN1ObjectIdentifier(signAlgoOid));
+
+    SignerInfo signerInfo = new SignerInfo(
+            new SignerIdentifier(issuerAndSerial),
+            digestAlgId,
+            signedAttrSet,
+            sigAlgId,
+            new DEROctetString(remoteSignatureValue),
+            null  // no unsigned attributes yet (added later for B-T)
+    );
+
+    // --- 3. Build the certificate set ---
+    ASN1EncodableVector certVector = new ASN1EncodableVector();
+    for (X509Certificate cert : certChain) {
+        certVector.add(
+                org.bouncycastle.asn1.x509.Certificate.getInstance(
+                        cert.getEncoded()));
+    }
+
+    // --- 4. Assemble the SignedData ---
+    ASN1EncodableVector digestAlgIds = new ASN1EncodableVector();
+    digestAlgIds.add(digestAlgId);
+
+    SignedData signedData = new SignedData(
+            new DERSet(digestAlgIds),
+            new ContentInfo(CMSObjectIdentifiers.data, null), // detached
+            new BERSet(certVector),
+            null,  // no CRLs in the CMS itself (they go in the DSS)
+            new DERSet(signerInfo));
+
+    // --- 5. Wrap in ContentInfo ---
+    ContentInfo cmsContentInfo = new ContentInfo(
+            CMSObjectIdentifiers.signedData,
+            signedData);
+
+    return cmsContentInfo.getEncoded("DER");
+}
+----
+
+=== Algorithm Detection for CSC Credentials
+
+The CSC credential info response tells you the key algorithm (RSA or EC) but not always the exact signing algorithm OID.
+Use the key algorithm OID to determine the correct signing algorithm:
+
+[source,java]
+----
+/**
+ * Determines the signing algorithm OID from the CSC credential's
+ * key algorithm. Defaults to SHA256withRSA for RSA keys and
+ * SHA256withECDSA for EC keys.
+ */
+public String resolveSignAlgoOid(String keyAlgorithmOid) {
+    if (keyAlgorithmOid != null
+            && keyAlgorithmOid.startsWith("1.2.840.10045")) {
+        // EC key — use SHA256withECDSA
+        return "1.2.840.10045.4.3.2";
+    }
+    // RSA key — use SHA256withRSA (PKCS#1 v1.5)
+    return "1.2.840.113549.1.1.11";
+}
+----
+
+=== Adding an Unsigned Timestamp to the Remote CMS
+
+After assembling the CMS with the remote signature value, you can add an RFC 3161 timestamp as an unsigned attribute to achieve PAdES-B-T.
+This requires parsing the CMS back, adding the unsigned attribute, and re-encoding:
+
+[source,java]
+----
+/**
+ * Adds an RFC 3161 timestamp token as an unsigned attribute
+ * to an existing CMS SignedData.
+ * The timestamp is over the signature value (not the content).
+ */
+public byte[] addTimestampToCms(byte[] cmsBytes,
+        byte[] signatureValue, String tsaUrl) throws Exception {
+
+    // 1. Get timestamp token over the signature value
+    byte[] tsToken = requestTimestamp(signatureValue, tsaUrl);
+
+    // 2. Parse the existing CMS
+    CMSSignedData signedData = new CMSSignedData(cmsBytes);
+    SignerInformationStore signerStore = signedData.getSignerInfos();
+    SignerInformation signer = signerStore.getSigners()
+            .iterator().next();
+
+    // 3. Add the timestamp as an unsigned attribute
+    Hashtable<ASN1ObjectIdentifier, Attribute> unsignedAttrs =
+            new Hashtable<>();
+    unsignedAttrs.put(
+            PKCSObjectIdentifiers.id_aa_signatureTimeStampToken,
+            new Attribute(
+                    PKCSObjectIdentifiers.id_aa_signatureTimeStampToken,
+                    new DERSet(ASN1Primitive.fromByteArray(tsToken))));
+
+    AttributeTable unsignedTable = new AttributeTable(unsignedAttrs);
+    SignerInformation timestampedSigner =
+            SignerInformation.replaceUnsignedAttributes(
+                    signer, unsignedTable);
+
+    // 4. Rebuild the SignedData with the updated SignerInfo
+    List<SignerInformation> newSigners = new ArrayList<>();
+    newSigners.add(timestampedSigner);
+    CMSSignedData timestampedCms = CMSSignedData.replaceSigners(
+            signedData, new SignerInformationStore(newSigners));
+
+    return timestampedCms.getEncoded();
+}
+----
+
+[NOTE]
+====
+This pattern — build CMS without unsigned attributes, then parse and add the timestamp — is the standard approach for remote signing.
+You cannot add the timestamp during initial CMS construction because the timestamp must cover the signature value, which does not exist until the CSC API returns it.
+The two-phase assembly is inherent to the remote signing model.
+
+For local signing (where you have the private key), BouncyCastle's `CMSSignedDataGenerator` can add the timestamp in a single pass.
+The manual assembly shown here is only needed when the signing operation is split between local CMS construction and remote cryptographic operation.
+====
+
+== Putting It All Together
+
+Here is how you use the PAdES-B-B and PAdES-B-T builders with PDFBox:
+
+[source,java]
+----
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.interactive.digitalsignature.PDSignature;
+import org.apache.pdfbox.pdmodel.interactive.digitalsignature.SignatureInterface;
+import org.apache.pdfbox.pdmodel.interactive.digitalsignature.SignatureOptions;
+
+import java.io.ByteArrayOutputStream;
+import java.util.Calendar;
+
+// --- PAdES-B-B (no timestamp) ---
+SignatureInterface bbSigner = new PadesBBBuilder(
+        privateKey, certificate, chain);
+
+try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+    PDSignature sig = new PDSignature();
+    sig.setFilter(PDSignature.FILTER_ADOBE_PPKLITE);
+    sig.setSubFilter(COSName.getPDFName("ETSI.CAdES.detached"));
+    sig.setSignDate(Calendar.getInstance());
+
+    SignatureOptions opts = new SignatureOptions();
+    opts.setPreferredSignatureSize(32768);
+
+    doc.addSignature(sig, bbSigner, opts);
+
+    ByteArrayOutputStream out = new ByteArrayOutputStream();
+    doc.saveIncremental(out);
+    // out.toByteArray() is the PAdES-B-B signed PDF
+}
+
+// --- PAdES-B-T (with timestamp) ---
+SignatureInterface btSigner = new PadesBTBuilder(
+        privateKey, certificate, chain,
+        "http://timestamp.example.com/tsa");
+
+try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+    PDSignature sig = new PDSignature();
+    sig.setFilter(PDSignature.FILTER_ADOBE_PPKLITE);
+    sig.setSubFilter(COSName.getPDFName("ETSI.CAdES.detached"));
+    sig.setSignDate(Calendar.getInstance());
+
+    SignatureOptions opts = new SignatureOptions();
+    opts.setPreferredSignatureSize(65536); // larger for timestamp
+
+    doc.addSignature(sig, btSigner, opts);
+
+    ByteArrayOutputStream out = new ByteArrayOutputStream();
+    doc.saveIncremental(out);
+    // out.toByteArray() is the PAdES-B-T signed PDF
+}
+----
+
+The `PadesBBBuilder` and `PadesBTBuilder` classes are production-ready.
+They handle algorithm negotiation, ESS attribute construction, certificate embedding, and timestamp integration.
+Drop them into your project alongside the BouncyCastle and PDFBox dependencies from Chapter 28, register the BouncyCastle provider, and you have a complete signing pipeline.
+
+In Chapter 31, we reverse the process: given a signed PDF, we verify the CMS signature, validate the certificate chain, check the timestamp, and extract every piece of information that these structures contain.

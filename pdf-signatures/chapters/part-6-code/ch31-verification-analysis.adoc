@@ -1,0 +1,1205 @@
+= Verification & Analysis with PDFBox
+
+[.lead]
+Signing a PDF is a matter of following a recipe.
+Verifying a signed PDF is where things get interesting — and where most implementations get things wrong.
+PDFBox gives you every primitive you need: signature extraction, byte range access, CMS parsing, content stream reading.
+But it deliberately does not give you a "verify this signature" method.
+You build the pipeline yourself, step by step, and you understand every failure mode because you wrote the code that handles it.
+
+This chapter walks through a complete verification implementation using Apache PDFBox {pdfbox-version} and BouncyCastle {bc-version}.
+We start with extracting signatures from a PDF document, proceed through each verification step from Chapter 16, and end with a production-ready five-step pipeline that handles the edge cases real-world PDFs throw at you.
+If Chapter 16 described _what_ to verify, this chapter shows you _how_ — with code you can compile and run.
+
+== Extracting Signatures from a PDF Document
+
+=== The Extraction Path: AcroForm to PDSignature
+
+Every PDF signature lives inside the AcroForm field tree.
+The extraction path follows the object hierarchy we dissected in Chapter 12: the document's `/AcroForm` dictionary contains a `/Fields` array, which includes `PDSignatureField` entries, each of which references a `PDSignature` dictionary.
+
+PDFBox models this hierarchy directly.
+The key classes are:
+
+- `PDAcroForm` -- the form dictionary, accessed via `PDDocument.getDocumentCatalog().getAcroForm()`
+- `PDSignatureField` -- a form field of type `/Sig`, extends `PDTerminalField`
+- `PDSignature` -- the actual `/Type /Sig` dictionary containing `/Contents`, `/ByteRange`, `/SubFilter`, etc.
+
+There are two ways to access signatures in PDFBox.
+The first walks the field tree:
+
+[source,java]
+----
+/**
+ * Extract all signature fields from the AcroForm field tree.
+ * This approach gives you access to the field (widget, appearance)
+ * in addition to the signature dictionary.
+ */
+public List<PDSignatureField> extractSignatureFields(PDDocument document) {
+    PDAcroForm acroForm = document.getDocumentCatalog().getAcroForm();
+    if (acroForm == null) {
+        log.info("Document has no AcroForm — no signatures possible");
+        return Collections.emptyList();
+    }
+
+    List<PDSignatureField> signatureFields = new ArrayList<>();
+    for (PDField field : acroForm.getFields()) {
+        collectSignatureFields(field, signatureFields);
+    }
+
+    log.info("Found {} signature field(s) in AcroForm", signatureFields.size());
+    return signatureFields;
+}
+
+private void collectSignatureFields(PDField field,
+        List<PDSignatureField> result) {
+    if (field instanceof PDSignatureField sigField) {
+        result.add(sigField);
+    } else if (field instanceof PDNonTerminalField nonTerminal) {
+        for (PDField child : nonTerminal.getChildren()) {
+            collectSignatureFields(child, result);
+        }
+    }
+}
+----
+
+The second approach bypasses the field tree and goes directly to the signature dictionaries:
+
+[source,java]
+----
+/**
+ * Extract all PDSignature dictionaries directly.
+ * Faster, but you lose access to the field and widget objects.
+ * Useful when you only need the cryptographic data.
+ */
+public List<PDSignature> extractSignatures(PDDocument document) {
+    List<PDSignature> signatures = document.getSignatureDictionaries();
+    log.info("Found {} signature dictionaries", signatures.size());
+    return signatures;
+}
+----
+
+[TIP]
+====
+Use the first approach (field tree walk) when you need the full picture -- field name, widget annotation, visual appearance, page location.
+Use the second approach when you only need the cryptographic payload -- for pure verification, it is faster and simpler.
+====
+
+=== Reading Signature Metadata
+
+Once you have a `PDSignature`, you can extract the metadata that drives the verification pipeline:
+
+[source,java]
+----
+public void logSignatureMetadata(PDSignature sig) {
+    log.info("SubFilter: {}", sig.getSubFilter());
+    log.info("Filter: {}", sig.getFilter());
+    log.info("Name: {}", sig.getName());
+    log.info("Location: {}", sig.getLocation());
+    log.info("Reason: {}", sig.getReason());
+    log.info("Sign date: {}", sig.getSignDate());
+    log.info("Contact info: {}", sig.getContactInfo());
+
+    int[] byteRange = sig.getByteRange();
+    if (byteRange != null && byteRange.length == 4) {
+        log.info("ByteRange: [{} {} {} {}]",
+                byteRange[0], byteRange[1], byteRange[2], byteRange[3]);
+        log.info("Signed bytes: {} + {} = {} total",
+                byteRange[1], byteRange[3],
+                byteRange[1] + byteRange[3]);
+        log.info("Gap (Contents): offset {} to {}, size {} bytes",
+                byteRange[1], byteRange[2],
+                byteRange[2] - byteRange[1]);
+    }
+}
+----
+
+The `/SubFilter` value tells you what kind of signature you are dealing with:
+
+- `adbe.pkcs7.detached` -- Classic PKCS#7 (CMS) detached signature
+- `ETSI.CAdES.detached` -- PAdES CAdES-based signature (the modern standard)
+- `adbe.pkcs7.sha1` -- Legacy: SHA-1 hash embedded in PKCS#7 (deprecated, avoid)
+- `adbe.x509.rsa_sha1` -- Legacy: bare RSA signature with X.509 cert (deprecated, avoid)
+
+For any new code, you should handle `adbe.pkcs7.detached` and `ETSI.CAdES.detached`.
+The legacy formats exist in old documents, and you may encounter them, but you should never produce them.
+
+== Parsing the CMS SignedData from /Contents
+
+=== Extracting the Raw CMS Bytes
+
+The `/Contents` value in the signature dictionary is a hex-encoded byte string containing the DER-encoded CMS `SignedData` structure.
+PDFBox provides this as a byte array:
+
+[source,java]
+----
+byte[] cmsBytes = signature.getContents();
+----
+
+This single line hides a meaningful amount of work.
+PDFBox reads the hex string from the PDF (which can be 16KB to 64KB or more of hex characters), decodes it from hex to binary, and strips any trailing zero padding.
+The result is the raw DER-encoded CMS `SignedData` that BouncyCastle can parse.
+
+=== Parsing with BouncyCastle
+
+To parse the CMS structure, you also need the signed bytes — the byte range segments from the PDF file.
+For a detached signature (which is what `adbe.pkcs7.detached` and `ETSI.CAdES.detached` are), the signed content is not inside the CMS; it is the external byte range data.
+
+[source,java]
+----
+/**
+ * Parse a CMS SignedData from the /Contents of a PDF signature.
+ *
+ * @param pdfBytes      the complete PDF file as a byte array
+ * @param signature     the PDSignature whose CMS we want to parse
+ * @return the parsed CMSSignedData, ready for verification
+ */
+public CMSSignedData parseCmsSignedData(byte[] pdfBytes,
+        PDSignature signature) throws CMSException {
+
+    // Extract the signed byte ranges
+    int[] byteRange = signature.getByteRange();
+    byte[] signedContent = new byte[byteRange[1] + byteRange[3]];
+    System.arraycopy(pdfBytes, byteRange[0], signedContent,
+            0, byteRange[1]);
+    System.arraycopy(pdfBytes, byteRange[2], signedContent,
+            byteRange[1], byteRange[3]);
+
+    // Parse the CMS with the signed content as the detached data
+    CMSProcessableByteArray processable =
+            new CMSProcessableByteArray(signedContent);
+    return new CMSSignedData(processable, signature.getContents());
+}
+----
+
+[WARNING]
+====
+A common mistake is to construct `CMSSignedData` with only the `/Contents` bytes (without the signed content).
+This will parse the CMS structure, but any subsequent verification call will fail because BouncyCastle cannot compute the message digest without the signed data.
+Always pass both the signed content and the CMS bytes.
+====
+
+=== Navigating the CMS Structure
+
+Once parsed, the `CMSSignedData` object exposes the full CMS tree from {rfc5652}:
+
+[source,java]
+----
+public void inspectCmsStructure(CMSSignedData cmsData) {
+    // Signer information (usually exactly one for PDF signatures)
+    SignerInformationStore signerStore = cmsData.getSignerInfos();
+    log.info("Number of signers: {}", signerStore.size());
+
+    for (SignerInformation signer : signerStore.getSigners()) {
+        log.info("Digest algorithm OID: {}", signer.getDigestAlgOID());
+        log.info("Encryption algorithm OID: {}",
+                signer.getEncryptionAlgOID());
+
+        // Signed attributes (authenticated)
+        AttributeTable signedAttrs = signer.getSignedAttributes();
+        if (signedAttrs != null) {
+            log.info("Signed attributes count: {}",
+                    signedAttrs.size());
+            logAttribute(signedAttrs, CMSAttributes.contentType,
+                    "contentType");
+            logAttribute(signedAttrs, CMSAttributes.messageDigest,
+                    "messageDigest");
+            logAttribute(signedAttrs, CMSAttributes.signingTime,
+                    "signingTime");
+            logAttribute(signedAttrs,
+                    PKCSObjectIdentifiers
+                            .id_aa_signingCertificateV2,
+                    "ESS-signing-certificate-v2");
+        }
+
+        // Unsigned attributes (unauthenticated — timestamps live here)
+        AttributeTable unsignedAttrs = signer.getUnsignedAttributes();
+        if (unsignedAttrs != null) {
+            log.info("Unsigned attributes count: {}",
+                    unsignedAttrs.size());
+            logAttribute(unsignedAttrs,
+                    PKCSObjectIdentifiers
+                            .id_aa_signatureTimeStampToken,
+                    "signatureTimeStampToken");
+        }
+    }
+
+    // Embedded certificates
+    Store<X509CertificateHolder> certStore = cmsData.getCertificates();
+    Collection<X509CertificateHolder> certs =
+            certStore.getMatches(null);
+    log.info("Embedded certificates: {}", certs.size());
+    for (X509CertificateHolder cert : certs) {
+        log.info("  Subject: {}", cert.getSubject());
+        log.info("  Issuer: {}", cert.getIssuer());
+        log.info("  Serial: {}", cert.getSerialNumber());
+        log.info("  Valid: {} to {}",
+                cert.getNotBefore(), cert.getNotAfter());
+    }
+}
+
+private void logAttribute(AttributeTable table,
+        ASN1ObjectIdentifier oid, String name) {
+    Attribute attr = table.get(oid);
+    if (attr != null) {
+        log.info("  {} present, values: {}",
+                name, attr.getAttrValues().size());
+    }
+}
+----
+
+== Byte Range Verification in Code
+
+=== The Three Checks
+
+Byte range verification (Step 1 from Chapter 16) requires three checks:
+
+1. The `/ByteRange` array has exactly four elements
+2. The first offset is zero (the signed region starts at the beginning of the file)
+3. The second segment extends to the end of the file (or the end of the revision for multi-signature documents)
+
+[source,java]
+----
+/**
+ * Verify the structural integrity of the byte range.
+ *
+ * @param byteRange   the four-element ByteRange array
+ * @param fileSize    the total size of the PDF file in bytes
+ * @return a ValidationResult indicating success or the specific failure
+ */
+public ValidationResult verifyByteRange(int[] byteRange, long fileSize) {
+    if (byteRange == null || byteRange.length != 4) {
+        log.error("ByteRange is null or does not have exactly 4 elements");
+        return ValidationResult.BYTE_RANGE_MALFORMED;
+    }
+
+    int offset1 = byteRange[0];
+    int length1 = byteRange[1];
+    int offset2 = byteRange[2];
+    int length2 = byteRange[3];
+
+    // Check 1: First segment starts at byte 0
+    if (offset1 != 0) {
+        log.error("ByteRange offset1 is {} — expected 0", offset1);
+        return ValidationResult.BYTE_RANGE_NOT_AT_START;
+    }
+
+    // Check 2: Segments don't overlap
+    if (offset2 < length1) {
+        log.error("ByteRange segments overlap: " +
+                "segment1 ends at {}, segment2 starts at {}",
+                length1, offset2);
+        return ValidationResult.BYTE_RANGE_OVERLAP;
+    }
+
+    // Check 3: Signed region extends to end of file
+    long signedEnd = (long) offset2 + length2;
+    if (signedEnd != fileSize) {
+        long trailingBytes = fileSize - signedEnd;
+        log.warn("ByteRange covers {} bytes but file is {} bytes — " +
+                "{} trailing unsigned bytes detected",
+                signedEnd, fileSize, trailingBytes);
+        return ValidationResult.BYTE_RANGE_TRAILING_BYTES;
+    }
+
+    log.info("ByteRange verified: [{} {} {} {}], " +
+            "file size {}, no trailing bytes",
+            offset1, length1, offset2, length2, fileSize);
+    return ValidationResult.OK;
+}
+----
+
+[IMPORTANT]
+====
+Trailing bytes are not always an attack.
+In a multi-signature document, each signature covers only up to the end of its own incremental revision.
+Subsequent revisions (containing later signatures) appear as "trailing bytes" from the perspective of the earlier signature.
+Chapter 8 covers how incremental updates work, and Chapter 13 covers the byte range geometry in multi-signature scenarios.
+
+However, trailing bytes on the _last_ signature in a document are suspicious and may indicate a Shadow Attack (Chapter 24).
+Your verification code should distinguish between "trailing bytes that are a legitimate later revision" and "trailing bytes that are unexplained."
+====
+
+=== Validating the Contents Gap
+
+The gap between the two segments should contain exactly the `/Contents` hex string.
+You can validate this by checking that the gap bytes, when decoded from hex, produce valid DER-encoded data:
+
+[source,java]
+----
+/**
+ * Validate that the gap between byte range segments contains
+ * a properly formatted hex string with valid CMS data.
+ */
+public boolean validateContentsGap(byte[] pdfBytes, int[] byteRange) {
+    int gapStart = byteRange[1];
+    int gapEnd = byteRange[2];
+    int gapSize = gapEnd - gapStart;
+
+    // The gap should start with '<' and end with '>'
+    if (pdfBytes[gapStart] != '<' || pdfBytes[gapEnd - 1] != '>') {
+        log.error("Gap does not start with '<' or end with '>'");
+        return false;
+    }
+
+    // Extract hex content (skip the delimiters)
+    String hexContent = new String(pdfBytes, gapStart + 1,
+            gapSize - 2, StandardCharsets.US_ASCII).trim();
+
+    // Verify it's valid hex
+    if (!hexContent.matches("[0-9a-fA-F]+")) {
+        log.error("Gap contains non-hex characters");
+        return false;
+    }
+
+    log.info("Contents gap validated: {} hex chars = {} bytes CMS",
+            hexContent.length(), hexContent.length() / 2);
+    return true;
+}
+----
+
+== CMS Cryptographic Verification
+
+=== Building the SignerInformationVerifier
+
+This is Step 3 from Chapter 16 — verifying that the CMS `SignedData` was actually created by the claimed signer's private key.
+BouncyCastle's `SignerInformation.verify()` method performs this check, but you need to provide the correct `SignerInformationVerifier`:
+
+[source,java]
+----
+/**
+ * Verify the CMS signature cryptographically.
+ *
+ * @param cmsData  the parsed CMS SignedData (with signed content)
+ * @return the signer's certificate if verification succeeds, null otherwise
+ */
+public X509CertificateHolder verifyCmsSignature(CMSSignedData cmsData)
+        throws Exception {
+
+    SignerInformationStore signerStore = cmsData.getSignerInfos();
+    if (signerStore.size() == 0) {
+        log.error("CMS contains no signers");
+        return null;
+    }
+
+    SignerInformation signerInfo =
+            signerStore.getSigners().iterator().next();
+
+    // Find the signer's certificate by matching the SignerIdentifier
+    Store<X509CertificateHolder> certStore = cmsData.getCertificates();
+    @SuppressWarnings("unchecked")
+    Collection<X509CertificateHolder> matches =
+            certStore.getMatches(signerInfo.getSID());
+
+    if (matches.isEmpty()) {
+        log.error("No certificate matches the SignerIdentifier — " +
+                "the signer's cert may not be embedded in the CMS");
+        return null;
+    }
+
+    X509CertificateHolder signerCert = matches.iterator().next();
+    log.info("Signer certificate: subject={}, issuer={}",
+            signerCert.getSubject(), signerCert.getIssuer());
+
+    // Build the verifier and verify
+    SignerInformationVerifier verifier =
+            new JcaSimpleSignerInfoVerifierBuilder()
+                    .setProvider("BC")
+                    .build(signerCert);
+
+    boolean valid = signerInfo.verify(verifier);
+    if (valid) {
+        log.info("CMS signature verification PASSED");
+        return signerCert;
+    } else {
+        log.error("CMS signature verification FAILED — " +
+                "signature was not created by the claimed certificate");
+        return null;
+    }
+}
+----
+
+=== What verify() Actually Does
+
+When you call `signerInfo.verify(verifier)`, BouncyCastle performs the following internally:
+
+1. Computes the digest of the signed content (the byte range data you passed when constructing `CMSSignedData`) using the algorithm from `SignerInfo.digestAlgorithm`
+2. Checks that this computed digest matches the `messageDigest` attribute in the signed attributes
+3. DER-encodes the signed attributes
+4. Verifies the RSA/ECDSA/DSA signature over the DER-encoded signed attributes using the public key from the signer's certificate
+
+If signed attributes are absent (which is technically allowed by CMS but rare in PDF signatures), BouncyCastle instead verifies the signature directly over the content digest.
+
+[NOTE]
+====
+The `verify()` method performs only the cryptographic verification — Steps 2 and 3 combined.
+It does not check certificate validity, revocation status, or trust.
+Those are separate steps you must implement yourself.
+====
+
+== Certificate Chain Reconstruction and Validation
+
+=== The Java PKIX CertPath API
+
+Java's `java.security.cert` package provides a complete PKIX certificate path validation engine via `CertPathBuilder` and `CertPathValidator`.
+This is the standard way to validate certificate chains in Java, and it handles the complexity of chain building, validity checking, basic constraints verification, and key usage checking.
+
+[source,java]
+----
+/**
+ * Build and validate the certificate chain from the signer's certificate
+ * to a trusted root.
+ *
+ * @param signerCert    the signer's certificate (from CMS verification)
+ * @param cmsData       the CMS containing intermediate certificates
+ * @param trustAnchors  the set of trusted root certificates
+ * @param signingTime   the claimed signing time (for validity checks)
+ * @return the validated CertPath, or null if validation fails
+ */
+public CertPath validateCertificateChain(
+        X509CertificateHolder signerCert,
+        CMSSignedData cmsData,
+        Set<TrustAnchor> trustAnchors,
+        Date signingTime) throws Exception {
+
+    // Convert BouncyCastle cert holders to Java X509Certificates
+    CertificateFactory cf = CertificateFactory.getInstance("X.509");
+    JcaX509CertificateConverter converter =
+            new JcaX509CertificateConverter().setProvider("BC");
+
+    // Collect all certificates from CMS into a CertStore
+    List<X509Certificate> allCerts = new ArrayList<>();
+    Store<X509CertificateHolder> bcStore = cmsData.getCertificates();
+    for (X509CertificateHolder holder : bcStore.getMatches(null)) {
+        allCerts.add(converter.getCertificate(holder));
+    }
+
+    CertStore certStore = CertStore.getInstance("Collection",
+            new CollectionCertStoreParameters(allCerts));
+
+    // Configure the target certificate selector
+    X509Certificate targetCert = converter.getCertificate(signerCert);
+    X509CertSelector targetSelector = new X509CertSelector();
+    targetSelector.setCertificate(targetCert);
+
+    // Build PKIX parameters
+    PKIXBuilderParameters params =
+            new PKIXBuilderParameters(trustAnchors, targetSelector);
+    params.addCertStore(certStore);
+    params.setRevocationEnabled(false); // We handle revocation separately
+    params.setDate(signingTime);        // Validate at signing time
+
+    // Build the chain
+    CertPathBuilder builder =
+            CertPathBuilder.getInstance("PKIX", "BC");
+    PKIXCertPathBuilderResult result =
+            (PKIXCertPathBuilderResult) builder.build(params);
+
+    CertPath certPath = result.getCertPath();
+    log.info("Certificate chain built successfully — {} certificates",
+            certPath.getCertificates().size());
+
+    for (int i = 0; i < certPath.getCertificates().size(); i++) {
+        X509Certificate cert =
+                (X509Certificate) certPath.getCertificates().get(i);
+        log.info("  [{}] Subject: {}, Issuer: {}",
+                i, cert.getSubjectX500Principal(),
+                cert.getIssuerX500Principal());
+    }
+
+    log.info("  [root] Trust anchor: {}",
+            result.getTrustAnchor().getTrustedCert()
+                    .getSubjectX500Principal());
+
+    return certPath;
+}
+----
+
+=== Building the Trust Anchor Set
+
+The `TrustAnchor` set represents your trust store — the root certificates you are willing to trust.
+In a real application, this might come from the Java default trust store (`cacerts`), a custom keystore, or the AATL/EUTL (see Chapter 16, Step 5).
+
+[source,java]
+----
+/**
+ * Load trust anchors from a Java KeyStore (JKS or PKCS12).
+ */
+public Set<TrustAnchor> loadTrustAnchors(Path keystorePath,
+        char[] password) throws Exception {
+
+    KeyStore trustStore = KeyStore.getInstance(
+            keystorePath.toString().endsWith(".p12")
+                    ? "PKCS12" : "JKS");
+    try (InputStream is = Files.newInputStream(keystorePath)) {
+        trustStore.load(is, password);
+    }
+
+    Set<TrustAnchor> anchors = new HashSet<>();
+    Enumeration<String> aliases = trustStore.aliases();
+    while (aliases.hasMoreElements()) {
+        String alias = aliases.nextElement();
+        if (trustStore.isCertificateEntry(alias)) {
+            X509Certificate cert =
+                    (X509Certificate) trustStore.getCertificate(alias);
+            anchors.add(new TrustAnchor(cert, null));
+            log.info("Loaded trust anchor: {}",
+                    cert.getSubjectX500Principal());
+        }
+    }
+
+    log.info("Loaded {} trust anchors from {}", anchors.size(),
+            keystorePath);
+    return anchors;
+}
+----
+
+=== Key Usage Validation
+
+The PKIX `CertPathValidator` checks basic constraints and key usage automatically.
+But if you want to verify specific requirements — for example, that the signer's certificate has the `digitalSignature` or `nonRepudiation` key usage — you can check explicitly:
+
+[source,java]
+----
+/**
+ * Check that the signer's certificate permits digital signing.
+ */
+public boolean hasSigningKeyUsage(X509Certificate cert) {
+    boolean[] keyUsage = cert.getKeyUsage();
+    if (keyUsage == null) {
+        log.warn("Certificate has no KeyUsage extension — " +
+                "signing permitted by default");
+        return true;
+    }
+
+    // bit 0 = digitalSignature, bit 1 = nonRepudiation (contentCommitment)
+    boolean digitalSignature = keyUsage[0];
+    boolean nonRepudiation = keyUsage[1];
+
+    if (!digitalSignature && !nonRepudiation) {
+        log.error("Certificate KeyUsage does not include " +
+                "digitalSignature or nonRepudiation");
+        return false;
+    }
+
+    log.info("Certificate KeyUsage: digitalSignature={}, " +
+            "nonRepudiation={}", digitalSignature, nonRepudiation);
+    return true;
+}
+----
+
+== Timestamp Verification
+
+=== Extracting the Timestamp Token
+
+A signature timestamp is an unsigned CMS attribute with OID `1.2.840.113549.1.9.16.2.14` (`id-aa-signatureTimeStampToken`).
+The attribute value is itself a CMS `SignedData` structure — a timestamp is a signature on a signature:
+
+[source,java]
+----
+/**
+ * Extract and verify the signature timestamp, if present.
+ *
+ * @param signerInfo  the CMS SignerInformation
+ * @return the verified signing time, or null if no timestamp or invalid
+ */
+public Date verifyTimestamp(SignerInformation signerInfo) throws Exception {
+    AttributeTable unsignedAttrs = signerInfo.getUnsignedAttributes();
+    if (unsignedAttrs == null) {
+        log.info("No unsigned attributes — no timestamp present");
+        return null;
+    }
+
+    Attribute tsAttr = unsignedAttrs.get(
+            PKCSObjectIdentifiers.id_aa_signatureTimeStampToken);
+    if (tsAttr == null) {
+        log.info("No signatureTimeStampToken attribute found");
+        return null;
+    }
+
+    // Parse the timestamp token
+    byte[] tsBytes = tsAttr.getAttrValues()
+            .getObjectAt(0).toASN1Primitive().getEncoded();
+    CMSSignedData tsSignedData = new CMSSignedData(tsBytes);
+    TimeStampToken tsToken = new TimeStampToken(tsSignedData);
+
+    // Verify the timestamp's CMS signature
+    SignerInformation tsSigner = tsSignedData.getSignerInfos()
+            .getSigners().iterator().next();
+    @SuppressWarnings("unchecked")
+    Collection<X509CertificateHolder> tsMatches =
+            tsSignedData.getCertificates()
+                    .getMatches(tsSigner.getSID());
+
+    if (tsMatches.isEmpty()) {
+        log.error("Timestamp token does not contain " +
+                "the TSA's certificate");
+        return null;
+    }
+
+    X509CertificateHolder tsCert = tsMatches.iterator().next();
+
+    // Verify the TSA certificate has timeStamping EKU
+    boolean hasTsEku = false;
+    if (tsCert.getExtensions() != null) {
+        Extension ekuExt = tsCert.getExtensions().getExtension(
+                Extension.extendedKeyUsage);
+        if (ekuExt != null) {
+            ExtendedKeyUsage eku =
+                    ExtendedKeyUsage.getInstance(ekuExt.getParsedValue());
+            hasTsEku = eku.hasKeyPurposeId(
+                    KeyPurposeId.id_kp_timeStamping);
+        }
+    }
+    if (!hasTsEku) {
+        log.warn("TSA certificate does not have " +
+                "id-kp-timeStamping EKU — " +
+                "timestamp may not be trusted");
+    }
+
+    // Verify the timestamp's CMS cryptographic signature
+    SignerInformationVerifier tsVerifier =
+            new JcaSimpleSignerInfoVerifierBuilder()
+                    .setProvider("BC")
+                    .build(tsCert);
+    boolean tsValid = tsSigner.verify(tsVerifier);
+
+    if (!tsValid) {
+        log.error("Timestamp CMS signature verification FAILED");
+        return null;
+    }
+
+    Date signingTime = tsToken.getTimeStampInfo().getGenTime();
+    log.info("Timestamp verified — signing time: {}", signingTime);
+    log.info("TSA: {}", tsCert.getSubject());
+    log.info("Timestamp serial: {}",
+            tsToken.getTimeStampInfo().getSerialNumber());
+    log.info("Timestamp hash algorithm: {}",
+            tsToken.getTimeStampInfo().getHashAlgorithm()
+                    .getAlgorithm().getId());
+
+    return signingTime;
+}
+----
+
+=== Verifying the Timestamp Covers the Signature
+
+A valid timestamp is not just a signed time — it must also prove that the _signature value_ existed at that time.
+The timestamp's message imprint digest must match the hash of the signature value from the `SignerInfo`:
+
+[source,java]
+----
+/**
+ * Verify that the timestamp's message imprint matches the signature value.
+ */
+public boolean verifyTimestampCoversSignature(
+        TimeStampToken tsToken,
+        SignerInformation signerInfo) throws Exception {
+
+    // The timestamp's imprint should be the hash of the signature value
+    byte[] signatureBytes = signerInfo.getSignature();
+    String tsHashAlg = tsToken.getTimeStampInfo()
+            .getHashAlgorithm().getAlgorithm().getId();
+    String algName = mapOidToAlgorithm(tsHashAlg);
+
+    MessageDigest digest = MessageDigest.getInstance(algName);
+    byte[] computedImprint = digest.digest(signatureBytes);
+
+    byte[] claimedImprint =
+            tsToken.getTimeStampInfo().getMessageImprintDigest();
+
+    boolean match = MessageDigest.isEqual(computedImprint, claimedImprint);
+    if (match) {
+        log.info("Timestamp message imprint matches signature value");
+    } else {
+        log.error("Timestamp message imprint does NOT match " +
+                "signature value — timestamp may cover different data");
+    }
+    return match;
+}
+----
+
+== The Complete Five-Step Verification Pipeline
+
+=== Putting It All Together
+
+Here is the complete verification pipeline that combines every step from this chapter.
+Each step is independent — a failure at one step does not prevent the other steps from running.
+The pipeline produces a comprehensive `VerificationReport` with per-step results:
+
+[source,java]
+----
+/**
+ * Complete signature verification pipeline.
+ * Runs all five verification steps and produces a comprehensive report.
+ */
+public VerificationReport verifySignature(byte[] pdfBytes,
+        PDSignature signature,
+        Set<TrustAnchor> trustAnchors) {
+
+    VerificationReport report = new VerificationReport();
+
+    try {
+        // === Step 1: Byte Range Structural Integrity ===
+        log.info("Step 1: Verifying byte range...");
+        int[] byteRange = signature.getByteRange();
+        ValidationResult byteRangeResult =
+                verifyByteRange(byteRange, pdfBytes.length);
+        report.setByteRangeResult(byteRangeResult);
+
+        if (byteRangeResult != ValidationResult.OK
+                && byteRangeResult
+                    != ValidationResult.BYTE_RANGE_TRAILING_BYTES) {
+            log.error("Step 1 FAILED: {}", byteRangeResult);
+            return report; // Cannot proceed without valid byte range
+        }
+
+        // === Step 2: Hash Verification ===
+        log.info("Step 2: Verifying message digest...");
+        CMSSignedData cmsData = parseCmsSignedData(pdfBytes, signature);
+        SignerInformation signerInfo = cmsData.getSignerInfos()
+                .getSigners().iterator().next();
+
+        // Compute the hash of the signed bytes
+        String digestAlgOid = signerInfo.getDigestAlgOID();
+        String algName = mapOidToAlgorithm(digestAlgOid);
+        MessageDigest md = MessageDigest.getInstance(algName);
+        md.update(pdfBytes, byteRange[0], byteRange[1]);
+        md.update(pdfBytes, byteRange[2], byteRange[3]);
+        byte[] computedHash = md.digest();
+
+        // Compare to the CMS messageDigest attribute
+        Attribute digestAttr = signerInfo.getSignedAttributes()
+                .get(CMSAttributes.messageDigest);
+        byte[] claimedHash = ASN1OctetString.getInstance(
+                digestAttr.getAttrValues().getObjectAt(0)).getOctets();
+
+        boolean hashMatch =
+                MessageDigest.isEqual(computedHash, claimedHash);
+        report.setHashResult(hashMatch
+                ? ValidationResult.OK
+                : ValidationResult.HASH_MISMATCH);
+
+        if (!hashMatch) {
+            log.error("Step 2 FAILED: computed hash does not match " +
+                    "CMS messageDigest — document was modified");
+        } else {
+            log.info("Step 2 PASSED: hash matches");
+        }
+
+        // === Step 3: CMS Cryptographic Verification ===
+        log.info("Step 3: Verifying CMS signature...");
+        X509CertificateHolder signerCert =
+                verifyCmsSignature(cmsData);
+        report.setCmsResult(signerCert != null
+                ? ValidationResult.OK
+                : ValidationResult.CMS_INVALID);
+
+        if (signerCert == null) {
+            log.error("Step 3 FAILED: CMS verification failed");
+            return report;
+        }
+        log.info("Step 3 PASSED: CMS signature valid");
+
+        // === Step 4: Certificate Chain Validation ===
+        log.info("Step 4: Validating certificate chain...");
+        Date validationDate = new Date(); // Default: now
+        try {
+            // Check for timestamp first — use timestamp time if available
+            Date tsTime = verifyTimestamp(signerInfo);
+            if (tsTime != null) {
+                validationDate = tsTime;
+                report.setTimestampTime(tsTime);
+                report.setTimestampResult(ValidationResult.OK);
+                log.info("Using timestamp time for chain validation: {}",
+                        tsTime);
+            }
+
+            CertPath certPath = validateCertificateChain(
+                    signerCert, cmsData, trustAnchors, validationDate);
+            report.setChainResult(certPath != null
+                    ? ValidationResult.OK
+                    : ValidationResult.CHAIN_INVALID);
+            report.setCertPath(certPath);
+        } catch (CertPathBuilderException e) {
+            log.error("Step 4 FAILED: {}", e.getMessage());
+            report.setChainResult(ValidationResult.CHAIN_INVALID);
+            report.setChainError(e.getMessage());
+        }
+
+        // === Step 5: Trust Evaluation ===
+        log.info("Step 5: Evaluating trust...");
+        if (report.getChainResult() == ValidationResult.OK) {
+            report.setTrustResult(ValidationResult.OK);
+            log.info("Step 5 PASSED: certificate chains to " +
+                    "a trusted root");
+        } else {
+            report.setTrustResult(ValidationResult.NOT_TRUSTED);
+            log.warn("Step 5: trust could not be established");
+        }
+
+    } catch (Exception e) {
+        log.error("Verification pipeline failed with exception", e);
+        report.setException(e);
+    }
+
+    log.info("Verification complete: {}", report.getSummary());
+    return report;
+}
+----
+
+=== The VerificationReport Model
+
+[source,java]
+----
+@Data
+@Builder
+public class VerificationReport {
+    private ValidationResult byteRangeResult;
+    private ValidationResult hashResult;
+    private ValidationResult cmsResult;
+    private ValidationResult chainResult;
+    private ValidationResult trustResult;
+    private ValidationResult timestampResult;
+    private Date timestampTime;
+    private CertPath certPath;
+    private String chainError;
+    private Exception exception;
+
+    public String getSummary() {
+        if (exception != null) {
+            return "ERROR: " + exception.getMessage();
+        }
+        boolean allPassed =
+                byteRangeResult == ValidationResult.OK
+                && hashResult == ValidationResult.OK
+                && cmsResult == ValidationResult.OK
+                && chainResult == ValidationResult.OK
+                && trustResult == ValidationResult.OK;
+        return allPassed ? "ALL STEPS PASSED" : "ONE OR MORE STEPS FAILED";
+    }
+
+    public boolean isValid() {
+        return exception == null
+                && byteRangeResult == ValidationResult.OK
+                && hashResult == ValidationResult.OK
+                && cmsResult == ValidationResult.OK;
+    }
+
+    public boolean isTrusted() {
+        return isValid()
+                && chainResult == ValidationResult.OK
+                && trustResult == ValidationResult.OK;
+    }
+}
+----
+
+=== The ValidationResult Enum
+
+[source,java]
+----
+public enum ValidationResult {
+    OK("Passed"),
+    BYTE_RANGE_MALFORMED("ByteRange array is malformed"),
+    BYTE_RANGE_NOT_AT_START("ByteRange does not start at offset 0"),
+    BYTE_RANGE_OVERLAP("ByteRange segments overlap"),
+    BYTE_RANGE_TRAILING_BYTES("Unsigned trailing bytes detected"),
+    HASH_MISMATCH("Computed hash does not match CMS messageDigest"),
+    CMS_INVALID("CMS cryptographic verification failed"),
+    CHAIN_INVALID("Certificate chain validation failed"),
+    NOT_TRUSTED("Signer certificate does not chain to a trusted root"),
+    TIMESTAMP_INVALID("Timestamp verification failed"),
+    REVOKED("A certificate in the chain has been revoked");
+
+    private final String description;
+
+    ValidationResult(String description) {
+        this.description = description;
+    }
+
+    public String getDescription() {
+        return description;
+    }
+}
+----
+
+== Modification Detection Between Revisions
+
+=== Why Multi-Signature Documents Need Revision Comparison
+
+When a PDF has multiple signatures, each signature covers a specific revision of the document — a snapshot of the file at the point when that signature was applied.
+Later signatures add incremental updates (Chapter 8) that extend the file.
+From the perspective of the first signature, the second signature's bytes are "trailing bytes" beyond its byte range.
+
+The critical question is: **did the incremental update between revisions only add the new signature, or did it modify existing content?**
+
+If someone added a new page, changed text, or altered form field values between signing events, the earlier signature's byte range still verifies (the signed bytes haven't changed), but the document's visible content has changed.
+This is the basis of the Shadow Attacks described in Chapter 24.
+
+=== Extracting Individual Revisions
+
+PDFBox allows you to extract the bytes of each revision by using the byte range information:
+
+[source,java]
+----
+/**
+ * Extract the signed revision for a specific signature.
+ * Returns the PDF bytes up to the end of the signature's coverage.
+ */
+public byte[] extractSignedRevision(byte[] pdfBytes,
+        PDSignature signature) {
+    int[] byteRange = signature.getByteRange();
+    int revisionEnd = byteRange[2] + byteRange[3];
+
+    byte[] revision = new byte[revisionEnd];
+    System.arraycopy(pdfBytes, 0, revision, 0, revisionEnd);
+
+    log.info("Extracted revision: {} bytes (full file: {} bytes)",
+            revisionEnd, pdfBytes.length);
+    return revision;
+}
+
+/**
+ * Compare two revisions to detect modifications beyond signature additions.
+ * Returns a list of differences found.
+ */
+public List<RevisionDifference> compareRevisions(
+        byte[] earlierRevision, byte[] laterRevision) throws IOException {
+
+    List<RevisionDifference> differences = new ArrayList<>();
+
+    try (PDDocument earlier = Loader.loadPDF(earlierRevision);
+         PDDocument later = Loader.loadPDF(laterRevision)) {
+
+        // Check page count changes
+        int earlyPages = earlier.getNumberOfPages();
+        int laterPages = later.getNumberOfPages();
+        if (earlyPages != laterPages) {
+            differences.add(new RevisionDifference(
+                    DifferenceType.PAGE_COUNT_CHANGED,
+                    "Page count changed from " + earlyPages +
+                    " to " + laterPages));
+        }
+
+        // Check AcroForm field value changes
+        PDAcroForm earlyForm =
+                earlier.getDocumentCatalog().getAcroForm();
+        PDAcroForm laterForm =
+                later.getDocumentCatalog().getAcroForm();
+
+        if (earlyForm != null && laterForm != null) {
+            compareFormFields(earlyForm, laterForm, differences);
+        }
+
+        // Check for new annotations
+        for (int i = 0;
+                i < Math.min(earlyPages, laterPages); i++) {
+            int earlyAnnots = earlier.getPage(i)
+                    .getAnnotations().size();
+            int laterAnnots = later.getPage(i)
+                    .getAnnotations().size();
+            if (earlyAnnots != laterAnnots) {
+                differences.add(new RevisionDifference(
+                        DifferenceType.ANNOTATIONS_CHANGED,
+                        "Page " + (i + 1) + ": annotations changed " +
+                        "from " + earlyAnnots + " to " + laterAnnots));
+            }
+        }
+    }
+
+    log.info("Revision comparison found {} difference(s)",
+            differences.size());
+    return differences;
+}
+----
+
+[CAUTION]
+====
+Revision comparison is inherently incomplete.
+A sophisticated attacker can modify content streams in ways that are difficult to detect by comparing PDF objects.
+The comparison above catches obvious changes (page count, form fields, annotations), but it is not a security guarantee.
+For high-security applications, consider using the EU DSS framework, which implements the full ETSI modification detection specification.
+====
+
+== Edge Cases: Self-Signed, Expired, and Missing Chain
+
+=== Self-Signed Certificates
+
+A self-signed certificate is one where the issuer and subject are the same entity — the certificate signs itself.
+Self-signed signatures are cryptographically valid (the CMS verifies), but the certificate chain is trivially short: one certificate, no intermediates, no root CA.
+
+[source,java]
+----
+/**
+ * Check if a certificate is self-signed.
+ */
+public boolean isSelfSigned(X509CertificateHolder cert) {
+    boolean selfSigned = cert.getSubject().equals(cert.getIssuer());
+    if (selfSigned) {
+        log.info("Certificate is self-signed: subject and issuer " +
+                "are both {}", cert.getSubject());
+    }
+    return selfSigned;
+}
+----
+
+For self-signed certificates, the chain validation in Step 4 will fail unless you explicitly add the self-signed certificate as a trust anchor.
+Most applications handle self-signed signatures by reporting: "The signature is cryptographically valid, but the identity of the signer could not be verified because the certificate is self-signed."
+
+This is the correct behavior.
+A self-signed signature proves that someone _possessing that private key_ signed the document.
+It does not prove _who_ possesses that key, because no trusted third party (CA) has vouched for the identity.
+
+=== Expired Certificates
+
+Certificate expiration is time-dependent — the same signature can be "valid" today and "expired" tomorrow.
+The handling depends on whether a timestamp is present:
+
+[source,java]
+----
+/**
+ * Determine if a signature's certificate is expired,
+ * accounting for timestamps.
+ */
+public CertExpirationStatus checkCertExpiration(
+        X509CertificateHolder signerCert,
+        Date timestampTime) {
+
+    Date now = new Date();
+    Date notBefore = signerCert.getNotBefore();
+    Date notAfter = signerCert.getNotAfter();
+
+    if (now.before(notAfter)) {
+        return CertExpirationStatus.VALID;
+    }
+
+    // Certificate has expired — check if we have a timestamp
+    if (timestampTime != null) {
+        if (timestampTime.before(notAfter)
+                && timestampTime.after(notBefore)) {
+            log.info("Certificate expired on {}, but timestamp {} " +
+                    "proves signature was created during validity period",
+                    notAfter, timestampTime);
+            return CertExpirationStatus.EXPIRED_BUT_TIMESTAMPED;
+        } else {
+            log.error("Certificate expired on {}, and timestamp {} " +
+                    "is outside the validity period [{} to {}]",
+                    notAfter, timestampTime, notBefore, notAfter);
+            return CertExpirationStatus.EXPIRED_AND_TIMESTAMP_INVALID;
+        }
+    }
+
+    log.warn("Certificate expired on {} and no timestamp is present",
+            notAfter);
+    return CertExpirationStatus.EXPIRED_NO_TIMESTAMP;
+}
+----
+
+=== Missing Intermediate Certificates
+
+The most common real-world chain validation failure is a missing intermediate certificate.
+The CMS `SignedData` should include all intermediate certificates between the signer's certificate and the root, but some signing implementations omit them.
+
+When intermediates are missing, you have two options:
+
+1. **AIA chasing**: Follow the Authority Information Access (AIA) extension in the signer's certificate to download the missing intermediate from the CA's server
+2. **Local certificate cache**: Maintain a local cache of known intermediate certificates
+
+[source,java]
+----
+/**
+ * Attempt to fetch missing intermediate certificates via AIA.
+ *
+ * @param cert  the certificate whose issuer we need
+ * @return the issuer's certificate, or null if not fetchable
+ */
+public X509Certificate fetchIssuerViaAia(X509Certificate cert)
+        throws Exception {
+
+    byte[] aiaExtBytes = cert.getExtensionValue(
+            Extension.authorityInfoAccess.getId());
+    if (aiaExtBytes == null) {
+        log.info("No AIA extension — cannot fetch issuer");
+        return null;
+    }
+
+    ASN1OctetString aiaOctet = ASN1OctetString.getInstance(aiaExtBytes);
+    AuthorityInformationAccess aia =
+            AuthorityInformationAccess.getInstance(
+                    ASN1Sequence.getInstance(aiaOctet.getOctets()));
+
+    for (AccessDescription desc : aia.getAccessDescriptions()) {
+        if (desc.getAccessMethod().equals(
+                AccessDescription.id_ad_caIssuers)) {
+            GeneralName gn = desc.getAccessLocation();
+            if (gn.getTagNo() == GeneralName.uniformResourceIdentifier) {
+                String url = gn.getName().toString();
+                log.info("Fetching issuer certificate from AIA: {}", url);
+
+                try (InputStream is = new URL(url).openStream()) {
+                    CertificateFactory cf =
+                            CertificateFactory.getInstance("X.509");
+                    return (X509Certificate) cf.generateCertificate(is);
+                }
+            }
+        }
+    }
+
+    log.warn("AIA extension present but no CA Issuers URL found");
+    return null;
+}
+----
+
+[TIP]
+====
+In production, always cache downloaded certificates.
+AIA chasing adds network latency and introduces a dependency on external servers — exactly the kind of dependency that LTV (Chapter 18) is designed to eliminate.
+If you are building a signing service, embed all intermediate certificates in the CMS at signing time, so validators never need to chase AIA.
+====
+
+== Algorithm OID Mapping Utility
+
+Throughout this chapter, we reference a `mapOidToAlgorithm()` helper.
+Here is a complete implementation that covers the algorithm OIDs you will encounter in real PDF signatures:
+
+[source,java]
+----
+/**
+ * Map a digest or signature algorithm OID to a Java algorithm name.
+ * Covers the algorithms used in real-world PDF signatures.
+ */
+public static String mapOidToAlgorithm(String oid) {
+    return switch (oid) {
+        // Digest algorithms
+        case "1.3.14.3.2.26"         -> "SHA-1";
+        case "2.16.840.1.101.3.4.2.1" -> "SHA-256";
+        case "2.16.840.1.101.3.4.2.2" -> "SHA-384";
+        case "2.16.840.1.101.3.4.2.3" -> "SHA-512";
+        // RSA signature algorithms
+        case "1.2.840.113549.1.1.5"  -> "SHA1withRSA";
+        case "1.2.840.113549.1.1.11" -> "SHA256withRSA";
+        case "1.2.840.113549.1.1.12" -> "SHA384withRSA";
+        case "1.2.840.113549.1.1.13" -> "SHA512withRSA";
+        case "1.2.840.113549.1.1.10" -> "RSASSA-PSS";
+        // ECDSA signature algorithms
+        case "1.2.840.10045.4.3.2"   -> "SHA256withECDSA";
+        case "1.2.840.10045.4.3.3"   -> "SHA384withECDSA";
+        case "1.2.840.10045.4.3.4"   -> "SHA512withECDSA";
+        default -> throw new IllegalArgumentException(
+                "Unknown algorithm OID: " + oid);
+    };
+}
+----
+
+== Key Takeaways
+
+- PDFBox provides signature extraction via two paths: the AcroForm field tree (full metadata) or `getSignatureDictionaries()` (fast, crypto-only)
+- CMS parsing requires both the `/Contents` bytes _and_ the signed content (byte range data) — always pass both to `CMSSignedData`
+- The five-step pipeline is: byte range check, hash verification, CMS cryptographic verification, certificate chain validation, trust evaluation
+- `SignerInformation.verify()` performs Steps 2 and 3 combined — but not chain validation or trust evaluation
+- Java's PKIX `CertPathBuilder` handles chain construction, validity checking, and basic constraints automatically
+- Timestamps shift the validation time from "now" to "when the signature was created" — critical for expired certificates
+- Revision comparison detects modifications between signatures but is not a complete security guarantee
+- Self-signed signatures are cryptographically valid but untrusted — always report the distinction clearly
+- Missing intermediates are the most common chain failure — implement AIA chasing or embed all intermediates at signing time
+- The `VerificationReport` model gives callers granular per-step results rather than a binary pass/fail

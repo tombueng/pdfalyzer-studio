@@ -45,8 +45,7 @@ PDFalyzer.Tabs = (function ($, P) {
     }
 
     function isTreeTab(tab) {
-        return tab === 'structure' || tab === 'forms' || tab === 'bookmarks' ||
-            tab === 'rawcos' || tab === 'attachments';
+        return tab === 'structure' || tab === 'forms' || tab === 'rawcos';
     }
 
     function captureTreeViewStateForTab(tab) {
@@ -114,9 +113,7 @@ PDFalyzer.Tabs = (function ($, P) {
                 case 'fonts':       P.FontsTab.loadFonts(); break;
                 case 'validation':  P.ValidationTab.loadValidation(); break;
                 case 'rawcos':      loadRawCos(viewState); break;
-                case 'bookmarks':   P.Tree.renderSubtree(P.state.treeData, 'bookmarks', { viewState: viewState }); break;
-                case 'attachments': loadAttachments(); break;
-                case 'signatures':  P.SignaturesTab.loadSignatures(); break;
+case 'signatures':  P.SignaturesTab.loadSignatures(); break;
                 case 'changes':     P.ChangesTab.renderChanges(); break;
             }
             if (typeof onAfterRender === 'function') { onAfterRender(); }
@@ -151,20 +148,6 @@ PDFalyzer.Tabs = (function ($, P) {
             .fail(function () { P.Utils.toast('Failed to load raw COS', 'danger'); });
     }
 
-    // ======================== ATTACHMENTS TAB ========================
-
-    function loadAttachments() {
-        var attachNodes = P.Tree.findAllByCategory(P.state.treeData, 'attachment');
-        if (!attachNodes.length) {
-            $('#treeContent').html(
-                '<div class="text-muted text-center mt-3">' +
-                '<i class="fas fa-paperclip fa-2x mb-2"></i><br>No attachments found</div>');
-            return;
-        }
-        P.Tree.renderSubtree(P.state.treeData, 'attachments', {
-            viewState: getTreeViewStateForTab('attachments')
-        });
-    }
 
     return { init: init, switchTab: switchTab, isTreeTab: isTreeTab };
 })(jQuery, PDFalyzer);

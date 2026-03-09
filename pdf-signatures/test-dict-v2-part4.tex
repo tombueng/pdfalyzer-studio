@@ -1,0 +1,551 @@
+% =============================================================================
+% Dictionary Diagram Variations — Part 4 (V16–V20): Experimental variants
+% =============================================================================
+\documentclass[11pt,a4paper]{article}
+\input{test-dict-v2-preamble}
+\begin{document}
+
+% #############################################################################
+% V16: Dark + zone boxes + inline badges per key (REQUIRED/OPTIONAL right of value)
+% #############################################################################
+\vartitle{V16 --- Dark + Zone Boxes + Per-Key Status Badges}
+{Each key/value line gets its own inline status badge. Zone boxes group visually.}
+
+\begin{tikzpicture}[remember picture,
+    every node/.style={anchor=west},
+    k/.style={font=\fontsize{8}{11}\selectfont\ttfamily\bfseries, text=keycolor},
+    v/.style={font=\fontsize{8}{11}\selectfont\ttfamily, text=valcolor},
+    s/.style={font=\fontsize{8}{11}\selectfont\ttfamily, text=strcolor},
+    d/.style={font=\fontsize{8}{11}\selectfont\ttfamily, text=delimcolor},
+    cm/.style={font=\fontsize{7}{9}\selectfont\ttfamily\itshape, text=commentcolor},
+    zbox/.style={rectangle, rounded corners=3pt, draw=#1, line width=1pt, fill=#1!12},
+    rbadge/.style={font=\fontsize{5}{6}\selectfont\bfseries\sffamily, text=reqred!80},
+    obadge/.style={font=\fontsize{5}{6}\selectfont\bfseries\sffamily, text=optgreen!80},
+    cbadge/.style={font=\fontsize{5}{6}\selectfont\bfseries\sffamily, text=condpurple!80},
+    inote/.style={font=\fontsize{6.5}{9}\selectfont\sffamily\itshape, text=commentcolor},
+]
+
+\def\cX{1.0}
+\def\tagX{7.2}
+\def\noteX{8.2}
+
+% Dark background
+\fill[codebg, rounded corners=5pt] (-0.2, 0.8) rectangle (16.0, -10.2);
+
+% Header
+\node[font=\fontsize{7}{8}\selectfont\sffamily\bfseries, text=commentcolor]
+    at (0.3, 0.55) {SIGNATURE DICTIONARY --- /Type /Sig};
+\draw[commentcolor!30, line width=0.4pt] (0.1, 0.32) -- (15.8, 0.32);
+
+\node[d] at (\cX, 0) {<<};
+
+% Identity
+\node[k] at (\cX+\codeIndent, -1*\lh) {/Type};       \node[v] at (\cX+1.8, -1*\lh) {/Sig};
+    \node[rbadge] at (\tagX, -1*\lh) {REQ};
+    \node[inote] at (\noteX, -1*\lh) {always /Sig};
+\node[k] at (\cX+\codeIndent, -2*\lh) {/Filter};     \node[v] at (\cX+2.2, -2*\lh) {/Adobe.PPKLite};
+    \node[rbadge] at (\tagX, -2*\lh) {REQ};
+    \node[inote] at (\noteX, -2*\lh) {handler name};
+\node[k] at (\cX+\codeIndent, -3*\lh) {/SubFilter};  \node[v] at (\cX+2.8, -3*\lh) {/ETSI.CAdES.detached};
+    \node[rbadge] at (\tagX, -3*\lh) {REQ};
+    \node[inote] at (\noteX, -3*\lh) {CMS profile --- THE critical key};
+\begin{scope}[on background layer]
+    \node[zbox=grpIdentD, fit={(\cX,-0.7)(\cX+14.7,-3*\lh-0.22)}] {};
+\end{scope}
+
+% Crypto
+\node[k] at (\cX+\codeIndent, -4*\lh) {/Contents};   \node[s] at (\cX+2.6, -4*\lh) {<0A3F8B...0000>};
+    \node[rbadge] at (\tagX, -4*\lh) {REQ};
+    \node[inote] at (\noteX, -4*\lh) {hex CMS SignedData, zero-padded};
+\node[k] at (\cX+\codeIndent, -5*\lh) {/ByteRange};  \node[v] at (\cX+2.8, -5*\lh) {[0 840 3560 1200]};
+    \node[rbadge] at (\tagX, -5*\lh) {REQ};
+    \node[inote] at (\noteX, -5*\lh) {signed ranges, verify sum = file size};
+\begin{scope}[on background layer]
+    \node[zbox=grpCryptoD, fit={(\cX,-4*\lh+0.22)(\cX+14.7,-5*\lh-0.22)}] {};
+\end{scope}
+
+% Metadata
+\node[k] at (\cX+\codeIndent, -6*\lh)  {/Name};         \node[s] at (\cX+1.8, -6*\lh) {(Alice Smith)};
+    \node[obadge] at (\tagX, -6*\lh) {OPT};
+    \node[inote] at (\noteX, -6*\lh) {display name --- NOT signed, forgeable};
+\node[k] at (\cX+\codeIndent, -7*\lh)  {/M};            \node[s] at (\cX+1.3, -7*\lh) {(D:20250307...)};
+    \node[obadge] at (\tagX, -7*\lh) {OPT};
+    \node[inote] at (\noteX, -7*\lh) {claimed time, prefer TSA};
+\node[k] at (\cX+\codeIndent, -8*\lh)  {/Reason};       \node[s] at (\cX+2.3, -8*\lh) {(Approved for release)};
+    \node[obadge] at (\tagX, -8*\lh) {OPT};
+\node[k] at (\cX+\codeIndent, -9*\lh)  {/ContactInfo};  \node[s] at (\cX+3.2, -9*\lh) {(alice@example.com)};
+    \node[obadge] at (\tagX, -9*\lh) {OPT};
+\node[k] at (\cX+\codeIndent, -10*\lh) {/Location};     \node[s] at (\cX+2.5, -10*\lh) {(Vienna, Austria)};
+    \node[obadge] at (\tagX, -10*\lh) {OPT};
+\begin{scope}[on background layer]
+    \node[zbox=grpMetaD, fit={(\cX,-6*\lh+0.22)(\cX+14.7,-10*\lh-0.22)}] {};
+\end{scope}
+
+% Integrity
+\node[k] at (\cX+\codeIndent, -11*\lh) {/Reference};        \node[v] at (\cX+2.7, -11*\lh) {[<<};
+    \node[cbadge] at (\tagX, -11*\lh) {COND};
+    \node[inote] at (\noteX, -11*\lh) {certification sigs only};
+\node[k] at (\cX+\subIndent, -12*\lh)  {/TransformMethod};  \node[v] at (\cX+4.0, -12*\lh) {/DocMDP};
+    \node[inote] at (\noteX, -12*\lh) {or /FieldMDP};
+\node[k] at (\cX+\subIndent, -13*\lh)  {/TransformParams};  \node[v] at (\cX+4.2, -13*\lh) {<< /P 2 >>};
+    \node[inote] at (\noteX, -13*\lh) {P=2: forms+sign, P=3: +annotations};
+\node[v] at (\cX+\codeIndent, -14*\lh) {>>]};
+\begin{scope}[on background layer]
+    \node[zbox=grpIntegD, fit={(\cX,-11*\lh+0.22)(\cX+14.7,-14*\lh-0.22)}] {};
+\end{scope}
+
+% Build
+\node[k] at (\cX+\codeIndent, -15*\lh) {/Prop\_Build};
+\node[v] at (\cX+3.0, -15*\lh)         {<< /App << /Name /PDFBox >> >>};
+    \node[obadge] at (\tagX, -15*\lh) {OPT};
+    \node[inote] at (\noteX, -15*\lh) {signing library};
+\begin{scope}[on background layer]
+    \node[zbox=grpBuildD, fit={(\cX,-15*\lh+0.22)(\cX+14.7,-15*\lh-0.22)}] {};
+\end{scope}
+
+\node[d] at (\cX, -16*\lh) {>>};
+
+\end{tikzpicture}
+
+\vfill\clearpage
+
+% #############################################################################
+% V17: White + zone boxes + warning/danger icons instead of badges
+% #############################################################################
+\vartitle{V17 --- White + Zone Boxes + Icon Markers}
+{Warning triangles for security-sensitive fields, lock icons for required, info circles for optional.}
+
+\begin{tikzpicture}[remember picture,
+    every node/.style={anchor=west},
+    k/.style={font=\fontsize{8}{11}\selectfont\ttfamily\bfseries, text=lkeycolor},
+    v/.style={font=\fontsize{8}{11}\selectfont\ttfamily, text=lvalcolor},
+    s/.style={font=\fontsize{8}{11}\selectfont\ttfamily, text=lstrcolor},
+    d/.style={font=\fontsize{8}{11}\selectfont\ttfamily, text=ldelimcolor},
+    zbox/.style={rectangle, rounded corners=3pt, draw=#1, line width=1pt, fill=#1!6},
+    anno/.style={rectangle, rounded corners=4pt, draw=#1!50, line width=0.8pt,
+                 fill=#1!5, text width=6.3cm, inner sep=5pt, anchor=north west,
+                 font=\fontsize{7.5}{9.5}\selectfont\sffamily},
+    lockicon/.style={font=\fontsize{8}{9}\selectfont\bfseries, text=reqred},
+    warnicon/.style={font=\fontsize{8}{9}\selectfont\bfseries, text=grpMetaD},
+    infoicon/.style={font=\fontsize{8}{9}\selectfont\bfseries, text=optgreen},
+    conn/.style={draw=#1, line width=1pt, -{Stealth[length=4pt, width=3pt]}},
+]
+
+\def\cX{1.0}
+\def\iX{0.2}
+\def\aX{9.6}
+
+% White bg
+\draw[black!15, line width=0.8pt, rounded corners=4pt] (-0.3, 0.9) rectangle (8.9, -10.9);
+
+\node[font=\fontsize{8}{9}\selectfont\sffamily\bfseries, text=accent]
+    at (0.3, 0.6) {Signature Dictionary};
+
+\node[d] at (\cX, 0) {<<};
+
+% Identity (lock icons = required)
+\node[lockicon] at (\iX, -2*\lh) {$\blacksquare$};
+\node[k] at (\cX+\codeIndent, -1*\lh) {/Type};       \node[v] at (\cX+1.8, -1*\lh) {/Sig};
+\node[k] at (\cX+\codeIndent, -2*\lh) {/Filter};     \node[v] at (\cX+2.2, -2*\lh) {/Adobe.PPKLite};
+\node[k] at (\cX+\codeIndent, -3*\lh) {/SubFilter};  \node[v] at (\cX+2.8, -3*\lh) {/ETSI.CAdES.detached};
+\begin{scope}[on background layer]
+    \node[zbox=grpIdentD, fit={(\cX,-0.7)(\cX+7.5,-3*\lh-0.22)}] (zI) {};
+\end{scope}
+
+% Crypto (lock)
+\node[lockicon] at (\iX, -4.5*\lh) {$\blacksquare$};
+\node[k] at (\cX+\codeIndent, -4*\lh) {/Contents};   \node[s] at (\cX+2.6, -4*\lh) {<0A3F8B...0000>};
+\node[k] at (\cX+\codeIndent, -5*\lh) {/ByteRange};  \node[v] at (\cX+2.8, -5*\lh) {[0 840 3560 1200]};
+\begin{scope}[on background layer]
+    \node[zbox=grpCryptoD, fit={(\cX,-4*\lh+0.22)(\cX+7.5,-5*\lh-0.22)}] (zC) {};
+\end{scope}
+
+% Metadata (warning triangles = not signed, forgeable)
+\node[warnicon] at (\iX, -8*\lh) {$\triangle$};
+\node[k] at (\cX+\codeIndent, -6*\lh)  {/Name};         \node[s] at (\cX+1.8, -6*\lh) {(Alice Smith)};
+\node[k] at (\cX+\codeIndent, -7*\lh)  {/M};            \node[s] at (\cX+1.3, -7*\lh) {(D:20250307...)};
+\node[k] at (\cX+\codeIndent, -8*\lh)  {/Reason};       \node[s] at (\cX+2.3, -8*\lh) {(Approved for release)};
+\node[k] at (\cX+\codeIndent, -9*\lh)  {/ContactInfo};  \node[s] at (\cX+3.2, -9*\lh) {(alice@example.com)};
+\node[k] at (\cX+\codeIndent, -10*\lh) {/Location};     \node[s] at (\cX+2.5, -10*\lh) {(Vienna, Austria)};
+\begin{scope}[on background layer]
+    \node[zbox=grpMetaD, fit={(\cX,-6*\lh+0.22)(\cX+7.5,-10*\lh-0.22)}] (zM) {};
+\end{scope}
+
+% Integrity (lock + conditional)
+\node[lockicon] at (\iX, -12.5*\lh) {$\blacklozenge$};
+\node[k] at (\cX+\codeIndent, -11*\lh) {/Reference};        \node[v] at (\cX+2.7, -11*\lh) {[<<};
+\node[k] at (\cX+\subIndent, -12*\lh)  {/TransformMethod};  \node[v] at (\cX+4.0, -12*\lh) {/DocMDP};
+\node[k] at (\cX+\subIndent, -13*\lh)  {/TransformParams};  \node[v] at (\cX+4.2, -13*\lh) {<< /P 2 >>};
+\node[v] at (\cX+\codeIndent, -14*\lh) {>>]};
+\begin{scope}[on background layer]
+    \node[zbox=grpIntegD, fit={(\cX,-11*\lh+0.22)(\cX+7.5,-14*\lh-0.22)}] (zR) {};
+\end{scope}
+
+% Build (info)
+\node[infoicon] at (\iX, -15*\lh) {$\circ$};
+\node[k] at (\cX+\codeIndent, -15*\lh) {/Prop\_Build};
+\node[v] at (\cX+3.0, -15*\lh)         {<< /App << /Name /PDFBox >> >>};
+\begin{scope}[on background layer]
+    \node[zbox=grpBuildD, fit={(\cX,-15*\lh+0.22)(\cX+7.5,-15*\lh-0.22)}] (zB) {};
+\end{scope}
+
+\node[d] at (\cX, -16*\lh) {>>};
+
+% Annotations
+\node[anno=grpIdentD] (aI) at (\aX, 0.5) {
+    $\blacksquare$ \textbf{\color{grpIdentD}Identity \& Format}\\[2pt]
+    \texttt{/SubFilter} = CMS profile selector.
+};
+\node[anno=grpCryptoD] (aC) at (\aX, -1.0) {
+    $\blacksquare$ \textbf{\color{grpCryptoD}Crypto Core}\\[2pt]
+    Proof + coverage. Verify sums.
+};
+\node[anno=grpMetaD] (aM) at (\aX, -2.3) {
+    $\triangle$ \textbf{\color{grpMetaD}Metadata --- NOT SIGNED}\\[2pt]
+    Forgeable! Trust X.509 cert instead.
+};
+\node[anno=grpIntegD] (aR) at (\aX, -3.6) {
+    $\blacklozenge$ \textbf{\color{grpIntegD}Modification Detection}\\[2pt]
+    DocMDP: \texttt{/P 2} = forms+sign.
+};
+\node[anno=grpBuildD] (aB) at (\aX, -4.8) {
+    $\circ$ \textbf{\color{grpBuildD}Build Properties}\\[2pt]
+    Which library. Debug breadcrumb.
+};
+
+\draw[conn=grpIdentD]  (zI.east) -- (aI.west);
+\draw[conn=grpCryptoD] (zC.east) -- (aC.west);
+\draw[conn=grpMetaD]   (zM.east) -- (aM.west);
+\draw[conn=grpIntegD]  (zR.east) -- (aR.west);
+\draw[conn=grpBuildD]  (zB.east) -- (aB.west);
+
+\end{tikzpicture}
+
+\vfill\clearpage
+
+% #############################################################################
+% V18: Dark + compact single-column (for inline use in running text)
+% #############################################################################
+\vartitle{V18 --- Dark + Compact Single-Column (Inline Figure)}
+{Narrow, compact. Designed to fit inline within running text or a margin note.}
+
+\begin{center}
+\begin{tikzpicture}[remember picture,
+    every node/.style={anchor=west},
+    k/.style={font=\fontsize{7}{9.5}\selectfont\ttfamily\bfseries, text=keycolor},
+    v/.style={font=\fontsize{7}{9.5}\selectfont\ttfamily, text=valcolor},
+    s/.style={font=\fontsize{7}{9.5}\selectfont\ttfamily, text=strcolor},
+    d/.style={font=\fontsize{7}{9.5}\selectfont\ttfamily, text=delimcolor},
+    glabel/.style={font=\fontsize{5.5}{6.5}\selectfont\sffamily\bfseries, text=#1, anchor=east},
+]
+
+\def\cX{1.5}
+\def\Lh{0.42}
+\def\barX{0.3}
+
+% Narrow dark bg
+\fill[codebg, rounded corners=4pt] (0, 0.5) rectangle (7.5, -7.5);
+
+\node[font=\fontsize{6}{7}\selectfont\sffamily\bfseries, text=commentcolor]
+    at (0.3, 0.3) {Sig Dict};
+
+\node[d] at (\cX, 0) {<<};
+
+% Identity
+\fill[grpIdentD] (\barX, -0.5) rectangle (\barX+0.08, -3*\Lh-0.15);
+\node[glabel=grpIdentD] at (\barX+1.0, -2*\Lh) {ID};
+\node[k] at (\cX+0.25, -1*\Lh) {/Type};       \node[v] at (\cX+1.4, -1*\Lh) {/Sig};
+\node[k] at (\cX+0.25, -2*\Lh) {/Filter};     \node[v] at (\cX+1.7, -2*\Lh) {/Adobe.PPKLite};
+\node[k] at (\cX+0.25, -3*\Lh) {/SubFilter};  \node[v] at (\cX+2.2, -3*\Lh) {/ETSI.CAdES.detached};
+
+% Crypto
+\fill[grpCryptoD] (\barX, -4*\Lh+0.05) rectangle (\barX+0.08, -5*\Lh-0.15);
+\node[glabel=grpCryptoD] at (\barX+1.0, -4.5*\Lh) {CR};
+\node[k] at (\cX+0.25, -4*\Lh) {/Contents};   \node[s] at (\cX+2.0, -4*\Lh) {<0A3F8B...>};
+\node[k] at (\cX+0.25, -5*\Lh) {/ByteRange};  \node[v] at (\cX+2.2, -5*\Lh) {[0 840 3560 1200]};
+
+% Metadata
+\fill[grpMetaD] (\barX, -6*\Lh+0.05) rectangle (\barX+0.08, -9*\Lh-0.15);
+\node[glabel=grpMetaD] at (\barX+1.0, -7.5*\Lh) {MT};
+\node[k] at (\cX+0.25, -6*\Lh)  {/Name};     \node[s] at (\cX+1.4, -6*\Lh) {(Alice Smith)};
+\node[k] at (\cX+0.25, -7*\Lh)  {/M};        \node[s] at (\cX+1.0, -7*\Lh) {(D:20250307...)};
+\node[k] at (\cX+0.25, -8*\Lh)  {/Reason};   \node[s] at (\cX+1.8, -8*\Lh) {(Approved...)};
+\node[k] at (\cX+0.25, -9*\Lh)  {/Location}; \node[s] at (\cX+2.0, -9*\Lh) {(Vienna)};
+
+% Integrity
+\fill[grpIntegD] (\barX, -10*\Lh+0.05) rectangle (\barX+0.08, -12*\Lh-0.15);
+\node[glabel=grpIntegD] at (\barX+1.0, -11*\Lh) {IN};
+\node[k] at (\cX+0.25, -10*\Lh) {/Reference};       \node[v] at (\cX+2.2, -10*\Lh) {[<<};
+\node[k] at (\cX+0.55, -11*\Lh) {/TransformMethod};  \node[v] at (\cX+3.3, -11*\Lh) {/DocMDP};
+\node[v] at (\cX+0.55, -12*\Lh) {/TransformParams << /P 2 >> >>]};
+
+% Build
+\fill[grpBuildD] (\barX, -13*\Lh+0.05) rectangle (\barX+0.08, -13*\Lh-0.15);
+\node[glabel=grpBuildD] at (\barX+1.0, -13*\Lh) {BL};
+\node[k] at (\cX+0.25, -13*\Lh) {/Prop\_Build};
+\node[v] at (\cX+2.3, -13*\Lh)  {<< ... /PDFBox ... >>};
+
+\node[d] at (\cX, -14*\Lh) {>>};
+
+\end{tikzpicture}
+\end{center}
+
+\vfill\clearpage
+
+% #############################################################################
+% V19: White + full-width annotated (landscape-like, wider margins)
+% #############################################################################
+\vartitle{V19 --- White + Wide Layout with Detailed Inline Annotations}
+{Full page width used. Code on left third, two annotation columns on the right.}
+
+\begin{tikzpicture}[remember picture,
+    every node/.style={anchor=west},
+    k/.style={font=\fontsize{8}{11}\selectfont\ttfamily\bfseries, text=lkeycolor},
+    v/.style={font=\fontsize{8}{11}\selectfont\ttfamily, text=lvalcolor},
+    s/.style={font=\fontsize{8}{11}\selectfont\ttfamily, text=lstrcolor},
+    d/.style={font=\fontsize{8}{11}\selectfont\ttfamily, text=ldelimcolor},
+    zbox/.style={rectangle, rounded corners=3pt, draw=#1, line width=0.8pt, fill=#1!6},
+    col2hdr/.style={font=\fontsize{6.5}{7.5}\selectfont\sffamily\bfseries, text=black!50, anchor=south west},
+    specref/.style={font=\fontsize{6.5}{8.5}\selectfont\ttfamily, text=black!40},
+    advice/.style={font=\fontsize{7}{9}\selectfont\sffamily, text=black!65, text width=4.8cm},
+]
+
+\def\cX{0.6}
+\def\specX{6.5}
+\def\advX{11.0}
+
+% Column headers
+\node[col2hdr] at (\cX, 0.5) {DICTIONARY ENTRY};
+\node[col2hdr] at (\specX, 0.5) {SPEC REFERENCE};
+\node[col2hdr] at (\advX, 0.5) {PRACTITIONER ADVICE};
+\draw[black!15, line width=0.4pt] (0, 0.3) -- (16.2, 0.3);
+
+\node[d] at (\cX, 0) {<<};
+
+% Identity
+\node[k] at (\cX+\codeIndent, -1*\lh) {/Type};       \node[v] at (\cX+1.8, -1*\lh) {/Sig};
+\node[k] at (\cX+\codeIndent, -2*\lh) {/Filter};     \node[v] at (\cX+2.2, -2*\lh) {/Adobe.PPKLite};
+\node[k] at (\cX+\codeIndent, -3*\lh) {/SubFilter};  \node[v] at (\cX+2.8, -3*\lh) {/ETSI.CAdES.detached};
+\begin{scope}[on background layer]
+    \node[zbox=grpIdentD, fit={(\cX,-0.7)(\cX+5.3,-3*\lh-0.2)}] {};
+\end{scope}
+\node[specref] at (\specX, -1*\lh) {Table 255, row 1};
+\node[specref] at (\specX, -2*\lh) {Table 255, row 2};
+\node[specref] at (\specX, -3*\lh) {Table 255, row 3};
+\node[advice, anchor=north west] at (\advX, -0.7) {
+    \textbf{SubFilter is king.} Always produce
+    \texttt{ETSI.CAdES.detached}. Consume all
+    three for backward compatibility.
+};
+
+% Crypto
+\node[k] at (\cX+\codeIndent, -4*\lh) {/Contents};   \node[s] at (\cX+2.6, -4*\lh) {<0A3F8B...0000>};
+\node[k] at (\cX+\codeIndent, -5*\lh) {/ByteRange};  \node[v] at (\cX+2.8, -5*\lh) {[0 840 3560 1200]};
+\begin{scope}[on background layer]
+    \node[zbox=grpCryptoD, fit={(\cX,-4*\lh+0.2)(\cX+5.3,-5*\lh-0.2)}] {};
+\end{scope}
+\node[specref] at (\specX, -4*\lh) {Table 255, row 4};
+\node[specref] at (\specX, -5*\lh) {Table 255, row 5};
+\node[advice, anchor=north west] at (\advX, -3.7*\lh) {
+    Verify: \texttt{len1+len2+hex==file\_size}.
+    If not, bytes are uncovered.
+};
+
+% Metadata
+\node[k] at (\cX+\codeIndent, -6*\lh)  {/Name};         \node[s] at (\cX+1.8, -6*\lh) {(Alice Smith)};
+\node[k] at (\cX+\codeIndent, -7*\lh)  {/M};            \node[s] at (\cX+1.3, -7*\lh) {(D:20250307...)};
+\node[k] at (\cX+\codeIndent, -8*\lh)  {/Reason};       \node[s] at (\cX+2.3, -8*\lh) {(Approved...)};
+\node[k] at (\cX+\codeIndent, -9*\lh)  {/Location};     \node[s] at (\cX+2.5, -9*\lh) {(Vienna)};
+\begin{scope}[on background layer]
+    \node[zbox=grpMetaD, fit={(\cX,-6*\lh+0.2)(\cX+5.3,-9*\lh-0.2)}] {};
+\end{scope}
+\node[specref] at (\specX, -6*\lh) {Table 255, rows 6--10};
+\node[advice, anchor=north west] at (\advX, -5.7*\lh) {
+    \textbf{Not signed!} Anyone can forge these.
+    Trust the X.509 cert inside the CMS blob.
+};
+
+% Integrity
+\node[k] at (\cX+\codeIndent, -10*\lh) {/Reference};        \node[v] at (\cX+2.7, -10*\lh) {[<<};
+\node[k] at (\cX+\subIndent, -11*\lh)  {/TransformMethod};  \node[v] at (\cX+4.0, -11*\lh) {/DocMDP};
+\node[k] at (\cX+\subIndent, -12*\lh)  {/TransformParams};  \node[v] at (\cX+4.2, -12*\lh) {<< /P 2 >>};
+\node[v] at (\cX+\codeIndent, -13*\lh) {>>]};
+\begin{scope}[on background layer]
+    \node[zbox=grpIntegD, fit={(\cX,-10*\lh+0.2)(\cX+5.3,-13*\lh-0.2)}] {};
+\end{scope}
+\node[specref] at (\specX, -10*\lh) {Table 255, row 12};
+\node[specref] at (\specX, -11*\lh) {\S12.8.2.2};
+\node[advice, anchor=north west] at (\advX, -9.7*\lh) {
+    DocMDP \texttt{/P 2} = forms+sign.
+    Required for certification sigs.
+};
+
+% Build
+\node[k] at (\cX+\codeIndent, -14*\lh) {/Prop\_Build};
+\node[v] at (\cX+3.0, -14*\lh)         {<< /App << /Name /PDFBox >> >>};
+\begin{scope}[on background layer]
+    \node[zbox=grpBuildD, fit={(\cX,-14*\lh+0.2)(\cX+5.3,-14*\lh-0.2)}] {};
+\end{scope}
+\node[specref] at (\specX, -14*\lh) {Table 255, row 14};
+\node[advice, anchor=north west] at (\advX, -13.7*\lh) {
+    Which library signed it.
+    Invaluable for debugging.
+};
+
+\node[d] at (\cX, -15*\lh) {>>};
+
+\end{tikzpicture}
+
+\vfill\clearpage
+
+% #############################################################################
+% V20: Dark + zone boxes + cross-reference arrows between related entries
+% #############################################################################
+\vartitle{V20 --- Dark + Zone Boxes + Cross-Reference Arrows}
+{Arrows between related entries within the dictionary (e.g., ByteRange points to Contents gap).}
+
+\begin{tikzpicture}[remember picture,
+    every node/.style={anchor=west},
+    k/.style={font=\fontsize{8}{11}\selectfont\ttfamily\bfseries, text=keycolor},
+    v/.style={font=\fontsize{8}{11}\selectfont\ttfamily, text=valcolor},
+    s/.style={font=\fontsize{8}{11}\selectfont\ttfamily, text=strcolor},
+    d/.style={font=\fontsize{8}{11}\selectfont\ttfamily, text=delimcolor},
+    cm/.style={font=\fontsize{7}{9}\selectfont\ttfamily\itshape, text=commentcolor},
+    zbox/.style={rectangle, rounded corners=3pt, draw=#1, line width=1pt, fill=#1!12},
+    xref/.style={draw=#1, line width=1pt, densely dashed, -{Stealth[length=4pt, width=3pt]}},
+    xreflabel/.style={font=\fontsize{6}{7.5}\selectfont\sffamily\itshape, text=#1,
+                       fill=codebg, inner sep=1pt},
+    anno/.style={rectangle, rounded corners=4pt, draw=#1, line width=0.9pt,
+                 fill=#1!8, text width=5.6cm, inner sep=5pt, anchor=north west,
+                 font=\fontsize{7.5}{9.5}\selectfont\sffamily},
+    badge/.style={rectangle, rounded corners=2pt, fill=#1, text=white,
+                  font=\fontsize{5.5}{6.5}\selectfont\bfseries\sffamily,
+                  inner xsep=3pt, inner ysep=1.5pt},
+    conn/.style={draw=#1, line width=1pt, -{Stealth[length=4pt, width=3pt]}},
+]
+
+\def\cX{1.0}
+\def\aX{10.2}
+
+% Dark background
+\fill[codebg, rounded corners=5pt] (-0.2, 0.8) rectangle (9.4, -11.0);
+
+\node[font=\fontsize{7}{8}\selectfont\sffamily\bfseries, text=commentcolor]
+    at (0.3, 0.55) {SIGNATURE DICTIONARY --- /Type /Sig};
+\draw[commentcolor!30, line width=0.4pt] (0.1, 0.32) -- (9.2, 0.32);
+
+\node[d] at (\cX, 0) {<<};
+
+% Identity
+\node[k] (kType) at (\cX+\codeIndent, -1*\lh) {/Type};       \node[v] at (\cX+1.8, -1*\lh) {/Sig};
+\node[k] (kFilt) at (\cX+\codeIndent, -2*\lh) {/Filter};     \node[v] (vFilt) at (\cX+2.2, -2*\lh) {/Adobe.PPKLite};
+\node[k] (kSub)  at (\cX+\codeIndent, -3*\lh) {/SubFilter};  \node[v] (vSub) at (\cX+2.8, -3*\lh) {/ETSI.CAdES.detached};
+\begin{scope}[on background layer]
+    \node[zbox=grpIdentD, fit={(\cX,-0.7)(\cX+8.1,-3*\lh-0.22)}] (zI) {};
+\end{scope}
+
+% Crypto
+\node[k] (kCont)  at (\cX+\codeIndent, -4*\lh) {/Contents};
+\node[s] (vCont)  at (\cX+2.6, -4*\lh) {<0A3F8B...0000>};
+\node[k] (kRange) at (\cX+\codeIndent, -5*\lh) {/ByteRange};
+\node[v] (vRange) at (\cX+2.8, -5*\lh) {[0 840 3560 1200]};
+\begin{scope}[on background layer]
+    \node[zbox=grpCryptoD, fit={(\cX,-4*\lh+0.22)(\cX+8.1,-5*\lh-0.22)}] (zC) {};
+\end{scope}
+
+% Cross-ref: ByteRange -> Contents (they define each other's gap)
+\draw[xref=strcolor] (vRange.east) -- ++(0.3,0) |- (vCont.east)
+    node[xreflabel=strcolor, pos=0.3, right=2pt] {defines gap around};
+
+% Metadata
+\node[k] at (\cX+\codeIndent, -6*\lh)  {/Name};
+\node[s] (vName) at (\cX+1.8, -6*\lh)  {(Alice Smith)};
+\node[k] at (\cX+\codeIndent, -7*\lh)  {/M};
+\node[s] at (\cX+1.3, -7*\lh)          {(D:20250307120000+01'00')};
+\node[k] at (\cX+\codeIndent, -8*\lh)  {/Reason};
+\node[s] at (\cX+2.3, -8*\lh)          {(Approved for release)};
+\node[k] at (\cX+\codeIndent, -9*\lh)  {/Location};
+\node[s] at (\cX+2.5, -9*\lh)          {(Vienna, Austria)};
+\begin{scope}[on background layer]
+    \node[zbox=grpMetaD, fit={(\cX,-6*\lh+0.22)(\cX+8.1,-9*\lh-0.22)}] (zM) {};
+\end{scope}
+
+% Cross-ref: /Name is NOT from /Contents cert (warning)
+\draw[xref=reqred!70] (vName.east) -- ++(0.5,0) |- ($(vCont.east)+(0.8,0)$)
+    node[xreflabel=reqred!70, pos=0.25, right=2pt] {real name is in X.509 cert here};
+
+% Integrity
+\node[k] at (\cX+\codeIndent, -10*\lh) {/Reference};
+\node[v] at (\cX+2.7, -10*\lh)         {[<<};
+\node[k] (kTM) at (\cX+\subIndent, -11*\lh) {/TransformMethod};
+\node[v] at (\cX+4.0, -11*\lh)         {/DocMDP};
+\node[k] at (\cX+\subIndent, -12*\lh)  {/TransformParams};
+\node[v] at (\cX+4.2, -12*\lh)         {<< /P 2 >>};
+\node[v] at (\cX+\codeIndent, -13*\lh) {>>]};
+\begin{scope}[on background layer]
+    \node[zbox=grpIntegD, fit={(\cX,-10*\lh+0.22)(\cX+8.1,-13*\lh-0.22)}] (zR) {};
+\end{scope}
+
+% Cross-ref: SubFilter determines how Contents is parsed
+\draw[xref=keycolor] (vSub.east) -- ++(1.5,0) |- ($(vCont.east)+(1.5,0)$)
+    node[xreflabel=keycolor, pos=0.5, right=2pt] {determines CMS format of};
+
+% Build
+\node[k] at (\cX+\codeIndent, -14*\lh) {/Prop\_Build};
+\node[v] (vBuild) at (\cX+3.0, -14*\lh) {<< /App << /Name /PDFBox >> >>};
+\begin{scope}[on background layer]
+    \node[zbox=grpBuildD, fit={(\cX,-14*\lh+0.22)(\cX+8.1,-14*\lh-0.22)}] (zB) {};
+\end{scope}
+
+% Cross-ref: Filter <-> Prop_Build/Filter
+\draw[xref=grpBuildD] (vFilt.east) -- ++(2.0,0) |- (vBuild.east)
+    node[xreflabel=grpBuildD, pos=0.3, right=2pt] {echoed in build info};
+
+\node[d] at (\cX, -15*\lh) {>>};
+
+% --- Annotations ---
+\node[anno=grpIdentD] (aI) at (\aX, 0.5) {
+    \textbf{\color{grpIdentD}Identity}
+    \hfill\tikz\node[badge=reqred]{REQ};\\[2pt]
+    SubFilter determines CMS format
+    of /Contents. See arrows.
+};
+\node[anno=grpCryptoD] (aC) at (\aX, -1.2) {
+    \textbf{\color{grpCryptoD}Crypto}
+    \hfill\tikz\node[badge=reqred]{REQ};\\[2pt]
+    ByteRange brackets /Contents.
+    Dashed arrows show the relationship.
+};
+\node[anno=grpMetaD] (aM) at (\aX, -2.8) {
+    \textbf{\color{grpMetaD}Metadata}
+    \hfill\tikz\node[badge=optgreen]{OPT};\\[2pt]
+    /Name is cosmetic. The real signer
+    is in the X.509 cert (red arrow).
+};
+\node[anno=grpIntegD] (aR) at (\aX, -4.3) {
+    \textbf{\color{grpIntegD}Integrity}
+    \hfill\tikz\node[badge=condpurple]{COND};\\[2pt]
+    DocMDP constrains changes.
+};
+\node[anno=grpBuildD] (aB) at (\aX, -5.6) {
+    \textbf{\color{grpBuildD}Build}
+    \hfill\tikz\node[badge=optgreen]{OPT};\\[2pt]
+    /Filter echoed in /Prop\_Build.
+};
+
+\draw[conn=grpIdentD]  (zI.east) -- (aI.west);
+\draw[conn=grpCryptoD] (zC.east) -- (aC.west);
+\draw[conn=grpMetaD]   (zM.east) -- (aM.west);
+\draw[conn=grpIntegD]  (zR.east) -- (aR.west);
+\draw[conn=grpBuildD]  (zB.east) -- (aB.west);
+
+\end{tikzpicture}
+
+\vfill
+
+\begin{center}
+\small\sffamily\color{black!40}
+\textit{End of 20 variations --- pick a style (or combine elements) for the book.}
+\end{center}
+
+\end{document}

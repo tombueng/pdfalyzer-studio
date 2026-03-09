@@ -124,6 +124,7 @@ PDFalyzer.Viewer = (function ($, P) {
         }
 
         $('#uploadSplash').hide();
+        if (P.LoadingSpinner) P.LoadingSpinner.show();
         var nextViewports = [];
         var nextCanvases = [];
 
@@ -145,8 +146,10 @@ PDFalyzer.Viewer = (function ($, P) {
                         P.ViewerRender.restorePaneViewState(viewState);
                         $(document).trigger('pdfviewer:rendered');
                     }
+                    if (P.LoadingSpinner) P.LoadingSpinner.hide();
                 });
         }).catch(function (err) {
+            if (P.LoadingSpinner) P.LoadingSpinner.hide();
             if ($staging) {
                 $staging.removeClass('pdf-viewer-crossfade-in pdf-viewer-staging-active').empty();
             }

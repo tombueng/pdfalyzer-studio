@@ -1,0 +1,49 @@
+% Byte range diagram: single signature coverage (Chapter 13)
+\documentclass[border=10pt]{standalone}
+\usepackage{tikz}
+\usetikzlibrary{positioning, decorations.pathreplacing, calc}
+\usepackage{fontspec}
+\setmainfont{Noto Serif}
+\setsansfont{Noto Sans}
+\setmonofont{DejaVu Sans Mono}[Scale=0.85]
+\usepackage{xcolor}
+\definecolor{signed}{HTML}{c8e6c9}
+\definecolor{gap}{HTML}{ffcdd2}
+\definecolor{accent}{HTML}{0f3460}
+
+\begin{document}
+\begin{tikzpicture}[
+    block/.style={draw, minimum height=1.2cm, text centered, font=\sffamily\small},
+    label/.style={font=\sffamily\footnotesize, text=accent},
+    brace/.style={decorate, decoration={brace, amplitude=8pt, mirror}},
+    braceup/.style={decorate, decoration={brace, amplitude=8pt}},
+]
+
+% File blocks
+\node[block, fill=signed, minimum width=3cm] (header) {Header + Body};
+\node[block, fill=signed, minimum width=2cm, right=0pt of header] (objects) {Sig Objects};
+\node[block, fill=gap, minimum width=2cm, right=0pt of objects] (contents) {\texttt{/Contents}};
+\node[block, fill=signed, minimum width=2cm, right=0pt of contents] (xref) {Xref};
+\node[block, fill=signed, minimum width=1.5cm, right=0pt of xref] (trailer) {Trailer};
+\node[block, fill=signed, minimum width=1cm, right=0pt of trailer] (eof) {\texttt{\%\%EOF}};
+
+% Segment 1 brace (below)
+\draw[brace, thick, accent] ($(header.south west) + (0,-0.2)$) -- node[below=10pt, label] {Segment 1: \texttt{offset1} to \texttt{offset1 + length1}} ($(objects.south east) + (0,-0.2)$);
+
+% Gap label
+\draw[brace, thick, red!70!black] ($(contents.south west) + (0,-0.2)$) -- node[below=10pt, font=\sffamily\footnotesize, text=red!70!black] {Gap (CMS signature value)} ($(contents.south east) + (0,-0.2)$);
+
+% Segment 2 brace (below)
+\draw[brace, thick, accent] ($(xref.south west) + (0,-0.2)$) -- node[below=10pt, label] {Segment 2: \texttt{offset2} to \texttt{offset2 + length2}} ($(eof.south east) + (0,-0.2)$);
+
+% Overall brace (above)
+\draw[braceup, thick, accent] ($(header.north west) + (0,0.2)$) -- node[above=10pt, label] {Signed PDF file} ($(eof.north east) + (0,0.2)$);
+
+% Legend
+\node[below=2.5cm of contents, font=\sffamily\small] (legend) {
+    \tikz{\fill[signed] (0,0) rectangle (0.4,0.3);} Signed \quad
+    \tikz{\fill[gap] (0,0) rectangle (0.4,0.3);} Not signed (gap)
+};
+
+\end{tikzpicture}
+\end{document}

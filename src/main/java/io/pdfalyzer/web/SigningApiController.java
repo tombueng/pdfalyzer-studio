@@ -17,16 +17,23 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
+import io.pdfalyzer.model.CscCredential;
+import io.pdfalyzer.model.CscProvider;
 import io.pdfalyzer.model.KeyMaterialUploadResult;
 import io.pdfalyzer.model.PdfSession;
 import io.pdfalyzer.model.PendingSignatureData;
 import io.pdfalyzer.model.SelfSignedCertRequest;
 import io.pdfalyzer.model.SigningKeyMaterial;
 import io.pdfalyzer.model.SigningRequest;
+import io.pdfalyzer.model.TsaServer;
 import io.pdfalyzer.service.CertificateService;
+import io.pdfalyzer.service.CscApiClient;
+import io.pdfalyzer.service.CscProviderRegistry;
+import io.pdfalyzer.service.CscSigningService;
 import io.pdfalyzer.service.PdfService;
 import io.pdfalyzer.service.PdfSigningService;
 import io.pdfalyzer.service.SelfSignedCertService;
+import io.pdfalyzer.service.TsaProbeService;
 
 @RestController
 @RequestMapping("/api/signing")
@@ -36,15 +43,27 @@ public class SigningApiController {
     private final SelfSignedCertService selfSignedCertService;
     private final PdfSigningService pdfSigningService;
     private final PdfService pdfService;
+    private final TsaProbeService tsaProbeService;
+    private final CscProviderRegistry cscProviderRegistry;
+    private final CscApiClient cscApiClient;
+    private final CscSigningService cscSigningService;
 
     public SigningApiController(CertificateService certificateService,
                                 SelfSignedCertService selfSignedCertService,
                                 PdfSigningService pdfSigningService,
-                                PdfService pdfService) {
+                                PdfService pdfService,
+                                TsaProbeService tsaProbeService,
+                                CscProviderRegistry cscProviderRegistry,
+                                CscApiClient cscApiClient,
+                                CscSigningService cscSigningService) {
         this.certificateService = certificateService;
         this.selfSignedCertService = selfSignedCertService;
         this.pdfSigningService = pdfSigningService;
         this.pdfService = pdfService;
+        this.tsaProbeService = tsaProbeService;
+        this.cscProviderRegistry = cscProviderRegistry;
+        this.cscApiClient = cscApiClient;
+        this.cscSigningService = cscSigningService;
     }
 
     @PostMapping("/{sessionId}/upload-key")
@@ -139,6 +158,8 @@ public class SigningApiController {
                 .certIssuerDN(material.getCertificate() != null
                         ? material.getCertificate().getIssuerX500Principal().getName()
                         : null)
+                .tsaServerId(request.getTsaServerId())
+                .tsaUrl(request.getTsaUrl())
                 .build();
 
         return ResponseEntity.ok(pending);
@@ -173,6 +194,181 @@ public class SigningApiController {
         result.put("fieldName", pending.getFieldName());
         return ResponseEntity.ok(result);
     }
+
+    // ── TSA Server endpoints ────────────────────────────────────────────
+
+    @GetMapping("/tsa/servers")
+    public ResponseEntity<List<TsaServer>> listTsaServers() {
+        return ResponseEntity.ok(tsaProbeService.getAllWithStatus());
+    }
+
+    @PostMapping("/tsa/probe")
+    public ResponseEntity<Map<String, String>> probeAllTsa() {
+        tsaProbeService.probeAllAsync();
+        return ResponseEntity.ok(Map.of("status", "probing"));
+    }
+
+    @PostMapping("/tsa/probe/{serverId}")
+    public ResponseEntity<Map<String, String>> probeSingleTsa(
+            @PathVariable("serverId") String serverId) {
+        tsaProbeService.probeSingleAsync(serverId);
+        return ResponseEntity.ok(Map.of("status", "probing", "serverId", serverId));
+    }
+
+    @GetMapping("/tsa/server/{serverId}")
+    public ResponseEntity<TsaServer> getTsaServer(
+            @PathVariable("serverId") String serverId) {
+        TsaServer server = tsaProbeService.getWithStatus(serverId);
+        if (server == null) return ResponseEntity.notFound().build();
+        return ResponseEntity.ok(server);
+    }
+
+    // ── CSC Remote Signing endpoints ────────────────────────────────────
+
+    @GetMapping("/csc/providers")
+    public ResponseEntity<List<CscProvider>> listCscProviders() {
+        return ResponseEntity.ok(cscProviderRegistry.listAll());
+    }
+
+    @GetMapping("/csc/provider/{providerId}")
+    public ResponseEntity<CscProvider> getCscProvider(
+            @PathVariable("providerId") String providerId) {
+        CscProvider provider = cscProviderRegistry.get(providerId);
+        if (provider == null) return ResponseEntity.notFound().build();
+        return ResponseEntity.ok(provider);
+    }
+
+    @PostMapping("/csc/provider")
+    public ResponseEntity<CscProvider> addCscProvider(@RequestBody CscProvider provider) {
+        return ResponseEntity.ok(cscProviderRegistry.addOrUpdate(provider));
+    }
+
+    @PostMapping("/csc/{providerId}/connect")
+    public ResponseEntity<Map<String, Object>> connectCscProvider(
+            @PathVariable("providerId") String providerId,
+            @RequestBody Map<String, String> credentials) {
+        CscProvider provider = cscProviderRegistry.get(providerId);
+        if (provider == null) return ResponseEntity.notFound().build();
+
+        String sessionId = credentials.get("sessionId");
+        String username = credentials.get("username");
+        String password = credentials.get("password");
+
+        try {
+            String token;
+            if (username != null && !username.isBlank()) {
+                // Resource Owner Password Grant
+                token = cscApiClient.authenticate(provider, username, password);
+            } else if (provider.getClientId() != null && !provider.getClientId().isBlank()) {
+                // Client Credentials Grant
+                token = cscApiClient.authenticateClientCredentials(provider);
+            } else {
+                return ResponseEntity.badRequest().body(Map.of("error", "No credentials provided"));
+            }
+
+            cscApiClient.storeToken(sessionId, providerId, token);
+            provider.setStatus("connected");
+            provider.setStatusMessage(null);
+
+            Map<String, Object> result = new LinkedHashMap<>();
+            result.put("connected", true);
+            result.put("providerId", providerId);
+            return ResponseEntity.ok(result);
+        } catch (Exception e) {
+            provider.setStatus("error");
+            provider.setStatusMessage(e.getMessage());
+            return ResponseEntity.ok(Map.of(
+                    "connected", false,
+                    "error", e.getMessage()));
+        }
+    }
+
+    @GetMapping("/csc/{sessionId}/{providerId}/credentials")
+    public ResponseEntity<List<CscCredential>> listCscCredentials(
+            @PathVariable("sessionId") String sessionId,
+            @PathVariable("providerId") String providerId) {
+        CscProvider provider = cscProviderRegistry.get(providerId);
+        if (provider == null) return ResponseEntity.notFound().build();
+
+        String token = cscApiClient.getToken(sessionId, providerId);
+        if (token == null) {
+            return ResponseEntity.badRequest().build();
+        }
+
+        List<CscCredential> credentials = cscApiClient.listCredentials(provider, token);
+        return ResponseEntity.ok(credentials);
+    }
+
+    @PostMapping("/csc/{sessionId}/{providerId}/send-otp")
+    public ResponseEntity<Map<String, Boolean>> sendCscOtp(
+            @PathVariable("sessionId") String sessionId,
+            @PathVariable("providerId") String providerId,
+            @RequestBody Map<String, String> body) {
+        CscProvider provider = cscProviderRegistry.get(providerId);
+        if (provider == null) return ResponseEntity.notFound().build();
+
+        String token = cscApiClient.getToken(sessionId, providerId);
+        if (token == null) return ResponseEntity.badRequest().build();
+
+        cscApiClient.sendOtp(provider, token, body.get("credentialId"));
+        return ResponseEntity.ok(Map.of("sent", true));
+    }
+
+    @PostMapping("/csc/{sessionId}/{providerId}/sign")
+    public ResponseEntity<Map<String, Object>> signWithCsc(
+            @PathVariable("sessionId") String sessionId,
+            @PathVariable("providerId") String providerId,
+            @RequestBody Map<String, Object> body) {
+        CscProvider provider = cscProviderRegistry.get(providerId);
+        if (provider == null) return ResponseEntity.notFound().build();
+
+        String token = cscApiClient.getToken(sessionId, providerId);
+        if (token == null) return ResponseEntity.badRequest().build();
+
+        String credentialId = (String) body.get("credentialId");
+        String fieldName = (String) body.get("fieldName");
+        String otp = (String) body.get("otp");
+        String reason = (String) body.get("reason");
+        String location = (String) body.get("location");
+
+        // Get credential info for cert chain
+        CscCredential cred = cscApiClient.getCredentialInfo(provider, token, credentialId);
+
+        // Determine signing algorithm OID based on key type
+        String signAlgoOid = null;
+        if (cred.getKeyAlgorithm() != null && cred.getKeyAlgorithm().contains("1.2.840.10045")) {
+            signAlgoOid = "1.2.840.10045.4.3.2"; // SHA256withECDSA
+        } else {
+            signAlgoOid = "1.2.840.113549.1.1.11"; // SHA256withRSA
+        }
+
+        // Authorize credential (get SAD)
+        String sad = cscApiClient.authorizeCredential(provider, token, credentialId, 1, null, otp);
+
+        // Sign the PDF
+        PdfSession session = pdfService.getSession(sessionId);
+        byte[] signed = cscSigningService.signWithCsc(
+                session.getPdfBytes(), fieldName,
+                provider, token, credentialId, sad, signAlgoOid,
+                cred.getCertificates(), reason, location);
+
+        try {
+            pdfService.updateSessionPdf(sessionId, signed);
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to update session after CSC signing: " + e.getMessage(), e);
+        }
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("sessionId", sessionId);
+        result.put("signed", true);
+        result.put("fieldName", fieldName);
+        result.put("provider", provider.getName());
+        result.put("pageCount", session.getPageCount());
+        result.put("tree", session.getTreeRoot());
+        return ResponseEntity.ok(result);
+    }
+
+    // ── Key export ───────────────────────────────────────────────────────
 
     @GetMapping("/{sessionId}/export-key/{sessionKeyId}")
     public ResponseEntity<byte[]> exportKey(

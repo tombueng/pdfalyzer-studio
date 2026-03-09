@@ -17,17 +17,16 @@
 /* Tabs */
 .tree-tabs {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 8px;
     background: rgba(0,0,0,0.2);
     border-bottom: 1px solid var(--border);
-    overflow: hidden;
     flex-shrink: 0;
 }
 
 .tree-tabs-list {
     display: flex;
-    overflow-x: auto;
+    flex-wrap: wrap;
     min-width: 0;
     flex: 1 1 auto;
 }
@@ -66,6 +65,7 @@
     flex: 1;
     overflow: auto;
     padding: 8px;
+    position: relative;
 }
 
 /* Tree Nodes */
@@ -202,7 +202,7 @@
 
 .validation-issue .issue-rule {
     font-family: monospace;
-    opacity: 0.7;
+    opacity: 0.85;
     font-size: 11px;
 }
 
@@ -249,6 +249,32 @@
 }
 #statusBar .status-pending-changes:hover {
     opacity: 1;
+}
+
+#statusBar .status-spacer { flex: 1; }
+
+.status-display-btn {
+    cursor: pointer;
+    user-select: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+.status-display-btn:hover { color: var(--accent); }
+
+/* === Tree spinner overlay === */
+#treeSpinnerOverlay {
+    position: absolute;
+    inset: 0;
+    z-index: 20;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(27, 25, 62, 0.85);
+}
+#treeSpinnerOverlay canvas {
+    border-radius: 6px;
+    background: #1B193E;
 }
 
 /* === Skeleton Loader === */

@@ -1,0 +1,839 @@
+= The EU DSS Framework
+
+[.lead]
+Throughout this book, we have been building PDF signing and validation code from the ground up — constructing CMS structures by hand with BouncyCastle, computing byte ranges manually, assembling DSS dictionaries one stream at a time.
+This is the right approach for understanding what is happening, but it is the wrong approach for production software.
+
+The **European Digital Signature Services (EU DSS)** framework is the European Commission's open-source reference implementation for digital signature creation, extension, and validation.
+It is maintained by the European Commission's ISA2 programme (now the Digital Europe Programme), developed primarily by the Luxembourg company Nowina Solutions, and used by dozens of EU member states in their national validation services.
+It handles PAdES, CAdES, XAdES, and JAdES.
+It validates against the EU Trusted List.
+It implements every PAdES profile from B-B through B-LTA.
+It supports remote signing via the CSC API.
+And it is free — released under the LGPL 2.1 license.
+
+If you are building production software that creates or validates digital signatures in a European context, EU DSS is not just an option — it is the benchmark against which your implementation will be measured.
+This chapter covers everything you need to use it: architecture, core modules, the signing flow, validation, Spring Boot integration, and the honest trade-offs between using EU DSS and rolling your own.
+
+== History and Governance
+
+=== Origins
+
+The EU DSS project began in 2011 as part of the European Commission's **ISA programme** (Interoperability Solutions for European Public Administrations).
+The goal was to provide member states with a reusable software library that correctly implemented the ETSI signature standards — so that each country would not have to write its own implementation from scratch and risk incompatibilities.
+
+The project was motivated by the same cross-border recognition failures that led to eIDAS itself (Chapter 19).
+Even when countries agreed on the legal framework, their software implementations often produced or validated signatures differently.
+A common reference implementation was the practical answer to "why doesn't my signature validate in your system?"
+
+=== Development
+
+The framework has been developed primarily by **Nowina Solutions** (formerly Nowina Technologies), a Luxembourg-based company specializing in electronic signatures and trust services.
+Nowina won the European Commission's procurement for DSS development and has been the principal technical contributor since 2015.
+
+The source code is hosted on the European Commission's **GitHub organization** at `github.com/esig/dss` and on the Commission's own code repository at `ec.europa.eu/digital-building-blocks/code/projects/ESIG`.
+
+=== Version History
+
+.EU DSS Major Version History
+[cols="2,2,6", options="header"]
+|===
+| Version | Date | Key Changes
+
+| 4.x
+| 2015-2017
+| First widely adopted version. PAdES, CAdES, XAdES support. Java 7/8.
+
+| 5.0
+| 2018
+| Major rewrite. Modular architecture (separate Maven modules). Java 8 minimum. Introduced pluggable token architecture.
+
+| 5.6
+| 2020
+| JAdES (JSON Advanced Electronic Signatures) support. ETSI EN 319 102-1 validation policy. Improved EU Trusted List parsing.
+
+| 5.10
+| 2022
+| Java 11 minimum. CSC API support for remote signing. Updated BouncyCastle dependency (1.70+).
+
+| 5.13
+| 2023
+| Improved PKCS#11 token support. PSD2 (Payment Services Directive) certificate validation. Updated CRL/OCSP handling.
+
+| 6.0
+| 2024
+| Java 17 minimum. Module system (JPMS) support. Restructured Maven coordinates (groupId changed from `eu.europa.ec.joinup.sd-dss` to `eu.europa.dss`). Updated {bc-version} dependency.
+
+| 6.2
+| 2025
+| Java 17+. Enhanced EUDI wallet integration. Improved TSL (Trusted List) refresh mechanisms. This is the current stable release as of early 2026.
+
+|===
+
+[NOTE]
+====
+The groupId change in version 6.0 is a common source of confusion.
+If your project depends on `eu.europa.ec.joinup.sd-dss:dss-pades`, that is DSS 5.x.
+If it depends on `eu.europa.dss:dss-pades`, that is DSS 6.x.
+The two groupIds are not interchangeable — do not mix modules from different major versions.
+====
+
+== Architecture
+
+=== Design Principles
+
+EU DSS is built around three core architectural principles:
+
+1. **Format independence**: The same signing and validation workflow works for PAdES (PDF), CAdES (CMS), XAdES (XML), and JAdES (JSON). The format-specific logic is encapsulated in format modules; the core signing flow is shared.
+
+2. **Pluggable token architecture**: The private key can come from anywhere — a PKCS#12 file, a PKCS#11 smart card, a Microsoft CNG keystore, a remote CSC API service, or a custom `SignatureTokenConnection` implementation. The signing flow does not need to know where the key is.
+
+3. **Policy-based validation**: Validation is driven by a configurable policy (an XML file) that defines which checks to perform and what their outcomes mean. You can use the default ETSI validation policy, or you can define your own — accepting certain non-conformities for your use case while rejecting others.
+
+=== Module Overview
+
+EU DSS is organized into Maven modules, each with a specific responsibility.
+You do not need all of them — include only what you use.
+
+.Core EU DSS Modules
+[cols="3,6", options="header"]
+|===
+| Module | Purpose
+
+| `dss-spi`
+| Service Provider Interface. Core abstractions: `DSSDocument`, `SignatureTokenConnection`, `CertificateToken`, `DSSPrivateKeyEntry`. All other modules depend on this.
+
+| `dss-model`
+| Data model classes: `SignatureLevel`, `DigestAlgorithm`, `EncryptionAlgorithm`, `TimestampType`, etc. Enumerations and DTOs used across the framework.
+
+| `dss-token`
+| Token implementations: `Pkcs12SignatureToken`, `Pkcs11SignatureToken`, `MSCAPISignatureToken`, `KeyStoreSignatureToken`. These connect to key material.
+
+| `dss-pades`
+| PAdES (PDF) signing and validation. Depends on Apache PDFBox internally. Produces and validates PAdES-B-B through B-LTA.
+
+| `dss-cades`
+| CAdES (CMS) signing and validation. Used internally by `dss-pades` for the CMS structures inside PDF signatures.
+
+| `dss-xades`
+| XAdES (XML) signing and validation. Not needed for PDF work unless you also handle XML signatures.
+
+| `dss-jades`
+| JAdES (JSON) signing and validation. The newest format support.
+
+| `dss-tsl-validation`
+| EU Trusted List (TSL/EUTL) parsing, validation, and caching. Downloads the trusted lists, verifies their signatures, and builds a trust store that other modules use for validation.
+
+| `dss-crl-parser`
+| CRL downloading and parsing.
+
+| `dss-ocsp-parser`
+| OCSP response fetching and parsing.
+
+| `dss-service`
+| Higher-level service classes: `OnlineOCSPSource`, `OnlineCRLSource`, `OnlineTSPSource`, `CommonsDataLoader` (HTTP client). Implements the data-fetching operations that validation requires.
+
+| `dss-document`
+| Document-level abstractions: `SignatureParameters`, `ToBeSigned`, `SignatureValue`, `SignedDocumentValidator`. The signing flow API lives here.
+
+| `dss-diagnostic-data-jaxb`
+| JAXB model for the diagnostic data XML that validation produces. Useful for detailed validation reports.
+
+| `dss-detailed-report-jaxb`
+| JAXB model for the detailed validation report. Human-readable validation results.
+
+| `dss-simple-report-jaxb`
+| JAXB model for the simple validation report. Summary-level pass/fail results.
+
+|===
+
+=== Maven Coordinates
+
+For a typical PAdES signing and validation project with EU DSS 6.2, you need:
+
+[source,xml]
+----
+<properties>
+    <dss.version>6.2</dss.version>
+</properties>
+
+<dependencies>
+    <!-- Core signing and validation for PAdES -->
+    <dependency>
+        <groupId>eu.europa.dss</groupId>
+        <artifactId>dss-pades</artifactId>
+        <version>${dss.version}</version>
+    </dependency>
+
+    <!-- Token support (PKCS#12, PKCS#11) -->
+    <dependency>
+        <groupId>eu.europa.dss</groupId>
+        <artifactId>dss-token</artifactId>
+        <version>${dss.version}</version>
+    </dependency>
+
+    <!-- Online sources for OCSP, CRL, TSA -->
+    <dependency>
+        <groupId>eu.europa.dss</groupId>
+        <artifactId>dss-service</artifactId>
+        <version>${dss.version}</version>
+    </dependency>
+
+    <!-- EU Trusted List validation -->
+    <dependency>
+        <groupId>eu.europa.dss</groupId>
+        <artifactId>dss-tsl-validation</artifactId>
+        <version>${dss.version}</version>
+    </dependency>
+</dependencies>
+----
+
+[TIP]
+====
+EU DSS depends on {pdfbox-version} internally for PDF operations.
+If your project also uses PDFBox directly, ensure version alignment — having two different PDFBox versions on the classpath causes unpredictable behavior.
+Check the DSS BOM (Bill of Materials) for the exact PDFBox version it expects.
+====
+
+== The Signing Flow: ToBeSigned / SignatureValue
+
+=== The Two-Phase Signing Model
+
+EU DSS uses a two-phase signing model that maps directly to the hash-signing model described in Chapter 22.
+This separation is what makes remote signing possible — the private key operation can happen anywhere, including on a remote HSM via the CSC API.
+
+**Phase 1: Compute what needs to be signed**
+
+[source,java]
+----
+// 1. Create the PAdES service
+PAdESService service = new PAdESService(certificateVerifier);
+
+// 2. Set the TSA source (for B-T and above)
+service.setTspSource(onlineTSPSource);
+
+// 3. Configure signature parameters
+PAdESSignatureParameters parameters = new PAdESSignatureParameters();
+parameters.setSignatureLevel(SignatureLevel.PAdES_BASELINE_T);
+parameters.setDigestAlgorithm(DigestAlgorithm.SHA256);
+parameters.setSigningCertificate(new CertificateToken(signingCert));
+parameters.setCertificateChain(certificateChainTokens);
+
+// 4. Get the data to be signed (the hash)
+DSSDocument toSignDocument = new InMemoryDocument(pdfBytes);
+ToBeSigned dataToSign = service.getDataToSign(
+        toSignDocument, parameters);
+----
+
+The `ToBeSigned` object contains the bytes that must be signed — specifically, the DER-encoded signed attributes of the CMS SignerInfo, exactly as described in Chapter 22's hash-signing flow.
+EU DSS has already computed the message digest over the PDF byte range, built the ESS-signing-certificate-v2 attribute, and assembled the signed attributes.
+
+**Phase 2: Sign the hash and finalize**
+
+[source,java]
+----
+// 5. Sign the hash (locally or remotely)
+//    This is where the private key is used
+SignatureValue signatureValue = signingToken.sign(
+        dataToSign, parameters.getDigestAlgorithm(),
+        privateKeyEntry);
+
+// 6. Finalize the signature — embed in PDF
+DSSDocument signedDocument = service.signDocument(
+        toSignDocument, parameters, signatureValue);
+
+// 7. Write the result
+signedDocument.writeTo(new FileOutputStream("signed.pdf"));
+----
+
+The beauty of this design: step 5 is the _only_ step that touches the private key.
+Everything else — PDF parsing, CMS construction, timestamp embedding, incremental save — is handled by EU DSS.
+If you want to use a remote signing service instead of a local key, you replace step 5 with a CSC API call and everything else stays the same.
+
+=== SignatureTokenConnection Implementations
+
+The `SignatureTokenConnection` interface abstracts access to the private key.
+EU DSS ships with several implementations:
+
+[source,java]
+----
+// PKCS#12 file (local keystore)
+Pkcs12SignatureToken token = new Pkcs12SignatureToken(
+        new FileInputStream("keystore.p12"),
+        new KeyStore.PasswordProtection("password".toCharArray()));
+List<DSSPrivateKeyEntry> keys = token.getKeys();
+DSSPrivateKeyEntry privateKey = keys.get(0);
+
+// PKCS#11 smart card / HSM
+Pkcs11SignatureToken pkcs11Token = new Pkcs11SignatureToken(
+        "/usr/lib/opensc-pkcs11.so",  // PKCS#11 library path
+        new KeyStore.PasswordProtection("pin".toCharArray()),
+        0);  // slot index
+List<DSSPrivateKeyEntry> smartCardKeys = pkcs11Token.getKeys();
+
+// Microsoft CNG (Windows certificate store)
+MSCAPISignatureToken mscapiToken = new MSCAPISignatureToken();
+List<DSSPrivateKeyEntry> windowsKeys = mscapiToken.getKeys();
+----
+
+For remote signing via CSC API, you implement `SignatureTokenConnection` with HTTP calls to the CSC endpoints.
+The `sign()` method sends the hash to `/signatures/signHash` and returns the signature value.
+
+== Complete PAdES-B-T Signing Example
+
+Here is a complete, working example that signs a PDF with PAdES-B-T using a PKCS#12 keystore and a TSA:
+
+[source,java]
+----
+import eu.europa.dss.cades.signature.CAdESService;
+import eu.europa.dss.enumerations.DigestAlgorithm;
+import eu.europa.dss.enumerations.SignatureLevel;
+import eu.europa.dss.model.DSSDocument;
+import eu.europa.dss.model.InMemoryDocument;
+import eu.europa.dss.model.SignatureValue;
+import eu.europa.dss.model.ToBeSigned;
+import eu.europa.dss.pades.PAdESSignatureParameters;
+import eu.europa.dss.pades.signature.PAdESService;
+import eu.europa.dss.service.http.commons.CommonsDataLoader;
+import eu.europa.dss.service.http.commons.OCSPDataLoader;
+import eu.europa.dss.service.ocsp.OnlineOCSPSource;
+import eu.europa.dss.service.crl.OnlineCRLSource;
+import eu.europa.dss.service.tsp.OnlineTSPSource;
+import eu.europa.dss.spi.x509.CertificateSource;
+import eu.europa.dss.spi.x509.CommonTrustedCertificateSource;
+import eu.europa.dss.token.DSSPrivateKeyEntry;
+import eu.europa.dss.token.Pkcs12SignatureToken;
+import eu.europa.dss.validation.CommonCertificateVerifier;
+
+/**
+ * Complete PAdES-B-T signing with EU DSS.
+ * This example uses a PKCS#12 keystore and a public TSA.
+ */
+public byte[] signWithEuDss(byte[] pdfBytes, String keystorePath,
+        String keystorePassword, String tsaUrl) throws Exception {
+
+    // 1. Open the PKCS#12 token
+    Pkcs12SignatureToken signingToken = new Pkcs12SignatureToken(
+            new FileInputStream(keystorePath),
+            new KeyStore.PasswordProtection(
+                    keystorePassword.toCharArray()));
+
+    // 2. Get the private key entry (first key in the keystore)
+    List<DSSPrivateKeyEntry> keys = signingToken.getKeys();
+    DSSPrivateKeyEntry privateKey = keys.get(0);
+
+    // 3. Configure the certificate verifier
+    //    (used during signing to validate the chain)
+    CommonCertificateVerifier certificateVerifier =
+            new CommonCertificateVerifier();
+
+    // OCSP source for online revocation checking
+    OnlineOCSPSource ocspSource = new OnlineOCSPSource();
+    ocspSource.setDataLoader(new OCSPDataLoader());
+    certificateVerifier.setOcspSource(ocspSource);
+
+    // CRL source as fallback
+    OnlineCRLSource crlSource = new OnlineCRLSource();
+    crlSource.setDataLoader(new CommonsDataLoader());
+    certificateVerifier.setCrlSource(crlSource);
+
+    // 4. Configure the TSA source
+    OnlineTSPSource tspSource = new OnlineTSPSource(tsaUrl);
+    tspSource.setDataLoader(new CommonsDataLoader());
+
+    // 5. Create the PAdES service
+    PAdESService padesService = new PAdESService(certificateVerifier);
+    padesService.setTspSource(tspSource);
+
+    // 6. Configure signature parameters
+    PAdESSignatureParameters parameters =
+            new PAdESSignatureParameters();
+    parameters.setSignatureLevel(SignatureLevel.PAdES_BASELINE_T);
+    parameters.setDigestAlgorithm(DigestAlgorithm.SHA256);
+    parameters.setSigningCertificate(
+            privateKey.getCertificate());
+    parameters.setCertificateChain(
+            privateKey.getCertificateChain());
+
+    // Optional: set visual signature parameters
+    // parameters.setSignatureImageParameters(...);
+
+    // 7. Phase 1: Get the data to be signed
+    DSSDocument toSignDocument = new InMemoryDocument(pdfBytes);
+    ToBeSigned dataToSign = padesService.getDataToSign(
+            toSignDocument, parameters);
+
+    // 8. Phase 2: Sign the hash
+    SignatureValue signatureValue = signingToken.sign(
+            dataToSign, parameters.getDigestAlgorithm(),
+            privateKey);
+
+    // 9. Finalize: embed signature in PDF
+    DSSDocument signedDocument = padesService.signDocument(
+            toSignDocument, parameters, signatureValue);
+
+    // 10. Extract the result
+    ByteArrayOutputStream result = new ByteArrayOutputStream();
+    signedDocument.writeTo(result);
+
+    log.info("PAdES-B-T signature created: {} bytes",
+            result.size());
+    return result.toByteArray();
+}
+----
+
+That is roughly 60 lines of code — including logging, comments, and error handling setup — to produce a fully compliant PAdES-B-T signature.
+Compare this to the hundreds of lines required to build the CMS structure manually with BouncyCastle (Chapter 12), and the value proposition of EU DSS becomes clear.
+
+== Extending Signatures
+
+One of EU DSS's most powerful features is **signature extension**: upgrading a signature's PAdES profile without re-signing.
+
+[source,java]
+----
+/**
+ * Extends a PAdES-B-B or B-T signature to PAdES-B-LTA.
+ * Fetches revocation data, builds the DSS, adds an archival timestamp.
+ */
+public byte[] extendToLta(byte[] signedPdfBytes,
+        String tsaUrl) throws Exception {
+
+    // 1. Set up the certificate verifier with online sources
+    CommonCertificateVerifier verifier =
+            new CommonCertificateVerifier();
+    verifier.setOcspSource(new OnlineOCSPSource());
+    verifier.setCrlSource(new OnlineCRLSource());
+
+    // 2. Add the EU Trusted List as a trust source
+    //    (required for validating qualified certificates)
+    // TrustedListsCertificateSource is populated by the
+    // TSL loading job — see Spring Boot integration below
+
+    // 3. Create the PAdES service with a TSA
+    PAdESService service = new PAdESService(verifier);
+    OnlineTSPSource tspSource = new OnlineTSPSource(tsaUrl);
+    service.setTspSource(tspSource);
+
+    // 4. Configure extension parameters
+    PAdESSignatureParameters extensionParams =
+            new PAdESSignatureParameters();
+    extensionParams.setSignatureLevel(
+            SignatureLevel.PAdES_BASELINE_LTA);
+
+    // 5. Extend the document
+    DSSDocument signedDoc =
+            new InMemoryDocument(signedPdfBytes);
+    DSSDocument extendedDoc =
+            service.extendDocument(signedDoc, extensionParams);
+
+    ByteArrayOutputStream result = new ByteArrayOutputStream();
+    extendedDoc.writeTo(result);
+
+    log.info("Signature extended to PAdES-B-LTA: {} bytes",
+            result.size());
+    return result.toByteArray();
+}
+----
+
+The `extendDocument` method handles all the complexity described in Chapter 17 (PAdES Profiles) and Chapter 18 (Timestamps and LTV):
+
+1. Parses the existing signature to determine its current level
+2. Fetches OCSP responses and CRLs for every certificate in the chain
+3. Builds the DSS dictionary with all validation data
+4. Requests an archival timestamp from the TSA
+5. Saves everything as an incremental update
+
+This is the operation you would run as a scheduled job to keep archived documents verifiable indefinitely.
+
+== Validation with EU DSS
+
+=== Basic Validation
+
+Validation is where EU DSS provides the most value.
+Building a correct signature validator from scratch requires implementing the entire ETSI EN 319 102-1 validation algorithm — certificate chain building, revocation checking at the correct point in time, timestamp validation, DSS consumption, policy evaluation.
+EU DSS does all of this:
+
+[source,java]
+----
+/**
+ * Validates all signatures in a signed PDF.
+ * Returns a structured validation report.
+ */
+public Reports validateSignatures(byte[] signedPdfBytes)
+        throws Exception {
+
+    // 1. Set up the certificate verifier
+    CommonCertificateVerifier verifier =
+            new CommonCertificateVerifier();
+    verifier.setOcspSource(new OnlineOCSPSource());
+    verifier.setCrlSource(new OnlineCRLSource());
+
+    // For qualified certificate validation, add the EUTL:
+    // verifier.addTrustedCertSources(trustedListSource);
+
+    // 2. Create a validator for the signed document
+    DSSDocument document = new InMemoryDocument(signedPdfBytes);
+    SignedDocumentValidator validator =
+            SignedDocumentValidator.fromDocument(document);
+    validator.setCertificateVerifier(verifier);
+
+    // 3. Validate — this runs the full ETSI EN 319 102-1
+    //    validation algorithm
+    Reports reports = validator.validateDocument();
+
+    // 4. Access the results
+    SimpleReport simpleReport = reports.getSimpleReport();
+    for (String sigId : simpleReport.getSignatureIdList()) {
+        log.info("Signature {}: indication={}, subIndication={}",
+                sigId,
+                simpleReport.getIndication(sigId),
+                simpleReport.getSubIndication(sigId));
+        log.info("  Signed by: {}",
+                simpleReport.getSignedBy(sigId));
+        log.info("  Signing time: {}",
+                simpleReport.getSigningTime(sigId));
+        log.info("  Signature level: {}",
+                simpleReport.getSignatureFormat(sigId));
+    }
+
+    return reports;
+}
+----
+
+=== Validation Reports
+
+EU DSS produces three levels of validation reports:
+
+1. **Simple Report**: A summary of each signature's validity — pass/fail, signer name, signing time, signature level. Suitable for end-user display.
+
+2. **Detailed Report**: A structured breakdown of every validation check — certificate chain validation, revocation checking, timestamp validation, policy conformance. Each check has an indication (PASSED, FAILED, INDETERMINATE) and a sub-indication explaining why.
+
+3. **Diagnostic Data**: The raw data collected during validation — all certificates encountered, all revocation data fetched, all timestamps found. This is the lowest level and is useful for debugging validation failures.
+
+[source,java]
+----
+// Accessing the detailed report
+DetailedReport detailedReport = reports.getDetailedReport();
+
+// Get the basic building blocks conclusion
+//  (certificate chain and revocation status)
+for (String sigId : detailedReport.getSignatureIds()) {
+    Indication bbsIndication =
+            detailedReport.getBasicBuildingBlocksIndication(sigId);
+    SubIndication bbsSubIndication =
+            detailedReport.getBasicBuildingBlocksSubIndication(sigId);
+
+    log.info("Signature {} basic building blocks: {} / {}",
+            sigId, bbsIndication, bbsSubIndication);
+
+    // Get timestamp validation results
+    List<String> tsIds =
+            detailedReport.getTimestampIds(sigId);
+    for (String tsId : tsIds) {
+        log.info("  Timestamp {}: {}",
+                tsId,
+                detailedReport.getTimestampIndication(tsId));
+    }
+}
+----
+
+=== EU Trusted List Integration
+
+For validating qualified certificates, EU DSS can load and parse the EU Trusted List (EUTL):
+
+[source,java]
+----
+/**
+ * Configures EU DSS to validate against the EU Trusted List.
+ * The EUTL is downloaded, its signature verified, and the qualified
+ * trust service providers are extracted as trusted certificate sources.
+ */
+public TrustedListsCertificateSource loadEuTrustedList()
+        throws Exception {
+
+    TrustedListsCertificateSource trustedListSource =
+            new TrustedListsCertificateSource();
+
+    // The LOTL (List of the Lists) is the entry point
+    LOTLSource lotlSource = new LOTLSource();
+    lotlSource.setUrl(
+            "https://ec.europa.eu/tools/lotl/eu-lotl.xml");
+
+    // The LOTL is signed — we need the signing certificate
+    // to verify it (bootstrapping problem — this cert is
+    // distributed as part of the EU DSS distribution)
+    lotlSource.setCertificateSource(
+            officialJournalCertificateSource());
+
+    // Configure the TSL validation job
+    TLValidationJob tlValidationJob = new TLValidationJob();
+    tlValidationJob.setListOfTrustedListSources(lotlSource);
+    tlValidationJob.setTrustedListCertificateSource(
+            trustedListSource);
+
+    // Use a caching data loader to avoid re-downloading
+    // the entire EUTL on every validation
+    FileCacheDataLoader cacheDataLoader =
+            new FileCacheDataLoader();
+    cacheDataLoader.setCacheExpirationTime(
+            24 * 60 * 60 * 1000L); // 24 hours
+    cacheDataLoader.setFileCacheDirectory(
+            new File("/tmp/dss-tl-cache"));
+    tlValidationJob.setOnlineDataLoader(cacheDataLoader);
+
+    // Run the initial load
+    tlValidationJob.onlineRefresh();
+
+    log.info("EU Trusted List loaded: {} trusted certificates",
+            trustedListSource.getNumberOfTrustedCertificates());
+
+    return trustedListSource;
+}
+----
+
+[WARNING]
+====
+The EU Trusted List is large — the LOTL (List of the Lists) references 27+ national trusted lists, each containing dozens of trust service providers and their certificates.
+The initial download and parsing can take 30-60 seconds.
+
+In production:
+- Load the EUTL at application startup, not on the first validation request
+- Cache the downloaded lists on disk (use `FileCacheDataLoader`)
+- Refresh periodically (every 24 hours is typical) rather than on every request
+- If the EUTL is unreachable, fall back to the cached version
+
+Never skip EUTL validation — if you validate qualified signatures without checking the EUTL, you are accepting certificates that may not be qualified.
+====
+
+== Spring Boot Integration
+
+EU DSS provides a Spring Boot starter module that auto-configures most of the framework:
+
+[source,xml]
+----
+<dependency>
+    <groupId>eu.europa.dss</groupId>
+    <artifactId>dss-spring-boot-starter</artifactId>
+    <version>${dss.version}</version>
+</dependency>
+----
+
+=== Configuration Properties
+
+The starter exposes configuration through `application.properties`:
+
+[source,properties]
+----
+# TSA configuration
+dss.tsp.url=http://timestamp.digicert.com
+dss.tsp.digest-algorithm=SHA256
+
+# EU Trusted List
+dss.lotl.url=https://ec.europa.eu/tools/lotl/eu-lotl.xml
+dss.lotl.cache-directory=/var/cache/dss/tl
+dss.lotl.cache-expiration=86400000
+
+# OCSP/CRL timeouts
+dss.ocsp.connect-timeout=5000
+dss.ocsp.read-timeout=10000
+dss.crl.connect-timeout=5000
+dss.crl.read-timeout=30000
+
+# Proxy (if behind a corporate proxy)
+dss.proxy.https.host=proxy.example.com
+dss.proxy.https.port=8443
+----
+
+=== Auto-Configured Beans
+
+The starter auto-configures the following Spring beans:
+
+- `CommonCertificateVerifier` — pre-configured with OCSP and CRL sources
+- `OnlineTSPSource` — configured from `dss.tsp.url`
+- `OnlineOCSPSource` and `OnlineCRLSource` — with timeout configuration
+- `TrustedListsCertificateSource` — loaded from the EUTL on startup
+- `TLValidationJob` — scheduled to refresh the EUTL periodically
+- `CommonsDataLoader` — HTTP client with proxy and timeout support
+
+You can inject these directly into your services:
+
+[source,java]
+----
+@Service
+@Slf4j
+public class SignatureService {
+
+    private final CommonCertificateVerifier certificateVerifier;
+    private final OnlineTSPSource tspSource;
+
+    public SignatureService(
+            CommonCertificateVerifier certificateVerifier,
+            OnlineTSPSource tspSource) {
+        this.certificateVerifier = certificateVerifier;
+        this.tspSource = tspSource;
+    }
+
+    public byte[] signPdf(byte[] pdfBytes,
+            SignatureTokenConnection token,
+            DSSPrivateKeyEntry keyEntry) throws Exception {
+
+        PAdESService service =
+                new PAdESService(certificateVerifier);
+        service.setTspSource(tspSource);
+
+        PAdESSignatureParameters params =
+                new PAdESSignatureParameters();
+        params.setSignatureLevel(
+                SignatureLevel.PAdES_BASELINE_T);
+        params.setDigestAlgorithm(DigestAlgorithm.SHA256);
+        params.setSigningCertificate(
+                keyEntry.getCertificate());
+        params.setCertificateChain(
+                keyEntry.getCertificateChain());
+
+        DSSDocument doc = new InMemoryDocument(pdfBytes);
+        ToBeSigned tbs = service.getDataToSign(doc, params);
+        SignatureValue sv = token.sign(
+                tbs, params.getDigestAlgorithm(), keyEntry);
+        DSSDocument signed =
+                service.signDocument(doc, params, sv);
+
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        signed.writeTo(out);
+        return out.toByteArray();
+    }
+}
+----
+
+== EU DSS vs. Rolling Your Own
+
+=== When to Use EU DSS
+
+Use EU DSS when:
+
+- **You need eIDAS compliance**: EU DSS is the reference implementation. If your validation disagrees with EU DSS, regulators will assume your code is wrong, not EU DSS.
+- **You validate qualified signatures**: EUTL parsing, QCStatements interpretation, SCAL assessment — EU DSS handles all of this. Implementing it correctly from scratch is months of work.
+- **You need multiple signature formats**: If your application handles PAdES, CAdES, and XAdES, EU DSS's format-independent architecture saves enormous effort.
+- **You need long-term maintenance**: EU DSS is actively maintained with a clear release cadence. ETSI standards evolve, new algorithms are added, old ones deprecated. EU DSS tracks these changes.
+
+=== When to Consider Alternatives
+
+EU DSS may not be the right choice when:
+
+- **You need total control over CMS construction**: EU DSS abstracts away the CMS building process. If your use case requires non-standard CMS attributes, custom signature dictionary entries, or unusual byte range handling, EU DSS may fight you. In these cases, using BouncyCastle directly (as shown throughout this book) gives you full control.
+- **You have strict dependency constraints**: EU DSS brings a significant dependency tree — PDFBox, BouncyCastle, Apache HttpClient, JAXB, SLF4J, and dozens of transitive dependencies. If your project has strict dependency policies, the EU DSS footprint may be too large.
+- **You only create signatures, never validate**: If you only sign PDFs and never validate them, EU DSS brings a lot of validation machinery you do not need. A leaner approach with PDFBox + BouncyCastle may be more appropriate.
+- **You need to support PDF features beyond signing**: EU DSS is focused on digital signatures. It does not help with form filling, content editing, font embedding, or other PDF operations. You will still need PDFBox or another PDF library for those.
+
+=== The Hybrid Approach
+
+In practice, many projects use a hybrid approach:
+
+- **EU DSS for validation**: Use `SignedDocumentValidator` to validate incoming signed PDFs. This gives you correct ETSI EN 319 102-1 validation with EUTL support.
+- **PDFBox + BouncyCastle for signing**: Use PDFBox for PDF manipulation and BouncyCastle for CMS construction. This gives you full control over the signing process while still producing standard-compliant signatures.
+- **EU DSS for extension**: Use `PAdESService.extendDocument()` to upgrade signatures from B-B/B-T to B-LTA. This is complex to implement manually (DSS dictionary construction, archival timestamp embedding) and EU DSS does it reliably.
+
+This hybrid model gives you the best of both worlds: full control where you need it, and battle-tested reference code where correctness is paramount.
+
+[TIP]
+====
+If you adopt the hybrid approach, be mindful of PDFBox version alignment.
+EU DSS uses a specific PDFBox version internally.
+If your direct PDFBox dependency uses a different version, classloader conflicts can cause subtle, hard-to-diagnose bugs — wrong method signatures, missing classes, or (worst case) silent data corruption.
+Always align your PDFBox version with the one in EU DSS's dependency tree.
+====
+
+== Common Pitfalls
+
+=== 1. Forgetting to Set the Certificate Chain
+
+[source,java]
+----
+// WRONG — only sets the signing certificate, not the chain
+parameters.setSigningCertificate(keyEntry.getCertificate());
+// Missing: parameters.setCertificateChain(...)
+
+// RIGHT — set both
+parameters.setSigningCertificate(keyEntry.getCertificate());
+parameters.setCertificateChain(keyEntry.getCertificateChain());
+----
+
+Without the certificate chain, the CMS `certificates` collection will contain only the signer's certificate.
+Validators that do not have access to the intermediate certificates (from AIA or a local store) will fail to build the chain.
+
+=== 2. Not Configuring a Certificate Verifier
+
+[source,java]
+----
+// WRONG — empty verifier, cannot check revocation
+CommonCertificateVerifier verifier =
+        new CommonCertificateVerifier();
+// No OCSP source, no CRL source set
+
+// RIGHT — configure revocation sources
+CommonCertificateVerifier verifier =
+        new CommonCertificateVerifier();
+verifier.setOcspSource(new OnlineOCSPSource());
+verifier.setCrlSource(new OnlineCRLSource());
+----
+
+An unconfigured verifier cannot check certificate revocation.
+EU DSS will still produce a signature, but validation will report INDETERMINATE for revocation checking.
+
+=== 3. Underestimating /Contents Size
+
+When EU DSS constructs the PDF signature, it must pre-allocate space for the `/Contents` hex string.
+If the allocated space is too small, the CMS signature (with certificates, timestamps, etc.) will not fit.
+EU DSS handles this internally with reasonable defaults, but if you are building very large certificate chains or using multiple timestamps, you may need to increase the allocation:
+
+[source,java]
+----
+PAdESSignatureParameters params =
+        new PAdESSignatureParameters();
+params.setContentSize(32768);  // 32 KB for /Contents
+// Default is typically 16384 (16 KB)
+----
+
+=== 4. Blocking the EUTL Load on First Request
+
+The EUTL download takes 30-60 seconds.
+If you trigger it lazily (on the first validation request), your first user will experience a 30-second delay.
+Always load the EUTL eagerly at application startup:
+
+[source,java]
+----
+@PostConstruct
+public void initTrustedLists() {
+    log.info("Loading EU Trusted List — this may take 30-60 seconds");
+    tlValidationJob.onlineRefresh();
+    log.info("EU Trusted List loaded: {} certificates",
+            trustedListSource.getNumberOfTrustedCertificates());
+}
+----
+
+=== 5. Ignoring Validation Sub-Indications
+
+A common mistake is checking only the top-level `Indication` (TOTAL_PASSED, TOTAL_FAILED, INDETERMINATE) and ignoring the `SubIndication`.
+The sub-indication tells you _why_ the validation reached that conclusion:
+
+- `NO_SIGNING_CERTIFICATE_FOUND` — the signer's certificate is missing
+- `REVOKED` — a certificate in the chain has been revoked
+- `EXPIRED` — a certificate has expired and there is no proof that signing occurred before expiry
+- `TRY_LATER` — revocation data could not be fetched (OCSP/CRL unreachable)
+- `CRYPTO_CONSTRAINTS_FAILURE` — weak algorithms detected (e.g., SHA-1)
+- `HASH_FAILURE` — the message digest does not match (document has been modified)
+
+Always log the sub-indication alongside the indication for debugging.
+
+== Key Takeaways
+
+- **EU DSS** is the European Commission's open-source reference implementation for digital signature creation, extension, and validation — LGPL 2.1 licensed, actively maintained
+- The **two-phase signing model** (ToBeSigned / SignatureValue) cleanly separates CMS construction from the private key operation, enabling local and remote signing through the same API
+- **SignatureTokenConnection** abstracts key access: PKCS#12, PKCS#11, MS CAPI, or custom (CSC API) — swap the token, keep the signing flow
+- EU DSS handles **PAdES-B-B through B-LTA** creation and the full ETSI EN 319 102-1 **validation algorithm**, including EUTL lookup for qualified certificate determination
+- **Signature extension** (`extendDocument`) upgrades a signature's PAdES profile without re-signing — the most practical feature for archival workflows
+- The **Spring Boot starter** auto-configures certificate verifiers, TSA sources, and EUTL loading — production-ready with minimal configuration
+- **Validation reports** come in three levels: Simple (pass/fail), Detailed (per-check breakdown), Diagnostic (raw collected data)
+- The **EUTL** must be loaded at startup and cached on disk — lazy loading causes unacceptable latency, missing EUTL data causes incorrect qualified status determination
+- **Hybrid approach** is common in practice: EU DSS for validation and extension, PDFBox + BouncyCastle for signing with full CMS control
+- Always align **PDFBox versions** between your direct dependency and EU DSS's transitive dependency — version mismatches cause classloader conflicts

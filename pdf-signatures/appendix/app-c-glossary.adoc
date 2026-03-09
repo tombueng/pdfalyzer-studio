@@ -1,0 +1,203 @@
+[appendix]
+= Glossary & Spec References
+
+[.lead]
+This appendix collects every acronym, term, and specification referenced throughout the book into two lookup tables.
+When you encounter an unfamiliar term in a chapter, this is the place to find a concise definition.
+When you need the precise specification for a standard we reference, the spec table gives you the document number, title, and where to find it.
+
+== Glossary
+
+[cols="2,6", options="header"]
+|===
+| Term | Definition
+
+| AATL
+| **Adobe Approved Trust List.** Adobe's curated list of root CA certificates trusted by Acrobat and Reader for signature validation. CAs must apply and meet Adobe's requirements to be listed. If a signer's certificate does not chain to an AATL root, Acrobat shows a warning even if the signature is cryptographically valid.
+
+| AcroForm
+| **Interactive Form Dictionary.** The PDF structure (`/AcroForm` in the document catalog) that contains all form fields, including signature fields. Defined in {iso32000-2} Section 12.7.
+
+| AIA
+| **Authority Information Access.** An X.509 v3 certificate extension ({rfc5280} Section 4.2.2.1) that provides URLs for the OCSP responder and the issuer's certificate. Used to fetch missing intermediate certificates during chain building.
+
+| ASN.1
+| **Abstract Syntax Notation One.** A standard for describing data structures used in X.509 certificates, CMS, OCSP, and TSP. Structures are encoded using DER (Distinguished Encoding Rules) for cryptographic applications.
+
+| ByteRange
+| The `/ByteRange` array in a PDF signature dictionary. Specifies which bytes of the PDF file are covered by the signature. Always four integers: `[offset1 length1 offset2 length2]`. See {iso32000-2} Section 12.8.1.
+
+| CA
+| **Certificate Authority.** An entity that issues X.509 certificates. CAs form a hierarchy: root CAs are self-signed and explicitly trusted; intermediate CAs are signed by a root or another intermediate.
+
+| CAdES
+| **CMS Advanced Electronic Signatures.** ETSI standard (EN 319 122) defining enhanced CMS signature profiles for long-term validity and legal compliance. PAdES builds on CAdES for the CMS portion of PDF signatures.
+
+| CMS
+| **Cryptographic Message Syntax.** The standard ({rfc5652}) for signing and encrypting data. PDF signatures use CMS `SignedData` as the cryptographic payload inside the `/Contents` value. Successor to PKCS#7.
+
+| CRL
+| **Certificate Revocation List.** A signed list published by a CA containing the serial numbers of revoked certificates. Defined in {rfc5280} Section 5. Checked during certificate chain validation.
+
+| DER
+| **Distinguished Encoding Rules.** A deterministic binary encoding of ASN.1 structures. All cryptographic ASN.1 (certificates, CMS, OCSP, TSP) uses DER encoding.
+
+| DSS
+| **Document Security Store.** A PDF dictionary (`/DSS` in the document catalog) defined in {iso32000-2} Section 12.8.4.3 that stores certificates, CRLs, and OCSP responses needed for offline (LTV) validation.
+
+| ECDSA
+| **Elliptic Curve Digital Signature Algorithm.** A signature algorithm based on elliptic curve cryptography. Uses smaller keys than RSA for equivalent security (e.g., 256-bit ECDSA approximates 3072-bit RSA).
+
+| eIDAS
+| **Electronic Identification, Authentication, and Trust Services.** EU Regulation (No 910/2014) that establishes a legal framework for electronic signatures, seals, and timestamps across EU member states. Defines three signature levels: simple, advanced, and qualified.
+
+| ESS
+| **Extended Security Services.** Defined in RFC 2634 and RFC 5035. The `ESS-signing-certificate-v2` attribute is required in PAdES signatures to bind the CMS signature to a specific signer certificate.
+
+| ETSI
+| **European Telecommunications Standards Institute.** The standards body that publishes PAdES (EN 319 142), CAdES (EN 319 122), and the validation standards (TS 119 102) referenced by the eIDAS regulation.
+
+| EUTL
+| **European Union Trusted List.** The official registry of Qualified Trust Service Providers (QTSPs) maintained by EU member states. Analogous to Adobe's AATL but for the EU regulatory framework.
+
+| HSM
+| **Hardware Security Module.** A physical device that stores private keys and performs cryptographic operations. Used in production signing environments to protect key material from extraction.
+
+| Incremental Update
+| A mechanism defined in {iso32000-2} Section 7.5.6 that appends new or modified objects to the end of a PDF file without rewriting the entire file. Every PDF signature is applied via an incremental update.
+
+| LTV
+| **Long-Term Validation.** The practice of embedding all data needed for signature validation (certificates, CRLs, OCSP responses) within the PDF itself, so the signature can be validated offline, indefinitely, without contacting external servers.
+
+| MDP
+| **Modification Detection and Prevention.** A PDF mechanism ({iso32000-2} Section 12.8.2.2) that specifies what changes are permitted after a certification signature is applied. Three permission levels exist (P=1, P=2, P=3).
+
+| OCSP
+| **Online Certificate Status Protocol.** A protocol ({rfc6960}) for checking certificate revocation status in real time. An OCSP responder returns `good`, `revoked`, or `unknown` for a given certificate serial number.
+
+| OID
+| **Object Identifier.** A globally unique dotted-decimal number (e.g., `1.2.840.113549.1.7.2`) that identifies algorithms, attributes, extensions, and other standardized objects in ASN.1 structures.
+
+| PAdES
+| **PDF Advanced Electronic Signatures.** ETSI standard (EN 319 142) that defines constrained profiles for PDF signatures to meet EU legal requirements. Four baseline profiles: B-B, B-T, B-LT, B-LTA.
+
+| PKCS#7
+| **Public-Key Cryptography Standards #7.** The predecessor to CMS. PDF signatures historically used the term "PKCS#7" (and the SubFilter `adbe.pkcs7.detached`), though modern implementations use CMS. The terms are often used interchangeably.
+
+| PKCS#12
+| **Public-Key Cryptography Standards #12.** A file format for storing private keys and certificates together, typically with `.p12` or `.pfx` extension. Protected by a password.
+
+| PKIX
+| **Public-Key Infrastructure (X.509).** The set of standards and protocols for managing X.509 certificates and building certificate chains. In Java, `CertPathBuilder` and `CertPathValidator` implement the PKIX algorithm.
+
+| QTSP
+| **Qualified Trust Service Provider.** Under eIDAS, a trust service provider that has been granted qualified status by an EU member state's supervisory body. Only QTSPs can issue qualified certificates and qualified timestamps.
+
+| RSA
+| **Rivest-Shamir-Adleman.** The most widely used public-key algorithm for digital signatures. Common key sizes for PDF signatures are 2048 and 4096 bits.
+
+| SHA-256
+| **Secure Hash Algorithm, 256-bit.** The recommended minimum hash algorithm for new PDF signatures. Produces a 32-byte (256-bit) digest. Part of the SHA-2 family.
+
+| SubFilter
+| The `/SubFilter` entry in a PDF signature dictionary that specifies the CMS encoding format. Values: `adbe.pkcs7.detached` (classic), `ETSI.CAdES.detached` (PAdES), `adbe.pkcs7.sha1` (deprecated), `adbe.x509.rsa_sha1` (deprecated).
+
+| TSA
+| **Timestamp Authority.** A trusted server that issues RFC 3161 timestamp tokens. The timestamp token proves that specific data existed at a specific point in time.
+
+| TSP
+| **Time-Stamp Protocol.** The protocol defined in {rfc3161} for requesting and receiving timestamp tokens from a TSA.
+
+| TST
+| **Time-Stamp Token.** The CMS `SignedData` structure returned by a TSA containing a `TSTInfo` with the timestamp time and the hash of the timestamped data.
+
+| VRI
+| **Validation Related Information.** A sub-dictionary of the DSS that groups certificates, CRLs, and OCSP responses for a specific signature. Keyed by the SHA-1 hash of the signature value.
+
+| X.509
+| The ITU-T standard for public-key certificates. Version 3 (X.509 v3) is used universally in PDF signatures. Defined in {rfc5280}.
+
+| XAdES
+| **XML Advanced Electronic Signatures.** ETSI standard (EN 319 132) for XML-based signatures. Not directly relevant to PDF signatures, but part of the same eIDAS framework as PAdES and CAdES.
+
+|===
+
+== Specification Reference Table
+
+.Standards and specifications referenced in this book
+[cols="2,4,3", options="header"]
+|===
+| Identifier | Title | Access
+
+| ISO 32000-2:2020
+| Document management -- Portable document format -- Part 2: PDF 2.0
+| https://www.iso.org/standard/75839.html (paid) or Adobe's published PDF Reference
+
+| RFC 5652
+| Cryptographic Message Syntax (CMS)
+| https://www.rfc-editor.org/rfc/rfc5652
+
+| RFC 5280
+| Internet X.509 Public Key Infrastructure Certificate and CRL Profile
+| https://www.rfc-editor.org/rfc/rfc5280
+
+| RFC 3161
+| Internet X.509 Public Key Infrastructure Time-Stamp Protocol (TSP)
+| https://www.rfc-editor.org/rfc/rfc3161
+
+| RFC 6960
+| X.509 Internet Public Key Infrastructure Online Certificate Status Protocol - OCSP
+| https://www.rfc-editor.org/rfc/rfc6960
+
+| RFC 2634
+| Enhanced Security Services (ESS) for S/MIME
+| https://www.rfc-editor.org/rfc/rfc2634
+
+| RFC 5035
+| Enhanced Security Services (ESS) Update: Adding CertID Algorithm Agility
+| https://www.rfc-editor.org/rfc/rfc5035
+
+| RFC 4055
+| Additional Algorithms and Identifiers for RSA Cryptography with SHA-256, SHA-384, and SHA-512
+| https://www.rfc-editor.org/rfc/rfc4055
+
+| ETSI EN 319 142-1
+| PAdES: Building blocks and PAdES baseline signatures
+| https://www.etsi.org/deliver/etsi_en/319100_319199/31914201/
+
+| ETSI EN 319 142-2
+| PAdES: Additional PAdES signatures profiles
+| https://www.etsi.org/deliver/etsi_en/319100_319199/31914202/
+
+| ETSI EN 319 122-1
+| CAdES: Building blocks and CAdES baseline signatures
+| https://www.etsi.org/deliver/etsi_en/319100_319199/31912201/
+
+| ETSI TS 119 102-1
+| Electronic Signatures and Infrastructures: Procedures for Creation and Validation
+| https://www.etsi.org/deliver/etsi_ts/119100_119199/11910201/
+
+| ETSI TS 119 102-2
+| Electronic Signatures and Infrastructures: Signature Validation Report
+| https://www.etsi.org/deliver/etsi_ts/119100_119199/11910202/
+
+| EU Regulation 910/2014
+| eIDAS: Electronic Identification, Authentication, and Trust Services
+| https://eur-lex.europa.eu/eli/reg/2014/910/oj
+
+| EU Regulation 2024/1183
+| eIDAS 2.0: Amending Regulation 910/2014 (European Digital Identity Framework)
+| https://eur-lex.europa.eu/eli/reg/2024/1183/oj
+
+| Adobe AATL
+| Adobe Approved Trust List -- Technical Requirements
+| https://helpx.adobe.com/acrobat/kb/approved-trust-list1.html
+
+|===
+
+[TIP]
+====
+The RFCs are freely available and are the definitive reference for CMS, X.509, OCSP, and TSP.
+The ETSI standards are available free of charge from ETSI's website after registration.
+ISO 32000-2 is a paid standard, but much of the PDF signature specification is reproduced (with commentary) in this book and in Adobe's freely published PDF Reference documents.
+====

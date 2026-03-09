@@ -1,0 +1,792 @@
+[appendix]
+= Complete Code Listings
+
+[.lead]
+This appendix collects the complete, compilable source code for the major classes developed throughout Parts 5 and 6.
+Each listing is self-contained — you can copy it into your project, adjust the package name, and compile.
+All code targets Java {java-version}, Apache PDFBox {pdfbox-version}, and BouncyCastle {bc-version}.
+
+== SigningService: Complete PDF Signing Implementation
+
+This is the full signing service from Chapters 29 and 30, consolidated into a single class.
+It handles both `adbe.pkcs7.detached` and `ETSI.CAdES.detached` signatures, with optional RFC 3161 timestamps.
+
+[source,java]
+----
+package io.pdfalyzer.signing;
+
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.security.MessageDigest;
+import java.security.PrivateKey;
+import java.security.cert.Certificate;
+import java.security.cert.X509Certificate;
+import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.List;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.interactive.digitalsignature.PDSignature;
+import org.apache.pdfbox.pdmodel.interactive.digitalsignature.SignatureInterface;
+import org.bouncycastle.asn1.ASN1ObjectIdentifier;
+import org.bouncycastle.asn1.DERSet;
+import org.bouncycastle.asn1.cms.Attribute;
+import org.bouncycastle.asn1.cms.AttributeTable;
+import org.bouncycastle.asn1.cms.CMSAttributes;
+import org.bouncycastle.asn1.ess.ESSCertIDv2;
+import org.bouncycastle.asn1.ess.SigningCertificateV2;
+import org.bouncycastle.asn1.nist.NISTObjectIdentifiers;
+import org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers;
+import org.bouncycastle.asn1.x509.AlgorithmIdentifier;
+import org.bouncycastle.cert.jcajce.JcaCertStore;
+import org.bouncycastle.cert.jcajce.JcaX509CertificateHolder;
+import org.bouncycastle.cms.CMSProcessableByteArray;
+import org.bouncycastle.cms.CMSSignedData;
+import org.bouncycastle.cms.CMSSignedDataGenerator;
+import org.bouncycastle.cms.DefaultSignedAttributeTableGenerator;
+import org.bouncycastle.cms.SignerInfoGenerator;
+import org.bouncycastle.cms.SignerInfoGeneratorBuilder;
+import org.bouncycastle.cms.jcajce.JcaSignerInfoGeneratorBuilder;
+import org.bouncycastle.operator.ContentSigner;
+import org.bouncycastle.operator.DigestCalculatorProvider;
+import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
+import org.bouncycastle.operator.jcajce.JcaDigestCalculatorProviderBuilder;
+import org.bouncycastle.tsp.TSPAlgorithms;
+import org.bouncycastle.tsp.TimeStampRequest;
+import org.bouncycastle.tsp.TimeStampRequestGenerator;
+import org.bouncycastle.tsp.TimeStampResponse;
+import org.bouncycastle.tsp.TimeStampToken;
+
+/**
+ * Complete PDF signing service.
+ * Supports PKCS#7 detached and PAdES CAdES-detached signatures
+ * with optional RFC 3161 timestamps.
+ */
+@Slf4j
+@RequiredArgsConstructor
+public class SigningService {
+
+    private final PrivateKey privateKey;
+    private final X509Certificate[] certificateChain;
+    private final String tsaUrl; // null if no timestamp desired
+
+    /**
+     * Sign a PDF document and return the signed bytes.
+     *
+     * @param pdfBytes    the unsigned PDF
+     * @param subFilter   "adbe.pkcs7.detached" or "ETSI.CAdES.detached"
+     * @param name        signer name (optional)
+     * @param reason      signing reason (optional)
+     * @param location    signing location (optional)
+     * @return the signed PDF bytes
+     */
+    public byte[] sign(byte[] pdfBytes, String subFilter,
+            String name, String reason, String location)
+            throws Exception {
+
+        try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+            PDSignature pdSig = new PDSignature();
+            pdSig.setFilter(PDSignature.FILTER_ADOBE_PPKLITE);
+            pdSig.setSubFilter(COSName.getPDFName(subFilter));
+            if (name != null) pdSig.setName(name);
+            if (reason != null) pdSig.setReason(reason);
+            if (location != null) pdSig.setLocation(location);
+            pdSig.setSignDate(Calendar.getInstance());
+
+            SignatureInterface sigInterface = content -> {
+                byte[] data = content.readAllBytes();
+                return buildCmsSignature(data, subFilter);
+            };
+
+            doc.addSignature(pdSig, sigInterface);
+
+            ByteArrayOutputStream result = new ByteArrayOutputStream();
+            doc.saveIncremental(result);
+
+            log.info("PDF signed successfully — {} bytes, SubFilter={}",
+                    result.size(), subFilter);
+            return result.toByteArray();
+        }
+    }
+
+    /**
+     * Build the CMS SignedData for the given content bytes.
+     */
+    private byte[] buildCmsSignature(byte[] content, String subFilter)
+            throws Exception {
+
+        // Digest the content
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(content);
+
+        // Build the CMS generator
+        CMSSignedDataGenerator gen = new CMSSignedDataGenerator();
+
+        DigestCalculatorProvider dcProv =
+                new JcaDigestCalculatorProviderBuilder()
+                        .setProvider("BC").build();
+
+        ContentSigner signer = new JcaContentSignerBuilder(
+                "SHA256withRSA").setProvider("BC").build(privateKey);
+
+        JcaSignerInfoGeneratorBuilder signerBuilder =
+                new JcaSignerInfoGeneratorBuilder(dcProv);
+
+        // For PAdES: add ESS-signing-certificate-v2
+        if ("ETSI.CAdES.detached".equals(subFilter)) {
+            byte[] certHash = MessageDigest.getInstance("SHA-256")
+                    .digest(certificateChain[0].getEncoded());
+            ESSCertIDv2 certId = new ESSCertIDv2(
+                    new AlgorithmIdentifier(
+                            NISTObjectIdentifiers.id_sha256),
+                    certHash);
+            SigningCertificateV2 sigCertV2 =
+                    new SigningCertificateV2(
+                            new ESSCertIDv2[]{ certId });
+
+            Attribute sigCertAttr = new Attribute(
+                    PKCSObjectIdentifiers.id_aa_signingCertificateV2,
+                    new DERSet(sigCertV2));
+
+            AttributeTable signedAttrs = new AttributeTable(
+                    new Attribute[]{ sigCertAttr });
+            signerBuilder.setSignedAttributeGenerator(
+                    new DefaultSignedAttributeTableGenerator(signedAttrs));
+        }
+
+        gen.addSignerInfoGenerator(
+                signerBuilder.build(signer, certificateChain[0]));
+
+        // Add all certificates in the chain
+        List<Certificate> certList = new ArrayList<>();
+        for (X509Certificate cert : certificateChain) {
+            certList.add(cert);
+        }
+        gen.addCertificates(new JcaCertStore(certList));
+
+        // Generate the CMS SignedData
+        CMSProcessableByteArray processable =
+                new CMSProcessableByteArray(content);
+        CMSSignedData signedData = gen.generate(processable, false);
+
+        // Add timestamp if TSA URL is configured
+        if (tsaUrl != null) {
+            signedData = addTimestamp(signedData);
+        }
+
+        byte[] encoded = signedData.getEncoded();
+        log.info("CMS signature built: {} bytes, timestamp={}",
+                encoded.length, tsaUrl != null);
+        return encoded;
+    }
+
+    /**
+     * Request a timestamp from the TSA and add it as an unsigned attribute.
+     */
+    private CMSSignedData addTimestamp(CMSSignedData signedData)
+            throws Exception {
+
+        // Hash the signature value
+        byte[] signatureBytes = signedData.getSignerInfos()
+                .getSigners().iterator().next().getSignature();
+        MessageDigest tsDigest = MessageDigest.getInstance("SHA-256");
+        byte[] tsHash = tsDigest.digest(signatureBytes);
+
+        // Build and send the timestamp request
+        TimeStampRequestGenerator reqGen =
+                new TimeStampRequestGenerator();
+        reqGen.setCertReq(true);
+        TimeStampRequest tsReq =
+                reqGen.generate(TSPAlgorithms.SHA256, tsHash);
+
+        HttpURLConnection conn = (HttpURLConnection)
+                new URL(tsaUrl).openConnection();
+        conn.setDoOutput(true);
+        conn.setRequestMethod("POST");
+        conn.setRequestProperty("Content-Type",
+                "application/timestamp-query");
+        conn.getOutputStream().write(tsReq.getEncoded());
+
+        TimeStampResponse tsResp =
+                new TimeStampResponse(conn.getInputStream());
+        tsResp.validate(tsReq);
+        TimeStampToken tsToken = tsResp.getTimeStampToken();
+
+        log.info("Timestamp obtained — TSA time: {}",
+                tsToken.getTimeStampInfo().getGenTime());
+
+        // Embed as unsigned attribute
+        Attribute tsAttr = new Attribute(
+                PKCSObjectIdentifiers.id_aa_signatureTimeStampToken,
+                new DERSet(tsToken.toCMSSignedData().toASN1Structure()));
+
+        return CMSSignedData.replaceUnsignedAttributes(
+                signedData,
+                new AttributeTable(new Attribute[]{ tsAttr }));
+    }
+}
+----
+
+== VerificationService: Complete Signature Verification
+
+The full verification pipeline from Chapter 31, as a single compilable class.
+
+[source,java]
+----
+package io.pdfalyzer.verification;
+
+import java.security.MessageDigest;
+import java.security.cert.CertPath;
+import java.security.cert.CertPathBuilder;
+import java.security.cert.CertStore;
+import java.security.cert.CertificateFactory;
+import java.security.cert.CollectionCertStoreParameters;
+import java.security.cert.PKIXBuilderParameters;
+import java.security.cert.PKIXCertPathBuilderResult;
+import java.security.cert.TrustAnchor;
+import java.security.cert.X509CertSelector;
+import java.security.cert.X509Certificate;
+import java.time.Clock;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Date;
+import java.util.List;
+import java.util.Set;
+
+import lombok.extern.slf4j.Slf4j;
+import org.apache.pdfbox.pdmodel.interactive.digitalsignature.PDSignature;
+import org.bouncycastle.asn1.ASN1OctetString;
+import org.bouncycastle.asn1.cms.CMSAttributes;
+import org.bouncycastle.asn1.cms.Attribute;
+import org.bouncycastle.asn1.cms.AttributeTable;
+import org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers;
+import org.bouncycastle.cert.X509CertificateHolder;
+import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
+import org.bouncycastle.cms.CMSProcessableByteArray;
+import org.bouncycastle.cms.CMSSignedData;
+import org.bouncycastle.cms.SignerInformation;
+import org.bouncycastle.cms.SignerInformationStore;
+import org.bouncycastle.cms.jcajce.JcaSimpleSignerInfoVerifierBuilder;
+import org.bouncycastle.tsp.TimeStampToken;
+import org.bouncycastle.util.Store;
+
+/**
+ * Complete five-step signature verification service.
+ * Accepts an injectable Clock for deterministic testing.
+ */
+@Slf4j
+public class VerificationService {
+
+    private final Clock clock;
+
+    public VerificationService() {
+        this.clock = Clock.systemUTC();
+    }
+
+    public VerificationService(Clock clock) {
+        this.clock = clock;
+    }
+
+    /**
+     * Run the full five-step verification pipeline.
+     */
+    public VerificationReport verify(byte[] pdfBytes,
+            PDSignature signature,
+            Set<TrustAnchor> trustAnchors) {
+
+        VerificationReport report = new VerificationReport();
+
+        try {
+            // Step 1: Byte range
+            int[] byteRange = signature.getByteRange();
+            report.setByteRangeResult(
+                    verifyByteRange(byteRange, pdfBytes.length));
+
+            // Step 2: Hash
+            byte[] signedContent = extractSignedContent(
+                    pdfBytes, byteRange);
+            CMSSignedData cmsData = new CMSSignedData(
+                    new CMSProcessableByteArray(signedContent),
+                    signature.getContents());
+            SignerInformation signerInfo = cmsData.getSignerInfos()
+                    .getSigners().iterator().next();
+
+            report.setHashResult(verifyHash(
+                    signedContent, signerInfo));
+
+            // Step 3: CMS
+            X509CertificateHolder signerCert =
+                    verifyCms(cmsData, signerInfo);
+            report.setCmsResult(signerCert != null
+                    ? ValidationResult.OK
+                    : ValidationResult.CMS_INVALID);
+
+            if (signerCert == null) return report;
+
+            // Check for timestamp
+            Date validationTime = Date.from(clock.instant());
+            Date tsTime = extractTimestampTime(signerInfo);
+            if (tsTime != null) {
+                validationTime = tsTime;
+                report.setTimestampTime(tsTime);
+                report.setTimestampResult(ValidationResult.OK);
+            }
+
+            // Step 4: Certificate chain
+            report.setChainResult(validateChain(
+                    signerCert, cmsData, trustAnchors, validationTime));
+
+            // Step 5: Trust
+            report.setTrustResult(
+                    report.getChainResult() == ValidationResult.OK
+                            ? ValidationResult.OK
+                            : ValidationResult.NOT_TRUSTED);
+
+        } catch (Exception e) {
+            log.error("Verification failed", e);
+            report.setException(e);
+        }
+
+        return report;
+    }
+
+    private byte[] extractSignedContent(byte[] pdfBytes,
+            int[] byteRange) {
+        byte[] content = new byte[byteRange[1] + byteRange[3]];
+        System.arraycopy(pdfBytes, byteRange[0], content,
+                0, byteRange[1]);
+        System.arraycopy(pdfBytes, byteRange[2], content,
+                byteRange[1], byteRange[3]);
+        return content;
+    }
+
+    private ValidationResult verifyByteRange(int[] byteRange,
+            long fileSize) {
+        if (byteRange == null || byteRange.length != 4) {
+            return ValidationResult.BYTE_RANGE_MALFORMED;
+        }
+        if (byteRange[0] != 0) {
+            return ValidationResult.BYTE_RANGE_NOT_AT_START;
+        }
+        long end = (long) byteRange[2] + byteRange[3];
+        if (end != fileSize) {
+            return ValidationResult.BYTE_RANGE_TRAILING_BYTES;
+        }
+        return ValidationResult.OK;
+    }
+
+    private ValidationResult verifyHash(byte[] signedContent,
+            SignerInformation signerInfo) throws Exception {
+        String algName = mapOidToAlgorithm(
+                signerInfo.getDigestAlgOID());
+        MessageDigest md = MessageDigest.getInstance(algName);
+        byte[] computed = md.digest(signedContent);
+
+        Attribute digestAttr = signerInfo.getSignedAttributes()
+                .get(CMSAttributes.messageDigest);
+        byte[] claimed = ASN1OctetString.getInstance(
+                digestAttr.getAttrValues().getObjectAt(0)).getOctets();
+
+        return MessageDigest.isEqual(computed, claimed)
+                ? ValidationResult.OK
+                : ValidationResult.HASH_MISMATCH;
+    }
+
+    @SuppressWarnings("unchecked")
+    private X509CertificateHolder verifyCms(CMSSignedData cmsData,
+            SignerInformation signerInfo) throws Exception {
+        Store<X509CertificateHolder> certStore =
+                cmsData.getCertificates();
+        Collection<X509CertificateHolder> matches =
+                certStore.getMatches(signerInfo.getSID());
+        if (matches.isEmpty()) return null;
+
+        X509CertificateHolder cert = matches.iterator().next();
+        boolean valid = signerInfo.verify(
+                new JcaSimpleSignerInfoVerifierBuilder()
+                        .setProvider("BC").build(cert));
+        return valid ? cert : null;
+    }
+
+    private Date extractTimestampTime(SignerInformation signerInfo)
+            throws Exception {
+        AttributeTable unsigned = signerInfo.getUnsignedAttributes();
+        if (unsigned == null) return null;
+
+        Attribute tsAttr = unsigned.get(
+                PKCSObjectIdentifiers.id_aa_signatureTimeStampToken);
+        if (tsAttr == null) return null;
+
+        byte[] tsBytes = tsAttr.getAttrValues()
+                .getObjectAt(0).toASN1Primitive().getEncoded();
+        TimeStampToken tst =
+                new TimeStampToken(new CMSSignedData(tsBytes));
+        return tst.getTimeStampInfo().getGenTime();
+    }
+
+    private ValidationResult validateChain(
+            X509CertificateHolder signerCert,
+            CMSSignedData cmsData,
+            Set<TrustAnchor> trustAnchors,
+            Date validationTime) {
+        try {
+            JcaX509CertificateConverter converter =
+                    new JcaX509CertificateConverter().setProvider("BC");
+            List<X509Certificate> allCerts = new ArrayList<>();
+            for (X509CertificateHolder h :
+                    cmsData.getCertificates().getMatches(null)) {
+                allCerts.add(converter.getCertificate(h));
+            }
+
+            X509Certificate target =
+                    converter.getCertificate(signerCert);
+            X509CertSelector selector = new X509CertSelector();
+            selector.setCertificate(target);
+
+            PKIXBuilderParameters params =
+                    new PKIXBuilderParameters(trustAnchors, selector);
+            params.addCertStore(CertStore.getInstance("Collection",
+                    new CollectionCertStoreParameters(allCerts)));
+            params.setRevocationEnabled(false);
+            params.setDate(validationTime);
+
+            CertPathBuilder.getInstance("PKIX", "BC").build(params);
+            return ValidationResult.OK;
+        } catch (Exception e) {
+            log.error("Chain validation failed: {}", e.getMessage());
+            return ValidationResult.CHAIN_INVALID;
+        }
+    }
+
+    private static String mapOidToAlgorithm(String oid) {
+        return switch (oid) {
+            case "1.3.14.3.2.26"          -> "SHA-1";
+            case "2.16.840.1.101.3.4.2.1" -> "SHA-256";
+            case "2.16.840.1.101.3.4.2.2" -> "SHA-384";
+            case "2.16.840.1.101.3.4.2.3" -> "SHA-512";
+            default -> throw new IllegalArgumentException(
+                    "Unknown digest OID: " + oid);
+        };
+    }
+}
+----
+
+== Signature Appearance Builder
+
+A minimal but complete appearance builder for visible signatures.
+Generates an appearance stream with signer name, date, and reason inside the signature widget rectangle.
+
+[source,java]
+----
+package io.pdfalyzer.signing;
+
+import java.io.IOException;
+import java.text.SimpleDateFormat;
+import java.util.Calendar;
+
+import lombok.extern.slf4j.Slf4j;
+import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDResources;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.font.PDType1Font;
+import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
+import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationWidget;
+import org.apache.pdfbox.pdmodel.interactive.digitalsignature.PDSignature;
+import org.apache.pdfbox.pdmodel.interactive.form.PDAcroForm;
+import org.apache.pdfbox.pdmodel.interactive.form.PDSignatureField;
+
+/**
+ * Builds a visible signature appearance with text content.
+ */
+@Slf4j
+public class AppearanceBuilder {
+
+    /**
+     * Create a visible signature field with a text-based appearance.
+     *
+     * @param doc       the document to add the appearance to
+     * @param sig       the PDSignature to associate with the field
+     * @param page      the page number (0-based)
+     * @param rect      the rectangle for the signature widget
+     * @param name      signer's name
+     * @param reason    signing reason
+     * @param signDate  the signing date
+     */
+    public static void createVisibleAppearance(
+            PDDocument doc, PDSignature sig,
+            int page, PDRectangle rect,
+            String name, String reason, Calendar signDate)
+            throws IOException {
+
+        PDAcroForm acroForm = doc.getDocumentCatalog().getAcroForm();
+        if (acroForm == null) {
+            acroForm = new PDAcroForm(doc);
+            doc.getDocumentCatalog().setAcroForm(acroForm);
+        }
+
+        PDSignatureField sigField = new PDSignatureField(acroForm);
+        sigField.setValue(sig);
+        acroForm.getFields().add(sigField);
+
+        PDAnnotationWidget widget = sigField.getWidgets().get(0);
+        widget.setRectangle(rect);
+        widget.setPage(doc.getPage(page));
+
+        // Build appearance content
+        PDType1Font font = new PDType1Font(
+                Standard14Fonts.FontName.HELVETICA);
+        float fontSize = 8f;
+        float leading = fontSize * 1.4f;
+        float margin = 4f;
+
+        String dateStr = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss z")
+                .format(signDate.getTime());
+
+        String[] lines = {
+                "Digitally signed by: " + name,
+                "Date: " + dateStr,
+                "Reason: " + (reason != null ? reason : "—")
+        };
+
+        // Create the appearance stream using form XObject
+        PDRectangle formRect = new PDRectangle(
+                rect.getWidth(), rect.getHeight());
+
+        org.apache.pdfbox.pdmodel.graphics.form.PDFormXObject form =
+                new org.apache.pdfbox.pdmodel.graphics.form.PDFormXObject(doc);
+        form.setBBox(formRect);
+        form.setResources(new PDResources());
+        form.getResources().put(COSName.getPDFName("F1"), font);
+
+        // Write content stream operators directly
+        StringBuilder cs = new StringBuilder();
+        cs.append("BT\n");
+        cs.append("/F1 ").append(fontSize).append(" Tf\n");
+        cs.append(margin).append(" ")
+          .append(rect.getHeight() - margin - fontSize)
+          .append(" Td\n");
+        cs.append(leading).append(" TL\n");
+
+        for (String line : lines) {
+            cs.append("(").append(escapePdfString(line)).append(") Tj\n");
+            cs.append("T*\n");
+        }
+        cs.append("ET\n");
+
+        form.getStream().createOutputStream().write(
+                cs.toString().getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+        form.getStream().createOutputStream().close();
+
+        org.apache.pdfbox.pdmodel.interactive.annotation.PDAppearanceDictionary appearance =
+                new org.apache.pdfbox.pdmodel.interactive.annotation.PDAppearanceDictionary();
+        appearance.setNormalAppearance(
+                new org.apache.pdfbox.pdmodel.interactive.annotation.PDAppearanceEntry(form));
+        widget.setAppearance(appearance);
+
+        doc.getPage(page).getAnnotations().add(widget);
+
+        log.info("Created visible signature appearance: {}x{} at ({},{})",
+                rect.getWidth(), rect.getHeight(),
+                rect.getLowerLeftX(), rect.getLowerLeftY());
+    }
+
+    private static String escapePdfString(String input) {
+        return input
+                .replace("\\", "\\\\")
+                .replace("(", "\\(")
+                .replace(")", "\\)");
+    }
+}
+----
+
+== Test Keystore Generator: Full Implementation
+
+The complete generator from Chapter 32, including all certificate generation methods.
+
+[source,java]
+----
+package io.pdfalyzer.test;
+
+import java.math.BigInteger;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.KeyStore;
+import java.security.cert.X509Certificate;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.Arrays;
+import java.util.Date;
+
+import lombok.extern.slf4j.Slf4j;
+import org.bouncycastle.asn1.ASN1ObjectIdentifier;
+import org.bouncycastle.asn1.x500.X500Name;
+import org.bouncycastle.asn1.x509.BasicConstraints;
+import org.bouncycastle.asn1.x509.ExtendedKeyUsage;
+import org.bouncycastle.asn1.x509.Extension;
+import org.bouncycastle.asn1.x509.KeyPurposeId;
+import org.bouncycastle.asn1.x509.KeyUsage;
+import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
+import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
+import org.bouncycastle.operator.ContentSigner;
+import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
+
+/**
+ * Generates a complete PKI hierarchy for testing PDF signatures.
+ * Root CA -> Intermediate CA -> Signer
+ * Root CA -> TSA
+ */
+@Slf4j
+public class TestKeystoreGenerator {
+
+    private static final int KEY_SIZE = 2048;
+    private static final String SIG_ALG = "SHA256withRSA";
+    private static long serialCounter = System.currentTimeMillis();
+
+    public static KeyStore generateTestKeystore(char[] password)
+            throws Exception {
+        // Root CA
+        KeyPair rootKp = generateKeyPair();
+        X500Name rootDn = new X500Name(
+                "CN=Test Root CA, O=PDFalyzer Test, C=DE");
+        X509Certificate rootCert = buildCaCert(
+                rootKp, rootDn, rootKp, rootDn, 100, true);
+
+        // Intermediate CA
+        KeyPair intKp = generateKeyPair();
+        X500Name intDn = new X500Name(
+                "CN=Test Intermediate CA, O=PDFalyzer Test, C=DE");
+        X509Certificate intCert = buildCaCert(
+                intKp, intDn, rootKp, rootDn, 50, false);
+
+        // Signer
+        KeyPair signerKp = generateKeyPair();
+        X500Name signerDn = new X500Name(
+                "CN=Test Signer, O=PDFalyzer Test, C=DE");
+        X509Certificate signerCert = buildSignerCert(
+                signerKp, signerDn, intKp, intDn, 10);
+
+        // TSA
+        KeyPair tsaKp = generateKeyPair();
+        X500Name tsaDn = new X500Name(
+                "CN=Test TSA, O=PDFalyzer Test, C=DE");
+        X509Certificate tsaCert = buildTsaCert(
+                tsaKp, tsaDn, rootKp, rootDn, 50);
+
+        // Assemble keystore
+        KeyStore ks = KeyStore.getInstance("PKCS12");
+        ks.load(null, password);
+        ks.setKeyEntry("signer", signerKp.getPrivate(), password,
+                new X509Certificate[]{ signerCert, intCert, rootCert });
+        ks.setKeyEntry("tsa", tsaKp.getPrivate(), password,
+                new X509Certificate[]{ tsaCert, rootCert });
+        ks.setCertificateEntry("root", rootCert);
+        ks.setCertificateEntry("intermediate", intCert);
+
+        log.info("Test keystore generated — 4 entries");
+        return ks;
+    }
+
+    private static KeyPair generateKeyPair() throws Exception {
+        KeyPairGenerator gen = KeyPairGenerator.getInstance("RSA");
+        gen.initialize(KEY_SIZE);
+        return gen.generateKeyPair();
+    }
+
+    private static X509Certificate buildCaCert(
+            KeyPair subjectKp, X500Name subjectDn,
+            KeyPair issuerKp, X500Name issuerDn,
+            int validityYears, boolean isRoot) throws Exception {
+
+        Date notBefore = new Date();
+        Date notAfter = Date.from(Instant.now()
+                .plus(Duration.ofDays(365L * validityYears)));
+
+        JcaX509v3CertificateBuilder builder =
+                new JcaX509v3CertificateBuilder(
+                        issuerDn,
+                        BigInteger.valueOf(serialCounter++),
+                        notBefore, notAfter,
+                        subjectDn,
+                        subjectKp.getPublic());
+
+        builder.addExtension(Extension.basicConstraints, true,
+                new BasicConstraints(isRoot ? Integer.MAX_VALUE : 0));
+        builder.addExtension(Extension.keyUsage, true,
+                new KeyUsage(
+                        KeyUsage.keyCertSign | KeyUsage.cRLSign));
+
+        ContentSigner signer = new JcaContentSignerBuilder(SIG_ALG)
+                .setProvider("BC").build(issuerKp.getPrivate());
+        return new JcaX509CertificateConverter().setProvider("BC")
+                .getCertificate(builder.build(signer));
+    }
+
+    private static X509Certificate buildSignerCert(
+            KeyPair subjectKp, X500Name subjectDn,
+            KeyPair issuerKp, X500Name issuerDn,
+            int validityYears) throws Exception {
+
+        Date notBefore = new Date();
+        Date notAfter = Date.from(Instant.now()
+                .plus(Duration.ofDays(365L * validityYears)));
+
+        JcaX509v3CertificateBuilder builder =
+                new JcaX509v3CertificateBuilder(
+                        issuerDn,
+                        BigInteger.valueOf(serialCounter++),
+                        notBefore, notAfter,
+                        subjectDn,
+                        subjectKp.getPublic());
+
+        builder.addExtension(Extension.basicConstraints, true,
+                new BasicConstraints(false));
+        builder.addExtension(Extension.keyUsage, true,
+                new KeyUsage(KeyUsage.digitalSignature
+                        | KeyUsage.nonRepudiation));
+
+        ContentSigner signer = new JcaContentSignerBuilder(SIG_ALG)
+                .setProvider("BC").build(issuerKp.getPrivate());
+        return new JcaX509CertificateConverter().setProvider("BC")
+                .getCertificate(builder.build(signer));
+    }
+
+    private static X509Certificate buildTsaCert(
+            KeyPair subjectKp, X500Name subjectDn,
+            KeyPair issuerKp, X500Name issuerDn,
+            int validityYears) throws Exception {
+
+        Date notBefore = new Date();
+        Date notAfter = Date.from(Instant.now()
+                .plus(Duration.ofDays(365L * validityYears)));
+
+        JcaX509v3CertificateBuilder builder =
+                new JcaX509v3CertificateBuilder(
+                        issuerDn,
+                        BigInteger.valueOf(serialCounter++),
+                        notBefore, notAfter,
+                        subjectDn,
+                        subjectKp.getPublic());
+
+        builder.addExtension(Extension.basicConstraints, true,
+                new BasicConstraints(false));
+        builder.addExtension(Extension.keyUsage, true,
+                new KeyUsage(KeyUsage.digitalSignature));
+        builder.addExtension(Extension.extendedKeyUsage, true,
+                new ExtendedKeyUsage(KeyPurposeId.id_kp_timeStamping));
+
+        ContentSigner signer = new JcaContentSignerBuilder(SIG_ALG)
+                .setProvider("BC").build(issuerKp.getPrivate());
+        return new JcaX509CertificateConverter().setProvider("BC")
+                .getCertificate(builder.build(signer));
+    }
+}
+----

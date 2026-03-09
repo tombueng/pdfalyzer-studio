@@ -1,0 +1,425 @@
+[appendix]
+= ASN.1 Structure Reference
+
+[.lead]
+This appendix is a reference card for the ASN.1 structures you will encounter when working with PDF digital signatures.
+Every CMS `SignedData` blob inside a `/Contents` value, every X.509 certificate in the chain, every OCSP response and timestamp token — they are all ASN.1 structures encoded in DER.
+When your BouncyCastle code throws a `ParseException` at 2 AM, this is the appendix you reach for.
+
+We present the OID table first (because OIDs are the keys to everything), then the ASN.1 grammar for each major structure, with annotations showing where each field appears in the context of PDF signatures.
+
+== OID Reference Table
+
+Object Identifiers (OIDs) are the universal labels of the ASN.1 world.
+Every algorithm, every attribute, every extension is identified by an OID.
+The following table covers the OIDs you will encounter in PDF signature processing:
+
+=== Digest Algorithms
+
+.Digest algorithm OIDs
+[cols="3,3,2", options="header"]
+|===
+| OID | Algorithm | Status
+
+| 1.3.14.3.2.26
+| SHA-1
+| Deprecated -- do not use for new signatures
+
+| 2.16.840.1.101.3.4.2.1
+| SHA-256
+| Recommended minimum
+
+| 2.16.840.1.101.3.4.2.2
+| SHA-384
+| Recommended for high security
+
+| 2.16.840.1.101.3.4.2.3
+| SHA-512
+| Recommended for high security
+
+| 2.16.840.1.101.3.4.2.4
+| SHA-224
+| Acceptable but uncommon
+|===
+
+=== Signature Algorithms
+
+.Signature algorithm OIDs
+[cols="3,3,2", options="header"]
+|===
+| OID | Algorithm | Notes
+
+| 1.2.840.113549.1.1.5
+| SHA-1 with RSA (sha1WithRSAEncryption)
+| Deprecated
+
+| 1.2.840.113549.1.1.11
+| SHA-256 with RSA (sha256WithRSAEncryption)
+| Recommended
+
+| 1.2.840.113549.1.1.12
+| SHA-384 with RSA (sha384WithRSAEncryption)
+| Recommended
+
+| 1.2.840.113549.1.1.13
+| SHA-512 with RSA (sha512WithRSAEncryption)
+| Recommended
+
+| 1.2.840.113549.1.1.10
+| RSASSA-PSS
+| Modern RSA padding, preferred over PKCS#1 v1.5
+
+| 1.2.840.10045.4.3.2
+| SHA-256 with ECDSA (ecdsa-with-SHA256)
+| Recommended for ECDSA
+
+| 1.2.840.10045.4.3.3
+| SHA-384 with ECDSA (ecdsa-with-SHA384)
+| Recommended for ECDSA
+
+| 1.2.840.10045.4.3.4
+| SHA-512 with ECDSA (ecdsa-with-SHA512)
+| Recommended for ECDSA
+|===
+
+=== CMS Attribute OIDs
+
+.CMS signed and unsigned attribute OIDs
+[cols="3,4,2", options="header"]
+|===
+| OID | Attribute Name | Context
+
+| 1.2.840.113549.1.9.3
+| contentType
+| Signed attr (required)
+
+| 1.2.840.113549.1.9.4
+| messageDigest
+| Signed attr (required)
+
+| 1.2.840.113549.1.9.5
+| signingTime
+| Signed attr (optional, discouraged in PAdES)
+
+| 1.2.840.113549.1.9.16.2.47
+| id-aa-signingCertificateV2 (ESS-signing-certificate-v2)
+| Signed attr (required for PAdES)
+
+| 1.2.840.113549.1.9.16.2.14
+| id-aa-signatureTimeStampToken
+| Unsigned attr (required for PAdES-B-T)
+
+| 1.2.840.113549.1.9.16.2.25
+| id-aa-ets-escTimeStamp
+| Unsigned attr (used in CAdES-X)
+
+| 1.2.840.113549.1.9.16.2.21
+| id-aa-ets-certValues
+| Unsigned attr (used in CAdES-C)
+
+| 1.2.840.113549.1.9.16.2.23
+| id-aa-ets-revocationValues
+| Unsigned attr (used in CAdES-C)
+|===
+
+=== X.509 Extension OIDs
+
+.X.509 v3 extension OIDs relevant to PDF signatures
+[cols="3,4,2", options="header"]
+|===
+| OID | Extension Name | Critical
+
+| 2.5.29.15
+| keyUsage
+| Yes
+
+| 2.5.29.37
+| extendedKeyUsage
+| Varies
+
+| 2.5.29.19
+| basicConstraints
+| Yes (for CAs)
+
+| 2.5.29.35
+| authorityKeyIdentifier
+| No
+
+| 2.5.29.14
+| subjectKeyIdentifier
+| No
+
+| 1.3.6.1.5.5.7.1.1
+| authorityInfoAccess (AIA)
+| No
+
+| 2.5.29.31
+| cRLDistributionPoints
+| No
+
+| 1.3.6.1.5.5.7.3.8
+| id-kp-timeStamping (EKU value)
+| N/A (EKU value, not standalone extension)
+|===
+
+== CMS SignedData Structure ({rfc5652})
+
+The CMS `SignedData` is the core structure inside every PDF `/Contents` value.
+This is the complete ASN.1 grammar from {rfc5652} Section 5.1, annotated with PDF-specific notes:
+
+[source,asn1]
+----
+-- RFC 5652 Section 5.1
+ContentInfo ::= SEQUENCE {
+    contentType     ContentType,        -- OID 1.2.840.113549.1.7.2 (signedData)
+    content     [0] EXPLICIT ANY        -- The SignedData below
+}
+
+SignedData ::= SEQUENCE {
+    version             CMSVersion,         -- 1 for most PDF signatures
+    digestAlgorithms    DigestAlgorithmIdentifiers,
+                                            -- SET OF: usually {sha-256}
+    encapContentInfo    EncapsulatedContentInfo,
+                                            -- EMPTY for detached signatures (PDF)
+    certificates    [0] IMPLICIT CertificateSet OPTIONAL,
+                                            -- Signer cert + intermediates
+    crls            [1] IMPLICIT RevocationInfoChoices OPTIONAL,
+                                            -- Rarely used in PDF CMS
+    signerInfos         SignerInfos         -- SET OF: usually exactly one
+}
+
+-- In PDF signatures, encapContentInfo.eContent is ABSENT because the
+-- signed data (the byte range) is external to the CMS structure.
+EncapsulatedContentInfo ::= SEQUENCE {
+    eContentType    ContentType,        -- 1.2.840.113549.1.7.1 (id-data)
+    eContent    [0] EXPLICIT OCTET STRING OPTIONAL
+                                        -- ABSENT for detached signatures
+}
+
+SignerInfo ::= SEQUENCE {
+    version                 CMSVersion,     -- 1 (issuerAndSerialNumber)
+    sid                     SignerIdentifier,
+    digestAlgorithm         DigestAlgorithmIdentifier,
+    signedAttrs         [0] IMPLICIT SignedAttributes OPTIONAL,
+                                            -- MUST be present for PDF sigs
+    signatureAlgorithm      SignatureAlgorithmIdentifier,
+    signature               SignatureValue,
+    unsignedAttrs       [1] IMPLICIT UnsignedAttributes OPTIONAL
+                                            -- Timestamp lives here
+}
+
+SignerIdentifier ::= CHOICE {
+    issuerAndSerialNumber   IssuerAndSerialNumber,
+                                            -- Most common in PDF
+    subjectKeyIdentifier [0] SubjectKeyIdentifier
+}
+
+IssuerAndSerialNumber ::= SEQUENCE {
+    issuer          Name,
+    serialNumber    CertificateSerialNumber
+}
+
+-- Signed attributes (DER-encoded, then signed)
+SignedAttributes ::= SET SIZE (1..MAX) OF Attribute
+
+-- The Attribute structure used for both signed and unsigned attrs
+Attribute ::= SEQUENCE {
+    attrType    OBJECT IDENTIFIER,      -- The attribute OID
+    attrValues  SET OF AttributeValue   -- Usually exactly one value
+}
+----
+
+[NOTE]
+====
+For PDF detached signatures, the `eContent` field inside `EncapsulatedContentInfo` is absent.
+The signed content is the byte range data from the PDF file, which is passed externally to the CMS verifier.
+This is why you must provide the byte range bytes when constructing a `CMSSignedData` in BouncyCastle — without them, the verifier cannot compute the digest.
+====
+
+== X.509 v3 Certificate Structure ({rfc5280})
+
+Every certificate in the CMS `certificates` collection, every CA in the chain, and every TSA certificate follows this structure:
+
+[source,asn1]
+----
+-- RFC 5280 Section 4.1
+Certificate ::= SEQUENCE {
+    tbsCertificate      TBSCertificate,     -- The signed payload
+    signatureAlgorithm  AlgorithmIdentifier, -- Must match inner sig alg
+    signatureValue      BIT STRING           -- Issuer's signature
+}
+
+TBSCertificate ::= SEQUENCE {
+    version         [0] EXPLICIT INTEGER DEFAULT v1,    -- v3 (2)
+    serialNumber        CertificateSerialNumber,
+    signature           AlgorithmIdentifier,    -- Inner copy of sig alg
+    issuer              Name,                   -- DN of the issuing CA
+    validity            Validity,
+    subject             Name,                   -- DN of the certificate owner
+    subjectPublicKeyInfo SubjectPublicKeyInfo,
+    -- v3 extensions follow:
+    extensions      [3] EXPLICIT Extensions OPTIONAL
+}
+
+Validity ::= SEQUENCE {
+    notBefore   Time,       -- Certificate valid from this date
+    notAfter    Time        -- Certificate valid until this date
+}
+
+-- Key extensions for PDF signature certificates:
+--
+-- keyUsage (2.5.29.15):
+--   digitalSignature (bit 0) — required for signing certificates
+--   nonRepudiation (bit 1) — alternative to digitalSignature
+--   keyCertSign (bit 5) — required for CA certificates
+--
+-- basicConstraints (2.5.29.19):
+--   cA: BOOLEAN — TRUE for CA certs, FALSE (or absent) for end-entity
+--   pathLenConstraint: INTEGER — max chain depth below this CA
+--
+-- extendedKeyUsage (2.5.29.37):
+--   id-kp-timeStamping (1.3.6.1.5.5.7.3.8) — required for TSA certs
+--
+-- authorityInfoAccess (1.3.6.1.5.5.7.1.1):
+--   id-ad-caIssuers — URL to fetch the issuer's certificate
+--   id-ad-ocsp — URL of the OCSP responder
+----
+
+== OCSP Response Structure ({rfc6960})
+
+OCSP responses are embedded in the DSS (Document Security Store) for PAdES-B-LT and PAdES-B-LTA signatures.
+The structure you will find in `/DSS /OCSPs`:
+
+[source,asn1]
+----
+-- RFC 6960 Section 4.2
+OCSPResponse ::= SEQUENCE {
+    responseStatus      OCSPResponseStatus,     -- 0 = successful
+    responseBytes   [0] EXPLICIT ResponseBytes OPTIONAL
+}
+
+ResponseBytes ::= SEQUENCE {
+    responseType    OBJECT IDENTIFIER,  -- 1.3.6.1.5.5.7.48.1.1 (basicResponse)
+    response        OCTET STRING        -- DER-encoded BasicOCSPResponse
+}
+
+BasicOCSPResponse ::= SEQUENCE {
+    tbsResponseData     ResponseData,
+    signatureAlgorithm  AlgorithmIdentifier,
+    signature           BIT STRING,
+    certs           [0] EXPLICIT SEQUENCE OF Certificate OPTIONAL
+}
+
+ResponseData ::= SEQUENCE {
+    version         [0] EXPLICIT INTEGER DEFAULT v1,
+    responderID         ResponderID,
+    producedAt          GeneralizedTime,
+    responses           SEQUENCE OF SingleResponse,
+    responseExtensions  [1] EXPLICIT Extensions OPTIONAL
+}
+
+SingleResponse ::= SEQUENCE {
+    certID              CertID,
+    certStatus          CertStatus,         -- good | revoked | unknown
+    thisUpdate          GeneralizedTime,
+    nextUpdate      [0] EXPLICIT GeneralizedTime OPTIONAL,
+    singleExtensions [1] EXPLICIT Extensions OPTIONAL
+}
+
+CertStatus ::= CHOICE {
+    good        [0] IMPLICIT NULL,          -- Certificate is not revoked
+    revoked     [1] IMPLICIT RevokedInfo,   -- Certificate has been revoked
+    unknown     [2] IMPLICIT UnknownInfo    -- Responder has no information
+}
+----
+
+== Timestamp Token Structure ({rfc3161})
+
+The timestamp token (TST) is the structure inside the `id-aa-signatureTimeStampToken` unsigned attribute.
+It is itself a CMS `SignedData` containing a `TSTInfo` as the encapsulated content:
+
+[source,asn1]
+----
+-- RFC 3161 Section 2.4.2
+-- The TimeStampToken is a CMS SignedData where the
+-- encapContentInfo contains a TSTInfo:
+
+-- id-ct-TSTInfo OBJECT IDENTIFIER ::= { 1.2.840.113549.1.9.16.1.4 }
+
+TSTInfo ::= SEQUENCE {
+    version         INTEGER { v1(1) },
+    policy          TSAPolicyId,            -- OID of the TSA's policy
+    messageImprint  MessageImprint,         -- Hash of the timestamped data
+    serialNumber    INTEGER,                -- Unique per TSA
+    genTime         GeneralizedTime,        -- The timestamp time (UTC)
+    accuracy        Accuracy OPTIONAL,      -- Time precision
+    ordering        BOOLEAN DEFAULT FALSE,
+    nonce           INTEGER OPTIONAL,       -- Echoed from request
+    tsa         [0] GeneralName OPTIONAL,   -- TSA identity
+    extensions  [1] IMPLICIT Extensions OPTIONAL
+}
+
+MessageImprint ::= SEQUENCE {
+    hashAlgorithm   AlgorithmIdentifier,    -- e.g., SHA-256
+    hashedMessage   OCTET STRING            -- Hash of the signature value
+}
+
+Accuracy ::= SEQUENCE {
+    seconds     INTEGER OPTIONAL,
+    millis  [0] INTEGER (1..999) OPTIONAL,
+    micros  [1] INTEGER (1..999) OPTIONAL
+}
+
+-- The Timestamp Request (sent to the TSA):
+TimeStampReq ::= SEQUENCE {
+    version         INTEGER { v1(1) },
+    messageImprint  MessageImprint,     -- Hash to timestamp
+    reqPolicy       TSAPolicyId OPTIONAL,
+    nonce           INTEGER OPTIONAL,   -- Anti-replay
+    certReq         BOOLEAN DEFAULT FALSE,
+                                        -- Request TSA cert in response
+    extensions  [0] IMPLICIT Extensions OPTIONAL
+}
+
+-- The Timestamp Response (returned by the TSA):
+TimeStampResp ::= SEQUENCE {
+    status          PKIStatusInfo,      -- 0 = granted
+    timeStampToken  TimeStampToken OPTIONAL
+                                        -- CMS SignedData containing TSTInfo
+}
+----
+
+[IMPORTANT]
+====
+The `messageImprint` in the TSTInfo is the hash of the _signature value_ (the raw bytes of the `SignerInfo.signature` field), not the hash of the signed document.
+This is a critical distinction.
+The timestamp proves that a specific signature value existed at a specific time.
+The signature value, in turn, covers the document bytes (via the signed attributes and byte range).
+The chain of trust is: timestamp proves signature time, signature proves document integrity.
+====
+
+== Algorithm Identifier Structure
+
+The `AlgorithmIdentifier` appears throughout all the structures above.
+For most algorithms, the parameters field is either absent or `NULL`:
+
+[source,asn1]
+----
+AlgorithmIdentifier ::= SEQUENCE {
+    algorithm   OBJECT IDENTIFIER,
+    parameters  ANY DEFINED BY algorithm OPTIONAL
+}
+
+-- For SHA-256: algorithm = 2.16.840.1.101.3.4.2.1, parameters = NULL (or absent)
+-- For RSA:     algorithm = 1.2.840.113549.1.1.11, parameters = NULL
+-- For ECDSA:   algorithm = 1.2.840.10045.4.3.2, parameters = absent
+-- For RSA-PSS: algorithm = 1.2.840.113549.1.1.10,
+--              parameters = RSASSA-PSS-params (complex — see RFC 4055)
+
+RSASSA-PSS-params ::= SEQUENCE {
+    hashAlgorithm       [0] HashAlgorithm DEFAULT sha1,
+    maskGenAlgorithm    [1] MaskGenAlgorithm DEFAULT mgf1SHA1,
+    saltLength          [2] INTEGER DEFAULT 20,
+    trailerField        [3] TrailerField DEFAULT trailerFieldBC
+}
+----

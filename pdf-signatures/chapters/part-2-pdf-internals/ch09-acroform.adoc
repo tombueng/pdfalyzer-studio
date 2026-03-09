@@ -1,0 +1,516 @@
+[[ch09]]
+= AcroForm & Interactive Forms
+ifdef::env-github[]
+:tip-caption: :bulb:
+:note-caption: :information_source:
+:important-caption: :heavy_exclamation_mark:
+:caution-caption: :fire:
+:warning-caption: :warning:
+endif::[]
+
+[abstract]
+--
+Signature fields are form fields.
+This is not a metaphor.
+A `/Sig` field lives in exactly the same data structure as a text box, a checkbox, or a dropdown — the AcroForm field tree defined in {iso32000-2} S12.7.
+If you do not understand how the AcroForm dictionary, the field hierarchy, widget annotations, and appearance streams work, you will not be able to create, debug, or validate PDF signatures reliably.
+
+This chapter builds that understanding from the ground up.
+--
+
+== The AcroForm Dictionary
+
+Every PDF that contains interactive form fields has an `/AcroForm` entry in the document catalog.
+This is the root of all form infrastructure in the document: the field list, the signature flags, the default appearance string, the default resources.
+If `/AcroForm` is missing from the catalog, the document has no interactive forms — period.
+Some tools create signature fields and forget to create the AcroForm entry, which leads to signatures that exist as orphaned objects in the file but are invisible to every conforming viewer.
+
+The AcroForm dictionary lives at:
+
+[source]
+----
+trailer -> /Root (Catalog) -> /AcroForm
+----
+
+Here is a representative AcroForm dictionary with all keys that matter for signature work:
+
+[source]
+----
+<<
+  /Fields [10 0 R 11 0 R 12 0 R]    % <1>
+  /SigFlags 3                         % <2>
+  /NeedAppearances false               % <3>
+  /DA (/Helv 0 Tf 0 g)                % <4>
+  /DR <<                               % <5>
+    /Font << /Helv 8 0 R /ZaDb 9 0 R >>
+  >>
+>>
+----
+<1> `/Fields` -- array of references to the top-level field dictionaries.
+    Every field in the document must be reachable from this array (directly or through parent-child relationships).
+<2> `/SigFlags` -- a bit field that controls signature-related behavior.
+    Value 3 means both bit 1 (SignaturesExist) and bit 2 (AppendOnly) are set.
+<3> `/NeedAppearances` -- tells the viewer whether to regenerate appearance streams before rendering.
+<4> `/DA` -- default appearance string, used for fields that do not have their own `/DA`.
+<5> `/DR` -- default resources dictionary, providing fonts and other resources for appearance generation.
+
+Let's examine each of these in the depth they deserve.
+
+=== /Fields -- The Root of the Field Tree
+
+The `/Fields` array contains indirect references to the document's top-level field dictionaries.
+"Top-level" means fields that have no parent — they are the roots of potentially nested field trees.
+A flat form with ten independent fields will have ten entries in `/Fields`.
+A form with a hierarchical namespace (like `address.city`, `address.zip`) will have a single `address` parent in `/Fields`, with `city` and `zip` as children.
+
+[IMPORTANT]
+====
+A field that is not reachable from `/Fields` does not exist as far as a conforming reader is concerned.
+We have seen PDFs where a signing tool created a signature field object, set its `/V` to point at a signature dictionary, added a widget annotation to a page -- and forgot to add the field to `/Fields`.
+The signature data is physically present in the file.
+The CMS bytes are valid.
+But no viewer will find it, because the AcroForm field tree does not reference it.
+
+If you are debugging a "missing signature" problem, check `/Fields` first.
+====
+
+=== /SigFlags -- The Two Bits That Protect Everything
+
+We cover `/SigFlags` in depth here because getting it wrong destroys signatures -- silently, irreversibly, and usually long after the signing ceremony is over.
+
+.SigFlags bit definitions -- {iso32000-2} S12.7.2, Table 225
+[cols="2,1,5", options="header"]
+|===
+| Name | Bit | What it does
+
+| `SignaturesExist`
+| 1
+| Declares that the document contains at least one signature field with a value.
+  Conforming readers use this as a signal to check for signatures and display validation status.
+  Without it, some viewers will not even look for signatures.
+
+| `AppendOnly`
+| 2
+| Mandates that any modifications to the document **shall** use incremental updates only.
+  This is the single most important protection for existing signatures.
+  If a viewer or editor does a full save (rewriting the entire file from scratch), every signature in the document becomes invalid -- the bytes have changed, the byte ranges no longer match, and the cryptographic verification will fail.
+
+|===
+
+The only correct value for `/SigFlags` in a signed document is **3** (both bits set).
+A value of 1 (SignaturesExist without AppendOnly) is technically allowed by the spec but is a bug in practice -- it tells viewers that signatures exist but does not protect them from being destroyed by a full save.
+
+WARNING: Many PDF generation tools -- including some versions of LibreOffice, older versions of iText, and various government form generators -- set `/SigFlags` to 1 or omit it entirely. If you receive a signed PDF with `/SigFlags` missing or set to 1, the signatures are at risk. Any editor that performs a full save will destroy them.
+
+AppendOnly matters because incremental updates are what make multi-signature workflows possible -- each signer appends their changes without moving the bytes that previous signers' byte ranges reference.
+Without AppendOnly, an editor may do a full rewrite, destroying every signature.
+
+We have also seen the converse: `/SigFlags` is 0 but signed fields exist with valid CMS data.
+Acrobat shows "No Signatures" because bit 1 was never set, so it never looked.
+
+IMPORTANT: The AppendOnly flag is advisory, not enforced by the file format. A malicious or poorly written tool can ignore it. The flag protects against _accidental_ destruction by well-behaved editors. Intentional tampering is what the cryptographic signature itself guards against.
+
+=== /NeedAppearances -- The Flag That Breaks Signatures
+
+The `/NeedAppearances` flag (boolean, default `false`) tells the viewer to regenerate appearance streams before rendering.
+For ordinary fields this is a convenience -- skip generating appearances and let the viewer handle it.
+For signature fields, it is a disaster.
+
+When a viewer regenerates appearances, it modifies the document bytes.
+If the document is signed, the signature becomes invalid.
+It does not matter that the viewer was "just" fixing up visuals -- the bytes changed.
+
+[WARNING]
+====
+If `/NeedAppearances` is `true` in a signed document, either: (1) the viewer regenerates appearances and the signature fails, or (2) the viewer skips regeneration and some fields show blank rectangles.
+**Never set `/NeedAppearances` to `true` in a document that will be signed.** Always generate complete appearance streams for every field before signing.
+====
+
+=== /DA -- Default Appearance String
+
+The `/DA` (Default Appearance) string is a PDF content stream fragment that specifies the default font, size, and color for variable text in form fields.
+It typically looks like:
+
+[source]
+----
+/Helv 0 Tf 0 g
+----
+
+This means: use the font aliased as `/Helv`, at size 0 (auto-size), in black (`0 g`).
+The font name `/Helv` must be defined in the `/DR` (Default Resources) dictionary.
+
+Why does this matter for signatures?
+Because if a signing tool creates a visible signature appearance that contains text -- the signer's name, the date, the reason -- and the font referenced in the appearance stream is not available in `/DR` _and_ not embedded in the appearance's own `/Resources`, some viewers will fall back to `/DA` and render the text in Helvetica or not at all.
+
+TIP: Always embed the font resources directly in the signature field's appearance stream `/Resources` dictionary. Do not rely on `/DR`. The appearance stream is a self-contained Form XObject and should carry everything it needs to render correctly, regardless of what the parent AcroForm provides.
+
+=== /DR -- Default Resources
+
+The `/DR` dictionary provides fonts, color spaces, and other resources available to all form fields.
+The two fonts you will encounter in virtually every AcroForm document are `/Helv` (Helvetica, for text) and `/ZaDb` (ZapfDingbats, for checkbox ticks and radio button bullets).
+
+NOTE: The `/DR` fonts are _not_ the same as page-level fonts. A page's `/Resources` dictionary is independent. If a signature appearance stream references a font from the page's resources but not from `/DR` or the appearance's own resources, rendering may fail in viewers that strictly follow the spec.
+
+
+== Field Tree Hierarchy
+
+=== Parent-Child Relationships and Fully Qualified Names
+
+The AcroForm field tree is not flat.
+Fields can be nested using `/Parent` and `/Kids` keys.
+A parent field `<< /T (address) /Kids [20 0 R 21 0 R] >>` with a child field `<< /T (city) /Parent 19 0 R /FT /Tx >>` produces the fully qualified name `address.city`.
+
+The fully qualified name is constructed by concatenating `/T` (partial name) values from root to leaf, separated by periods.
+This is the name you use in PDFBox's `acroForm.getField("address.city")`, in JavaScript, and in FDF data files.
+
+[TIP]
+====
+**Debugging field-not-found errors:** If `acroForm.getField("Signature1")` returns null, check whether the field is nested.
+It might be `form.Signature1` or `page1.Signature1`.
+Use `acroForm.getFieldTree()` to iterate every field in the hierarchy and inspect the fully qualified names.
+====
+
+=== Terminal vs. Non-Terminal Fields
+
+A **terminal field** is a field with no `/Kids`, or whose `/Kids` are all widget annotations (not other fields).
+Terminal fields have a `/FT` (field type) key -- `/Tx`, `/Btn`, `/Ch`, or `/Sig`.
+
+A **non-terminal field** is a pure grouping node.
+It has `/Kids` that are other fields, and it does _not_ have `/FT`.
+Its only purpose is to provide a namespace prefix.
+
+WARNING: Some PDF generators create non-terminal fields that also carry `/FT`. This is technically a spec violation ({iso32000-2} S12.7.4.1), but it happens. PDFBox handles it gracefully in most cases, but other libraries may choke. If you are building a field tree, keep non-terminal nodes clean -- no `/FT`, no `/V`, no `/Rect`.
+
+
+== Field Types
+
+{iso32000-2} S12.7.4 defines four field types.
+All of them can appear in the same AcroForm, side by side, and a single document frequently contains all four -- especially government and legal forms that combine text input, checkboxes, dropdown selections, and signature fields.
+
+=== /Tx -- Text Fields
+
+Text fields hold user-entered text (value in `/V` as a text string).
+Key properties: `/MaxLen` (maximum character count), `/Q` (text alignment: 0=left, 1=center, 2=right).
+Text fields interact with signatures in one important way: if a text field is filled _after_ a document is signed, the fill operation is an incremental update.
+Whether this invalidates the signature depends on the `/Lock` and `/FieldMDP` settings (covered in Chapter 14).
+
+=== /Btn -- Button Fields
+
+Button fields come in three flavors, distinguished by the `/Ff` (field flags) bits: **pushbuttons** (bit 17 set, no persistent value), **checkboxes** (bit 17 clear, bit 16 clear, two-state toggles with values like `/Yes` or `/Off`), and **radio buttons** (bit 17 clear, bit 16 set, mutually exclusive options).
+For signatures, button fields matter primarily in the context of form flattening and field locking.
+
+=== /Ch -- Choice Fields
+
+Choice fields present a list of options: **combo boxes** (bit 18 set, a dropdown) and **list boxes** (bit 18 clear, a scrollable list).
+Options are defined in the `/Opt` array, where each entry can be a simple text string or a two-element array `[export_value, display_text]`.
+
+=== /Sig -- Signature Fields
+
+Signature fields are where form infrastructure meets cryptographic infrastructure.
+A `/Sig` field is, structurally, just another form field in the AcroForm tree.
+But its `/V` (value) is not a text string or a name -- it is a **signature dictionary** (`/Type /Sig`), which is a complex structure containing the byte range, the CMS data, the signing filter, timestamps, and more.
+
+A signature field before signing:
+
+[source]
+----
+<<
+  /FT /Sig
+  /T (Signature1)
+  /V null                    % or /V absent entirely
+  /Rect [100 600 300 650]
+  /Subtype /Widget
+  /P 5 0 R
+>>
+----
+
+The same field after signing:
+
+[source]
+----
+<<
+  /FT /Sig
+  /T (Signature1)
+  /V 42 0 R                  % reference to the /Sig dictionary
+  /Rect [100 600 300 650]
+  /Subtype /Widget
+  /P 5 0 R
+  /AP << /N 43 0 R >>        % appearance stream added by the signing tool
+>>
+----
+
+Object 42 is the signature dictionary (covered in depth in Chapter 12).
+Object 43 is the visual appearance of the signature.
+
+[IMPORTANT]
+====
+The signature field is _not_ the signature.
+The field is the **container**.
+The signature dictionary (the `/V` value) is the **content**.
+A document can have signature fields with no value -- these are placeholder fields, pre-positioned by a template author, waiting for a signer to fill them in.
+
+This distinction matters because:
+
+- A document with an empty signature field still has an entry in `/Fields`.
+- The `/SigFlags` should _not_ have bit 1 set until at least one field actually has a value.
+- Validation logic should check `/V`, not just the presence of `/FT /Sig` fields.
+====
+
+What makes `/Sig` fields unique: (1) the value is a complex dictionary, not a simple string; (2) signing computes a hash over the entire file, not just the field; (3) the `/SV` (Seed Value) and `/Lock` dictionaries allow the field to constrain which algorithms, certificates, and post-signing modifications are acceptable; and (4) the widget's `/Rect` determines visibility -- a zero-size rect means an invisible signature.
+
+
+== Widget Annotations
+
+=== The Connection Between Fields and Pages
+
+A form field is an abstract data object (name, type, value).
+A widget annotation is its visual representation on a specific page (coordinates, size, appearance).
+
+In the most common case, the field and widget are **merged into a single PDF object** -- the same dictionary carries both `/FT` (field type) and `/Subtype /Widget`, both `/T` (field name) and `/Rect` (position).
+The spec ({iso32000-2} S12.5.6.19) also allows separating them: a field's `/Kids` array can contain widget annotations, each with `/Parent` pointing back to the field.
+This allows a single field to have widgets on multiple pages -- unusual, but legal.
+
+TIP: When debugging, check whether the field and widget are merged or separate. `PDSignatureField.getWidgets()` returns the list of widgets. An empty list means no visual representation -- fine for invisible signatures, a bug if you expected a visible one.
+
+=== Page Association
+
+A widget must be associated with a page via two links: the widget's `/P` key referencing the page dictionary, and the page's `/Annots` array containing a reference to the widget.
+Both should be present.
+If the widget is missing from `/Annots`, it will not render -- even if `/P` points to the correct page.
+
+WARNING: Some signing tools add the widget to the field tree but forget to add it to the page's `/Annots` array. The signature is valid cryptographically but invisible on every page. This is one of the most common "invisible signature" bugs that is not actually an invisible signature -- it is a missing annotation reference.
+
+
+== Appearance Streams
+
+=== Normal, Rollover, and Down
+
+The `/AP` dictionary can define three appearance streams: `/N` (Normal -- the only one that matters for signatures), `/R` (Rollover -- mouse hover, rarely used), and `/D` (Down -- click state, irrelevant for signatures).
+
+Each can be a single Form XObject stream or a **subdictionary** mapping state names to streams.
+Checkboxes use a subdictionary (`<< /Yes 60 0 R /Off 61 0 R >>`).
+Signature fields always use a single stream -- signatures do not have states.
+
+=== Why Appearance Streams Matter for Signatures
+
+If the appearance stream is missing, the viewer either renders a blank rectangle, tries to generate one on the fly (dangerous if the document is signed -- see `/NeedAppearances` above), or shows a generic placeholder.
+For signed fields, the only correct approach is to have the signing tool generate a complete appearance stream before signing.
+
+[NOTE]
+====
+The appearance stream is included in the signed byte range.
+Modifying it after signing invalidates the signature.
+However, the appearance is _not_ semantically bound to the CMS content -- the appearance could say "Signed by Alice" while the certificate belongs to Bob.
+The viewer must verify both independently.
+====
+
+=== Generating Appearances with PDFBox
+
+PDFBox provides the `PDAcroForm.refreshAppearances()` method (and its per-field equivalent) to generate appearance streams for all fields.
+This is the equivalent of setting `/NeedAppearances` to `true` and having the viewer regenerate -- except you do it programmatically, before signing, so the appearances are part of the signed bytes.
+
+[source,java]
+----
+try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+    PDAcroForm acroForm = doc.getDocumentCatalog().getAcroForm();
+    if (acroForm != null) {
+        acroForm.setNeedAppearances(false);  // clear the flag
+        acroForm.refreshAppearances();        // generate all appearances
+    }
+}
+----
+
+CAUTION: `refreshAppearances()` will overwrite existing appearance streams. If you have custom signature appearances (hand-drawn images, company logos), call this _before_ setting up your custom appearances, or call it only on non-signature fields. For signature appearances, most signing workflows build the appearance stream manually using a `PDFormXObject` -- Chapter 15 covers this in detail.
+
+
+== XFA Forms: The Deprecated Complication
+
+=== What XFA Was and Why It Was Deprecated
+
+XFA (XML Forms Architecture) was Adobe's attempt to replace the limited AcroForm system with a powerful XML-based form description language.
+An XFA form embeds XML data inside the PDF file (in the `/XFA` key of the AcroForm dictionary), and a viewer that supports XFA renders the form from XML rather than from the AcroForm field tree.
+XFA could do things AcroForm could not: dynamic layouts, complex validation rules, repeating sections, and data binding to external schemas.
+
+{iso32000-2} deprecated XFA for three reasons: (1) only Adobe implemented it fully -- interoperability was abysmal; (2) XFA and AcroForm coexist awkwardly in the same file, with the two representations frequently disagreeing about field values; and (3) XFA's scripting capabilities have been exploited in multiple CVEs.
+
+=== Why XFA Still Causes Problems
+
+Deprecation does not mean disappearance.
+Millions of XFA-based PDF forms are still in circulation -- government tax forms, insurance applications, healthcare records.
+When these documents are signed, the signature covers the entire file, including the XFA data.
+
+The problems:
+
+- **PDFBox does not support XFA rendering.** If you load an XFA document in PDFBox, you get the AcroForm fallback. The field values you see may differ from what an XFA-aware viewer shows. If you sign based on the AcroForm representation, the signature covers bytes that an XFA viewer interprets differently.
+- **Field names may not match.** XFA and AcroForm can use different naming conventions. A signature field named `form1[0].#subform[0].SignatureField1[0]` in XFA might be `SignatureField1` in the AcroForm fallback.
+- **Validation ambiguity.** If the XFA representation says one thing and the signed AcroForm says another, which one did the signer actually see and intend to sign?
+
+TIP: If you encounter an XFA document in a signing workflow, the safest approach is to flatten the XFA to pure AcroForm (removing the `/XFA` key and ensuring all field values are represented in the AcroForm structure) _before_ any signatures are applied. PDFBox's `PDAcroForm.flatten()` can help, but test thoroughly -- XFA flattening is lossy by nature.
+
+
+== Form Flattening and Signatures
+
+Form flattening converts interactive fields into static page content: field values are "burned in" to page content streams, widget annotations are removed, and the AcroForm structure is deleted.
+The result is a static document that looks like the filled-in form but cannot be edited.
+
+Flattening destroys every signature in the document.
+The signature fields themselves are removed (they are form fields), the byte ranges no longer point at the original bytes, and the AcroForm structure referencing the signatures is gone.
+
+[WARNING]
+====
+**Never flatten a signed document.** This sounds obvious, but it happens constantly in automated workflows -- sign, then flatten "for archival" or "to prevent editing."
+The result is a static PDF with no valid signatures.
+If you need to prevent editing after signing, use field locking (`/Lock`) and certification signatures (`/DocMDP`) -- not flattening.
+====
+
+
+== PDFBox AcroForm API
+
+=== PDAcroForm: The Entry Point
+
+In PDFBox {pdfbox-version}, the AcroForm is accessed through the document catalog:
+
+[source,java]
+----
+try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+    PDAcroForm acroForm = doc.getDocumentCatalog().getAcroForm();
+    if (acroForm == null) {
+        return;  // No interactive forms in this document
+    }
+    for (PDField field : acroForm.getFields()) {
+        log.debug("Field: {} (type: {}, fqn: {})",
+            field.getPartialName(), field.getFieldType(),
+            field.getFullyQualifiedName());
+    }
+}
+----
+
+NOTE: `acroForm.getFields()` returns only top-level fields. To traverse the full tree including children, use `acroForm.getFieldTree()`, which returns a flat iterable over every field in the hierarchy.
+
+=== Field Tree Traversal
+
+`acroForm.getFieldTree()` returns a flat iterable over every field in the hierarchy -- almost always what you want.
+For finding signature fields specifically:
+
+[source,java]
+----
+for (PDField field : acroForm.getFieldTree()) {
+    if (field instanceof PDSignatureField sigField) {
+        log.info("Signature field: {} (signed: {})",
+            sigField.getFullyQualifiedName(),
+            sigField.getSignature() != null);
+    }
+}
+----
+
+If you need tree depth or explicit parent-child relationships, use `PDNonTerminalField.getChildren()` and recurse manually.
+
+=== PDSignatureField and PDSignature
+
+`PDSignatureField` is the PDFBox class representing a `/Sig` field.
+It provides access to the signature value (the `/V` dictionary) through `getSignature()`, which returns a `PDSignature` or `null` if the field is unsigned.
+
+[source,java]
+----
+PDSignatureField sigField = (PDSignatureField) acroForm.getField("Signature1");
+if (sigField == null) { return; }  // field not found -- check fully qualified name
+
+PDSignature sig = sigField.getSignature();
+if (sig == null) { return; }       // field exists but is unsigned
+
+log.info("Filter: {}", sig.getFilter());       // e.g. "Adobe.PPKLite"
+log.info("SubFilter: {}", sig.getSubFilter()); // e.g. "adbe.pkcs7.detached"
+log.info("Name: {}", sig.getName());
+log.info("Sign date: {}", sig.getSignDate());
+----
+
+IMPORTANT: `PDAcroForm.getField(String name)` uses the **fully qualified name**. If the field is nested (e.g., `signatures.approval`), you must pass the full path. Passing just `approval` will return `null`. This is one of the most common sources of "field not found" bugs.
+
+=== Creating Signature Fields Programmatically
+
+Creating a signature field involves three steps: create the field, create the widget annotation, and wire them into the AcroForm and page structure.
+
+[source,java]
+----
+// Ensure the AcroForm exists
+PDAcroForm acroForm = doc.getDocumentCatalog().getAcroForm();
+if (acroForm == null) {
+    acroForm = new PDAcroForm(doc);
+    doc.getDocumentCatalog().setAcroForm(acroForm);
+}
+
+// Create the signature field and configure its widget
+PDSignatureField sigField = new PDSignatureField(acroForm);
+sigField.setPartialName("Signature1");
+PDAnnotationWidget widget = sigField.getWidgets().get(0);
+PDPage targetPage = doc.getPage(0);
+widget.setRectangle(new PDRectangle(100, 600, 200, 50));
+widget.setPage(targetPage);
+
+// Wire into AcroForm and page structure
+targetPage.getAnnotations().add(widget);
+List<PDField> fields = new ArrayList<>(acroForm.getFields());
+fields.add(sigField);
+acroForm.setFields(fields);
+acroForm.getCOSObject().setInt(COSName.SIG_FLAGS, 3);
+----
+
+[TIP]
+====
+**Common mistakes when creating signature fields:**
+
+1. **Forgetting to add the widget to the page's `/Annots` array.** The field exists in the AcroForm but is invisible.
+2. **Forgetting to add the field to `/Fields`.** The widget is on the page but no viewer considers it a form field.
+3. **Not setting `/SigFlags`.** The field is there, it gets signed, but editors may do a full save and destroy it.
+4. **Using `new PDRectangle(x, y, w, h)` vs. raw array.** PDFBox's `PDRectangle` constructor takes (x, y, width, height), but the raw PDF `/Rect` array is `[llx lly urx ury]`. PDFBox handles the conversion, but if you're debugging raw COS dictionaries, remember the coordinate difference.
+====
+
+
+== Common Form/Signature Interaction Bugs
+
+Years of debugging have revealed a predictable set of bugs that occur at the intersection of AcroForm infrastructure and signature functionality.
+These are not edge cases -- they are the everyday reality of working with signed PDF forms.
+
+=== Missing Appearance Streams
+
+**Symptom:** Signature validates, but the rectangle on the page is blank.
+**Cause:** No `/AP` entry on the widget, or `/NeedAppearances` is `true` and the viewer destroyed the original appearance during regeneration.
+**Fix:** Always generate a complete `PDAppearanceStream` during signing and set it as the normal appearance on the widget (see Chapter 15 for details).
+
+=== Wrong Field Hierarchy
+
+**Symptom:** PDFBox finds the field but Acrobat does not, or vice versa.
+**Cause:** Inconsistent parent-child chain -- a child references a parent that does not list it in `/Kids`, or the fully qualified name computed by concatenating `/T` values does not match expectations.
+**Fix:** Validate the tree bidirectionally: every child's `/Parent` must list it in `/Kids`, and vice versa.
+
+=== SigFlags Not Set or Wrong
+
+**Symptom:** Signatures are valid, but a subsequent edit does a full save and destroys them all.
+**Cause:** `/SigFlags` is 0, 1, or absent.
+**Fix:** Set `/SigFlags` to 3 when creating the first signature field -- before signing, not after.
+
+=== Orphaned Signature Fields
+
+**Symptom:** Signature panel shows a signature with no visual element on any page; or shows nothing despite signature data existing in the file.
+**Cause:** Widget is missing from a page's `/Annots` (variant 1), or the field is not referenced from `/Fields` (variant 2).
+**Fix:** Verify both paths: field -> AcroForm `/Fields`, and widget -> page `/Annots`.
+
+=== Acrobat vs. PDFBox Rendering Differences
+
+**Symptom:** A form that looks perfect in Acrobat renders differently in PDFBox (or vice versa).
+
+**Common causes:** Acrobat aggressively substitutes missing fonts (PDFBox does not -- it uses only what is embedded or available on the system). Acrobat regenerates appearances when `/NeedAppearances` is `true` (PDFBox requires an explicit `refreshAppearances()` call). Acrobat is lenient about malformed COS dictionaries (a field with `/FT` on a non-terminal node may work in Acrobat but cause unexpected behavior in PDFBox). And Acrobat interprets `/DA` strings flexibly -- font size 0 means "auto-size," missing color operators are silently defaulted -- while PDFBox parses more strictly.
+
+TIP: When debugging cross-viewer differences, compare the raw COS structure. In PDFBox: `field.getCOSObject().toString()`. In Acrobat: Preflight tool or JavaScript console (`this.getField("name").valueAsString`). The differences are almost always at the COS level.
+
+=== Real-World Scenario: The Government Tax Form
+
+A government tax authority distributes a PDF form designed in Adobe LiveCycle Designer.
+The form uses XFA internally with an AcroForm fallback.
+A citizen fills it in using Chrome's built-in PDF viewer (which uses the AcroForm fallback because it does not support XFA).
+The citizen's tax advisor opens the filled form in Acrobat (which _does_ support XFA), sees different field values because the XFA data was never updated, and signs the document.
+
+The signature is technically valid -- it covers the bytes that were present at signing time.
+But the signed content includes XFA data that disagrees with the AcroForm data.
+There is no clean fix short of removing XFA from the document entirely.
+This is precisely why {iso32000-2} deprecated XFA, and why the deprecation matters for real-world signature workflows.

@@ -1,0 +1,1181 @@
+== PDF Signature Attacks: A Complete Technical Analysis
+
+[quote, Vladislav Mladenov et al., "1 Trillion Dollar Refund" (CCS 2019)]
+We found 21 out of 22 desktop viewer applications and 5 out of 7 online validation services to be vulnerable to at least one of our attacks.
+
+For nearly two decades, the PDF signature ecosystem operated on an assumption that turned out to be wrong: that viewers actually verified what they claimed to verify.
+Between 2019 and 2021, a research team at Ruhr University Bochum systematically dismantled this assumption.
+They showed that an attacker could take a validly signed PDF, modify it in specific ways, and present the result to any major PDF viewer — Adobe Acrobat, Foxit Reader, Nitro, LibreOffice, Okular, dozens of others — and the viewer would display a green checkmark and the text "Signature is valid."
+
+The signed content had been altered.
+The viewer said it hadn't.
+Every viewer was wrong.
+
+This chapter is a complete technical analysis of every major attack against PDF digital signatures — from the Bochum research program to earlier CVEs, from the theoretical mechanics to working code that demonstrates each attack class.
+The purpose is not to enable attacks but to make them impossible to misunderstand.
+If you build or maintain a PDF signature validation system, you need to understand exactly how these attacks work so that your code cannot be fooled by them.
+If you are a security researcher, this chapter gives you the foundation to find the next generation of PDF signature vulnerabilities — because the Bochum team found the obvious ones, but the attack surface is far from fully explored.
+
+=== The Researchers
+
+The PDF signature attacks of 2019–2021 were the work of the **Chair of Network and Data Security** (Lehrstuhl für Netz- und Datensicherheit) at Ruhr University Bochum, Germany, led by **Prof. Dr. Jörg Schwenk**.
+
+The core research team:
+
+* **Vladislav Mladenov** — PhD researcher, co-first author of the CCS 2019 paper, led the implementation and testing of the USF, ISA, and SWA attack variants
+* **Christian Mainka** — post-doctoral researcher, co-first author of both the CCS 2019 and NDSS 2021 papers, designed the Shadow Attack taxonomy and coordinated responsible disclosure
+* **Karsten Meyer zu Selhausen** — researcher and co-founder of **Hackmanit GmbH**, the security consultancy that spun out of the Bochum group; contributed to attack implementation and vendor coordination
+* **Martin Grothe** — researcher, contributed to the CCS 2019 paper's systematic evaluation across 22 viewers
+* **Simon Rohlmann** — researcher, co-author of the NDSS 2021 Shadow Attacks paper, developed the Hide-and-Replace variant
+* **Prof. Dr. Jörg Schwenk** — senior author on both papers, provided the research direction and the formal security model for PDF signatures
+
+The team maintained a coordinated disclosure website at **pdf-insecurity.org**, where they published proof-of-concept PDFs, detailed attack descriptions, and a viewer-by-viewer vulnerability matrix.
+Hackmanit GmbH later developed **PDF Detector**, a tool for checking PDFs against known attack patterns.
+
+The two landmark papers:
+
+. _"1 Trillion Dollar Refund: How To Spoof PDF Signatures"_ — presented at **ACM Conference on Computer and Communications Security (CCS)**, November 2019, London.
+This paper introduced three attack classes (USF, ISA, SWA) and tested them against 22 desktop viewers and 7 online validation services.
+
+. _"Shadow Attacks: Hiding and Replacing Content in Signed PDFs"_ — presented at **Network and Distributed Systems Security Symposium (NDSS)**, February 2021 (virtual).
+This paper introduced a fundamentally different attack model where malicious content is prepared _before_ the document is signed.
+
+Both conferences are top-tier academic venues in computer security.
+The CCS 2019 paper won a **Distinguished Paper Award** — a recognition given to only a handful of papers at each conference.
+
+
+=== Before Bochum: The State of PDF Signature Validation
+
+To understand why the Bochum attacks worked, you need to understand what PDF viewers _were_ doing when they claimed to "validate" a signature.
+
+A correct signature validation must verify at least the following:
+
+. **Structural integrity**: The byte range specified in the `/ByteRange` array must cover the entire file except the gap reserved for the `/Contents` value.
+There must be no unaccounted bytes before, between, or after the byte ranges.
+. **Cryptographic verification**: The CMS `SignedData` structure in `/Contents` must contain a valid signature over the hash of the byte range data.
+The digest algorithm, signing algorithm, and signed attributes must all be consistent.
+. **Certificate chain validation**: The signer's certificate must chain to a trusted root.
+The chain must be valid at the time of signing (or at the time of a trusted timestamp).
+Revocation status must be checked.
+. **Modification detection**: If additional data has been appended to the file after the signature (an incremental update), the viewer must determine whether those changes are permissible under the signature's `/TransformMethod` (e.g., DocMDP permission level) or whether they indicate tampering.
+
+What the Bochum team discovered was that most viewers implemented step 3 reasonably well (they checked certificate chains) but failed catastrophically at steps 1, 2, and 4.
+Some viewers didn't check the cryptographic signature value at all.
+Some didn't verify that the byte range covered the entire file.
+Some allowed arbitrary changes after signing without any warning.
+
+The result: a perfectly executed certificate chain validation was protecting... nothing.
+The viewers were carefully verifying _who_ signed the document, while completely ignoring _whether the document had been changed since they signed it_.
+
+
+=== Attack Class 1: Universal Signature Forgery (USF)
+
+==== The Concept
+
+Universal Signature Forgery is the simplest and most devastating of the three original attack classes.
+The premise is almost embarrassingly straightforward: what happens if the CMS signature value in `/Contents` is wrong?
+
+A correct implementation should reject the signature immediately — if the cryptographic value doesn't verify, nothing else matters.
+What the Bochum team found was that some viewers never checked.
+
+In the most extreme cases, the `/Contents` value could be empty (all zeros), filled with random bytes, or contain a valid CMS structure that signed completely different data — and the viewer would still display "Signature is valid" with a green checkmark.
+
+==== How It Works
+
+The attack requires no special tools and no knowledge of the signer's private key.
+The attacker takes a legitimately signed PDF, modifies the document content (changes text, replaces pages, adds content), and re-calculates any internal structures (cross-reference table, object offsets) needed to keep the file syntactically valid.
+The `/Contents` value — the CMS `SignedData` blob — is left unchanged, even though it now contains a signature over the _original_ document bytes, not the modified ones.
+
+In a correct implementation, the viewer would:
+
+. Read the `/ByteRange` to determine which bytes are signed
+. Hash those bytes using the digest algorithm specified in the CMS structure
+. Extract the signature value from the CMS `SignerInfo`
+. Verify the signature over the hash using the signer's public key
+. If verification fails → reject the signature
+
+Vulnerable viewers skipped step 4, step 3, or in some cases both.
+They parsed the CMS structure to extract the signer's certificate (for display purposes), checked that the certificate chained to a trust anchor, and then displayed the result — without ever verifying that the signature value was mathematically valid for the current document content.
+
+==== The Variants
+
+The Bochum team identified three USF variants with increasing severity:
+
+.**USF Variant 1: Manipulated SignerInfo**
+The `SignerInfo.signature` value (the actual RSASSA-PKCS1-v1_5 or ECDSA bytes) is replaced with random data.
+A correct implementation rejects this immediately during RSA/ECDSA verification.
+Vulnerable viewers never reached that step.
+
+.**USF Variant 2: Manipulated ContentInfo**
+The outer CMS `ContentInfo` wrapping is modified so the `SignedData` structure is structurally invalid — wrong OIDs, missing fields, or inconsistent version numbers.
+A correct implementation rejects this during CMS parsing.
+Vulnerable viewers used lenient parsing that silently ignored structural errors.
+
+.**USF Variant 3: Manipulated `/Contents` Value**
+The entire `/Contents` hex string is replaced — either with zeros, with a truncated CMS structure, or with a CMS structure copied from a different document.
+This tests whether the viewer checks the relationship between the CMS content and the actual document bytes at all.
+
+==== Demonstration: Detecting USF Vulnerability
+
+The following code demonstrates how to detect whether a signed PDF's CMS signature actually validates cryptographically — the check that USF-vulnerable viewers failed to perform.
+This is the _defense_, not the attack: if you are building a validator, this is the minimum you must implement.
+
+[source,java]
+----
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.interactive.digitalsignature.PDSignature;
+import org.bouncycastle.cert.X509CertificateHolder;
+import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
+import org.bouncycastle.cms.CMSProcessableByteArray;
+import org.bouncycastle.cms.CMSSignedData;
+import org.bouncycastle.cms.SignerInformation;
+import org.bouncycastle.cms.jcajce.JcaSimpleSignerInfoVerifierBuilder;
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
+import org.bouncycastle.util.Store;
+
+import java.io.FileInputStream;
+import java.io.InputStream;
+import java.security.Security;
+import java.security.cert.X509Certificate;
+import java.util.Collection;
+
+/**
+ * Demonstrates the cryptographic signature verification that USF-vulnerable
+ * viewers failed to perform. This is the MINIMUM check for signature integrity.
+ */
+public class UsfDefenseCheck {
+
+    static {
+        Security.addProvider(new BouncyCastleProvider());
+    }
+
+    public static void verifySignature(byte[] pdfBytes) throws Exception {
+        PDDocument doc = Loader.loadPDF(pdfBytes);
+
+        for (PDSignature sig : doc.getSignatureDictionaries()) {
+            // Step 1: Extract the signed byte ranges
+            byte[] signedContent = sig.getSignedContent(
+                    new ByteArrayInputStream(pdfBytes)); // <1>
+
+            // Step 2: Extract the CMS SignedData from /Contents
+            byte[] cmsBytes = sig.getContents(
+                    new ByteArrayInputStream(pdfBytes)); // <2>
+
+            // Step 3: Parse the CMS structure
+            CMSSignedData cmsSignedData = new CMSSignedData(
+                    new CMSProcessableByteArray(signedContent),
+                    cmsBytes); // <3>
+
+            // Step 4: Verify each signer's cryptographic signature
+            Store<X509CertificateHolder> certStore =
+                    cmsSignedData.getCertificates();
+
+            for (SignerInformation signer :
+                    cmsSignedData.getSignerInfos().getSigners()) {
+
+                Collection<X509CertificateHolder> matches =
+                        certStore.getMatches(signer.getSID());
+
+                if (matches.isEmpty()) {
+                    System.err.println(
+                            "FAIL: No certificate found for signer"); // <4>
+                    continue;
+                }
+
+                X509CertificateHolder certHolder = matches.iterator().next();
+                X509Certificate cert = new JcaX509CertificateConverter()
+                        .setProvider("BC")
+                        .getCertificate(certHolder);
+
+                // THIS IS THE CHECK THAT USF-VULNERABLE VIEWERS SKIPPED
+                boolean cryptoValid = signer.verify(
+                        new JcaSimpleSignerInfoVerifierBuilder()
+                                .setProvider("BC")
+                                .build(cert)); // <5>
+
+                if (!cryptoValid) {
+                    System.err.println(
+                            "FAIL: Cryptographic signature verification "
+                            + "FAILED for signer: " + cert.getSubjectX500Principal());
+                    System.err.println(
+                            "This document may have been tampered with (USF attack)");
+                } else {
+                    System.out.println(
+                            "PASS: Cryptographic signature valid for: "
+                            + cert.getSubjectX500Principal());
+                }
+            }
+        }
+
+        doc.close();
+    }
+}
+----
+<1> Extracts the bytes covered by `/ByteRange` — this is the data that was supposedly signed
+<2> Extracts the raw CMS `SignedData` blob from the `/Contents` hex string
+<3> Creates a CMS structure with the signed content as the detached data — BouncyCastle will use this for digest comparison
+<4> If no certificate matches the `SignerInfo.sid`, the CMS structure is malformed — reject immediately
+<5> **This is the critical line.** `signer.verify()` performs the actual RSA/ECDSA verification: it computes the digest over the signed content, verifies the signed attributes, and checks the signature value against the signer's public key. USF-vulnerable viewers never called the equivalent of this method.
+
+WARNING: If your signature validation code does not include a step equivalent to `signer.verify()` — an actual cryptographic verification of the signature value against the document bytes — your code is vulnerable to Universal Signature Forgery. This is non-negotiable. It must happen before you display any "valid" indicator to the user.
+
+
+==== Constructing a USF Attack (Proof of Concept)
+
+To understand USF fully, here is how an attacker constructs one.
+This is _not_ production exploit code — it is a minimal demonstration of the mechanics that every PDF signature validator must defend against.
+
+[source,java]
+----
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.font.PDType1Font;
+import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
+
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.nio.file.Files;
+
+/**
+ * Demonstrates USF attack mechanics. Takes a signed PDF, modifies the visible
+ * content, and writes the result. The CMS signature value is left unchanged --
+ * it now signs the ORIGINAL content, not the modified content.
+ *
+ * A correct validator will reject this because the digest over the byte range
+ * no longer matches the digest in the CMS SignerInfo.
+ * A USF-vulnerable validator will show "Signature is valid."
+ */
+public class UsfAttackDemo {
+
+    public static void main(String[] args) throws Exception {
+        byte[] originalPdf = Files.readAllBytes(
+                new File("signed-document.pdf").toPath());
+
+        // Load the signed PDF
+        PDDocument doc = Loader.loadPDF(originalPdf);
+
+        // Add a new page with attacker-controlled content
+        PDPage attackPage = new PDPage();
+        doc.addPage(attackPage); // <1>
+
+        PDPageContentStream cs = new PDPageContentStream(doc, attackPage);
+        cs.beginText();
+        cs.setFont(
+                new PDType1Font(Standard14Fonts.FontName.HELVETICA_BOLD), 24);
+        cs.newLineAtOffset(50, 700);
+        cs.showText("APPROVED - Payment of $1,000,000 authorized"); // <2>
+        cs.endText();
+        cs.close();
+
+        // Save with full rewrite — this changes object offsets,
+        // xref table, and file length. The /ByteRange in the original
+        // signature now covers different bytes, but the /Contents
+        // CMS value still contains the hash of the ORIGINAL bytes.
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        doc.save(baos); // <3>
+        doc.close();
+
+        Files.write(
+                new File("usf-attack-result.pdf").toPath(), baos.toByteArray());
+
+        // A correct validator: REJECTS (digest mismatch)
+        // A USF-vulnerable validator: shows green checkmark
+    }
+}
+----
+<1> Modifying the document structure after it was signed — adding a page, changing text, anything
+<2> The attacker can insert any content they want
+<3> A full `save()` (not `saveIncremental()`) rewrites the entire file, changing byte offsets everywhere. The original `/ByteRange` and `/Contents` are preserved structurally, but the bytes they reference have changed. The CMS signature now signs data that no longer exists at those byte positions.
+
+IMPORTANT: This code produces a PDF that any _correct_ validator will reject. The point is that in 2019, most validators were not correct. The digest computed over the new byte range content will not match the digest inside the CMS `SignerInfo.digestAlgorithm` — the very first check in proper CMS verification detects this. USF worked because viewers displayed the signer's certificate information _without performing this check_.
+
+
+=== Attack Class 2: Incremental Saving Attack (ISA)
+
+==== The Concept
+
+The Incremental Saving Attack is more subtle than USF and exploits a feature that is fundamental to how PDF signatures work: **incremental updates**.
+
+When a PDF is signed, the signing process:
+
+. Appends the signature dictionary and any new objects to the end of the file
+. Appends a new cross-reference section pointing to the new/modified objects
+. Appends a new trailer
+. The `/ByteRange` in the signature covers everything from the beginning of the file through the end of this new revision — with a gap for the `/Contents` value
+
+The critical insight is that PDF is designed to allow _additional_ incremental updates after signing.
+This is intentional — you need to be able to add a second signature to an already-signed document, or fill in form fields on a signed form.
+{iso32000-2} §12.8.1 explicitly allows certain modifications after signing, depending on the signature's `/TransformMethod` and permission level.
+
+The question is: does the viewer correctly distinguish between _permissible_ incremental updates (adding another signature) and _impermissible_ ones (changing the page content)?
+
+The Bochum team found that most viewers did not.
+
+==== How It Works
+
+The attacker takes a legitimately signed PDF and appends a new incremental update — exactly the way PDFBox's `saveIncremental()` method does.
+But instead of adding a second signature or filling in a form field, the attacker appends objects that change the visible content: modified page content streams, replaced images, rewritten text, or entirely new pages.
+
+The original signature remains intact — its byte range still covers the original revision, and its CMS signature is still mathematically valid over those bytes.
+The appended revision contains the modifications, complete with a new cross-reference section and trailer that redirect the viewer to the modified objects.
+
+A correct validator must:
+
+. Verify the signature is cryptographically valid (steps from USF defense)
+. Determine the document's revision at the time of signing (the byte range endpoint)
+. Compare the current document state to the signed revision
+. If there are changes beyond the signed revision, evaluate whether those changes are permissible under the signature's DocMDP permissions
+. If impermissible changes are detected, display a clear warning: "The document has been modified after signing"
+
+Vulnerable viewers either:
+
+* Did not compare the current document state to the signed revision at all
+* Compared but accepted all incremental updates as permissible
+* Only checked whether the appended data was "syntactically valid PDF" rather than whether it changed the visible content
+
+==== The Variants
+
+.**ISA Variant 1: Content Replacement via Incremental Update**
+The attacker appends a new revision that redefines existing page content stream objects.
+The cross-reference in the new revision points to new objects at the end of the file that replace the original content.
+The viewer renders the new content; the signature covers the old content.
+
+.**ISA Variant 2: Page Insertion/Deletion**
+The attacker appends a new revision that modifies the page tree — adding new pages, removing existing pages, or reordering them.
+The `/Pages` dictionary in the new revision points to a different set of page objects.
+
+.**ISA Variant 3: Annotation and Form Field Manipulation**
+The attacker appends annotations or modifies form field values.
+This variant is particularly insidious because some annotation changes _are_ legitimately allowed after signing (e.g., adding signature fields for subsequent signers).
+The boundary between "allowed" and "not allowed" is defined by the DocMDP permission level, and most viewers did not enforce it correctly.
+
+==== Demonstration: ISA Attack Mechanics
+
+[source,java]
+----
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.cos.COSDictionary;
+import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.cos.COSArray;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.font.PDType1Font;
+import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
+
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.nio.file.Files;
+
+/**
+ * Demonstrates ISA mechanics. Takes a signed PDF and appends an incremental
+ * update that replaces the visible content of page 1.
+ *
+ * The original signature remains cryptographically valid over the original
+ * byte range. The appended revision changes what the user sees.
+ *
+ * A correct validator detects the impermissible modification.
+ * An ISA-vulnerable validator shows "Signature is valid" on the modified content.
+ */
+public class IsaAttackDemo {
+
+    public static void main(String[] args) throws Exception {
+        byte[] signedPdf = Files.readAllBytes(
+                new File("signed-document.pdf").toPath());
+
+        // Load for incremental save — preserves the original bytes
+        PDDocument doc = Loader.loadPDF(signedPdf);
+
+        // Get the first page and replace its content
+        PDPage page = doc.getPage(0);
+
+        // Create a new content stream that overwrites existing content
+        PDPageContentStream cs = new PDPageContentStream(
+                doc, page,
+                PDPageContentStream.AppendMode.OVERWRITE,
+                true); // <1>
+
+        cs.beginText();
+        cs.setFont(
+                new PDType1Font(Standard14Fonts.FontName.HELVETICA_BOLD), 36);
+        cs.newLineAtOffset(50, 700);
+        cs.showText("CONTRACT VOIDED"); // <2>
+        cs.endText();
+        cs.close();
+
+        // Save incrementally — appends new objects + xref + trailer
+        // The original signature's byte range is UNTOUCHED
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        doc.saveIncremental(baos); // <3>
+        doc.close();
+
+        Files.write(
+                new File("isa-attack-result.pdf").toPath(), baos.toByteArray());
+
+        // The file now looks like this:
+        // [original PDF bytes ... signature ... %%EOF]  <-- signed revision
+        // [new objects ... new xref ... new trailer ... %%EOF]  <-- attacker's appendage
+        //
+        // The signature covers only the first section.
+        // The viewer renders the second section.
+        // A correct validator: warns "Document modified after signing"
+        // An ISA-vulnerable validator: shows green checkmark
+    }
+}
+----
+<1> `AppendMode.OVERWRITE` replaces the existing content stream. PDFBox tracks this as a modified object, which will be written in the incremental update
+<2> The attacker-controlled content — can be anything
+<3> `saveIncremental()` appends to the existing file bytes without modifying them. The original signature's `/ByteRange` and `/Contents` remain at their original byte positions. The new revision simply adds new objects and a new cross-reference section after the original `%%EOF`
+
+==== Detecting ISA: Revision Comparison
+
+The defense against ISA requires comparing the document as rendered from the signed revision to the document as rendered from the current (potentially modified) revision.
+
+[source,java]
+----
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.interactive.digitalsignature.PDSignature;
+
+import java.io.ByteArrayInputStream;
+import java.util.Arrays;
+
+/**
+ * Demonstrates how to extract the signed revision of a PDF and compare it
+ * to the full file — the core defense against ISA.
+ */
+public class IsaDefenseCheck {
+
+    public static void checkForAppendedContent(byte[] pdfBytes)
+            throws Exception {
+
+        PDDocument doc = Loader.loadPDF(pdfBytes);
+
+        for (PDSignature sig : doc.getSignatureDictionaries()) {
+            int[] byteRange = sig.getByteRange(); // <1>
+
+            if (byteRange == null || byteRange.length != 4) {
+                System.err.println("FAIL: Invalid or missing /ByteRange");
+                continue;
+            }
+
+            // The signed region ends at byteRange[2] + byteRange[3]
+            int signedEnd = byteRange[2] + byteRange[3]; // <2>
+
+            // Check: does the file extend beyond the signed region?
+            if (pdfBytes.length > signedEnd) {
+                int extraBytes = pdfBytes.length - signedEnd;
+                System.err.println(
+                        "WARNING: File contains " + extraBytes
+                        + " bytes AFTER the signed byte range"); // <3>
+                System.err.println(
+                        "This indicates an incremental update after signing.");
+                System.err.println(
+                        "These bytes are NOT covered by the signature.");
+                System.err.println(
+                        "Investigate whether the changes are permissible "
+                        + "(e.g., additional signatures, form fills) "
+                        + "or malicious (content replacement).");
+
+                // Extract the signed revision for comparison
+                byte[] signedRevision = Arrays.copyOfRange(
+                        pdfBytes, 0, signedEnd); // <4>
+
+                // You can now load signedRevision as a separate PDDocument
+                // and compare its rendered pages to the full document
+                // to determine exactly what changed
+            } else if (pdfBytes.length == signedEnd) {
+                System.out.println(
+                        "PASS: File ends exactly at the signed byte range. "
+                        + "No incremental updates after signing.");
+            } else {
+                System.err.println(
+                        "FAIL: File is SHORTER than the signed byte range. "
+                        + "File is truncated or corrupted.");
+            }
+        }
+
+        doc.close();
+    }
+}
+----
+<1> `/ByteRange` is an array of four integers: `[offset1, length1, offset2, length2]`. The two ranges cover everything before and after the `/Contents` gap
+<2> The signed content ends at the start of range 2 plus its length — this is the last byte the signature covers
+<3> If the file extends beyond this point, there is appended content that the signature does not cover. This is the ISA detection point
+<4> Extracting the signed revision as a standalone PDF allows you to render it separately and compare to the current document state
+
+TIP: A naive "does the file extend beyond the byte range?" check catches obvious ISA attacks, but it is not sufficient. A legitimate second signature also extends the file. The real check requires parsing the appended incremental update and determining _what_ changed — was it another signature (allowed), a form fill (allowed under DocMDP P=3), or a content modification (never allowed)? This is the hard part of ISA defense, and it is where most viewers failed in 2019.
+
+
+=== Attack Class 3: Signature Wrapping Attack (SWA)
+
+==== The Concept
+
+The Signature Wrapping Attack is the most technically sophisticated of the three original attack classes.
+Where USF exploits missing cryptographic verification and ISA exploits missing modification detection, SWA exploits the way viewers _locate_ the signature within the file.
+
+The core insight: the `/ByteRange` array tells the viewer which bytes are signed, but _nothing prevents an attacker from moving the signed bytes to a different location in the file_ — as long as the byte values at the `/ByteRange` offsets still produce the same hash.
+
+Actually, SWA is even simpler than that.
+The attacker doesn't need the same hash.
+The attacker modifies the `/ByteRange` array itself to point to a _different_ region of the file — one that contains attacker-controlled content — while keeping the original CMS signature that was computed over the original content.
+
+Wait — if the `/ByteRange` is modified, wouldn't the signature be invalid?
+Yes, _if the viewer reads the `/ByteRange` from the signed revision_.
+But many viewers read the `/ByteRange` from the _current_ cross-reference table, which may have been modified by an incremental update.
+The attacker appends a new revision that:
+
+. Redefines the signature dictionary object to point to a new `/ByteRange`
+. Places attacker-controlled content at the byte positions specified by the new `/ByteRange`
+. Ensures the CMS signature (in the original `/Contents`) is structurally present
+
+The viewer follows the new cross-reference to the redefined signature dictionary, reads the attacker's `/ByteRange`, hashes the attacker's content, and — if it doesn't actually verify the hash against the CMS signature (shades of USF) — displays "valid."
+
+In some variants, the viewer _does_ check the hash, but the attacker has been clever about which bytes are at the new `/ByteRange` positions, potentially including a copy of the original signed content or exploiting hash-algorithm weaknesses.
+
+==== How It Works
+
+[source]
+----
+Original file layout:
+  [header ... objects ... page content ... ]
+  [signature dict: /ByteRange [0 840 3000 1200] /Contents <CMS...>]
+  [xref ... trailer ... %%EOF]
+
+  Bytes 0-839 and 3000-4199 are signed.
+  Bytes 840-2999 are the /Contents gap (CMS signature value).
+  The CMS signature is valid over hash(bytes[0..839] + bytes[3000..4199]).
+
+Attacker appends an incremental update:
+  [... %%EOF]                              <-- original file ends here
+  [new object: modified signature dict     <-- attacker redefines the sig dict
+      /ByteRange [0 840 5000 1200]         <-- points to NEW byte positions
+      /Contents <original CMS bytes>]      <-- keeps the original CMS value
+  [attacker content at byte offset 5000]   <-- whatever the attacker wants
+  [new xref pointing to new sig dict]
+  [new trailer ... %%EOF]
+----
+
+The viewer follows the new xref, finds the redefined signature dictionary, reads `/ByteRange [0 840 5000 1200]`, and hashes bytes at those positions.
+If it checks the CMS signature against this hash, it will fail (because the CMS signed the _original_ byte range content).
+But if the viewer is also vulnerable to USF (skips the hash verification), the attack succeeds.
+
+SWA is often combined with elements of ISA and USF.
+The Bochum team found that many real-world exploits used a combination of attack techniques.
+
+==== Demonstration: Detecting SWA
+
+[source,java]
+----
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.interactive.digitalsignature.PDSignature;
+
+/**
+ * Demonstrates SWA detection: verify that the /ByteRange covers the entire
+ * file without gaps (except the /Contents gap) and without overlaps.
+ */
+public class SwaDefenseCheck {
+
+    public static void checkByteRangeIntegrity(byte[] pdfBytes)
+            throws Exception {
+
+        PDDocument doc = Loader.loadPDF(pdfBytes);
+
+        for (PDSignature sig : doc.getSignatureDictionaries()) {
+            int[] byteRange = sig.getByteRange();
+
+            if (byteRange == null || byteRange.length != 4) {
+                System.err.println("FAIL: Missing or malformed /ByteRange");
+                continue;
+            }
+
+            int offset1 = byteRange[0]; // Should be 0
+            int length1 = byteRange[1];
+            int offset2 = byteRange[2];
+            int length2 = byteRange[3];
+            int signedEnd = offset2 + length2;
+
+            // Check 1: First range must start at byte 0
+            if (offset1 != 0) {
+                System.err.println(
+                        "FAIL: /ByteRange does not start at byte 0. "
+                        + "Starts at: " + offset1); // <1>
+            }
+
+            // Check 2: The gap between ranges is the /Contents value
+            int gapStart = offset1 + length1;
+            int gapEnd = offset2;
+            int gapSize = gapEnd - gapStart;
+
+            if (gapSize <= 0) {
+                System.err.println(
+                        "FAIL: /ByteRange gap is zero or negative. "
+                        + "Possible SWA indicator"); // <2>
+            }
+
+            // Check 3: Verify /Contents hex string is at the gap position
+            // The gap should contain exactly the hex-encoded CMS signature
+            // surrounded by angle brackets: <hex...>
+            if (pdfBytes[gapStart] != '<') {
+                System.err.println(
+                        "FAIL: Expected '<' at gap start (offset "
+                        + gapStart + "), found: 0x"
+                        + Integer.toHexString(
+                                pdfBytes[gapStart] & 0xFF)); // <3>
+            }
+
+            // Check 4: The signed region should cover the entire file
+            // (for a single-signature document with no subsequent updates)
+            if (signedEnd < pdfBytes.length) {
+                System.err.println(
+                        "WARNING: /ByteRange ends at byte " + signedEnd
+                        + " but file is " + pdfBytes.length
+                        + " bytes. Unsigned trailing content detected");
+            }
+
+            // Check 5: Cross-validate that the /ByteRange in the file
+            // matches what we'd expect from the signed revision
+            // This requires parsing the original revision's xref
+            System.out.println(
+                    "ByteRange analysis: "
+                    + "range1=[" + offset1 + "," + (offset1 + length1) + ") "
+                    + "gap=[" + gapStart + "," + gapEnd + ") "
+                    + "range2=[" + offset2 + "," + signedEnd + ") "
+                    + "fileSize=" + pdfBytes.length);
+        }
+
+        doc.close();
+    }
+}
+----
+<1> The first byte range must start at offset 0. If it doesn't, there are unsigned bytes at the beginning of the file — a clear SWA indicator
+<2> The gap between the two ranges must be positive and should correspond to the `/Contents` hex string. A zero or negative gap indicates structural manipulation
+<3> The gap should contain the hex-encoded CMS value. Checking that it starts with `<` and ends with `>` is a basic sanity check
+
+CAUTION: SWA defense requires more than just checking `/ByteRange` arithmetic. A sophisticated attacker can construct a valid-looking byte range that passes arithmetic checks but points to carefully crafted content. The complete defense is: (a) verify `/ByteRange` covers the file correctly, (b) verify the CMS signature cryptographically (USF defense), and (c) verify that the `/ByteRange` values come from the signed revision's cross-reference, not from an appended revision.
+
+
+=== Attack Class 4: Shadow Attacks (2021)
+
+==== A Fundamentally Different Threat Model
+
+The three attacks from CCS 2019 (USF, ISA, SWA) all shared a common assumption: the attacker modifies a PDF _after_ it has been legitimately signed.
+The signed document is genuine; the attacker's manipulation comes afterward.
+
+Shadow Attacks, published at NDSS 2021, inverted the model.
+The attacker prepares the PDF _before_ it is signed, embedding hidden malicious content that the signer cannot see during the signing process.
+The signer reviews the document, sees nothing suspicious, and signs it.
+The signed PDF is then sent to the recipient, who opens it — and sees different content from what the signer saw.
+
+The signature is cryptographically valid.
+The signer genuinely signed those exact bytes.
+The bytes just don't mean what the signer thought they meant.
+
+This is not a cryptographic failure.
+It is a semantic failure: the gap between what a human _sees_ when they review a document and what the _bytes_ actually encode.
+And it is far harder to defend against than USF, ISA, or SWA.
+
+==== Shadow Attack Variant 1: Hide
+
+The attacker creates a PDF with two layers of content — one visible, one hidden.
+The hidden content is placed _behind_ the visible content using PDF features like:
+
+* **Overlapping objects**: A white rectangle drawn on top of text, hiding it.
+The text is in the content stream; the rectangle covers it.
+After signing, the attacker removes the rectangle via an incremental update, revealing the hidden text.
+* **Optional Content Groups (OCG)**: PDF's layer mechanism.
+Content can be tagged with `/OC` (Optional Content) markers and made visible or invisible via the `/OCProperties` dictionary.
+The attacker sets a layer to invisible before signing, then sets it to visible after signing.
+* **Referenced XObjects**: Content referenced as `Form XObject` but not actually rendered on any page.
+After signing, an incremental update adds the XObject to a page's content stream.
+
+The key constraint: _all of the hidden content must be present in the file at the time of signing_, so that it falls within the signed byte range.
+The attacker only changes the _visibility_ via an incremental update after signing — which some viewers allowed without warning.
+
+==== Shadow Attack Variant 2: Replace
+
+The attacker creates a PDF where the visible content can be _replaced_ by different visible content without modifying any objects in the signed byte range.
+This exploits **interactive form features**:
+
+* A text field with a default value ("Contract for $1,000") and a different actual value ("Contract for $1,000,000") — the default is displayed initially, but changing which value is rendered requires only an annotation flag change
+* Font references that can be swapped — the same Unicode code points render as different glyphs depending on which font is active
+* Images referenced by name from a page's Resources dictionary — changing which image a name resolves to requires only modifying the Resources dictionary
+
+The Replace variant is particularly dangerous because it exploits features that are _designed_ to change document appearance (form filling, annotation updates) — the viewer must distinguish between a legitimate form fill and an attacker swapping content.
+
+==== Shadow Attack Variant 3: Hide-and-Replace
+
+The most powerful variant combines both techniques.
+The attacker creates a PDF that:
+
+. Contains the content the signer will see (layer A)
+. Contains the content the recipient will see (layer B), hidden behind layer A
+. Is structured so that a single incremental update (changing a few bytes in an annotation dictionary or OCG configuration) switches from layer A to layer B
+
+After signing, the attacker appends the minimal incremental update needed to switch layers.
+If the viewer allows annotation or OCG changes after signing (as many did, because these are often considered "permissible" changes), the attack succeeds.
+
+==== Demonstration: Shadow Attack (Hide Variant) Preparation
+
+[source,java]
+----
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.PDPageContentStream;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.font.PDType1Font;
+import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
+
+import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.nio.file.Files;
+
+/**
+ * Demonstrates the preparation phase of a Shadow Attack (Hide variant).
+ * The attacker creates a PDF with hidden text behind a white overlay.
+ *
+ * BEFORE signing: Signer sees "Payment: $1,000"
+ * AFTER signing + reveal: Recipient sees "Payment: $1,000,000"
+ *
+ * The hidden text ("Payment: $1,000,000") is present in the signed bytes.
+ * The overlay (white rectangle) hides it. An incremental update that removes
+ * the overlay reveals the hidden text — and the signature remains valid.
+ */
+public class ShadowAttackHideDemo {
+
+    public static void main(String[] args) throws Exception {
+        PDDocument doc = new PDDocument();
+        PDPage page = new PDPage(PDRectangle.A4);
+        doc.addPage(page);
+
+        PDType1Font font = new PDType1Font(
+                Standard14Fonts.FontName.HELVETICA);
+        PDType1Font fontBold = new PDType1Font(
+                Standard14Fonts.FontName.HELVETICA_BOLD);
+
+        PDPageContentStream cs = new PDPageContentStream(doc, page);
+
+        // Layer 1: The hidden content (written FIRST, so it's behind)
+        // This text will be present in the signed bytes
+        cs.beginText();
+        cs.setFont(fontBold, 16);
+        cs.newLineAtOffset(50, 700);
+        cs.showText("Payment: $1,000,000"); // <1>
+        cs.endText();
+
+        // Layer 2: The overlay that hides it
+        // A white rectangle drawn ON TOP of the hidden text
+        cs.setNonStrokingColor(1.0f, 1.0f, 1.0f); // White
+        cs.addRect(45, 695, 250, 25); // Covers the text above
+        cs.fill(); // <2>
+
+        // Layer 3: The visible content (what the signer sees)
+        cs.setNonStrokingColor(0.0f, 0.0f, 0.0f); // Black
+        cs.beginText();
+        cs.setFont(fontBold, 16);
+        cs.newLineAtOffset(50, 700);
+        cs.showText("Payment: $1,000"); // <3>
+        cs.endText();
+
+        // Legitimate-looking document body
+        cs.beginText();
+        cs.setFont(font, 12);
+        cs.newLineAtOffset(50, 650);
+        cs.showText("This agreement confirms the payment amount above.");
+        cs.endText();
+
+        cs.close();
+
+        // Save — this PDF is now ready to be sent to the signer
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        doc.save(baos);
+        doc.close();
+
+        Files.write(
+                new File("shadow-prepared.pdf").toPath(), baos.toByteArray());
+
+        // The signer opens this PDF, sees "Payment: $1,000", and signs it.
+        // The signed byte range includes ALL content: both the hidden
+        // "$1,000,000" text and the white rectangle that covers it.
+        //
+        // After signing, the attacker creates an incremental update that
+        // removes or makes transparent the white rectangle, revealing
+        // "Payment: $1,000,000" — and the signature validates.
+    }
+}
+----
+<1> The hidden text is written to the content stream first. In PDF rendering order, later operators paint _over_ earlier ones on the same area
+<2> A white filled rectangle covers the hidden text completely. The signer sees only white space at this position
+<3> The visible text is drawn on top of the white rectangle. This is what the signer reads when reviewing the document before signing
+
+CAUTION: Shadow Attacks are fundamentally harder to prevent than USF, ISA, or SWA because the malicious content is _part of the signed data_. The signature is cryptographically valid over the exact bytes the signer intended to sign. The defense must go beyond byte-level verification into _semantic_ analysis: does the document contain hidden content? Are there overlapping objects? Are there unused Form XObjects? Are there Optional Content Groups with suspicious visibility settings? This is an open research problem with no complete solution.
+
+==== The Scope of Shadow Attack Vulnerability
+
+The Bochum team tested 29 PDF viewers against the Shadow Attack variants.
+The results were comprehensive:
+
+.Shadow Attack test results across PDF viewers (NDSS 2021)
+[cols="3,1,1,1",options="header"]
+|===
+|Viewer |Hide |Replace |Hide-and-Replace
+
+|Adobe Acrobat Reader DC
+|Vulnerable
+|Vulnerable
+|Vulnerable
+
+|Foxit Reader
+|Vulnerable
+|Vulnerable
+|Vulnerable
+
+|LibreOffice Draw
+|Vulnerable
+|Partially vulnerable
+|Vulnerable
+
+|Nitro Pro
+|Vulnerable
+|Vulnerable
+|Vulnerable
+
+|PDF-XChange
+|Vulnerable
+|Not vulnerable
+|Vulnerable
+
+|Okular
+|Vulnerable
+|Vulnerable
+|Vulnerable
+
+|Evince
+|Vulnerable
+|Vulnerable
+|Vulnerable
+
+|Chrome PDF Viewer
+|No signature validation
+|—
+|—
+
+|macOS Preview
+|Vulnerable
+|Vulnerable
+|Vulnerable
+|===
+
+NOTE: This table is a representative subset. The full results covering 29 viewers are available in the NDSS 2021 paper and at pdf-insecurity.org. Chrome's built-in PDF viewer does not validate signatures at all (it displays them but does not indicate validity), so Shadow Attacks are not applicable in the traditional sense — but the user also receives no warning that the document has been signed and potentially tampered with.
+
+
+=== Pre-Bochum Vulnerabilities: Earlier PDF Signature Issues
+
+The Bochum research was the most systematic analysis of PDF signature security, but it was not the first time vulnerabilities were discovered.
+Several earlier issues laid the groundwork — and reveal that the _category_ of bug (failing to verify what you claim to verify) has been a persistent pattern in PDF signature implementations.
+
+==== CVE-2018-16042 — Adobe Acrobat Signature Bypass (2018)
+
+In 2018, Adobe patched **CVE-2018-16042** in Acrobat DC and Acrobat Reader DC (versions before 2019.008.20081).
+The vulnerability allowed a crafted PDF to display a valid signature indicator even when the document had been modified.
+
+The technical details were not fully disclosed (Adobe's advisory was characteristically brief), but the vulnerability class — signature validation bypass via document manipulation — is the same category as the ISA attacks that Bochum would systematize a year later.
+This CVE was one of several signals that the PDF signature validation code in major viewers had not been subject to rigorous adversarial testing.
+
+**Affected versions:** Acrobat DC/Reader DC before 2019.008.20081 +
+**Impact:** Signature validation bypass — modified documents displayed as validly signed +
+**Fix:** Updated signature validation logic in the January 2019 security update
+
+==== CVE-2018-4993 — Adobe Acrobat NTLM Credential Theft (2018)
+
+While not strictly a signature bypass, **CVE-2018-4993** demonstrated a related risk: a crafted PDF could trigger NTLM authentication requests to an attacker-controlled server when opened in Adobe Acrobat.
+Combined with a forged signature (via any of the bypass techniques), this creates a compound attack: the victim opens a "validly signed" PDF, and their Windows credentials are silently exfiltrated.
+
+**Affected versions:** Acrobat DC/Reader DC before 2018.011.20040 +
+**Impact:** NTLM hash theft via SMB relay when opening a crafted PDF +
+**Fix:** Restricted external resource loading in the May 2018 security update
+
+==== SHAttered and the SHA-1 Deprecation (2017)
+
+In February 2017, researchers from Google and CWI Amsterdam published **SHAttered** — the first practical collision attack against SHA-1.
+They produced two different PDF documents with the same SHA-1 hash, proving that SHA-1 could no longer be relied upon for collision resistance.
+
+For PDF signatures, this had immediate implications.
+The `adbe.pkcs7.sha1` SubFilter — which embeds a SHA-1 hash of the entire document as the CMS content data — was now theoretically vulnerable to a collision attack: an attacker could prepare two documents with the same SHA-1 hash, have the victim sign one, and then substitute the other.
+
+The practical impact was limited (the collision required approximately 2^63^ computations and the two colliding documents had to be carefully constructed), but the theoretical break was sufficient to trigger industry-wide deprecation:
+
+* {iso32000-2} deprecated `adbe.pkcs7.sha1` entirely
+* Adobe Acrobat began showing warnings for SHA-1 signed documents
+* The CA/Browser Forum required SHA-256 as the minimum for all new certificates
+* PAdES profiles already mandated SHA-256 as the minimum digest algorithm
+
+.SHA-1 timeline for PDF signatures
+[cols="1,4",options="header"]
+|===
+|Year |Event
+
+|2005
+|Theoretical weakness in SHA-1 published (Wang et al.)
+
+|2011
+|NIST deprecated SHA-1 for digital signatures in federal use
+
+|2013
+|Microsoft announced SHA-1 certificate sunset for 2016
+
+|2017
+|SHAttered: first practical SHA-1 collision (Google/CWI). Two PDFs with identical SHA-1 hashes publicly demonstrated
+
+|2017
+|ISO 32000-2 deprecated `adbe.pkcs7.sha1` SubFilter
+
+|2020
+|SHA-1 collisions reduced to 2^63^ operations (Leurent and Peyrin, "SHA-1 is a Shambles"), making chosen-prefix collisions feasible
+|===
+
+WARNING: If your code still generates signatures using SHA-1 (either via `adbe.pkcs7.sha1` or using SHA-1 as the `digestAlgorithm` in the CMS `SignerInfo`), stop immediately. SHA-1 is broken. Use SHA-256 or SHA-384. There is no legitimate reason to use SHA-1 for any new signature created after 2017.
+
+
+==== The Comodo Registration Authority Breach (2011)
+
+In March 2011 — the same month as DigiNotar, though discovered slightly earlier — an attacker compromised a **registration authority (RA)** affiliated with Comodo, one of the world's largest certificate authorities at the time.
+
+The attacker used the compromised RA account to issue nine fraudulent SSL certificates for high-profile domains: `login.live.com`, `mail.google.com`, `www.google.com`, `login.yahoo.com`, `login.skype.com`, `addons.mozilla.org`, and three others.
+The certificates were issued by Comodo's legitimate intermediate CA, meaning they chained correctly to a trusted root.
+
+The breach was discovered quickly because the attacker tested one of the certificates against a live server, and certificate pinning in Google Chrome detected the mismatch.
+Without Chrome's certificate pinning, the fraudulent certificates could have been used for undetectable man-in-the-middle attacks.
+
+**For PDF signatures:** The Comodo breach demonstrated that even without compromising a root CA's private key, an attacker could obtain legitimate-looking certificates through a _registration authority_ compromise — a weaker link in the chain.
+A document signed with one of these fraudulent certificates would have validated correctly in any PDF viewer that trusted Comodo's root.
+The signer would appear to be "Google" or "Microsoft" or "Yahoo" — entities that obviously did not sign the document.
+
+The incident led to:
+
+* Mandatory two-factor authentication for all RA accounts at major CAs
+* Domain control validation (DCV) requirements tightened by the CA/Browser Forum
+* Increased scrutiny of the RA model, eventually leading several CAs to eliminate external RAs entirely
+
+==== The Symantec Distrust (2017–2018)
+
+Between 2015 and 2017, Google's Chrome security team and the CA/Browser Forum discovered that **Symantec** (which at that time owned the Thawte, GeoTrust, VeriSign, and RapidSSL certificate brands) had mis-issued thousands of certificates — including certificates for domains whose owners had not authorized them.
+
+The problems were systemic:
+
+* Symantec had delegated certificate issuance to third-party partners (RAs) without adequate oversight
+* Test certificates for real domains were issued to unauthorized parties
+* Audit logs were incomplete or missing
+* Symantec initially denied the scope of the problem, then acknowledged it in stages
+
+Google announced a graduated distrust of all Symantec-issued certificates:
+
+* Chrome 66 (April 2018): distrusted certificates issued before June 1, 2016
+* Chrome 70 (October 2018): distrusted all remaining Symantec certificates
+
+Mozilla Firefox and Apple Safari followed with their own distrust timelines.
+Symantec sold its CA business to DigiCert, which re-issued certificates for affected customers under DigiCert's infrastructure.
+
+**For PDF signatures:** Symantec was a major CA in the AATL (Adobe Approved Trust List).
+Documents signed with Symantec-issued certificates before the distrust cutoff dates would validate correctly when signed, but might show warnings or failures in PDF viewers that updated their trust stores to reflect the browser distrust.
+This created a time-dependent validation problem: a PDF signed with a Symantec certificate in 2015 was "valid" when signed, "suspect" in 2018, and — depending on the viewer's trust configuration — might show as "invalid" or "valid with warnings" today.
+
+This is exactly the problem that PAdES-B-LTA (long-term validation with archival timestamps) was designed to solve: by embedding the full certificate chain and revocation data at the time of signing, and then protecting it with periodic archival timestamps, the signature's validity at the time of signing can be verified even after the issuing CA is no longer trusted.
+
+
+=== Exploits in the Wild
+
+A natural question: were any of these attacks exploited before or after the Bochum disclosures?
+
+The honest answer is: **we don't know for certain**.
+
+PDF signatures are used in financial contracts, government documents, legal filings, tax returns, insurance claims, and medical records.
+If an attacker successfully forged a signature on a financial contract, the victim might not discover it until a dispute arises — and even then, the forensic analysis might not identify the specific attack technique.
+
+What we do know:
+
+==== Indicators of Real-World Exploitation
+
+. **The "1 Trillion Dollar Refund" title was not hyperbole.** The paper's title referenced the fact that tax authorities in multiple countries accept signed PDFs as official submissions.
+The German tax system (ELSTER), for example, processes millions of electronically signed documents per year.
+If USF or ISA could forge signatures on tax submissions, the financial exposure was enormous.
+The Bochum team coordinated with CERT-Bund (Germany's national CERT) before publication.
+
+. **Adobe's response was unusually fast.** Adobe issued CVE-2020-9592 and CVE-2020-9596 and released patches within weeks of the responsible disclosure.
+For a company that typically operates on monthly security update cycles, the accelerated timeline suggests Adobe assessed the risk as immediate and severe — consistent with either active exploitation or intelligence indicating exploitation was imminent.
+
+. **The EU Digital Signature Service (DSS) was vulnerable.** The EU's own reference implementation for signature validation — the tool member states use to validate eIDAS-compliant signatures — was vulnerable to ISA attacks.
+If the EU's own validator could be fooled, signatures submitted to government services across 27 member states could potentially have been forged without detection.
+
+. **Commercial signing services had no detection capability.** Before the Bochum research, no commercial PDF signing or validation service tested for these attack classes.
+There were no automated tools to detect ISA, SWA, or Shadow Attack patterns in submitted PDFs.
+Any exploitation that occurred before 2019 would have been invisible to the existing security infrastructure.
+
+==== Post-Disclosure Exploitation Risk
+
+After the papers were published and patches released, the risk shifted:
+
+* **Unpatched viewers remain vulnerable.** Not all users update their PDF viewers.
+Enterprise environments, government agencies with slow update cycles, and users in regions with limited internet access may still be running vulnerable versions of Acrobat, Foxit, or other viewers.
+* **The attack techniques are public.** The Bochum team published detailed descriptions and proof-of-concept PDFs.
+Any attacker with basic PDF knowledge can reproduce the attacks.
+* **Shadow Attacks remain partially unresolved.** While most viewers now detect the Hide and Replace variants, the fundamental problem — that PDF semantics allow content to be visually hidden — is inherent to the format.
+New variants of Shadow Attacks are likely still discoverable.
+
+
+=== The Patch Response: What Changed
+
+==== Adobe's Response
+
+Adobe's patches for CVE-2020-9592 and CVE-2020-9596 (released in the May 2020 Acrobat security update, version 2020.006.20042) implemented:
+
+. **Cryptographic signature verification** — closing the USF vulnerability by ensuring the CMS signature value is always verified against the document hash
+. **Byte range coverage validation** — checking that the `/ByteRange` covers the entire file from offset 0 to the file's end (minus the `/Contents` gap), closing the SWA vulnerability
+. **Incremental update analysis** — warning users when an incremental update modifies content beyond what the signature's permission level allows, closing the ISA vulnerability
+. **Shadow content detection** — partial detection of Hidden content patterns (overlapping objects, OCGs with suspicious visibility settings)
+
+Acrobat's signature panel now displays more granular information:
+
+* "Signed and all signatures are valid" — no modifications detected
+* "Signed but the document has been modified since signing" — incremental updates detected, with details about what changed
+* "At least one signature has problems" — cryptographic or structural verification failed
+* "The document has been altered or corrupted since the signature was applied" — clear indication of tampering
+
+==== Foxit's Response
+
+Foxit Reader patched its signature validation in version 10.1 (released October 2020), implementing similar checks: CMS verification, byte range validation, and incremental update analysis.
+Foxit was notably slower than Adobe in responding — roughly five months after Adobe's patch.
+
+==== LibreOffice's Response
+
+LibreOffice (which uses the NSS library for cryptographic operations) patched its PDF signature validation in version 7.0.
+The fix was more complex because LibreOffice's PDF import/export pipeline differs significantly from dedicated PDF viewers — it converts PDF to an internal format for editing, which complicates byte-level signature verification.
+
+==== The Broader Industry
+
+By mid-2021, most actively maintained PDF viewers had released patches addressing the three original attack classes (USF, ISA, SWA).
+Shadow Attack mitigations were slower to arrive and remain incomplete in some viewers as of 2026.
+
+The Bochum research also influenced the standards bodies:
+
+* **ISO TC 171** (the committee responsible for {iso32000-2}) incorporated the attack findings into the errata and clarifications for the second edition of PDF 2.0
+* **ETSI** updated the PAdES standard (EN 319 142-1 V1.2.1, published 2022) to include explicit requirements for byte range coverage verification and incremental update validation
+* **The EU Digital Signature Service (DSS)** — the open-source reference validator maintained by the European Commission — was patched and now includes specific test cases for each attack class
+
+
+=== Building a Robust Validator: Lessons from the Attacks
+
+Every attack in this chapter exploits a specific gap between what a viewer _should_ check and what it _actually_ checks.
+Here is the complete checklist, informed by every vulnerability discussed above.
+
+.PDF Signature Validation Checklist (post-Bochum)
+[cols="1,3,2",options="header"]
+|===
+|# |Check |Defends Against
+
+|1
+|Parse the CMS `SignedData` structure and verify it is well-formed (correct OIDs, consistent version numbers, all required fields present)
+|USF Variant 2
+
+|2
+|Verify the `SignerInfo.signature` value cryptographically against the signer's public key and the computed digest
+|USF Variant 1
+
+|3
+|Verify the message digest in the signed attributes matches the hash of the byte range content
+|USF Variant 3, SWA
+
+|4
+|Verify `/ByteRange` starts at offset 0
+|SWA
+
+|5
+|Verify `/ByteRange` gap contains the `/Contents` hex string
+|SWA
+
+|6
+|Verify `/ByteRange` covers the entire file (for the signed revision) — no unaccounted bytes before, between, or after the ranges
+|SWA, ISA
+
+|7
+|If the file extends beyond the signed byte range, parse the incremental update and determine what changed
+|ISA
+
+|8
+|Verify that any changes in the incremental update are permissible under the signature's DocMDP permission level (P=1: no changes; P=2: form fills + signatures; P=3: form fills + signatures + annotations)
+|ISA Variant 3
+
+|9
+|Verify the certificate chain from the signer's certificate to a trusted root, checking revocation (OCSP/CRL) and validity dates
+|Certificate forgery, CA breaches
+
+|10
+|If a timestamp is present, verify the TSA certificate chain independently and check that the timestamp covers the correct data
+|Backdated signatures
+
+|11
+|Check for hidden content patterns: overlapping objects, Optional Content Groups with invisible layers, unreferenced Form XObjects, form fields with discrepant default/actual values
+|Shadow Attacks (Hide, Replace)
+
+|12
+|Ensure the digest algorithm is SHA-256 or stronger — reject SHA-1
+|SHAttered, hash collision attacks
+|===
+
+TIP: Checks 1–6 are non-negotiable — any validator that skips them is vulnerable to at least one of USF, ISA, or SWA. Checks 7–10 are necessary for real-world security but require more complex implementation. Checks 11–12 are defense-in-depth against attacks that remain partially unresolved.
+
+IMPORTANT: No checklist is complete. The Bochum team found these attack classes by thinking adversarially about the gap between what the spec _requires_ and what implementations _do_. There will be more attacks. The defense is not just implementing these twelve checks — it is building a culture of adversarial testing into your validation code.
+
+
+=== A Note on Responsible Disclosure
+
+The Bochum team followed responsible disclosure for both papers.
+They notified affected vendors months before publication and provided proof-of-concept PDFs for testing.
+
+For the CCS 2019 paper, the disclosure timeline was approximately:
+
+* **March–April 2019**: Initial vendor notifications
+* **May–August 2019**: Back-and-forth with vendors; some requested extended timelines; some did not respond
+* **November 2019**: Paper presented at CCS; public disclosure
+* **May 2020**: Adobe patches released (CVE-2020-9592, CVE-2020-9596)
+* **October 2020**: Foxit patches released
+
+The six-month gap between public disclosure and Adobe's patch — and the eleven-month gap before Foxit's patch — is notable.
+The Bochum team publicly criticized the slow response, particularly from viewers that took more than six months to patch after detailed proof-of-concept material was shared privately.
+
+For the NDSS 2021 paper (Shadow Attacks), the disclosure process was similar but vendors responded faster, having already been through the CCS 2019 cycle.
+
+The research materials — including proof-of-concept PDFs, the vulnerability matrix, and detailed attack descriptions — remain available at **pdf-insecurity.org**.
+The Hackmanit GmbH **PDF Detector** tool (available as a web service and standalone library) can check PDFs for known attack patterns.
+
+
+=== Summary
+
+PDF signature security before 2019 was, to put it bluntly, an illusion.
+The cryptographic primitives were sound — RSA, ECDSA, SHA-256, CMS are all well-designed and well-analyzed.
+The failure was entirely in how PDF viewers _used_ those primitives.
+They verified certificates meticulously and signatures not at all.
+
+The Bochum research (CCS 2019, NDSS 2021) exposed four attack classes:
+
+* **USF**: The viewer doesn't check the cryptographic signature value — forge anything
+* **ISA**: The viewer doesn't check for modifications after signing — append anything
+* **SWA**: The viewer doesn't validate the byte range — redirect it to anything
+* **Shadow Attacks**: The viewer doesn't analyze what the signed content _means_ — hide anything
+
+Every major PDF viewer was vulnerable.
+The patches took months to years.
+Some Shadow Attack variants remain partially unresolved.
+
+Earlier events — the DigiNotar breach (2011), the Comodo RA compromise (2011), the Symantec distrust (2017–2018), and the SHAttered SHA-1 collision (2017) — had already weakened the trust infrastructure underneath PDF signatures.
+The Bochum attacks showed that even if you trusted the infrastructure, the validators themselves couldn't be trusted.
+
+The lesson for implementers is clear: **verify everything, trust nothing, and test adversarially**.
+The validation checklist in this chapter is the minimum.
+The next attack class is already being researched.

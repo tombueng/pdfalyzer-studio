@@ -1,0 +1,390 @@
+% =============================================================================
+% Dictionary Diagrams using pure LaTeX tables (booktabs, longtable, tabularray)
+% Indentation solved via \hspace in cells and custom column types
+% =============================================================================
+\documentclass[11pt,a4paper]{article}
+\PassOptionsToPackage{table}{xcolor}
+\input{test-dict-v2-preamble}
+
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{multirow}
+% ragged2e not in Docker image; use \raggedright fallback
+\newcommand{\RaggedRight}{\raggedright}
+
+% Custom column types
+\newcolumntype{K}{>{\ttfamily\bfseries\color{lkeycolor}\raggedright\arraybackslash}p{3.2cm}}
+\newcolumntype{V}{>{\ttfamily\color{lvalcolor}\raggedright\arraybackslash}p{4.8cm}}
+\newcolumntype{N}{>{\small\sffamily\color{black!55}\RaggedRight\arraybackslash}p{6.2cm}}
+
+% Indentation helper
+\newcommand{\ind}{\hspace{10pt}}
+
+% Group header row
+\newcommand{\grpheader}[3]{%
+    \rowcolor{#1!15}
+    \multicolumn{3}{l}{%
+        \sffamily\bfseries\small\color{#1}%
+        #2%
+        \hfill\textnormal{\scriptsize\bfseries\color{#3}\sffamily%
+            \ifx#3\reqred REQUIRED%
+            \else\ifx#3\optgreen OPTIONAL%
+            \else CONDITIONAL%
+            \fi\fi}%
+    }\\
+}
+
+% Badge commands
+\newcommand{\reqbadge}{\textcolor{reqred}{\scriptsize\bfseries\sffamily REQUIRED}}
+\newcommand{\optbadge}{\textcolor{optgreen}{\scriptsize\bfseries\sffamily OPTIONAL}}
+\newcommand{\condbadge}{\textcolor{condpurple}{\scriptsize\bfseries\sffamily CONDITIONAL}}
+
+\begin{document}
+
+% #############################################################################
+% T1: Classic booktabs with colored group header rows
+% #############################################################################
+\vartitle{T1 --- Classic Booktabs with Group Headers}
+{Pure LaTeX table. booktabs rules. Colored group header rows. Indentation via \texttt{\textbackslash ind}.}
+
+\vspace{0.3em}
+
+\noindent
+\begin{tabular}{@{}KVN@{}}
+\toprule
+\textsf{\bfseries\color{black!50} Key} &
+\textsf{\bfseries\color{black!50} Value} &
+\textsf{\bfseries\color{black!50} Notes} \\
+\midrule
+
+% --- Identity ---
+\rowcolor{grpIdent!20}
+\multicolumn{3}{@{}l@{}}{\sffamily\bfseries\small\color{grpIdentD} Identity \& Format \hfill\reqbadge} \\
+/Type      & /Sig                       & Always \texttt{/Sig} \\
+/Filter    & /Adobe.PPKLite             & Handler name \\
+/SubFilter & /ETSI.CAdES.detached       & \textbf{Critical.} CMS profile = CAdES/PAdES \\
+\addlinespace[3pt]
+
+% --- Crypto ---
+\rowcolor{grpCrypto!20}
+\multicolumn{3}{@{}l@{}}{\sffamily\bfseries\small\color{grpCryptoD} Cryptographic Core \hfill\reqbadge} \\
+/Contents  & <0A3F8B...0000>            & DER CMS SignedData, hex-encoded, zero-padded \\
+/ByteRange & [0 840 3560 1200]          & Signed byte ranges (everything except /Contents hex) \\
+\addlinespace[3pt]
+
+% --- Metadata ---
+\rowcolor{grpMeta!20}
+\multicolumn{3}{@{}l@{}}{\sffamily\bfseries\small\color{grpMetaD} Signer Metadata \hfill\optbadge} \\
+/Name        & (Alice Smith)              & Display name --- \textbf{NOT signed}, forgeable \\
+/M           & (D:20250307120000+01'00')  & Claimed signing time. Prefer TSA timestamp \\
+/Reason      & (Approved for release)     & Cosmetic \\
+/ContactInfo & (alice@example.com)        & \\
+/Location    & (Vienna, Austria)          & \\
+\addlinespace[3pt]
+
+% --- Integrity ---
+\rowcolor{grpInteg!20}
+\multicolumn{3}{@{}l@{}}{\sffamily\bfseries\small\color{grpIntegD} Modification Detection \hfill\condbadge} \\
+/Reference              & [<<                & Required for certification signatures \\
+\ind /Type              & /SigRef            & \\
+\ind /TransformMethod   & /DocMDP            & or /FieldMDP \\
+\ind /TransformParams   & << /P 2 >>         & P=2: forms+sign. P=3: +annotations \\
+                        & >>]                & \\
+\addlinespace[3pt]
+
+% --- Build ---
+\rowcolor{grpBuild!20}
+\multicolumn{3}{@{}l@{}}{\sffamily\bfseries\small\color{grpBuildD} Build Properties \hfill\optbadge} \\
+/Prop\_Build & << /App << /Name /PDFBox >> >> & Which library signed it. Debugging gold \\
+
+\bottomrule
+\end{tabular}
+
+\medskip
+\noindent{\footnotesize\sffamily\itshape\color{black!40}
+ISO 32000-2 \S12.8.1, Table 255 --- Entries in a signature dictionary}
+
+\vfill\clearpage
+
+% #############################################################################
+% T2: Alternating row colors, left color bar via first column
+% #############################################################################
+\vartitle{T2 --- Alternating Rows with Left Color Bar}
+{A thin colored first column acts as a group indicator. Alternating row shading for readability.}
+
+\vspace{0.3em}
+
+\noindent
+\begin{tabular}{@{}
+    >{\centering\arraybackslash}p{0.15cm}  % color bar
+    KVN
+@{}}
+\toprule
+& \textsf{\bfseries\color{black!50} Key}
+& \textsf{\bfseries\color{black!50} Value}
+& \textsf{\bfseries\color{black!50} Notes} \\
+\midrule
+
+\cellcolor{grpIdentD} & /Type      & /Sig                       & Always /Sig \\
+\rowcolor{black!3}
+\cellcolor{grpIdentD} & /Filter    & /Adobe.PPKLite             & Handler \\
+\cellcolor{grpIdentD} & /SubFilter & /ETSI.CAdES.detached       & \textbf{CMS profile selector} \\
+\addlinespace[2pt]
+
+\cellcolor{grpCryptoD} & /Contents  & <0A3F8B...0000>           & Hex CMS SignedData \\
+\rowcolor{black!3}
+\cellcolor{grpCryptoD} & /ByteRange & [0 840 3560 1200]         & Verify: sum = file size \\
+\addlinespace[2pt]
+
+\cellcolor{grpMetaD} & /Name        & (Alice Smith)             & NOT signed \\
+\rowcolor{black!3}
+\cellcolor{grpMetaD} & /M           & (D:20250307120000+01'00') & Prefer TSA \\
+\cellcolor{grpMetaD} & /Reason      & (Approved for release)    & Cosmetic \\
+\rowcolor{black!3}
+\cellcolor{grpMetaD} & /ContactInfo & (alice@example.com)       & \\
+\cellcolor{grpMetaD} & /Location    & (Vienna, Austria)         & \\
+\addlinespace[2pt]
+
+\cellcolor{grpIntegD} & /Reference           & [<<               & Certification sigs \\
+\rowcolor{black!3}
+\cellcolor{grpIntegD} & \ind /TransformMethod & /DocMDP           & or /FieldMDP \\
+\cellcolor{grpIntegD} & \ind /TransformParams & << /P 2 >>        & P=2: forms+sign \\
+\rowcolor{black!3}
+\cellcolor{grpIntegD} &                       & >>]               & \\
+\addlinespace[2pt]
+
+\cellcolor{grpBuildD} & /Prop\_Build & << /App << /Name /PDFBox >> >> & Signing library \\
+
+\bottomrule
+\end{tabular}
+
+\vfill\clearpage
+
+% #############################################################################
+% T3: Three-column with spec refs (like V19 but pure table)
+% #############################################################################
+\vartitle{T3 --- Three-Column with Spec References (Pure Table)}
+{Like V19 but entirely in LaTeX tables. Auto-sizing columns, proper indentation.}
+
+\vspace{0.3em}
+
+\noindent
+\begin{tabular}{@{}
+    >{\ttfamily\bfseries\color{lkeycolor}\raggedright\arraybackslash}p{3cm}
+    >{\ttfamily\color{lvalcolor}\raggedright\arraybackslash}p{4.5cm}
+    >{\footnotesize\ttfamily\color{black!35}\raggedright\arraybackslash}p{2.5cm}
+    >{\small\sffamily\color{black!60}\RaggedRight\arraybackslash}p{5.5cm}
+@{}}
+\toprule
+\textsf{\bfseries\color{black!50}\normalsize Key} &
+\textsf{\bfseries\color{black!50}\normalsize Value} &
+\textsf{\bfseries\color{black!50}\normalsize Spec} &
+\textsf{\bfseries\color{black!50}\normalsize Practitioner Advice} \\
+\midrule
+
+% Identity
+\rowcolor{grpIdent!15}
+\multicolumn{4}{@{}l@{}}{\sffamily\bfseries\small\color{grpIdentD}
+    Identity \& Format \hfill\reqbadge} \\
+/Type      & /Sig                   & Tbl 255, r1 & Always \texttt{/Sig} \\
+/Filter    & /Adobe.PPKLite         & Tbl 255, r2 & Handler name \\
+/SubFilter & /ETSI.CAdES.detached   & Tbl 255, r3 & \textbf{SubFilter is king.} Use CAdES \\
+\addlinespace[3pt]
+
+% Crypto
+\rowcolor{grpCrypto!15}
+\multicolumn{4}{@{}l@{}}{\sffamily\bfseries\small\color{grpCryptoD}
+    Cryptographic Core \hfill\reqbadge} \\
+/Contents  & <0A3F8B...0000>        & Tbl 255, r4 & Hex CMS, zero-padded \\
+/ByteRange & [0 840 3560 1200]      & Tbl 255, r5 & Verify: ranges + hex = file size \\
+\addlinespace[3pt]
+
+% Metadata
+\rowcolor{grpMeta!15}
+\multicolumn{4}{@{}l@{}}{\sffamily\bfseries\small\color{grpMetaD}
+    Signer Metadata \hfill\optbadge} \\
+/Name        & (Alice Smith)            & Tbl 255, r6 & NOT signed! Forgeable \\
+/M           & (D:20250307...)          & Tbl 255, r7 & Prefer TSA timestamp \\
+/Reason      & (Approved for release)   & Tbl 255, r8 & Cosmetic \\
+/ContactInfo & (alice@example.com)      & Tbl 255, r9 & \\
+/Location    & (Vienna, Austria)        & Tbl 255, r10 & \\
+\addlinespace[3pt]
+
+% Integrity
+\rowcolor{grpInteg!15}
+\multicolumn{4}{@{}l@{}}{\sffamily\bfseries\small\color{grpIntegD}
+    Modification Detection \hfill\condbadge} \\
+/Reference            & [<<              & Tbl 255, r12 & Certification sigs only \\
+\ind /TransformMethod & /DocMDP          & \S12.8.2.2   & or /FieldMDP \\
+\ind /TransformParams & << /P 2 >>       &              & P=2: forms+sign \\
+                      & >>]              &              & \\
+\addlinespace[3pt]
+
+% Build
+\rowcolor{grpBuild!15}
+\multicolumn{4}{@{}l@{}}{\sffamily\bfseries\small\color{grpBuildD}
+    Build Properties \hfill\optbadge} \\
+/Prop\_Build & << /App << /Name /PDFBox >> >> & Tbl 255, r14 & Signing library ID \\
+
+\bottomrule
+\end{tabular}
+
+\medskip
+\noindent{\footnotesize\sffamily\itshape\color{black!40}
+ISO 32000-2 \S12.8.1, Table 255}
+
+\vfill\clearpage
+
+% #############################################################################
+% T4: Dark-themed table (colortbl + dark row backgrounds)
+% #############################################################################
+\vartitle{T4 --- Dark-Themed Table}
+{Dark row backgrounds with light text. Same booktabs structure but inverted colors.}
+
+\vspace{0.3em}
+
+\newcolumntype{D}{>{\ttfamily\bfseries\color{keycolor}\raggedright\arraybackslash}p{3.2cm}}
+\newcolumntype{E}{>{\ttfamily\color{valcolor}\raggedright\arraybackslash}p{4.8cm}}
+\newcolumntype{F}{>{\small\sffamily\color{codetext!70}\RaggedRight\arraybackslash}p{6.2cm}}
+
+{%
+\arrayrulecolor{commentcolor!30}
+\noindent
+\begin{tabular}{@{}DEF@{}}
+\rowcolor{codebg}
+\textsf{\bfseries\color{commentcolor} Key} &
+\textsf{\bfseries\color{commentcolor} Value} &
+\textsf{\bfseries\color{commentcolor} Notes} \\
+\midrule
+
+% Identity
+\rowcolor{grpIdentD!25}
+\multicolumn{3}{@{}l@{}}{\sffamily\bfseries\small\color{grpIdentD!80}
+    \hspace{4pt}Identity \& Format \hfill
+    \textcolor{reqred!80}{\scriptsize REQUIRED}\hspace{4pt}} \\
+\rowcolor{codebg}
+/Type      & /Sig                       & Always /Sig \\
+\rowcolor{codebg!90}
+/Filter    & /Adobe.PPKLite             & Handler name \\
+\rowcolor{codebg}
+/SubFilter & \color{strcolor}/ETSI.CAdES.detached & \textbf{\color{codetext}SubFilter is king} \\[3pt]
+
+% Crypto
+\rowcolor{grpCryptoD!25}
+\multicolumn{3}{@{}l@{}}{\sffamily\bfseries\small\color{grpCryptoD!80}
+    \hspace{4pt}Cryptographic Core \hfill
+    \textcolor{reqred!80}{\scriptsize REQUIRED}\hspace{4pt}} \\
+\rowcolor{codebg}
+/Contents  & \color{strcolor}<0A3F8B...0000> & Hex CMS SignedData \\
+\rowcolor{codebg!90}
+/ByteRange & [0 840 3560 1200]         & Verify: sum = file size \\[3pt]
+
+% Metadata
+\rowcolor{grpMetaD!25}
+\multicolumn{3}{@{}l@{}}{\sffamily\bfseries\small\color{grpMetaD!80}
+    \hspace{4pt}Signer Metadata \hfill
+    \textcolor{optgreen!80}{\scriptsize OPTIONAL}\hspace{4pt}} \\
+\rowcolor{codebg}
+/Name        & \color{strcolor}(Alice Smith)              & NOT signed \\
+\rowcolor{codebg!90}
+/M           & \color{strcolor}(D:20250307120000+01'00')  & Prefer TSA \\
+\rowcolor{codebg}
+/Reason      & \color{strcolor}(Approved for release)     & Cosmetic \\
+\rowcolor{codebg!90}
+/ContactInfo & \color{strcolor}(alice@example.com)        & \\
+\rowcolor{codebg}
+/Location    & \color{strcolor}(Vienna, Austria)          & \\[3pt]
+
+% Integrity
+\rowcolor{grpIntegD!25}
+\multicolumn{3}{@{}l@{}}{\sffamily\bfseries\small\color{grpIntegD!80}
+    \hspace{4pt}Modification Detection \hfill
+    \textcolor{condpurple!80}{\scriptsize CONDITIONAL}\hspace{4pt}} \\
+\rowcolor{codebg}
+/Reference            & [<<               & Certification sigs \\
+\rowcolor{codebg!90}
+\ind /TransformMethod & /DocMDP           & or /FieldMDP \\
+\rowcolor{codebg}
+\ind /TransformParams & << /P 2 >>        & P=2: forms+sign \\
+\rowcolor{codebg!90}
+                      & >>]               & \\[3pt]
+
+% Build
+\rowcolor{grpBuildD!25}
+\multicolumn{3}{@{}l@{}}{\sffamily\bfseries\small\color{grpBuildD!80}
+    \hspace{4pt}Build Properties \hfill
+    \textcolor{optgreen!80}{\scriptsize OPTIONAL}\hspace{4pt}} \\
+\rowcolor{codebg}
+/Prop\_Build & << /App << /Name /PDFBox >> >> & Signing library \\
+
+\rowcolor{codebg}
+\multicolumn{3}{c}{} \\[-6pt]
+\bottomrule
+\end{tabular}%
+}%
+
+\vfill\clearpage
+
+% #############################################################################
+% T5: Minimalist — no color, just rules and indentation
+% #############################################################################
+\vartitle{T5 --- Minimalist (No Color, Just Typography)}
+{Clean, Tufte-inspired. Only booktabs rules, indentation, and bold/light weight contrast.}
+
+\vspace{0.3em}
+
+\noindent
+\begin{tabular}{@{}
+    >{\ttfamily\bfseries\raggedright\arraybackslash}p{3.2cm}
+    >{\ttfamily\color{black!60}\raggedright\arraybackslash}p{5cm}
+    >{\small\sffamily\color{black!45}\RaggedRight\arraybackslash}p{6.5cm}
+@{}}
+\toprule
+\textsf{\scshape Key} &
+\textsf{\scshape Value} &
+\textsf{\scshape Notes} \\
+\midrule
+
+\multicolumn{3}{@{}l@{}}{\sffamily\itshape\small Identity \& Format \hfill\textnormal{\scriptsize required}} \\
+\addlinespace[1pt]
+/Type      & /Sig                       & Always /Sig \\
+/Filter    & /Adobe.PPKLite             & Signature handler \\
+/SubFilter & /ETSI.CAdES.detached       & CMS profile --- the critical key \\
+\addlinespace[6pt]
+
+\multicolumn{3}{@{}l@{}}{\sffamily\itshape\small Cryptographic Core \hfill\textnormal{\scriptsize required}} \\
+\addlinespace[1pt]
+/Contents  & <0A3F8B...0000>            & Hex-encoded CMS SignedData \\
+/ByteRange & [0 840 3560 1200]          & Signed ranges; verify sum = file size \\
+\addlinespace[6pt]
+
+\multicolumn{3}{@{}l@{}}{\sffamily\itshape\small Signer Metadata \hfill\textnormal{\scriptsize optional}} \\
+\addlinespace[1pt]
+/Name        & (Alice Smith)              & Display name --- not signed \\
+/M           & (D:20250307...)            & Claimed time; prefer TSA \\
+/Reason      & (Approved for release)     & \\
+/ContactInfo & (alice@example.com)        & \\
+/Location    & (Vienna, Austria)          & \\
+\addlinespace[6pt]
+
+\multicolumn{3}{@{}l@{}}{\sffamily\itshape\small Modification Detection \hfill\textnormal{\scriptsize conditional}} \\
+\addlinespace[1pt]
+/Reference            & [<<               & Certification signatures \\
+\ind /TransformMethod & /DocMDP           & or /FieldMDP \\
+\ind /TransformParams & << /P 2 >>        & P=2 forms+sign; P=3 +annotations \\
+                      & >>]               & \\
+\addlinespace[6pt]
+
+\multicolumn{3}{@{}l@{}}{\sffamily\itshape\small Build Properties \hfill\textnormal{\scriptsize optional}} \\
+\addlinespace[1pt]
+/Prop\_Build & << /App << /Name /PDFBox >> >> & Which library signed it \\
+
+\bottomrule
+\end{tabular}
+
+\medskip
+\noindent{\footnotesize\itshape\color{black!35}
+Signature Dictionary (/Type /Sig) --- ISO 32000-2 \S12.8.1, Table 255}
+
+\vfill
+\end{document}

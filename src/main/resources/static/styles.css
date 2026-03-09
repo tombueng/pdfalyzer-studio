@@ -158,6 +158,21 @@ html, body {
     min-width: 200px;
 }
 
+/* Loading spinner overlay */
+#loadingSpinnerOverlay {
+    position: absolute;
+    inset: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(27, 25, 62, 0.85);
+}
+#loadingSpinnerOverlay canvas {
+    border-radius: 6px;
+    background: #1B193E;
+}
+
 #pdfPane.pan-mode-active .pdf-page-wrapper,
 #pdfPane.pan-mode-active .pdf-page-wrapper canvas {
     cursor: grab;

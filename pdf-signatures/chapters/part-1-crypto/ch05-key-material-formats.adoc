@@ -1,0 +1,600 @@
+[[ch05]]
+= Key Material Formats
+ifdef::env-github[]
+:tip-caption: :bulb:
+:note-caption: :information_source:
+:important-caption: :heavy_exclamation_mark:
+:caution-caption: :fire:
+:warning-caption: :warning:
+endif::[]
+
+[abstract]
+--
+This chapter maps the landscape of key and certificate storage formats -- the containers that hold the private keys, public keys, and certificates you need to sign a PDF.
+We cover PKCS#12, PEM, DER, JKS, PKCS#8, and PKCS#1, explaining the history, internal structure, and practical quirks of each.
+We include a complete format-conversion matrix and address the HSM integration problem: what happens when the private key cannot be exported at all.
+
+If you have never been bitten by a "wrong format" exception when loading a keystore, consider yourself lucky and read this chapter anyway.
+If you have, you will find the explanations and conversion commands you wish you had found the first time.
+--
+
+
+== PKCS#12 / PFX: The Universal Container
+
+**PKCS#12** is the format you will use most often for PDF signing.
+It bundles a private key, the corresponding certificate, and (usually) the full certificate chain into a single, password-protected file.
+The standard file extensions are `.p12` and `.pfx`.
+
+=== History
+
+The lineage is tangled, as most things in cryptography are.
+
+Microsoft created **PFX** (Personal Information Exchange) in the mid-1990s as a container format for exporting keys and certificates from Internet Explorer and IIS.
+RSA Laboratories, working on their PKCS (Public-Key Cryptography Standards) series, developed **PKCS#12** as a platform-neutral alternative.
+The two formats converged over time: PKCS#12 v1.0 (1999) incorporated Microsoft's PFX design, and **RFC 7292** (2014) formalized the standard.
+
+Today, `.p12` and `.pfx` are effectively interchangeable extensions for the same format.
+Some tools (notably Windows) prefer `.pfx`; others (Java, OpenSSL) prefer `.p12`.
+The binary content is identical.
+
+NOTE: You will occasionally encounter ancient `.pfx` files from the late 1990s that use a pre-standard PFX format incompatible with PKCS#12. These are rare in 2026 but not extinct. OpenSSL will refuse to parse them, producing an error about "unknown bag type." If you encounter one, the only reliable conversion path is through a legacy Windows system or Internet Explorer's certificate export.
+
+=== Internal Structure
+
+A PKCS#12 file is a DER-encoded ASN.1 structure containing:
+
+.PKCS#12 internal structure
+[cols="2,5", options="header"]
+|===
+| Component | Description
+
+| PFX PDU
+| The outermost wrapper. Contains a version number (always 3), the authenticated safe, and an optional MAC (Message Authentication Code) for integrity verification.
+
+| AuthenticatedSafe
+| A SEQUENCE of ContentInfo values, each containing one or more SafeBag objects. The ContentInfo can be unencrypted (`data`), encrypted with a password-based cipher (`encryptedData`), or encrypted with a public key (`envelopedData` -- rarely used).
+
+| SafeBag
+| The actual content container. Types include `keyBag` (unencrypted private key), `pkcs8ShroudedKeyBag` (encrypted private key -- the most common), `certBag` (certificate), `crlBag` (CRL), and `secretBag` (arbitrary secret).
+
+| MAC
+| An HMAC computed over the AuthenticatedSafe using a key derived from the password. This verifies that the password is correct and that the file has not been tampered with. The MAC uses PBKDF2 or a similar key derivation function.
+|===
+
+The typical PKCS#12 file for PDF signing contains:
+
+. One `pkcs8ShroudedKeyBag` -- the private key, encrypted with a password-derived key
+. One or more `certBag` entries -- the signer's certificate and the intermediate CA certificate(s)
+
+The private key encryption within the PKCS#12 uses a password-based encryption scheme.
+Historically, this was **PBE-SHA1-3DES** (also known as `pbeWithSHAAnd3-KeyTripleDES-CBC`), which is the default in many older tools and in Java's PKCS#12 implementation prior to JDK 17.
+
+CAUTION: PBE-SHA1-3DES is weak by modern standards. SHA-1 for key derivation and Triple DES for encryption are both deprecated. OpenSSL 3.x defaults to AES-256-CBC with PBKDF2-HMAC-SHA256 for new PKCS#12 files, which is much stronger. However, some tools -- including older versions of Adobe Acrobat -- cannot read PKCS#12 files encrypted with the newer algorithms. If you generate a PKCS#12 with OpenSSL 3.x and Acrobat cannot open it, try re-exporting with the legacy flag: `openssl pkcs12 -export -legacy -in cert.pem -inkey key.pem -out keystore.pfx`.
+
+=== Loading PKCS#12 in Java
+
+[source,java]
+----
+import java.io.FileInputStream;
+import java.security.KeyStore;
+import java.security.PrivateKey;
+import java.security.cert.Certificate;
+import java.security.cert.X509Certificate;
+import java.util.Enumeration;
+
+/**
+ * Load a PKCS#12 keystore and extract the signing key and chain.
+ */
+public class Pkcs12LoadExample {
+
+    public static void loadAndInspect(
+            String p12Path, String password) throws Exception {
+
+        KeyStore ks = KeyStore.getInstance("PKCS12");
+        try (FileInputStream fis = new FileInputStream(p12Path)) {
+            ks.load(fis, password.toCharArray());
+        }
+
+        // Enumerate all entries
+        Enumeration<String> aliases = ks.aliases();
+        while (aliases.hasMoreElements()) {
+            String alias = aliases.nextElement();
+
+            if (ks.isKeyEntry(alias)) {
+                PrivateKey key = (PrivateKey) ks.getKey(
+                        alias, password.toCharArray());    // <1>
+                Certificate[] chain = ks.getCertificateChain(alias);
+
+                // key.getAlgorithm() -> "RSA" or "EC"
+                // key.getFormat() -> "PKCS#8"
+                // chain[0] is the end-entity certificate
+                // chain[chain.length-1] is closest to the root
+
+                X509Certificate signingCert =
+                        (X509Certificate) chain[0];
+                // signingCert.getSubjectX500Principal() -> signer DN
+                // signingCert.getNotAfter() -> expiration date
+            }
+        }
+    }
+}
+----
+<1> The password for the key entry is typically the same as the store password for PKCS#12 files, but the API allows them to be different. Some tools (notably `keytool`) set the key password equal to the store password when creating PKCS#12 files.
+
+TIP: When a PKCS#12 file fails to load with `IOException: keystore password was incorrect`, the error is misleading. It can mean (a) the password is actually wrong, (b) the file is corrupted, (c) the file uses an encryption algorithm not supported by your JDK, or (d) the file is not actually PKCS#12 format at all (perhaps it is PEM-encoded and was given a `.p12` extension by mistake). Always check the file format first: `openssl pkcs12 -info -in file.p12 -nokeys -passin pass:test 2>&1 | head -5` will quickly tell you whether the file is valid PKCS#12 and whether the password works.
+
+
+== PEM: The Text Format
+
+**PEM** (Privacy-Enhanced Mail) is the most human-friendly key and certificate format -- and, paradoxically, has nothing to do with email privacy anymore.
+
+=== History
+
+PEM was defined in RFCs 1421-1424 (1993) as a framework for email encryption.
+The framework itself was complex, poorly adopted, and quickly superseded by S/MIME and PGP.
+But the **encoding format** -- Base64-encoded DER data bracketed by header and footer lines -- became the de facto standard for exchanging cryptographic objects in text form.
+
+The format is simple:
+
+[source,text]
+----
+-----BEGIN CERTIFICATE-----
+MIIDXTCCAkWgAwIBAgIJAJC1HiIAZAiUMA0GCSqGSIb3Qw0teleBAUAMEUxCzAJ
+BgNVBAYTAkFVMRMwEQYDVQQIDApTb21lLVN0YXRlMSEwHwYDVQQKDBhJbnRlcm5l
+... (Base64-encoded DER data, typically 64 or 76 characters per line) ...
+dGhlIGNlcnRpZmljYXRl
+-----END CERTIFICATE-----
+----
+
+The header line identifies the content type.
+Common headers include:
+
+.PEM header types
+[cols="3,4", options="header"]
+|===
+| Header | Content
+
+| `-----BEGIN CERTIFICATE-----`
+| X.509 certificate (DER-encoded)
+
+| `-----BEGIN PRIVATE KEY-----`
+| PKCS#8 unencrypted private key
+
+| `-----BEGIN ENCRYPTED PRIVATE KEY-----`
+| PKCS#8 encrypted private key
+
+| `-----BEGIN RSA PRIVATE KEY-----`
+| PKCS#1 RSA-specific private key (legacy OpenSSL format)
+
+| `-----BEGIN PUBLIC KEY-----`
+| SubjectPublicKeyInfo (X.509) public key
+
+| `-----BEGIN CERTIFICATE REQUEST-----`
+| PKCS#10 certificate signing request (CSR)
+
+| `-----BEGIN X509 CRL-----`
+| Certificate Revocation List
+|===
+
+=== Multiple Objects in One File
+
+A PEM file can contain multiple objects -- this is one of its most useful features.
+A common pattern for PDF signing is to concatenate the certificate chain into a single file:
+
+[source,text]
+----
+-----BEGIN CERTIFICATE-----
+(end-entity certificate)
+-----END CERTIFICATE-----
+-----BEGIN CERTIFICATE-----
+(intermediate CA certificate)
+-----END CERTIFICATE-----
+-----BEGIN CERTIFICATE-----
+(root CA certificate -- optional)
+-----END CERTIFICATE-----
+----
+
+Java's `CertificateFactory.generateCertificates(InputStream)` (note the plural) reads all certificates from such a file.
+BouncyCastle's `PEMParser` reads any PEM objects sequentially.
+
+=== Loading PEM with BouncyCastle
+
+[source,java]
+----
+import java.io.FileReader;
+import java.security.KeyPair;
+import java.security.PrivateKey;
+import java.security.cert.X509Certificate;
+
+import org.bouncycastle.cert.X509CertificateHolder;
+import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
+import org.bouncycastle.openssl.PEMDecryptorProvider;
+import org.bouncycastle.openssl.PEMEncryptedKeyPair;
+import org.bouncycastle.openssl.PEMKeyPair;
+import org.bouncycastle.openssl.PEMParser;
+import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
+import org.bouncycastle.openssl.jcajce.JcePEMDecryptorProviderBuilder;
+
+/**
+ * Load certificates and private keys from PEM files using BouncyCastle.
+ */
+public class PemLoadExample {
+
+    /**
+     * Load a private key from a PEM file.
+     * Handles both encrypted and unencrypted keys.
+     */
+    public static PrivateKey loadPrivateKey(
+            String pemPath, String password) throws Exception {
+
+        try (PEMParser parser = new PEMParser(new FileReader(pemPath))) {
+            Object obj = parser.readObject();
+
+            JcaPEMKeyConverter converter = new JcaPEMKeyConverter()
+                    .setProvider("BC");
+
+            if (obj instanceof PEMEncryptedKeyPair) {
+                PEMDecryptorProvider decryptor =
+                        new JcePEMDecryptorProviderBuilder()
+                                .build(password.toCharArray());
+                PEMKeyPair decrypted =
+                        ((PEMEncryptedKeyPair) obj).decryptKeyPair(decryptor);
+                return converter.getKeyPair(decrypted).getPrivate();
+            }
+
+            if (obj instanceof PEMKeyPair) {
+                return converter.getKeyPair((PEMKeyPair) obj).getPrivate();
+            }
+
+            if (obj instanceof org.bouncycastle.asn1.pkcs.PrivateKeyInfo) {
+                return converter.getPrivateKey(
+                        (org.bouncycastle.asn1.pkcs.PrivateKeyInfo) obj);
+            }
+
+            throw new IllegalArgumentException(
+                    "Unexpected PEM object: " + obj.getClass().getName());
+        }
+    }
+
+    /**
+     * Load an X.509 certificate from a PEM file.
+     */
+    public static X509Certificate loadCertificate(
+            String pemPath) throws Exception {
+
+        try (PEMParser parser = new PEMParser(new FileReader(pemPath))) {
+            Object obj = parser.readObject();
+
+            if (obj instanceof X509CertificateHolder) {
+                return new JcaX509CertificateConverter()
+                        .setProvider("BC")
+                        .getCertificate((X509CertificateHolder) obj);
+            }
+
+            throw new IllegalArgumentException(
+                    "Not a certificate: " + obj.getClass().getName());
+        }
+    }
+}
+----
+
+WARNING: The `PEMParser` class reads objects sequentially. If your PEM file contains a private key followed by certificates, you must call `parser.readObject()` once for the key and then again for each certificate. A common mistake is to read only the first object and close the parser, missing the certificates entirely.
+
+
+== DER: The Binary Encoding
+
+**DER** (Distinguished Encoding Rules) is the canonical binary encoding for ASN.1 data structures.
+Every cryptographic object you encounter -- certificates, private keys, CMS structures, OCSP responses -- has a DER encoding.
+PEM is just Base64-encoded DER with headers.
+
+=== Relationship to PEM
+
+The conversion between DER and PEM is trivial:
+
+* **DER to PEM**: Base64-encode the DER bytes, split into 64-character lines, wrap with the appropriate header/footer.
+* **PEM to DER**: Strip the header/footer lines, concatenate the remaining lines, Base64-decode.
+
+DER files have no standard extension -- you will see `.der`, `.cer`, `.crt`, and even `.pem` used for DER-encoded data (incorrectly, but it happens).
+The reliable way to distinguish DER from PEM is to check whether the file starts with `-----BEGIN`: if yes, PEM; if no, DER (or something else entirely).
+
+=== When DER Matters
+
+For PDF signatures, DER encoding is everywhere:
+
+* The CMS `SignedData` in the `/Contents` field is DER-encoded (then hex-encoded)
+* Each certificate in the CMS is DER-encoded
+* OCSP responses embedded in the DSS are DER-encoded
+* CRLs embedded in the DSS are DER-encoded
+
+When you parse these structures with BouncyCastle, the library handles the DER encoding/decoding transparently.
+You only deal with DER directly when debugging at the byte level -- dumping the hex content of `/Contents` and feeding it to `openssl asn1parse`, for example.
+
+[source,bash]
+----
+# Dump the ASN.1 structure of a DER-encoded CMS blob
+openssl asn1parse -inform DER -in signature.der
+
+# Convert DER certificate to PEM
+openssl x509 -inform DER -in cert.der -outform PEM -out cert.pem
+
+# Convert PEM certificate to DER
+openssl x509 -inform PEM -in cert.pem -outform DER -out cert.der
+----
+
+
+== JKS: Java KeyStore (Legacy)
+
+**JKS** (Java KeyStore) was Java's original proprietary keystore format, introduced in JDK 1.2 (1998).
+It served the Java ecosystem for nearly two decades and is still encountered in legacy enterprise systems.
+
+=== Why JKS Is Being Replaced
+
+JKS has several problems:
+
+. **Proprietary format**: Only Java tools can read it. OpenSSL cannot parse JKS. Non-Java applications cannot use JKS keystores.
+. **Weak encryption**: The private key protection in JKS uses a custom, non-standard algorithm based on password-derived key material and a proprietary obfuscation scheme. It is not PBE by any recognized standard.
+. **Case-insensitive aliases**: JKS converts all aliases to lowercase, which can cause subtle bugs when migrating to PKCS#12 (which is case-sensitive).
+. **No standard for interoperability**: Migrating keys between JKS and non-Java systems always requires format conversion.
+
+Since JDK 9, the default keystore type in Java is **PKCS12**, not JKS.
+The `keytool` utility creates PKCS#12 keystores by default.
+If you are starting a new project, always use PKCS#12.
+
+TIP: To check which keystore type you are dealing with: `keytool -list -keystore mystore.jks` will prompt for a password and display entries. If you see "Keystore type: jks" in the output, it is a JKS file. If you see "Keystore type: PKCS12", it is PKCS#12. To convert JKS to PKCS#12: `keytool -importkeystore -srckeystore old.jks -destkeystore new.p12 -deststoretype PKCS12`.
+
+
+== PKCS#8: Private Key Format
+
+**PKCS#8** (RFC 5958, originally RSA PKCS#8) is the standard format for private keys, independent of the key algorithm.
+When you extract a private key from a PKCS#12 file in Java (`keyStore.getKey()`), the key's `getFormat()` method returns `"PKCS#8"` -- that is the encoding format of the key bytes.
+
+=== Unencrypted vs Encrypted
+
+PKCS#8 defines two structures:
+
+* **PrivateKeyInfo** (unencrypted): Contains the algorithm identifier and the raw private key data. Stored in PEM files with the header `-----BEGIN PRIVATE KEY-----`.
+
+* **EncryptedPrivateKeyInfo**: The PrivateKeyInfo wrapped in a password-based encryption layer. Stored in PEM files with the header `-----BEGIN ENCRYPTED PRIVATE KEY-----`.
+
+[source,asn1]
+----
+PrivateKeyInfo ::= SEQUENCE {
+    version                Version,
+    privateKeyAlgorithm    AlgorithmIdentifier,
+    privateKey             OCTET STRING
+}
+
+EncryptedPrivateKeyInfo ::= SEQUENCE {
+    encryptionAlgorithm    AlgorithmIdentifier,
+    encryptedData          OCTET STRING
+}
+----
+
+The `privateKey` octet string contains the algorithm-specific key data -- an RSA private key (PKCS#1 structure) for RSA, or an EC private key structure for ECDSA.
+PKCS#8 wraps these algorithm-specific formats in a uniform container.
+
+NOTE: PKCS#8 is the format that the JCA uses internally. When you call `privateKey.getEncoded()`, the returned bytes are PKCS#8 `PrivateKeyInfo`. When you call `publicKey.getEncoded()`, the returned bytes are `SubjectPublicKeyInfo` (the X.509 public key format, defined in {rfc5280}). These format names -- PKCS#8 for private keys, X.509 for public keys -- appear in Java's `Key.getFormat()` and in PEM headers.
+
+
+== PKCS#1: RSA-Specific Key Format
+
+**PKCS#1** (RFC 8017) defines the RSA-specific private key structure:
+
+[source,asn1]
+----
+RSAPrivateKey ::= SEQUENCE {
+    version           Version,
+    modulus           INTEGER,  -- n
+    publicExponent    INTEGER,  -- e
+    privateExponent   INTEGER,  -- d
+    prime1            INTEGER,  -- p
+    prime2            INTEGER,  -- q
+    exponent1         INTEGER,  -- d mod (p-1)
+    exponent2         INTEGER,  -- d mod (q-1)
+    coefficient       INTEGER   -- (inverse of q) mod p
+}
+----
+
+This is the format stored inside a PKCS#8 `PrivateKeyInfo` when the algorithm is RSA.
+It is also the format used in PEM files with the header `-----BEGIN RSA PRIVATE KEY-----` -- OpenSSL's "traditional" format.
+
+The distinction between PKCS#1 and PKCS#8 confuses many developers:
+
+* `-----BEGIN RSA PRIVATE KEY-----` is PKCS#1 (RSA-specific, no algorithm identifier wrapper)
+* `-----BEGIN PRIVATE KEY-----` is PKCS#8 (algorithm-agnostic, contains an algorithm identifier)
+
+Both contain the same RSA key data.
+PKCS#8 simply wraps the PKCS#1 structure with an additional layer that identifies the algorithm.
+If you try to load a PKCS#1 PEM file using code that expects PKCS#8, you will get a parsing error -- and vice versa.
+
+IMPORTANT: OpenSSL's default output format changed between versions. OpenSSL 1.x used PKCS#1 (`-----BEGIN RSA PRIVATE KEY-----`) by default for RSA keys. OpenSSL 3.x uses PKCS#8 (`-----BEGIN PRIVATE KEY-----`) by default. If you are following a tutorial written for an older OpenSSL version, the key files it produces may be in a different format than your current OpenSSL generates. Always check the PEM header.
+
+
+== Format Conversion Reference
+
+This matrix shows how to convert between formats using `openssl` and `keytool`.
+Every PDF signing project eventually needs at least one of these conversions.
+
+.Key and certificate format conversion commands
+[cols="2,2,5", options="header"]
+|===
+| From | To | Command
+
+| PKCS#12
+| PEM (key + cert)
+| `openssl pkcs12 -in store.p12 -out bundle.pem -nodes`
+
+| PKCS#12
+| Separate PEM files
+| `openssl pkcs12 -in store.p12 -nocerts -out key.pem` (key) then `openssl pkcs12 -in store.p12 -nokeys -out cert.pem` (cert)
+
+| PEM (key + cert)
+| PKCS#12
+| `openssl pkcs12 -export -in cert.pem -inkey key.pem -out store.p12 -name "alias"`
+
+| PEM certificate
+| DER certificate
+| `openssl x509 -in cert.pem -outform DER -out cert.der`
+
+| DER certificate
+| PEM certificate
+| `openssl x509 -inform DER -in cert.der -outform PEM -out cert.pem`
+
+| PKCS#1 key
+| PKCS#8 key
+| `openssl pkcs8 -topk8 -in rsa.pem -out pkcs8.pem -nocrypt`
+
+| PKCS#8 key
+| PKCS#1 key
+| `openssl rsa -in pkcs8.pem -out rsa.pem -traditional`
+
+| JKS
+| PKCS#12
+| `keytool -importkeystore -srckeystore old.jks -destkeystore new.p12 -deststoretype PKCS12`
+
+| PKCS#12
+| JKS
+| `keytool -importkeystore -srckeystore store.p12 -srcstoretype PKCS12 -destkeystore new.jks -deststoretype JKS`
+
+| PEM certificate
+| JKS (trust entry)
+| `keytool -importcert -file cert.pem -keystore trust.jks -alias "mycert"`
+|===
+
+TIP: The `-nodes` flag in the OpenSSL PKCS#12 export command means "no DES" -- the private key will not be encrypted in the output PEM file. This is convenient for testing but dangerous in production. Never leave unencrypted private keys on disk in production environments. Use `-aes256` instead of `-nodes` to encrypt the output private key with AES-256.
+
+
+== HSM Integration: When Keys Cannot Leave
+
+A **Hardware Security Module (HSM)** is a dedicated hardware device that generates, stores, and uses cryptographic keys internally.
+The private key **never leaves the HSM** -- all signing operations happen inside the device.
+This provides the strongest possible key protection: even if the server is completely compromised, the attacker cannot extract the private key.
+
+=== PKCS#11
+
+The standard interface for HSM access is **PKCS#11** (also called Cryptoki), defined by OASIS (originally by RSA Laboratories).
+PKCS#11 defines a C API for cryptographic operations: key generation, signing, encryption, etc.
+The HSM vendor provides a shared library (`.so` on Linux, `.dll` on Windows) that implements the PKCS#11 interface.
+
+Java accesses PKCS#11 via the **SunPKCS11 provider** -- a JCA provider that bridges the Java cryptographic API to a PKCS#11 library.
+
+[source,java]
+----
+import java.security.KeyStore;
+import java.security.Provider;
+import java.security.Security;
+
+/**
+ * Load keys from an HSM via PKCS#11.
+ * The private key never leaves the HSM -- signing happens on-device.
+ */
+public class Pkcs11Example {
+
+    public static KeyStore loadFromHsm(
+            String pkcs11ConfigPath, String pin) throws Exception {
+
+        // Configure the SunPKCS11 provider
+        Provider p = Security.getProvider("SunPKCS11");
+        p = p.configure(pkcs11ConfigPath);      // <1>
+        Security.addProvider(p);
+
+        // Load the "keystore" -- this actually enumerates
+        // objects on the HSM token
+        KeyStore ks = KeyStore.getInstance("PKCS11", p);
+        ks.load(null, pin.toCharArray());        // <2>
+
+        return ks;
+        // ks.getKey() returns a key handle, not the actual key bytes
+        // Signing with this key executes on the HSM
+    }
+}
+----
+<1> The config file specifies the PKCS#11 library path, slot number, and other HSM-specific parameters.
+<2> The PIN authenticates to the HSM token. Unlike PKCS#12 passwords, HSM PINs are typically short numeric codes enforced by the hardware.
+
+=== Why This Matters for PDF Signing
+
+When you use PDFBox's `SignatureInterface.sign()` with an HSM-backed key, the signing operation is transparently delegated to the HSM.
+The `PrivateKey` object returned by `ks.getKey()` is a **handle**, not the actual key material.
+The JCA provider intercepts the signing call, forwards it to the HSM via PKCS#11, and returns the result.
+Your signing code does not change -- the same `CMSSignedDataGenerator` code from Chapter 2 works with HSM keys and software keys identically.
+
+This is the elegance of the JCA provider model: the signing code is agnostic to key storage.
+Whether the key lives in a PKCS#12 file, a JKS keystore, or an HSM, the API is the same.
+
+IMPORTANT: For eIDAS qualified electronic signatures, the private key _must_ be stored in a **Qualified Signature Creation Device (QSCD)** -- an HSM or smart card that has been certified to Common Criteria EAL 4+ or equivalent. Software keystores (PKCS#12, JKS) are not QSCDs. If you are building a signing service that needs to produce qualified electronic signatures, HSM integration is not optional -- it is a legal requirement under {eidas-reg} Article 29.
+
+
+== Why Format Conversion Goes Wrong
+
+Format conversions are a perennial source of frustration.
+Here are the most common failure modes:
+
+=== Password Encoding Mismatch
+
+PKCS#12 passwords can be encoded as either **UTF-8** or **UTF-16BE** (BMPString in ASN.1 terminology) for the key derivation function.
+The PKCS#12 standard specifies BMPString, but some implementations use UTF-8.
+
+If you create a PKCS#12 with a password containing non-ASCII characters (umlauts, accented characters, CJK characters) using OpenSSL, and then try to open it in Java, the key derivation may produce a different key because the two implementations encode the password differently.
+
+The fix: use only ASCII characters in PKCS#12 passwords.
+This is not a theoretical recommendation -- it is a practical necessity in cross-platform environments.
+
+=== OpenSSL Legacy Format vs PKCS#8
+
+As mentioned above, OpenSSL's default private key format changed between major versions.
+A script that worked with OpenSSL 1.1.1 may produce keys that your PKCS#8-expecting Java code cannot parse when run with OpenSSL 3.x, or vice versa.
+
+Always check the PEM header and convert as needed.
+
+=== Certificate Chain Order in PKCS#12
+
+The PKCS#12 specification does not mandate a specific order for certificates in the file.
+Some tools store the end-entity certificate first, followed by intermediates.
+Others store them in reverse order.
+Java's `KeyStore.getCertificateChain()` returns them in order (end-entity first), regardless of how they are stored in the file -- but only if the certificates are associated with the correct key alias.
+
+If the chain is missing intermediates (because they were not included when the PKCS#12 was created), `getCertificateChain()` returns only the end-entity certificate.
+This produces the classic "chain not trusted" error at signing or validation time.
+
+TIP: When creating a PKCS#12 for PDF signing, always include the full chain (minus the root). With OpenSSL: `openssl pkcs12 -export -in signer.pem -inkey signer-key.pem -certfile intermediate-chain.pem -out signing.p12`. The `-certfile` flag adds the intermediate certificates. Without it, only the end-entity certificate is included.
+
+=== DER vs PEM Confusion
+
+Renaming a file's extension does not change its format.
+A file named `cert.pem` that is actually DER-encoded will cause a Base64 decode error.
+A file named `cert.der` that is actually PEM-encoded will cause an ASN.1 parse error.
+
+To reliably detect the format:
+
+[source,bash]
+----
+# If the file starts with "-----BEGIN", it is PEM
+head -1 cert.pem
+
+# Try parsing as DER; if it fails, it is probably PEM (or corrupted)
+openssl x509 -inform DER -in cert.der -noout 2>&1
+
+# The file command on Linux/macOS can often identify the format
+file cert.pem
+----
+
+
+== Summary
+
+Key material comes in several formats, each with its own history, strengths, and failure modes:
+
+* **PKCS#12** is the universal container for private keys and certificate chains. Use it for PDF signing keystores.
+* **PEM** is the human-readable, Base64-encoded format for individual certificates, keys, and other cryptographic objects. Use it for interchange with OpenSSL and when you need to inspect contents visually.
+* **DER** is the binary ASN.1 encoding underlying everything. You encounter it inside PDF signatures (the CMS blob in `/Contents`), in OCSP responses, and in CRLs.
+* **JKS** is Java's legacy keystore format. Migrate to PKCS#12.
+* **PKCS#8** is the standard private key format (algorithm-agnostic). Java uses it internally.
+* **PKCS#1** is the RSA-specific key format. Watch for the PEM header to distinguish it from PKCS#8.
+
+For HSM-backed signing (mandatory for eIDAS qualified signatures), keys are accessed via PKCS#11 and never leave the hardware.
+The JCA provider model makes this transparent to your signing code.
+
+Format conversion problems -- password encoding, legacy vs modern defaults, missing chain certificates, DER/PEM confusion -- are among the most common issues in PDF signing deployments.
+The conversion reference table in this chapter and a systematic approach to checking file formats will save you hours of debugging.
+
+In the next chapter, we examine the CMS SignedData structure -- the envelope that carries the cryptographic signature, the certificate chain, and the signed attributes from the signer to the validator, all encoded inside the PDF's `/Contents` hex string.

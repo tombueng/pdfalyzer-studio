@@ -1,0 +1,570 @@
+= Approval vs. Certification Signatures
+
+[.lead]
+PDF digital signatures come in two fundamentally different flavors, and confusing them is one of the most common mistakes in signature implementation.
+An **approval signature** says "I have reviewed and agree with this document."
+A **certification signature** says "I am the author of this document, and I am defining what changes are allowed after I sign it."
+
+The difference is not just semantic — it is structural.
+A certification signature carries a `/DocMDP` (Modification Detection and Prevention) transform that defines permission levels, restricts what subsequent signers and form fillers can do, and triggers different validation behavior in viewers.
+Getting this wrong means your signatures either restrict too much (form fields that can't be filled after signing) or too little (no protection against unauthorized modifications).
+
+This chapter explains both signature types, the DocMDP permission model, Lock and FieldMDP dictionaries, and the interaction rules that govern what happens when multiple signatures coexist.
+
+== The Two Signature Types
+
+=== Approval Signatures
+
+An **approval signature** is what most people think of when they hear "digital signature."
+It means: "I, the signer, have reviewed the document and give my approval."
+
+Technically, an approval signature is a `/Sig` dictionary with:
+
+- `/Filter`: `/Adobe.PPKLite`
+- `/SubFilter`: `adbe.pkcs7.detached` or `ETSI.CAdES.detached`
+- `/ByteRange`: covers the document up to this point
+- No `/TransformMethod` in any associated signature reference dictionary
+
+Approval signatures have these properties:
+
+- **Multiple allowed**: A document can have any number of approval signatures.
+  Each one adds an incremental update.
+- **No permission restrictions**: An approval signature does not limit what subsequent users can do with the document.
+  After you apply an approval signature, someone else can add another signature, fill form fields, add annotations, or even modify the document (though modifications will cause the signature to show as "modified since signing").
+- **Order matters**: Each approval signature covers everything up to the point it was applied.
+  Signature 2 covers signature 1.
+  If the document is modified between signature 1 and signature 2, signature 1 will show as "document modified" while signature 2 will show as "valid" (because it was applied after the modification).
+
+=== Certification Signatures
+
+A **certification signature** (also called an "author signature" or "MDP signature") is structurally different.
+It carries a `/TransformMethod` of `/DocMDP` in its signature reference dictionary, which embeds a set of permission rules into the signature.
+
+Technically, a certification signature includes:
+
+- Everything an approval signature has
+- A `/Reference` array in the signature dictionary containing a `/SigRef` (Signature Reference) dictionary
+- The `/SigRef` dictionary specifies `/TransformMethod /DocMDP`
+- A `/TransformParams` dictionary with a `/P` key (the permission level)
+
+And at the document level:
+
+- The document catalog's `/Perms` dictionary includes a `/DocMDP` entry pointing to the certifying signature
+
+Certification signatures have these properties:
+
+- **Only one per document**: A document can have at most one certification signature.
+  It is always the first signature applied.
+  If you try to add a certification signature to a document that already has one, the behavior is undefined — some viewers will reject it, others will ignore the previous one.
+- **Defines permissions**: The `/P` value (1, 2, or 3) controls what changes are allowed after certification.
+  This is the defining feature that makes certification signatures different from approval signatures.
+- **First in the chain**: The certification signature is always the foundational signature.
+  All subsequent signatures are approval signatures that build on the certified baseline.
+
+[source]
+----
+<< /Type /Sig
+   /Filter /Adobe.PPKLite
+   /SubFilter /adbe.pkcs7.detached
+   /ByteRange [0 14231 47007 1849]
+   /Contents <3082...>
+   /Reference [
+     << /Type /SigRef
+        /TransformMethod /DocMDP
+        /TransformParams << /Type /TransformParams /P 2 /V /1.2 >>
+     >>
+   ]
+   /Name (Document Author)
+   /M (D:20260308120000+01'00')
+>>
+----
+
+The document catalog connects this signature to the document-level permission system:
+
+[source]
+----
+<< /Type /Catalog
+   /AcroForm << ... >>
+   /Perms << /DocMDP 15 0 R >>    % Reference to the certifying signature object
+   /Pages 3 0 R
+>>
+----
+
+== The DocMDP Permission Model
+
+=== Permission Level 1: No Changes Allowed
+
+`/P 1` is the strictest level.
+After certification with P=1, **no changes whatsoever are allowed** to the document.
+This means:
+
+- No form fields can be filled
+- No additional signatures can be added
+- No annotations can be created
+- No pages can be added or removed
+- Any incremental update invalidates the certification
+
+This level is appropriate for documents that are complete and final — archived records, published regulations, completed certificates.
+In practice, it is rarely used because most signing workflows require at least form filling or countersigning.
+
+[WARNING]
+====
+P=1 is so restrictive that it prevents the document from being countersigned.
+If your workflow requires multiple signatures (author signs, then reviewer countersigns), **do not use P=1**.
+Use P=2 instead — it allows additional signatures while preventing content modifications.
+====
+
+=== Permission Level 2: Form Filling and Signing Only
+
+`/P 2` is the **default and most common** permission level.
+After certification with P=2:
+
+- **Allowed**: Filling form fields, applying additional (approval) signatures, adding signature appearances
+- **Not allowed**: Modifying page content, adding pages, removing pages, changing form field definitions (adding/removing fields), modifying JavaScript actions
+- Any change beyond form filling and signing invalidates the certification
+
+P=2 is the standard for government forms, contracts, and regulated documents.
+The document author sets up the form (fields, layout, instructions), certifies it, and then the form recipient fills in the fields and applies their own approval signature — without being able to alter the form structure or content.
+
+This is the level you should use unless you have a specific reason to choose P=1 or P=3.
+
+=== Permission Level 3: Form Filling, Signing, and Annotations
+
+`/P 3` is the most permissive certification level.
+After certification with P=3:
+
+- **Allowed**: Everything P=2 allows, plus adding annotations (comments, highlights, stamps, sticky notes, text markup)
+- **Not allowed**: Modifying page content, adding or removing pages, changing form field definitions
+
+P=3 is appropriate for review workflows where multiple people need to comment on a certified document without altering its content.
+Think of a contract that needs review comments from legal, compliance, and management before final signatures.
+
+=== What "Invalidates the Certification" Actually Means
+
+When we say a change "invalidates the certification," we mean:
+
+- The **byte range** of the certification signature remains intact — the hash still matches
+- The **CMS signature** still verifies cryptographically
+- But a **conforming viewer** detects that the modifications in subsequent revisions exceed the allowed permissions and displays a warning
+
+In Adobe Acrobat, this shows as: "The document has been altered or corrupted since the Signature was applied."
+In LibreOffice, it shows as: "Document has been modified since it was last signed."
+
+The exact wording varies by viewer, and — this is important — **not all viewers enforce MDP permissions correctly**.
+Some viewers only check whether the byte range is intact and don't analyze the incremental updates for permission compliance.
+This is one of the weaknesses that the Bochum team exploited in the Incremental Saving Attack (Chapter 24).
+
+== Lock Dictionaries: Field-Level Protection
+
+=== What Lock Dictionaries Do
+
+Beyond document-level MDP permissions, PDF supports **field-level locking** via the `/Lock` dictionary on a signature field.
+A Lock dictionary specifies which form fields should be locked (made read-only) once this particular signature is applied.
+
+The Lock dictionary lives in the signature field dictionary (not the signature value dictionary), and it applies when the field is signed:
+
+[source]
+----
+<< /Type /Annot
+   /Subtype /Widget
+   /FT /Sig
+   /T (SignatureField1)
+   /V 15 0 R               % Reference to the /Sig dictionary
+   /Lock <<
+     /Type /SigFieldLock
+     /Action /Include       % or /Exclude or /All
+     /Fields [(FieldA) (FieldB)]
+   >>
+>>
+----
+
+=== Lock Actions
+
+.Signature Field Lock Actions ({iso32000-2} §12.8.2.4)
+[cols="2,1,1,5", options="header"]
+|===
+| Action | Type | Req | Description
+
+| `/All`
+| name
+| —
+| Lock all fields in the document. No `/Fields` array is needed. After this signature is applied, every form field in the document becomes read-only. This is the simplest but most restrictive lock.
+
+| `/Include`
+| name
+| —
+| Lock only the fields listed in the `/Fields` array. The listed fields become read-only; all other fields remain fillable. Use this when you want to protect specific fields (e.g., "Price" and "Total") while allowing others (e.g., "Customer Signature") to be filled.
+
+| `/Exclude`
+| name
+| —
+| Lock all fields **except** those listed in the `/Fields` array. The listed fields remain fillable; everything else is locked. Use this when most fields should be locked but a few specific fields must remain editable (e.g., a "Date Received" field that an administrator fills after the signer has signed).
+|===
+
+=== The `/Fields` Array
+
+The `/Fields` array in the Lock dictionary contains the **fully qualified field names** of the fields to include or exclude.
+In a hierarchical field tree, the fully qualified name is the concatenation of parent and child names separated by periods:
+
+[source]
+----
+/Fields [(PersonalInfo.FirstName) (PersonalInfo.LastName) (Signature2)]
+----
+
+[WARNING]
+====
+Field name matching is case-sensitive and must be exact.
+A typo in the Lock dictionary's `/Fields` array means the field won't be locked — and there will be no error message.
+The signature applies successfully, the Lock dictionary is present, but the misspelled field remains editable.
+
+**Always test your Lock configurations** by:
+
+1. Signing the document with the Lock dictionary
+2. Opening it in Adobe Acrobat
+3. Attempting to edit the fields that should be locked
+4. Verifying that Acrobat prevents editing and shows the fields as read-only
+====
+
+== FieldMDP: Fine-Grained Modification Detection
+
+=== FieldMDP vs. DocMDP
+
+While DocMDP controls what categories of changes are allowed (form filling, annotations, etc.), **FieldMDP** controls which specific fields can be modified.
+It is a more targeted mechanism.
+
+FieldMDP uses the same `/Reference` array mechanism as DocMDP but with `/TransformMethod /FieldMDP`:
+
+[source]
+----
+<< /Type /SigRef
+   /TransformMethod /FieldMDP
+   /TransformParams <<
+     /Type /TransformParams
+     /Action /Include
+     /Fields [(ProtectedField1) (ProtectedField2)]
+     /V /2.0
+   >>
+>>
+----
+
+The `/Action` and `/Fields` keys work identically to Lock dictionary actions — `/Include`, `/Exclude`, and `/All` with the same semantics.
+
+The difference from Lock dictionaries:
+
+- **Lock dictionary**: Controls whether a field is **editable** in the viewer UI (read-only vs. writable).
+  It's a presentation-level restriction — the viewer _should_ prevent the user from typing in a locked field.
+- **FieldMDP**: Controls whether modifications to specific fields are **detected** during validation.
+  If a FieldMDP-protected field is changed after signing, the signature shows as modified.
+  It's a validation-level mechanism.
+
+In practice, Lock and FieldMDP are often used together: Lock prevents casual editing in a UI, and FieldMDP ensures that any bypass of the Lock (via direct file manipulation) is detected during validation.
+
+== Interaction Rules: When Multiple Signatures Coexist
+
+=== The Certification + Approval Pattern
+
+The most common multi-signature pattern is:
+
+1. **Author creates** the document with form fields
+2. **Author certifies** with P=2 (form filling and signing allowed) and optionally locks specific fields
+3. **Recipient fills** form fields
+4. **Recipient applies** an approval signature (which adds an incremental update with the filled values and the new signature)
+
+This works because:
+
+- The certification (P=2) allows form filling and additional signatures
+- The approval signature is applied to a document that already has a certification
+- The certification signature remains valid because the changes (form fill + new signature) are within the P=2 permissions
+
+=== What Happens When Permissions Conflict
+
+Things get complicated when:
+
+**Scenario 1: Approval signature before certification**
+
+Technically, any signature can be applied to any document.
+If someone applies an approval signature first and then a certification signature second, the certification signature covers (signs over) the approval signature.
+But the certification's MDP permissions only apply to changes _after_ the certification — they don't retroactively validate the approval signature's changes.
+
+In practice, this scenario is unusual and may confuse validators.
+**Always apply the certification signature first.**
+
+**Scenario 2: Lock dictionary conflicts with MDP**
+
+If the certification says P=2 (form filling allowed) but a Lock dictionary locks all fields — the Lock takes precedence for the locked fields.
+The MDP permission defines the ceiling (what's _possible_), and Lock dictionaries further restrict within that ceiling.
+
+**Scenario 3: Multiple Lock dictionaries from different signatures**
+
+Each signature field can have its own Lock dictionary.
+When multiple signatures with Lock dictionaries coexist:
+
+- Locks are cumulative — each new signature can lock additional fields
+- Locks are permanent — once a field is locked by any signature, no subsequent signature can unlock it
+- A field is locked if _any_ Lock dictionary in the chain locks it
+
+This means the first signer can lock fields A and B, the second signer can lock fields C and D, and after both signatures are applied, fields A, B, C, and D are all locked.
+
+[source]
+----
+// Signature 1 (Author): Lock fields A, B
+SignatureField1.Lock = { Action: Include, Fields: [A, B] }
+
+// After Sig1: A=locked, B=locked, C=editable, D=editable
+
+// Signature 2 (Reviewer): Lock fields C, D
+SignatureField2.Lock = { Action: Include, Fields: [C, D] }
+
+// After Sig2: A=locked, B=locked, C=locked, D=locked
+----
+
+== Implementation: Certification Signatures with PDFBox
+
+=== Creating a Certification Signature
+
+[source,java]
+----
+PDDocument doc = Loader.loadPDF(inputFile);
+
+// Create the signature
+PDSignature signature = new PDSignature();
+signature.setFilter(PDSignature.FILTER_ADOBE_PPKLITE);
+signature.setSubFilter(PDSignature.SUBFILTER_ADBE_PKCS7_DETACHED);
+signature.setName("Document Author");
+signature.setSignDate(Calendar.getInstance());
+
+// Set certification (MDP) permissions — P=2 is recommended
+doc.addSignature(signature, signingInterface);
+
+// Set the access permissions
+// 2 = form filling and signing allowed
+AccessPermission accessPermission = new AccessPermission();
+accessPermission.setDocMDP(2);
+doc.setDocumentPermissions(signature, accessPermission);
+
+doc.saveIncremental(outputStream);
+doc.close();
+----
+
+[NOTE]
+====
+PDFBox's API for certification signatures evolved between versions.
+In PDFBox 2.x, you used `doc.addSignature()` with a `SignatureOptions` and separately configured the MDP via the catalog's `/Perms` dictionary.
+In PDFBox 3.x, the `AccessPermission` class provides a cleaner API, but the underlying mechanism is the same — writing the `/DocMDP` reference into the catalog.
+====
+
+=== Adding Lock Dictionaries
+
+Lock dictionaries are configured on the signature field before signing:
+
+[source,java]
+----
+// Get or create the signature field
+PDSignatureField sigField = findOrCreateSignatureField(doc, "AuthorSignature");
+
+// Create lock dictionary
+COSDictionary lockDict = new COSDictionary();
+lockDict.setName(COSName.TYPE, "SigFieldLock");
+lockDict.setName(COSName.getPDFName("Action"), "Include");
+
+COSArray fieldsToLock = new COSArray();
+fieldsToLock.add(new COSString("PriceField"));
+fieldsToLock.add(new COSString("TotalField"));
+fieldsToLock.add(new COSString("ContractTerms"));
+lockDict.setItem(COSName.getPDFName("Fields"), fieldsToLock);
+
+// Attach lock dictionary to the signature field
+sigField.getCOSObject().setItem(COSName.getPDFName("Lock"), lockDict);
+
+// Now sign the document
+doc.addSignature(signature, signingInterface);
+doc.saveIncremental(outputStream);
+----
+
+== Seed Value Dictionaries: Constraining How a Signature Field Is Signed
+
+=== Purpose of Seed Values
+
+A **seed value dictionary** (`/SV`) on a signature field constrains _how_ the field can be signed.
+It does not sign anything itself — it provides instructions to the signing tool about what certificate to use, what algorithm to use, which SubFilter is required, and other signing parameters.
+
+This is the mechanism that government form creators use to ensure that form fillers sign with the correct certificate type, use the correct algorithm, and produce signatures that will pass validation.
+
+=== Key Seed Value Entries
+
+.Seed Value Dictionary Keys ({iso32000-2} §12.8.2.3)
+[cols="2,2,1,2", options="header"]
+|===
+| Key | Type | Req | Spec Ref
+
+| `/Filter`
+| name
+| Optional
+| §12.8.2.3, Table 237
+4+| The signature handler to use. In practice, always `/Adobe.PPKLite`.
+If set, the signing tool should use this handler — if a different handler is selected, the signing tool should warn the user.
+
+| `/SubFilter`
+| array
+| Optional
+| §12.8.2.3, Table 237
+4+| Array of acceptable SubFilter values. The signing tool should use one of these SubFilter values.
+Example: `[/adbe.pkcs7.detached /ETSI.CAdES.detached]` means either detached format is acceptable.
+
+| `/DigestMethod`
+| array
+| Optional
+| §12.8.2.3, Table 237
+4+| Array of acceptable digest algorithms. Example: `[/SHA256 /SHA384 /SHA512]`.
+If set, the signing tool must use one of these algorithms. `/SHA1` is deprecated and should not be included.
+
+| `/Reasons`
+| array
+| Optional
+| §12.8.2.3, Table 237
+4+| Array of text strings presenting acceptable signing reasons. The signing tool should let the user choose from this list.
+Example: `[(I approve this document) (I have reviewed this document) (I am the authorized signatory)]`.
+
+| `/MDP`
+| dictionary
+| Optional
+| §12.8.2.3, Table 237
+4+| The MDP parameters dictionary, specifying the default DocMDP permission level for signatures applied to this field.
+
+| `/TimeStamp`
+| dictionary
+| Optional
+| §12.8.2.3, Table 237
+4+| Timestamp seed value dictionary specifying a timestamp authority URL and whether a timestamp is required.
+If the `/Ff` flag is set to 1 (required), the signing tool must include a timestamp from the specified TSA.
+
+| `/Ff`
+| integer (flags)
+| Optional
+| §12.8.2.3, Table 237
+4+| Flags indicating which seed values are mandatory (bit 1 set) vs. recommended (bit 1 clear).
+If a seed value's corresponding Ff bit is set, the signing tool must respect the constraint — failure to do so should prevent the signature from being applied.
+
+| `/LegalAttestation`
+| array
+| Optional
+| §12.8.2.3
+4+| Array of legal attestation strings. The signer may be required to accept one of these attestations as part of the signing ceremony.
+
+|===
+
+=== Timestamp Seed Values
+
+The `/TimeStamp` sub-dictionary in seed values is particularly important for PAdES compliance:
+
+[source]
+----
+/SV <<
+  /TimeStamp <<
+    /URL (http://tsa.example.com/timestamp)
+    /Ff 1              % 1 = timestamp required, 0 = optional
+  >>
+  /SubFilter [/ETSI.CAdES.detached]
+  /DigestMethod [/SHA256 /SHA384 /SHA512]
+  /Ff 1                % All seed values are mandatory
+>>
+----
+
+This seed value dictionary says: "When signing this field, you must use CAdES detached format, SHA-256 or better, and you must include a timestamp from `tsa.example.com`. All of these requirements are mandatory (Ff=1)."
+
+A conforming signing tool (Adobe Acrobat, for example) will enforce these constraints automatically.
+PDFBox-based signing code must read and respect these seed values manually — the library does not enforce them automatically.
+
+[TIP]
+====
+**Always read the seed value dictionary before signing.**
+If you're building a signing service that signs arbitrary PDFs, the seed values may impose constraints that your default configuration doesn't meet.
+Ignoring them produces a signature that appears valid cryptographically but violates the form author's intent — and may fail validation in systems that check seed value compliance.
+
+[source,java]
+----
+PDSignatureField sigField = ...; // the field you're about to sign
+COSDictionary sv = sigField.getCOSObject()
+    .getCOSDictionary(COSName.getPDFName("SV"));
+if (sv != null) {
+    // Check SubFilter requirements
+    COSArray subFilters = sv.getCOSArray(COSName.getPDFName("SubFilter"));
+    // Check DigestMethod requirements
+    COSArray digestMethods = sv.getCOSArray(COSName.getPDFName("DigestMethod"));
+    // Check Timestamp requirements
+    COSDictionary ts = sv.getCOSDictionary(COSName.getPDFName("TimeStamp"));
+    if (ts != null) {
+        String tsaUrl = ts.getString(COSName.getPDFName("URL"));
+        int tsFlags = ts.getInt(COSName.getPDFName("Ff"), 0);
+        boolean timestampRequired = (tsFlags & 1) != 0;
+    }
+}
+----
+====
+
+== Real-World Patterns and Mistakes
+
+=== Mistake 1: Using Certification When Approval Is Needed
+
+**Scenario**: A developer creates a multi-signature workflow where three people sign sequentially.
+They make the first signature a certification signature with P=1 (no changes allowed).
+
+**Result**: The second and third signatures fail or invalidate the certification, because P=1 prohibits additional signatures.
+
+**Fix**: Use P=2 for the first (certification) signature if additional signatures are needed.
+Or use approval signatures for all three if no MDP restrictions are needed.
+
+=== Mistake 2: Not Setting MDP When It's Needed
+
+**Scenario**: A government form is meant to be filled and signed by the citizen, with no other modifications allowed.
+The form creator signs it as a plain approval signature without MDP.
+
+**Result**: The form has no modification restrictions.
+Anyone can modify the form structure, add fields, remove fields, or alter content — and the original signature only indicates "document has been modified" without specifying what was allowed.
+
+**Fix**: Use a certification signature with P=2 to allow form filling while preventing structural changes.
+
+=== Mistake 3: Lock Dictionary with Wrong Field Names
+
+**Scenario**: The signature is configured to lock fields "Price", "Total", and "Terms".
+But the actual field names in the PDF are "price_field", "total_amount", and "contract_terms" (because the form designer used different naming).
+
+**Result**: The Lock dictionary is present and syntactically correct, but no fields are actually locked — the names don't match.
+There is no error message or warning.
+
+**Fix**: Enumerate all field names before configuring the Lock dictionary.
+In PDFBox:
+
+[source,java]
+----
+PDAcroForm acroForm = doc.getDocumentCatalog().getAcroForm();
+for (PDField field : acroForm.getFieldTree()) {
+    log.info("Field: {} (type: {})",
+             field.getFullyQualifiedName(), field.getFieldType());
+}
+----
+
+=== Mistake 4: Assuming All Viewers Enforce MDP
+
+**Scenario**: A developer relies on MDP P=2 to prevent content modifications, assuming all viewers will refuse to let users edit non-form content after certification.
+
+**Result**: Adobe Acrobat enforces MDP correctly.
+Foxit enforces it mostly correctly.
+LibreOffice enforces it partially.
+PDFBox (when used as a library) does not enforce MDP at all — it allows any modification programmatically.
+Browser-based PDF viewers (Chrome, Firefox) often ignore MDP entirely because they don't support editing.
+
+**Lesson**: MDP is a _validation_ mechanism, not an _access control_ mechanism.
+It tells you whether changes were permitted, not whether they were prevented.
+A determined user with a hex editor or a programmatic tool can always modify a PDF — MDP ensures you can _detect_ that the modification occurred.
+
+== Key Takeaways
+
+- **Approval signatures**: "I approve this document." Multiple allowed, no restrictions on subsequent changes, each covers all previous content.
+- **Certification signatures**: "I authored this document and define what can change." Only one per document, must be first, carries DocMDP permissions (P=1/2/3).
+- **P=2 is the default and most common** permission level — allows form filling and additional signatures while preventing content modifications.
+- **Lock dictionaries** control which fields become read-only after a specific signature is applied. Cumulative and permanent.
+- **FieldMDP** provides validation-level detection of changes to specific fields — complements Lock dictionaries.
+- **Seed value dictionaries** constrain how a signature field must be signed — SubFilter, digest algorithm, timestamp requirements.
+- MDP is a **detection mechanism**, not a prevention mechanism. Not all viewers enforce it. Always verify compliance programmatically.
+- **Always apply certification signatures first**, then approval signatures. The certification establishes the permission framework.

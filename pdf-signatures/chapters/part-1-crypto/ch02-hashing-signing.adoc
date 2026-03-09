@@ -1,0 +1,710 @@
+[[ch02]]
+= Hash Functions & Digital Signing
+ifdef::env-github[]
+:tip-caption: :bulb:
+:note-caption: :information_source:
+:important-caption: :heavy_exclamation_mark:
+:caution-caption: :fire:
+:warning-caption: :warning:
+endif::[]
+
+[.lead]
+This chapter covers the two primitives that every digital signature depends on: cryptographic hash functions and the sign/verify operation.
+We go deep on the SHA family, explain why MD5 and SHA-1 are still haunting PDF signatures decades after they were broken, and walk through the exact sequence of bytes that turns a document into a verifiable commitment.
+
+If you already know what a hash function does, skip to <<ch02-sha-family>> for the forensic details of which algorithms you will actually encounter in the wild.
+If you want code, jump to <<ch02-java-hashing>>.
+
+
+== What Hash Functions Do
+
+A cryptographic hash function takes an input of arbitrary length and produces a fixed-size output -- the _digest_ or _hash value_.
+That is it.
+One operation, no keys involved, purely deterministic.
+Feed in the same bytes, get the same digest, every time, on every machine.
+
+But the properties that make this useful for digital signatures are specific and non-negotiable:
+
+.Properties of a cryptographic hash function
+[cols="2,5", options="header"]
+|===
+| Property | What It Means
+
+| **Deterministic**
+| Same input always produces the same output. No randomness, no state. `SHA-256("hello")` is the same value on your laptop, on a server in Frankfurt, and on a Mars rover running Java {java-version}. Always.
+
+| **Fixed-size output**
+| Regardless of whether the input is 1 byte or 1 terabyte, the output is always the same length. SHA-256 produces 32 bytes (256 bits). SHA-512 produces 64 bytes (512 bits). This fixed-size property is what makes hash functions useful as input to signing algorithms.
+
+| **Avalanche effect**
+| Change a single bit of the input, and on average 50% of the output bits change. The output looks completely unrelated to the original. There is no way to look at two digests and determine whether their inputs were similar.
+
+| **Pre-image resistance**
+| Given a hash value `h`, it is computationally infeasible to find any input `m` such that `hash(m) = h`. You cannot reverse a hash function. This is not encryption -- there is no key, no decryption, no way back.
+
+| **Second pre-image resistance**
+| Given an input `m1`, it is computationally infeasible to find a different input `m2` such that `hash(m1) = hash(m2)`. You cannot find a substitute document that produces the same hash.
+
+| **Collision resistance**
+| It is computationally infeasible to find _any_ two distinct inputs `m1` and `m2` such that `hash(m1) = hash(m2)`. This is stronger than second pre-image resistance -- the attacker gets to choose both inputs.
+|===
+
+NOTE: The distinction between second pre-image resistance and collision resistance matters enormously for digital signatures. An attacker who breaks collision resistance can prepare two documents with the same hash _before_ either is signed -- get one signed, then substitute the other. An attacker who breaks second pre-image resistance can find a substitute for an _already signed_ document. Collision attacks are easier (birthday paradox -- they require roughly 2^(n/2) work for an n-bit hash), which is why we retire algorithms at the collision resistance boundary, not the pre-image boundary.
+
+
+== Why We Hash Before Signing
+
+You might wonder: why not just sign the document directly?
+
+Three reasons, and they all matter:
+
+1. **Performance.** RSA signing is slow. ECDSA signing is faster but still orders of magnitude slower than hashing. A 10 MB PDF would take an unacceptable time to sign directly with RSA-2048. Hashing reduces the input to 32 bytes (for SHA-256), and signing 32 bytes is fast regardless of the original document size.
+
+2. **Fixed-size input.** RSA can only operate on data smaller than its modulus (typically 256 bytes for RSA-2048). You cannot feed a 10 MB document directly into RSA. Hashing solves this by producing a fixed-size value that fits within the algorithm's constraints.
+
+3. **Security proof structure.** The security of digital signature schemes is typically proven in two parts: the hash function provides collision resistance, and the signing algorithm provides unforgeability. Separating the two allows each component to be analyzed (and replaced) independently. When SHA-1 was broken, we could switch to SHA-256 without changing the RSA or ECDSA implementation.
+
+The process is always the same:
+
+----
+Sign:   digest = hash(data)  -->  signature = sign(digest, privateKey)
+Verify: digest = hash(data)  -->  result    = verify(digest, signature, publicKey)
+----
+
+The signer computes the hash of the data, then signs the hash with their private key.
+The verifier computes the hash of the same data independently, then checks the signature against that hash using the signer's public key.
+If the hashes match and the signature is valid, the data has not been modified since signing.
+
+IMPORTANT: The verifier computes the hash independently. The hash is not sent alongside the signature -- it is recomputed from the original data. If an attacker modifies even one byte of the data, the verifier's independently computed hash will differ from the hash that was signed, and verification will fail. This is the fundamental integrity guarantee of digital signatures.
+
+
+[[ch02-sha-family]]
+== The SHA Family
+
+The Secure Hash Algorithm family, designed by the NSA and published by NIST, is what you will encounter in virtually every PDF signature created after 2010.
+
+=== SHA-1: The Algorithm That Refused to Die
+
+SHA-1 produces a 160-bit (20-byte) digest.
+It was published in 1995 as FIPS PUB 180-1 and became the default hash algorithm for essentially everything: TLS certificates, code signing, Git commits, and yes, PDF signatures.
+
+The theoretical weaknesses appeared early.
+In 2005, Xiaoyun Wang, Yiqun Lisa Yin, and Hongbo Yu published an attack reducing the collision resistance of SHA-1 from the expected 2^80 operations to approximately 2^69 -- still impractical, but a clear signal that the algorithm was weakening.
+NIST recommended transitioning away from SHA-1 by 2010 for digital signatures.
+
+The practical break came on February 23, 2017.
+
+==== The SHAttered Attack
+
+A team from CWI Amsterdam (Marc Stevens) and Google (Elie Bursztein, Pierre Karpman) published the first practical SHA-1 collision.
+They produced two distinct PDF files -- `shattered-1.pdf` and `shattered-2.pdf` -- that had identical SHA-1 hashes but displayed completely different content.
+One showed a blue background with the text "SHAttered"; the other showed a red background with different text.
+
+The numbers:
+
+* The attack required approximately 2^63.1 SHA-1 computations
+* That translated to roughly 6,500 CPU-years and 110 GPU-years of computation
+* Google estimated the cost at approximately $110,000 using cloud computing resources
+* The collision was found using a technique called an _identical-prefix collision attack_, where both files share a common prefix and the collision is achieved by appending carefully crafted "near-collision blocks"
+
+.How the SHAttered collision was constructed
+[cols="1,4", options="header"]
+|===
+| Component | Description
+
+| Common prefix
+| Both PDFs share an identical header and initial structure -- valid PDF objects, page definitions, and the beginning of a JPEG image stream.
+
+| Collision blocks
+| 128 bytes of carefully computed data inserted into each file at the same offset. These blocks differ between the two files but are constructed so that the SHA-1 internal state converges to the same value after processing them.
+
+| Divergent suffix
+| After the collision blocks, the remainder of each file can be _anything_. Since the SHA-1 state is identical at that point, any shared suffix produces the same final hash. The attackers used this to embed different JPEG image data, producing visually distinct documents.
+|===
+
+WARNING: The SHAttered attack has direct consequences for PDF signatures. If a PDF signature uses SHA-1 as its digest algorithm (SubFilter `adbe.pkcs7.sha1` or a CMS SignedData with SHA-1 as the digest algorithm), an attacker who controls the document content _before_ signing can prepare two versions with the same SHA-1 hash. Get one version signed, and the other is also "signed" -- the signature validates on both. This is not a theoretical concern: the SHAttered team demonstrated it with actual PDF files.
+
+==== The Cost of $110,000
+
+It is worth dwelling on the attack cost because it illustrates how cryptographic security erodes over time.
+When SHAttered was published in 2017, $110,000 in cloud compute seemed significant.
+By 2020, the cost had dropped to an estimated $45,000 due to GPU price improvements.
+A 2020 paper by Ga{eacute}tan Leurent and Thomas Peyrin ("SHA-1 is a Shambles") demonstrated a _chosen-prefix_ collision attack (more powerful than identical-prefix) for an estimated $45,000.
+
+By 2026, a SHA-1 collision can likely be generated for under $20,000.
+This is well within the budget of a motivated individual, let alone a criminal organization or nation-state.
+The cost trajectory is clear: it only gets cheaper.
+
+==== Consequences for PDF and the Deprecation Timeline
+
+The SHAttered attack triggered a cascade of changes across the industry:
+
+* {iso32000-2} deprecated the `adbe.pkcs7.sha1` SubFilter
+* Adobe Acrobat began showing warnings for SHA-1 signatures (initially a yellow warning, later escalated to an error on newer Acrobat versions)
+* The PAdES standards ({etsi-pades}) require SHA-256 or stronger for all profiles
+* The CA/Browser Forum prohibited SHA-1 in TLS certificates effective January 1, 2017 -- a deadline that was already set before SHAttered, but the attack validated the urgency
+* Git, which used SHA-1 for commit hashes, began its multi-year migration to SHA-256 (still ongoing as of 2026)
+* Major browsers dropped SHA-1 certificate support: Chrome (January 2017), Firefox (January 2017), Edge (May 2017)
+
+TIP: If you encounter a PDF with a SHA-1 based signature, do not immediately panic. A SHA-1 signature is not _forged_ -- it was created legitimately at a time when SHA-1 was considered acceptable. The risk is that someone _could_ have prepared a collision before signing. For documents signed before 2017 by trusted parties, the practical risk is low. For documents signed after 2017 with SHA-1, ask pointed questions about why.
+
+
+=== SHA-256, SHA-384, SHA-512: The Modern Workhorses
+
+These are the algorithms you should be using.
+All three are members of the SHA-2 family, published by NIST in 2001 as FIPS PUB 180-2.
+
+.SHA-2 family members used in PDF signatures
+[cols="1,1,1,2,3", options="header"]
+|===
+| Algorithm | Output (bits) | Output (bytes) | Block size | Usage in PDF signatures
+
+| SHA-256
+| 256
+| 32
+| 512 bits (64 bytes)
+| The default for virtually all modern PDF signatures. PAdES-B-B requires SHA-256 as the minimum. If you are signing a PDF today, use SHA-256 unless you have a specific reason for a stronger algorithm.
+
+| SHA-384
+| 384
+| 48
+| 1024 bits (128 bytes)
+| Used when organizational policy requires stronger-than-256-bit hashing. Common in government and defense contexts. SHA-384 is actually a truncated SHA-512 with different initial values -- it uses the 64-bit word size of SHA-512, which makes it faster than SHA-256 on 64-bit platforms.
+
+| SHA-512
+| 512
+| 64
+| 1024 bits (128 bytes)
+| Maximum strength in the SHA-2 family. Rare in PDF signatures because SHA-256 is considered sufficient, and SHA-512 produces larger digests that increase CMS signature size. Used in high-security environments.
+|===
+
+NOTE: SHA-384's performance characteristic is surprising and worth knowing. Because it operates on 64-bit words (like SHA-512) rather than 32-bit words (like SHA-256), SHA-384 is actually _faster_ than SHA-256 on modern 64-bit processors. If you need to hash large documents and your platform is 64-bit (it is), SHA-384 gives you more security bits at equal or better performance. This is one of those facts that sounds wrong but is measurably true.
+
+==== SHA-3: The Insurance Policy
+
+SHA-3 (Keccak), published as FIPS 202 in 2015, is a completely different design from SHA-2 -- it uses a sponge construction rather than the Merkle-Damgard construction of SHA-1 and SHA-2.
+SHA-3 was selected by NIST specifically because it has _no_ structural similarity to SHA-2, meaning any attack on SHA-2 would not apply.
+
+You will not encounter SHA-3 in PDF signatures today.
+No PDF specification references it, no PAdES profile requires it, and no mainstream PDF library defaults to it.
+It exists as insurance: if SHA-2 is ever broken, SHA-3 is ready to replace it without a multi-year standardization process.
+
+BouncyCastle {bc-version} supports SHA-3 for signing, so the migration path exists when needed.
+
+
+== MD5: The Ghost in the Machine
+
+MD5 produces a 128-bit (16-byte) digest.
+It was designed by Ronald Rivest (the "R" in RSA) in 1991 and published as RFC 1321.
+It was once the standard hash function for everything.
+
+MD5 is _broken_.
+Not theoretically, not in some academic sense -- practically, completely, irrecoverably broken for collision resistance.
+
+=== The Wang-Yu Attacks (2004)
+
+In August 2004, Xiaoyun Wang and Hongbo Yu (the same Wang who later weakened SHA-1) presented the first practical MD5 collision at CRYPTO 2004.
+They could find two distinct inputs with the same MD5 hash in less than an hour on a standard PC.
+The collision required approximately 2^39 MD5 operations -- billions of times easier than the expected 2^64.
+
+By 2006, Vlastimil Klima had reduced the attack to _one minute_ on a single notebook computer.
+By 2008, Alexander Sotirov and Marc Stevens demonstrated a rogue CA attack using MD5 collisions, creating a fraudulent intermediate CA certificate that chained to a legitimate root.
+This was not an academic exercise -- they obtained a real certificate from a real CA (RapidSSL, which used MD5 for certificate signing) and used MD5 collisions to create a rogue CA certificate that any browser would trust.
+
+Today, MD5 collisions can be generated in _seconds_ on commodity hardware.
+The algorithm is fully broken for any security-sensitive purpose.
+
+=== Why MD5 Still Appears in Legacy PDFs
+
+Despite being broken for collision resistance since 2004, you will encounter MD5 in:
+
+* Old PDF signatures created before 2005 using `adbe.pkcs7.detached` with MD5 as the digest algorithm
+* Legacy government and enterprise PDFs that were signed by systems deployed in the early 2000s
+* Some PKCS#12 keystores that use MD5-based key derivation for the encryption of the private key (this is a different use of MD5 -- key derivation, not signature hashing -- and while not ideal, the risk profile is different from using MD5 for signing)
+* The `/ID` array in PDF trailers, which traditionally contained MD5 hashes of file metadata (this is not security-sensitive)
+
+CAUTION: If you encounter a PDF signed with MD5 as the digest algorithm, the signature provides _no_ collision resistance. An attacker who controlled the document before signing could have prepared a collision. For documents signed by trusted parties before 2004, the practical risk is limited (the attack was not known yet). For anything signed after 2004, the signature's integrity guarantee is meaningless against a determined attacker.
+
+
+== The Signing Process Step by Step
+
+Now we connect the hash function to the asymmetric cryptography from Chapter 1 and trace the exact sequence of operations that produces a PDF digital signature.
+
+=== Step 1: Hash the Document
+
+The signing library reads the bytes of the PDF specified by the `/ByteRange` array.
+This is _not_ the entire file -- it is everything except the `/Contents` hex string, which is where the signature will be placed.
+The gap exists because you cannot include the signature value in the data being signed (you would need to know the signature before computing it -- a circular dependency).
+
+The library feeds these bytes through the chosen hash algorithm:
+
+----
+SHA-256( byteRange[0..offset1] || byteRange[offset2..end] ) = digest (32 bytes)
+----
+
+This 32-byte digest is the _fingerprint_ of the document at the moment of signing.
+
+=== Step 2: Pad the Hash
+
+Before the hash can be signed with the private key, it must be padded to the correct size for the signing algorithm.
+For RSA, there are two padding schemes:
+
+**PKCS#1 v1.5 padding** (the traditional scheme): The hash is prefixed with a DER-encoded `DigestInfo` structure that identifies the hash algorithm, then padded with `0xFF` bytes to fill the modulus size.
+The structure looks like:
+
+[source,asn1]
+----
+DigestInfo ::= SEQUENCE {
+    digestAlgorithm  AlgorithmIdentifier,  -- OID for SHA-256
+    digest           OCTET STRING           -- the 32-byte hash
+}
+----
+
+The padded message is: `0x00 0x01 [0xFF padding] 0x00 [DigestInfo DER bytes]`.
+
+**RSASSA-PSS** (Probabilistic Signature Scheme): A more modern padding scheme that includes random salt, making signatures non-deterministic.
+PSS provides a tighter security proof than PKCS#1 v1.5, but it is less commonly used in PDF signatures because the entire PDF ecosystem was built around PKCS#1 v1.5.
+Some CAs issue PSS certificates, and you may encounter the OID `1.2.840.113549.1.1.10` (RSASSA-PSS) in the `SignerInfo.signatureAlgorithm` field.
+
+For ECDSA, there is no padding step -- the hash is used directly as input to the ECDSA signing equation.
+
+WARNING: The choice of padding scheme is not just a technical detail. PKCS#1 v1.5 has known theoretical weaknesses (Bleichenbacher's 1998 attack on encryption; related issues apply to signatures in certain implementation scenarios). RSASSA-PSS is provably secure under standard assumptions. In practice, PKCS#1 v1.5 remains safe for signatures (as opposed to encryption, where the Bleichenbacher attack is devastating), but security-conscious deployments should prefer PSS. The {etsi-pades} standards allow both.
+
+=== Step 3: Encrypt with Private Key
+
+The padded hash (for RSA) or raw hash (for ECDSA) is processed with the private key:
+
+For RSA: _s = paddedHash^d^ mod n_, where _d_ is the private exponent and _n_ is the modulus.
+The result _s_ is the signature value -- a number the same size as the modulus (256 bytes for RSA-2048, 384 bytes for RSA-3072).
+
+For ECDSA: The algorithm generates a nonce _k_ (either random or deterministic per RFC 6979), computes a curve point _(x1, y1) = k * G_, and derives the signature pair _(r, s)_ from _x1_, the hash, and the private key _d_.
+The signature is the pair _(r, s)_, each approximately the same size as the curve order (32 bytes each for P-256, totaling 64 bytes).
+
+=== Step 4: Package as CMS SignedData
+
+The raw signature value is not written directly into the PDF.
+It is wrapped in a CMS `SignedData` structure ({rfc5652} Section 5) that includes:
+
+* The signature value itself
+* The signer's certificate (and often the full certificate chain)
+* The `SignerInfo` containing the digest algorithm, signature algorithm, and signed attributes
+* The `messageDigest` signed attribute -- the hash from Step 1
+* The `signingTime` attribute (optional but common)
+* The `contentType` attribute (always `id-data` for PDF)
+
+This CMS blob is DER-encoded, then hex-encoded (each byte becomes two hex characters), and written into the `/Contents` entry of the signature dictionary.
+
+
+== The Verification Process Step by Step
+
+Verification is the mirror image of signing, with one crucial addition: the verifier must independently recompute the hash and compare it against what the signer claims to have signed.
+
+=== Step 1: Extract the CMS SignedData
+
+The validator reads the `/Contents` hex string from the signature dictionary and decodes it from hex to DER to obtain the CMS `SignedData` structure.
+
+=== Step 2: Re-Hash the Byte Range
+
+The validator reads the `/ByteRange` array, extracts the specified byte ranges from the PDF file, and computes the hash using the algorithm specified in the `SignerInfo.digestAlgorithm` field.
+
+This is the critical integrity check: if anyone has modified the PDF bytes after signing, this hash will differ from the original.
+
+=== Step 3: Compare Hashes
+
+The validator extracts the `messageDigest` attribute from the CMS `SignerInfo` signed attributes.
+This attribute contains the hash that the signer computed over the byte range content.
+The validator compares this with the independently computed hash from Step 2.
+
+If they do not match, the document has been modified and validation fails immediately.
+There is no need to check the cryptographic signature.
+
+=== Step 4: Verify the Cryptographic Signature
+
+If the hashes match, the validator checks that the signature over the signed attributes (which include the `messageDigest` attribute) is cryptographically valid.
+For RSA: compute _m' = s^e^ mod n_ and verify that the result matches the padded hash of the signed attributes.
+For ECDSA: verify the _(r, s)_ pair against the hash using the public key point _Q_.
+
+If this check passes, the signature is **cryptographically valid** -- it was produced by someone holding the private key that corresponds to the public key in the certificate.
+
+[IMPORTANT]
+====
+Cryptographic validity is necessary but not sufficient.
+A signature can be cryptographically valid and still be _untrustworthy_:
+
+* The certificate might be expired.
+* The certificate might have been revoked.
+* The certificate might not chain to a trusted root.
+* The signed byte range might not cover the entire document (the Bochum attacks exploited exactly this -- see Chapter 24).
+* The certificate might lack the `digitalSignature` or `nonRepudiation` key usage extension (see Chapter 3).
+
+Signature **validation** -- as opposed to mere cryptographic verification -- requires checking all of these conditions.
+Chapter 16 covers the full validation process.
+====
+
+
+== DigestMethod in PDF Signatures
+
+The hash algorithm used for a PDF signature is determined by the `/SubFilter` value and the CMS `SignerInfo.digestAlgorithm` field.
+
+.How the hash algorithm is specified
+[cols="2,2,3", options="header"]
+|===
+| SubFilter | Hash Determination | Notes
+
+| `adbe.pkcs7.detached`
+| CMS `digestAlgorithm` field
+| The hash algorithm is specified inside the CMS structure. Can be any algorithm the signer chooses (SHA-256, SHA-384, SHA-512, or legacy SHA-1/MD5).
+
+| `adbe.pkcs7.sha1`
+| Always SHA-1
+| Deprecated by {iso32000-2}. The SHA-1 hash of the entire byte range is embedded as the CMS content. Do not create new signatures with this SubFilter.
+
+| `ETSI.CAdES.detached`
+| CMS `digestAlgorithm` field
+| PAdES-compliant signatures. Must use SHA-256 or stronger per {etsi-pades}. This is the recommended SubFilter for new signatures.
+
+| `ETSI.RFC3161`
+| CMS `digestAlgorithm` field
+| Document-level timestamp tokens ({rfc3161}). The hash algorithm is specified in the timestamp request.
+|===
+
+
+== Hash Algorithm OIDs
+
+When a hash algorithm appears inside a CMS SignedData structure, it is identified by an ASN.1 Object Identifier (OID).
+You need to know these OIDs because they appear in the raw bytes of every PDF signature, and when something goes wrong, you will be reading hex dumps.
+
+.Hash algorithm OIDs used in CMS ({rfc5652} and NIST)
+[cols="2,3,2", options="header"]
+|===
+| Algorithm | OID | Notes
+
+| MD5
+| `1.2.840.113549.2.5`
+| Legacy only. Do not use for new signatures.
+
+| SHA-1
+| `1.3.14.3.2.26`
+| Deprecated. Still accepted by some validators for backward compatibility.
+
+| SHA-224
+| `2.16.840.1.101.3.4.2.4`
+| Rarely used. Exists for completeness.
+
+| SHA-256
+| `2.16.840.1.101.3.4.2.1`
+| The default for modern PDF signatures. PAdES minimum.
+
+| SHA-384
+| `2.16.840.1.101.3.4.2.2`
+| Used in higher-security contexts.
+
+| SHA-512
+| `2.16.840.1.101.3.4.2.3`
+| Maximum SHA-2 strength.
+
+| SHA3-256
+| `2.16.840.1.101.3.4.2.8`
+| Future use. Not currently seen in PDF signatures.
+
+| SHA3-384
+| `2.16.840.1.101.3.4.2.9`
+| Future use.
+
+| SHA3-512
+| `2.16.840.1.101.3.4.2.10`
+| Future use.
+|===
+
+TIP: The OID `2.16.840.1.101.3.4.2.1` (SHA-256) is the one you will see most often. The prefix `2.16.840.1.101.3.4` is the NIST algorithm arc. The `.2` subtree is hash algorithms, and `.1` is SHA-256 specifically. Memorize this OID -- you will recognize it instantly in ASN.1 dumps and hex views.
+
+The OID structure `1.2.840.113549` is the RSA Security arc (the company, now part of EMC/Dell). MD5 (`...2.5`) and various PKCS algorithms live under this prefix. The OID `1.3.14.3.2.26` for SHA-1 is under the OIW (Open Information Warehouse) arc -- a historical artifact from the 1990s standardization process.
+
+
+== Signature Algorithm OIDs
+
+The signing operation itself also has OIDs, which combine the hash algorithm with the public-key algorithm:
+
+.Common signature algorithm OIDs in PDF signatures
+[cols="3,3,2", options="header"]
+|===
+| Algorithm Combination | OID | Notes
+
+| SHA-256 with RSA
+| `1.2.840.113549.1.1.11`
+| Most common combination in current PDF signatures.
+
+| SHA-384 with RSA
+| `1.2.840.113549.1.1.12`
+| Higher-security RSA.
+
+| SHA-512 with RSA
+| `1.2.840.113549.1.1.13`
+| Maximum SHA-2 + RSA.
+
+| SHA-256 with ECDSA
+| `1.2.840.10045.4.3.2`
+| Growing in usage. Smaller signatures than RSA.
+
+| SHA-384 with ECDSA
+| `1.2.840.10045.4.3.3`
+| Common with P-384 curves.
+
+| SHA-1 with RSA
+| `1.2.840.113549.1.1.5`
+| Deprecated. Legacy signatures only.
+
+| RSASSA-PSS
+| `1.2.840.113549.1.1.10`
+| Probabilistic RSA. The hash algorithm is specified in the parameters, not in the OID itself.
+|===
+
+WARNING: When parsing CMS SignedData from a PDF signature, you may encounter a mismatch between the `digestAlgorithm` in the SignerInfo (which specifies the hash algorithm) and the hash algorithm implied by the `signatureAlgorithm` OID. For example, the `digestAlgorithm` might say SHA-256, but the `signatureAlgorithm` OID might be `1.2.840.113549.1.1.1` (RSA encryption, with no hash specified). This is technically allowed by {rfc5652} (the signature algorithm can be "RSA" and the hash is determined by the `digestAlgorithm` field), but it confuses many parsers. Always use the `digestAlgorithm` field as the authoritative source for which hash was used.
+
+
+== When Hash and Signature Algorithms Collide
+
+An interesting question arises: what happens when you pair a hash algorithm with a signature algorithm designed for a different security level?
+For example, SHA-256 (128-bit security) with ECDSA P-384 (192-bit security)?
+
+The answer is straightforward: **the overall security level is the minimum of the two components**.
+SHA-256 with P-384 provides 128-bit security, not 192-bit.
+The hash function is the bottleneck.
+
+Standard pairings:
+
+* **SHA-256 with RSA-3072 or ECDSA P-256**: 128-bit security across the board. The default for most use cases.
+* **SHA-384 with RSA-7680 or ECDSA P-384**: 192-bit security. Government/defense contexts.
+* **SHA-512 with ECDSA P-521**: 256-bit security. Rarely needed.
+
+Mismatched pairings are not _wrong_ -- they work correctly -- but they waste resources.
+Using SHA-512 with RSA-2048 gives you 112-bit security (limited by RSA) while computing an unnecessarily expensive hash.
+Using SHA-256 with P-384 gives you 128-bit security (limited by SHA-256) while using a curve that provides more security than the hash can deliver.
+
+TIP: In practice, almost everyone uses SHA-256 with either RSA-2048/3072 or ECDSA P-256. The matched security levels make the overall system coherent, and SHA-256 is fast, universally supported, and has no known weaknesses. Do not overthink this unless you have specific compliance requirements that mandate higher security levels.
+
+
+[[ch02-java-hashing]]
+== Java: Computing Hashes
+
+The `java.security.MessageDigest` class is Java's built-in hash computation API.
+For basic hashing, you do not need BouncyCastle -- the JDK provides SHA-256 and SHA-512 out of the box.
+
+[source,java]
+----
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+
+public class HashExample {
+
+    /**
+     * Compute the SHA-256 hash of the given data.
+     * Returns the raw 32-byte digest.
+     */
+    public static byte[] sha256(byte[] data) throws NoSuchAlgorithmException {
+        MessageDigest md = MessageDigest.getInstance("SHA-256");
+        return md.digest(data);
+    }
+
+    /**
+     * Compute a hash using a specified algorithm.
+     * Algorithm names: "SHA-256", "SHA-384", "SHA-512", "SHA-1", "MD5".
+     */
+    public static byte[] hash(byte[] data, String algorithm)
+            throws NoSuchAlgorithmException {
+        MessageDigest md = MessageDigest.getInstance(algorithm);
+        return md.digest(data);
+    }
+
+    /**
+     * Demonstrate the avalanche effect: one-bit change produces
+     * a completely different hash.
+     */
+    public static void demonstrateAvalanche() throws NoSuchAlgorithmException {
+        byte[] original = "The quick brown fox jumps over the lazy dog".getBytes();
+        byte[] modified = "The quick brown fox jumps over the lazy dog.".getBytes(); // <1>
+
+        byte[] hash1 = sha256(original);
+        byte[] hash2 = sha256(modified);
+
+        // hash1 and hash2 will be completely different despite
+        // the inputs differing by a single period character
+    }
+}
+----
+<1> The only difference is a trailing period. The SHA-256 outputs differ in approximately 50% of their bits.
+
+For PDF signing, you typically do not call `MessageDigest` directly.
+Instead, the signing library (PDFBox + BouncyCastle) computes the hash as part of the CMS signing operation.
+But knowing how to compute hashes independently is essential for debugging -- when a signature fails validation, one of the first things to check is whether the hash of the byte range matches the `messageDigest` attribute in the CMS SignerInfo.
+
+
+== Java: Signing with BouncyCastle
+
+Here is the complete signing flow using BouncyCastle {bc-version}.
+This code signs a byte array and produces a CMS SignedData structure -- exactly what ends up in a PDF signature's `/Contents` value.
+
+[source,java]
+----
+import java.security.KeyStore;
+import java.security.PrivateKey;
+import java.security.Security;
+import java.security.cert.Certificate;
+import java.security.cert.X509Certificate;
+import java.util.ArrayList;
+import java.util.List;
+
+import org.bouncycastle.cert.jcajce.JcaCertStore;
+import org.bouncycastle.cms.CMSProcessableByteArray;
+import org.bouncycastle.cms.CMSSignedData;
+import org.bouncycastle.cms.CMSSignedDataGenerator;
+import org.bouncycastle.cms.jcajce.JcaSignerInfoGeneratorBuilder;
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
+import org.bouncycastle.operator.ContentSigner;
+import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
+import org.bouncycastle.operator.jcajce.JcaDigestCalculatorProviderBuilder;
+
+public class SigningExample {
+
+    static {
+        Security.addProvider(new BouncyCastleProvider());
+    }
+
+    /**
+     * Sign data and return DER-encoded CMS SignedData.
+     *
+     * @param dataToSign     the raw bytes to sign (byte range content)
+     * @param keyStore       loaded PKCS#12 key store
+     * @param alias          key entry alias
+     * @param password       key password
+     * @param hashAlgorithm  "SHA-256", "SHA-384", or "SHA-512"
+     * @return               DER-encoded CMS SignedData
+     */
+    public static byte[] signData(byte[] dataToSign, KeyStore keyStore,
+                                   String alias, char[] password,
+                                   String hashAlgorithm) throws Exception {
+
+        PrivateKey privateKey = (PrivateKey) keyStore.getKey(alias, password);    // <1>
+        Certificate[] chain = keyStore.getCertificateChain(alias);
+        X509Certificate signingCert = (X509Certificate) chain[0];
+
+        List<Certificate> certList = new ArrayList<>();                           // <2>
+        for (Certificate cert : chain) {
+            certList.add(cert);
+        }
+
+        String signatureAlgorithm = hashAlgorithm + "withRSA";                   // <3>
+
+        ContentSigner signer = new JcaContentSignerBuilder(signatureAlgorithm)
+                .setProvider("BC")
+                .build(privateKey);
+
+        CMSSignedDataGenerator generator = new CMSSignedDataGenerator();
+        generator.addSignerInfoGenerator(
+                new JcaSignerInfoGeneratorBuilder(
+                        new JcaDigestCalculatorProviderBuilder()
+                                .setProvider("BC")
+                                .build()
+                ).build(signer, signingCert)
+        );
+        generator.addCertificates(new JcaCertStore(certList));                    // <4>
+
+        CMSProcessableByteArray content = new CMSProcessableByteArray(dataToSign);
+        CMSSignedData signedData = generator.generate(content, false);            // <5>
+
+        return signedData.getEncoded();                                           // <6>
+    }
+}
+----
+<1> Extract the private key from the key store. In production, use an HSM (see Chapter 5).
+<2> Include the full certificate chain so validators can build the path without fetching intermediates.
+<3> For ECDSA keys, use `hashAlgorithm + "withECDSA"` instead. The algorithm name must match the key type.
+<4> Embedding certificates in the CMS is critical -- without them, the validator has no chain to verify.
+<5> The `false` parameter means _detached_ signature: the content is not included in the CMS structure.
+<6> The returned bytes are DER-encoded and will be hex-encoded to fill `/Contents`.
+
+IMPORTANT: The `false` parameter in `generator.generate(content, false)` is the single most important boolean in PDF signing. It means "detached signature" -- the signed content is _not_ embedded in the CMS structure. PDF requires detached signatures because the content (the byte range) lives in the PDF file itself. If you pass `true`, the CMS will include the content, and some validators will reject it because the `/SubFilter` says `adbe.pkcs7.detached` but the CMS contains encapsulated content.
+
+
+== Debugging Hash Mismatches
+
+When a PDF signature fails validation, the most common root cause is a hash mismatch: the hash of the byte range content does not match the `messageDigest` signed attribute in the CMS SignerInfo.
+
+Here is how to debug this systematically:
+
+[source,java]
+----
+import java.security.MessageDigest;
+
+import org.bouncycastle.asn1.ASN1OctetString;
+import org.bouncycastle.asn1.cms.Attribute;
+import org.bouncycastle.asn1.cms.CMSAttributes;
+import org.bouncycastle.cms.CMSSignedData;
+import org.bouncycastle.cms.SignerInformation;
+import org.bouncycastle.util.encoders.Hex;
+
+public class HashDebugExample {
+
+    /**
+     * Compare the hash in the CMS messageDigest attribute against
+     * a freshly computed hash of the byte range content.
+     */
+    public static void debugHashMismatch(byte[] cmsBytes, byte[] byteRangeContent)
+            throws Exception {
+
+        CMSSignedData signedData = new CMSSignedData(cmsBytes);
+
+        for (SignerInformation signerInfo : signedData.getSignerInfos().getSigners()) {
+
+            // 1. Get the digest algorithm from the SignerInfo
+            String digestAlgOid = signerInfo.getDigestAlgOID();
+            String digestAlgName = mapOidToName(digestAlgOid);
+
+            // 2. Compute the hash of the byte range content independently
+            MessageDigest md = MessageDigest.getInstance(digestAlgName);
+            byte[] computedHash = md.digest(byteRangeContent);
+
+            // 3. Extract the messageDigest attribute from signed attributes
+            Attribute mdAttr = signerInfo.getSignedAttributes()
+                    .get(CMSAttributes.messageDigest);
+            byte[] embeddedHash = ASN1OctetString.getInstance(
+                    mdAttr.getAttrValues().getObjectAt(0)
+            ).getOctets();
+
+            // 4. Compare
+            boolean match = MessageDigest.isEqual(computedHash, embeddedHash);
+            // If match is false: the byte range was extracted incorrectly,
+            // or the PDF was modified after signing
+        }
+    }
+
+    private static String mapOidToName(String oid) {
+        return switch (oid) {
+            case "2.16.840.1.101.3.4.2.1" -> "SHA-256";
+            case "2.16.840.1.101.3.4.2.2" -> "SHA-384";
+            case "2.16.840.1.101.3.4.2.3" -> "SHA-512";
+            case "1.3.14.3.2.26"           -> "SHA-1";
+            case "1.2.840.113549.2.5"      -> "MD5";
+            default -> throw new IllegalArgumentException("Unknown OID: " + oid);
+        };
+    }
+}
+----
+
+TIP: When debugging a hash mismatch, the most common causes are: (1) the byte range was extracted incorrectly -- off by one byte, or not accounting for the gap correctly; (2) the PDF was modified after signing (perhaps by a tool that did a full save instead of incremental save); (3) the byte range array values do not add up to cover the entire file (there are bytes before or after the byte range that are not part of the signed content but should be -- see Chapter 13 for the gory details).
+
+
+== Summary
+
+Digital signatures are built on two primitives: hash functions provide integrity (any modification is detectable), and asymmetric signing provides authentication (only the private key holder could have created the signature) and non-repudiation (the signer cannot deny having signed).
+
+For PDF signatures:
+
+* **Use SHA-256** as the digest algorithm. It is the PAdES minimum, universally supported, and has no known weaknesses.
+* **SHA-1 is deprecated.** The SHAttered attack proved practical collision attacks are feasible. Do not create new SHA-1 signatures.
+* **MD5 is broken.** Collisions can be generated in seconds. Legacy only.
+* **The hash is always computed over the byte range**, not the entire PDF file. The byte range excludes the `/Contents` value (which contains the signature itself -- you cannot sign your own signature).
+* **CMS detached signatures** are the standard: the content is not embedded in the CMS structure.
+* **PKCS#1 v1.5 padding** is dominant in PDF signatures, but **RSASSA-PSS** is gaining adoption for new deployments.
+
+The next chapter introduces X.509 certificates -- the mechanism that binds a public key to an identity, turning a raw cryptographic operation into a trust relationship.

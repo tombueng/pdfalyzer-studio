@@ -29,7 +29,7 @@ var PDFalyzer = (function () {
     }
 
     function normalizeTab(tab) {
-        var allowed = ['structure', 'forms', 'fonts', 'validation', 'rawcos', 'bookmarks', 'attachments', 'signatures', 'changes'];
+        var allowed = ['structure', 'forms', 'fonts', 'validation', 'rawcos', 'signatures', 'changes'];
         return allowed.indexOf(tab) >= 0 ? tab : 'structure';
     }
 

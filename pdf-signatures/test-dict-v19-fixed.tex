@@ -1,0 +1,266 @@
+% =============================================================================
+% V19-fixed: Auto-sizing columns using TikZ matrix + relative positioning
+% No hardcoded column widths — everything adapts to content
+% =============================================================================
+\documentclass[11pt,a4paper]{article}
+\input{test-dict-v2-preamble}
+
+\usepackage{array}
+\usepackage{colortbl}
+
+\begin{document}
+
+\vartitle{V19-fixed --- Auto-Sizing Three-Column Layout}
+{Code column auto-sizes to content. Zone boxes wrap actual rows. No overflow.}
+
+\vspace{0.3em}
+
+% We use nested tabular inside TikZ for the code column,
+% and position the other two columns relative to its boundary.
+%
+% Column 1: Dictionary code (auto-width tabular)
+% Column 2: Spec references (fixed width)
+% Column 3: Practitioner advice (fills remaining space)
+
+\newcolumntype{K}{>{\ttfamily\bfseries\color{lkeycolor}}l}
+\newcolumntype{V}{>{\ttfamily\color{lvalcolor}}l}
+\newcolumntype{S}{>{\ttfamily\color{lstrcolor}}l}
+
+\begin{tikzpicture}[remember picture,
+    every node/.style={anchor=north west, inner sep=0pt},
+    zbox/.style={rectangle, rounded corners=3pt, draw=#1, line width=0.8pt, fill=#1!6,
+                 inner sep=3pt},
+    spectext/.style={font=\fontsize{7}{9.5}\selectfont\ttfamily, text=black!40,
+                     anchor=north west},
+    advtext/.style={font=\fontsize{7.5}{10}\selectfont\sffamily, text=black!65,
+                    text width=5.2cm, anchor=north west},
+    badge/.style={rectangle, rounded corners=2pt, fill=#1, text=white,
+                  font=\fontsize{5}{6}\selectfont\bfseries\sffamily,
+                  inner xsep=2.5pt, inner ysep=1pt},
+    colhdr/.style={font=\fontsize{6.5}{7.5}\selectfont\sffamily\bfseries,
+                   text=black!45, anchor=south west},
+]
+
+% === Column headers ===
+\node[colhdr] (h1) at (0, 0.4) {DICTIONARY ENTRY};
+\node[colhdr] (h2) at (7.5, 0.4) {SPEC REFERENCE};
+\node[colhdr] (h3) at (11.0, 0.4) {PRACTITIONER ADVICE};
+\draw[black!15, line width=0.4pt] (0, 0.2) -- (16.2, 0.2);
+
+% === Code column: one tabular per group, wrapped in zone boxes ===
+
+% --- Group 1: Identity ---
+\node[anchor=north west] (grp1) at (0, -0.1) {%
+    \begin{tabular}{@{\hspace{6pt}}K@{\hspace{8pt}}V@{\hspace{6pt}}}
+    /Type      & /Sig \\
+    /Filter    & /Adobe.PPKLite \\
+    /SubFilter & /ETSI.CAdES.detached \\
+    \end{tabular}%
+};
+\begin{scope}[on background layer]
+    \node[zbox=grpIdentD, fit=(grp1)] (z1) {};
+\end{scope}
+
+% Spec refs for group 1 (positioned relative to zone box)
+\node[spectext] at (7.5, -0.15) {Table 255, row 1};
+\node[spectext] at (7.5, -0.50) {Table 255, row 2};
+\node[spectext] at (7.5, -0.85) {Table 255, row 3};
+
+% Advice for group 1
+\node[advtext] (a1) at (11.0, -0.1) {%
+    \tikz[baseline=(b.base)]\node[badge=reqred](b){REQUIRED};\;
+    \textbf{SubFilter is king.} Always produce
+    \texttt{ETSI.CAdES.detached}. Consume all
+    three for backward compatibility.
+};
+
+% --- Group 2: Crypto ---
+\node[anchor=north west] (grp2) at (0, -1.45) {%
+    \begin{tabular}{@{\hspace{6pt}}K@{\hspace{8pt}}S@{\hspace{6pt}}}
+    /Contents  & <0A3F8B...0000> \\
+    /ByteRange & \color{lvalcolor}[0 840 3560 1200] \\
+    \end{tabular}%
+};
+\begin{scope}[on background layer]
+    \node[zbox=grpCryptoD, fit=(grp2)] (z2) {};
+\end{scope}
+
+\node[spectext] at (7.5, -1.50) {Table 255, row 4};
+\node[spectext] at (7.5, -1.85) {Table 255, row 5};
+
+\node[advtext] (a2) at (11.0, -1.45) {%
+    \tikz[baseline=(b.base)]\node[badge=reqred](b){REQUIRED};\;
+    \textbf{The proof and what it covers.}
+    Verify: \texttt{len1+len2+hex==file\_size}.
+    If not equal, bytes are uncovered.
+};
+
+% --- Group 3: Metadata ---
+\node[anchor=north west] (grp3) at (0, -2.8) {%
+    \begin{tabular}{@{\hspace{6pt}}K@{\hspace{8pt}}S@{\hspace{6pt}}}
+    /Name        & (Alice Smith) \\
+    /M           & (D:20250307120000+01'00') \\
+    /Reason      & (Approved for release) \\
+    /ContactInfo & (alice@example.com) \\
+    /Location    & (Vienna, Austria) \\
+    \end{tabular}%
+};
+\begin{scope}[on background layer]
+    \node[zbox=grpMetaD, fit=(grp3)] (z3) {};
+\end{scope}
+
+\node[spectext] at (7.5, -2.85) {Table 255, rows 6--10};
+
+\node[advtext] (a3) at (11.0, -2.8) {%
+    \tikz[baseline=(b.base)]\node[badge=optgreen](b){OPTIONAL};\;
+    \textbf{Not signed!} Anyone can forge these
+    with a hex editor. Trust the X.509 cert
+    inside the CMS blob in \texttt{/Contents}.
+};
+
+% --- Group 4: Integrity ---
+\node[anchor=north west] (grp4) at (0, -5.0) {%
+    \begin{tabular}{@{\hspace{6pt}}K@{\hspace{8pt}}V@{\hspace{6pt}}}
+    /Reference        & [<< \\
+    \hspace{12pt}/Type             & /SigRef \\
+    \hspace{12pt}/TransformMethod  & /DocMDP \\
+    \hspace{12pt}/TransformParams  & << /P 2 >> \\
+                      & >>] \\
+    \end{tabular}%
+};
+\begin{scope}[on background layer]
+    \node[zbox=grpIntegD, fit=(grp4)] (z4) {};
+\end{scope}
+
+\node[spectext] at (7.5, -5.05) {Table 255, row 12};
+\node[spectext] at (7.5, -5.40) {\S12.8.2.2};
+
+\node[advtext] (a4) at (11.0, -5.0) {%
+    \tikz[baseline=(b.base)]\node[badge=condpurple](b){CONDITIONAL};\;
+    \textbf{DocMDP} constrains post-signing changes.
+    \texttt{/P 2} = forms + sign only.
+    \texttt{/P 3} = also annotations.
+    Required for certification signatures.
+};
+
+% --- Group 5: Build ---
+\node[anchor=north west] (grp5) at (0, -7.3) {%
+    \begin{tabular}{@{\hspace{6pt}}K@{\hspace{8pt}}V@{\hspace{6pt}}}
+    /Prop\_Build & << /App << /Name /PDFBox >> >> \\
+    \end{tabular}%
+};
+\begin{scope}[on background layer]
+    \node[zbox=grpBuildD, fit=(grp5)] (z5) {};
+\end{scope}
+
+\node[spectext] at (7.5, -7.35) {Table 255, row 14};
+
+\node[advtext] (a5) at (11.0, -7.3) {%
+    \tikz[baseline=(b.base)]\node[badge=optgreen](b){OPTIONAL};\;
+    Which library signed it.
+    Invaluable for cross-vendor debugging.
+};
+
+% === Bottom rule ===
+\draw[black!10, line width=0.3pt] (0, -8.1) -- (16.2, -8.1);
+\node[font=\fontsize{6}{7}\selectfont\sffamily\itshape, text=black!30, anchor=east]
+    at (16.2, -8.3) {ISO 32000-2 \S12.8.1, Table 255};
+
+\end{tikzpicture}
+
+\vspace{2em}
+
+% =============================================================================
+% Second example: a DIFFERENT dictionary to prove auto-sizing works generically
+% =============================================================================
+
+\vartitle{V19-fixed (b) --- Seed Value Dictionary (different content, same template)}
+{Same layout applied to the Seed Value Dictionary. Columns adapt automatically.}
+
+\vspace{0.3em}
+
+\begin{tikzpicture}[remember picture,
+    every node/.style={anchor=north west, inner sep=0pt},
+    zbox/.style={rectangle, rounded corners=3pt, draw=#1, line width=0.8pt, fill=#1!6,
+                 inner sep=3pt},
+    spectext/.style={font=\fontsize{7}{9.5}\selectfont\ttfamily, text=black!40,
+                     anchor=north west},
+    advtext/.style={font=\fontsize{7.5}{10}\selectfont\sffamily, text=black!65,
+                    text width=5.2cm, anchor=north west},
+    badge/.style={rectangle, rounded corners=2pt, fill=#1, text=white,
+                  font=\fontsize{5}{6}\selectfont\bfseries\sffamily,
+                  inner xsep=2.5pt, inner ysep=1pt},
+    colhdr/.style={font=\fontsize{6.5}{7.5}\selectfont\sffamily\bfseries,
+                   text=black!45, anchor=south west},
+]
+
+\node[colhdr] at (0, 0.4) {DICTIONARY ENTRY};
+\node[colhdr] at (7.5, 0.4) {SPEC REFERENCE};
+\node[colhdr] at (11.0, 0.4) {PRACTITIONER ADVICE};
+\draw[black!15, line width=0.4pt] (0, 0.2) -- (16.2, 0.2);
+
+% --- Group 1: Seed Value identity ---
+\node[anchor=north west] (sv1) at (0, -0.1) {%
+    \begin{tabular}{@{\hspace{6pt}}K@{\hspace{8pt}}V@{\hspace{6pt}}}
+    /Type & /SV \\
+    /Ff   & 1 \\
+    \end{tabular}%
+};
+\begin{scope}[on background layer]
+    \node[zbox=grpIdentD, fit=(sv1)] {};
+\end{scope}
+\node[spectext] at (7.5, -0.15) {Table 235};
+\node[advtext] at (11.0, -0.1) {%
+    \tikz[baseline=(b.base)]\node[badge=reqred](b){REQUIRED};\;
+    \texttt{/Ff} bit 1 = SubFilter required. Set it.
+};
+
+% --- Group 2: Constraints ---
+\node[anchor=north west] (sv2) at (0, -1.1) {%
+    \begin{tabular}{@{\hspace{6pt}}K@{\hspace{8pt}}V@{\hspace{6pt}}}
+    /SubFilter       & [/ETSI.CAdES.detached] \\
+    /DigestMethod    & [/SHA256 /SHA384 /SHA512] \\
+    /Reasons         & [(Approved) (Reviewed) (Rejected)] \\
+    /MDP             & << /P 2 >> \\
+    /LegalAttestation & [(This document has been legally reviewed.)] \\
+    \end{tabular}%
+};
+\begin{scope}[on background layer]
+    \node[zbox=grpCryptoD, fit=(sv2)] {};
+\end{scope}
+\node[spectext] at (7.5, -1.15) {Table 235, rows 3--8};
+\node[advtext] at (11.0, -1.1) {%
+    \tikz[baseline=(b.base)]\node[badge=optgreen](b){OPTIONAL};\;
+    \textbf{Template author's tool.} Constrains
+    which algorithms, reasons, and permissions
+    signers can use. The \texttt{/Reasons} array
+    pre-populates the signing dialog in Acrobat.
+};
+
+% --- Group 3: Certificate constraints ---
+\node[anchor=north west] (sv3) at (0, -3.6) {%
+    \begin{tabular}{@{\hspace{6pt}}K@{\hspace{8pt}}V@{\hspace{6pt}}}
+    /Cert            & << /Subject (...) /Issuer (...) >> \\
+    /KeyUsage        & [/digitalSignature /nonRepudiation] \\
+    /TimeStamp       & << /URL (http://tsa.example.com) /Ff 1 >> \\
+    \end{tabular}%
+};
+\begin{scope}[on background layer]
+    \node[zbox=grpIntegD, fit=(sv3)] {};
+\end{scope}
+\node[spectext] at (7.5, -3.65) {Table 235, rows 9--12};
+\node[advtext] at (11.0, -3.6) {%
+    \tikz[baseline=(b.base)]\node[badge=condpurple](b){CONDITIONAL};\;
+    \textbf{Certificate constraints} restrict which
+    certs can sign this field. \texttt{/TimeStamp}
+    with \texttt{/Ff 1} makes TSA mandatory ---
+    the field refuses unsigned timestamps.
+};
+
+\draw[black!10, line width=0.3pt] (0, -5.5) -- (16.2, -5.5);
+\node[font=\fontsize{6}{7}\selectfont\sffamily\itshape, text=black!30, anchor=east]
+    at (16.2, -5.7) {ISO 32000-2 \S12.7.5.5, Table 235};
+
+\end{tikzpicture}
+
+\end{document}

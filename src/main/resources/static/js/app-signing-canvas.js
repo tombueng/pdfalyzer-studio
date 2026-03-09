@@ -1,7 +1,19 @@
 /**
  * PDFalyzer Studio -- Freehand drawing canvas for signature visual representation.
  * Supports mouse, touch, and pointer events with pressure sensitivity,
- * velocity-based dynamic pen width, real-time bezier smoothing, and biometric data recording.
+ * velocity-based dynamic pen width, multiple smoothing algorithms, and biometric data recording.
+ *
+ * Smoothing is non-destructive: raw stroke points are always retained.
+ * Changing the algorithm or level re-renders from the original data.
+ * Heavy smoothing runs async with a progress overlay to avoid blocking the UI.
+ *
+ * Available algorithms:
+ *   none     - Raw recorded points, no smoothing
+ *   bezier   - Quadratic bezier with interpolated control points (original)
+ *   chaikin  - Chaikin corner-cutting subdivision (iterative, extreme oversmoothing possible)
+ *   gaussian - Gaussian kernel smoothing on X/Y coordinates
+ *   catmull  - Catmull-Rom centripetal spline interpolation
+ *   bspline  - Cubic B-spline approximation (control-point based)
  */
 PDFalyzer.SigningCanvas = (function ($, P) {
     'use strict';
@@ -9,7 +21,7 @@ PDFalyzer.SigningCanvas = (function ($, P) {
     var _canvas = null;
     var _ctx = null;
     var _drawing = false;
-    var _strokes = [];       // Array of stroke arrays for undo
+    var _strokes = [];       // Array of stroke arrays for undo (raw recorded points)
     var _currentStroke = [];
     var _penColor = '#1a1a2e';
     var _basePenWidth = 2.0;
@@ -20,12 +32,18 @@ PDFalyzer.SigningCanvas = (function ($, P) {
     var _lastWidth = 2.0;
 
     // Smoothing
-    var _smoothingLevel = 0.5; // 0 = no smoothing, 1 = max smoothing
-    var _smoothingEnabled = true;
+    var _smoothingLevel = 0.5;
+    var _smoothingAlgorithm = 'chaikin'; // none|bezier|chaikin|gaussian|catmull|bspline
+
+    // Async redraw state
+    var _redrawTimer = null;
+    var _redrawDebounceMs = 80;
+    var _asyncAbort = false;
+    var MAX_OUTPUT_POINTS = 500000; // safety cap per stroke
 
     // Biometric data recording
     var _biometricEnabled = true;
-    var _biometricData = []; // Array of stroke biometric entries
+    var _biometricData = [];
     var _currentBioStroke = [];
     var _startTimestamp = 0;
 
@@ -57,6 +75,7 @@ PDFalyzer.SigningCanvas = (function ($, P) {
         _canvas.removeEventListener('pointermove', onPointerMove);
         _canvas.removeEventListener('pointerup', onPointerUp);
         _canvas.removeEventListener('pointerleave', onPointerUp);
+        cancelAsyncRedraw();
         _canvas = null;
         _ctx = null;
     }
@@ -95,15 +114,12 @@ PDFalyzer.SigningCanvas = (function ($, P) {
         var now = performance.now();
         pt.t = now - _startTimestamp;
 
-        // Compute velocity (px/ms)
         var dx = pt.x - _lastPoint.x;
         var dy = pt.y - _lastPoint.y;
         var dt = now - _lastTime;
         var velocity = dt > 0 ? Math.sqrt(dx * dx + dy * dy) / dt : 0;
 
-        // Dynamic width from pressure + velocity
         var targetWidth = computeWidth(pt.pressure, velocity);
-        // Smooth width transitions to avoid jagged strokes
         var w = _lastWidth + (_lastWidth < targetWidth ? 0.3 : 0.5) * (targetWidth - _lastWidth);
         pt.width = w;
         _lastWidth = w;
@@ -117,9 +133,9 @@ PDFalyzer.SigningCanvas = (function ($, P) {
             });
         }
 
-        // Draw with bezier smoothing
-        if (_smoothingEnabled && _currentStroke.length >= 3) {
-            drawSmoothedSegment(_currentStroke, w);
+        // Live preview: use bezier for real-time (fast), full algorithm on redraw
+        if (_smoothingAlgorithm !== 'none' && _currentStroke.length >= 3) {
+            drawBezierSegment(_currentStroke, w);
         } else {
             drawLineSegment(_lastPoint, pt, w);
         }
@@ -139,17 +155,15 @@ PDFalyzer.SigningCanvas = (function ($, P) {
         }
         _currentStroke = [];
         _currentBioStroke = [];
+        // Redraw with the selected algorithm applied to all strokes
+        scheduleRedraw();
     }
 
     // ── Width computation ──────────────────────────────────────────────────
 
     function computeWidth(pressure, velocity) {
-        // Pressure contribution (0.0 - 1.0)
         var p = (typeof pressure === 'number' && pressure > 0) ? pressure : 0.5;
-
-        // Velocity dampening: faster movement = thinner lines (like real ink)
         var velocityFactor = 1.0 - Math.min(velocity * 0.3, 0.6);
-
         var w = _basePenWidth + p * (_maxPenWidth - _basePenWidth);
         w *= velocityFactor;
         return Math.max(_minPenWidth, Math.min(_maxPenWidth, w));
@@ -168,27 +182,19 @@ PDFalyzer.SigningCanvas = (function ($, P) {
         _ctx.stroke();
     }
 
-    function drawSmoothedSegment(stroke, w) {
+    function drawBezierSegment(stroke, w) {
         var len = stroke.length;
         if (len < 3) return;
-
-        // Use last 3 points for quadratic bezier
         var p0 = stroke[len - 3];
         var p1 = stroke[len - 2];
         var p2 = stroke[len - 1];
-
-        var smoothFactor = _smoothingLevel;
-
-        // Midpoints
+        var sf = Math.min(_smoothingLevel, 1.0);
         var mx1 = (p0.x + p1.x) / 2;
         var my1 = (p0.y + p1.y) / 2;
         var mx2 = (p1.x + p2.x) / 2;
         var my2 = (p1.y + p2.y) / 2;
-
-        // Interpolated control point
-        var cpx = p1.x + smoothFactor * (((mx1 + mx2) / 2) - p1.x);
-        var cpy = p1.y + smoothFactor * (((my1 + my2) / 2) - p1.y);
-
+        var cpx = p1.x + sf * (((mx1 + mx2) / 2) - p1.x);
+        var cpy = p1.y + sf * (((my1 + my2) / 2) - p1.y);
         _ctx.lineWidth = w;
         _ctx.strokeStyle = _penColor;
         _ctx.lineCap = 'round';
@@ -212,16 +218,222 @@ PDFalyzer.SigningCanvas = (function ($, P) {
         };
     }
 
+    // ══════════════════════════════════════════════════════════════════════
+    //  SMOOTHING ALGORITHMS
+    //  Each takes an array of raw points and _smoothingLevel, returns a new
+    //  array of smoothed {x, y} points. Width is interpolated separately.
+    //  All algorithms guard against runaway output sizes.
+    // ══════════════════════════════════════════════════════════════════════
+
+    /**
+     * Chaikin corner-cutting subdivision.
+     * Each pass roughly doubles point count. We cap iterations so output
+     * stays under MAX_OUTPUT_POINTS per stroke. At level 50 with a typical
+     * 200-point stroke, this gives ~15 iterations (200 * 2^15 ≈ 6.5M capped).
+     */
+    function smoothChaikin(pts) {
+        var iterations = Math.max(0, Math.floor(_smoothingLevel));
+        if (iterations === 0 || pts.length < 3) return pts;
+
+        // Cap iterations so output stays manageable
+        var maxIter = Math.floor(Math.log2(MAX_OUTPUT_POINTS / Math.max(pts.length, 2)));
+        maxIter = Math.max(1, Math.min(maxIter, 20)); // absolute cap at 20
+        iterations = Math.min(iterations, maxIter);
+
+        var result = pts;
+        for (var iter = 0; iter < iterations; iter++) {
+            var next = [result[0]];
+            for (var i = 0; i < result.length - 1; i++) {
+                var a = result[i];
+                var b = result[i + 1];
+                next.push({ x: 0.75 * a.x + 0.25 * b.x, y: 0.75 * a.y + 0.25 * b.y });
+                next.push({ x: 0.25 * a.x + 0.75 * b.x, y: 0.25 * a.y + 0.75 * b.y });
+            }
+            next.push(result[result.length - 1]);
+            result = next;
+            if (result.length > MAX_OUTPUT_POINTS) break;
+        }
+        return result;
+    }
+
+    /**
+     * Gaussian kernel smoothing on X/Y coordinates.
+     * smoothingLevel controls kernel radius (sigma = smoothingLevel * 5).
+     * Kernel radius capped to avoid O(n*r) blowup.
+     */
+    function smoothGaussian(pts) {
+        if (pts.length < 3 || _smoothingLevel <= 0) return pts;
+        var sigma = _smoothingLevel * 5;
+        var radius = Math.min(Math.ceil(sigma * 2.5), 500); // cap radius
+        if (radius < 1) return pts;
+
+        var kernel = [];
+        var kSum = 0;
+        for (var k = -radius; k <= radius; k++) {
+            var v = Math.exp(-(k * k) / (2 * sigma * sigma));
+            kernel.push(v);
+            kSum += v;
+        }
+        for (var ki = 0; ki < kernel.length; ki++) kernel[ki] /= kSum;
+
+        var result = [];
+        for (var i = 0; i < pts.length; i++) {
+            var sx = 0, sy = 0;
+            for (var j = 0; j < kernel.length; j++) {
+                var idx = i + (j - radius);
+                idx = Math.max(0, Math.min(pts.length - 1, idx));
+                sx += pts[idx].x * kernel[j];
+                sy += pts[idx].y * kernel[j];
+            }
+            result.push({ x: sx, y: sy });
+        }
+        return result;
+    }
+
+    /**
+     * Catmull-Rom centripetal spline interpolation.
+     * Density capped to keep output points bounded.
+     */
+    function smoothCatmullRom(pts) {
+        if (pts.length < 3) return pts;
+        var density = Math.max(1, Math.round(_smoothingLevel * 3));
+        var maxDensity = Math.max(1, Math.floor(MAX_OUTPUT_POINTS / Math.max(pts.length, 1)));
+        density = Math.min(density, maxDensity);
+        var result = [pts[0]];
+
+        for (var i = 0; i < pts.length - 1; i++) {
+            var p0 = pts[Math.max(0, i - 1)];
+            var p1 = pts[i];
+            var p2 = pts[Math.min(pts.length - 1, i + 1)];
+            var p3 = pts[Math.min(pts.length - 1, i + 2)];
+
+            for (var s = 1; s <= density; s++) {
+                var t = s / density;
+                var t2 = t * t;
+                var t3 = t2 * t;
+                var x = 0.5 * ((2 * p1.x) +
+                    (-p0.x + p2.x) * t +
+                    (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 +
+                    (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3);
+                var y = 0.5 * ((2 * p1.y) +
+                    (-p0.y + p2.y) * t +
+                    (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 +
+                    (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3);
+                result.push({ x: x, y: y });
+            }
+        }
+        return result;
+    }
+
+    /**
+     * Cubic B-spline approximation. Density capped similarly.
+     */
+    function smoothBSpline(pts) {
+        if (pts.length < 4) return pts;
+        var density = Math.max(1, Math.round(_smoothingLevel * 3));
+        var maxDensity = Math.max(1, Math.floor(MAX_OUTPUT_POINTS / Math.max(pts.length, 1)));
+        density = Math.min(density, maxDensity);
+        var result = [pts[0]];
+
+        for (var i = 1; i < pts.length - 2; i++) {
+            var p0 = pts[i - 1];
+            var p1 = pts[i];
+            var p2 = pts[i + 1];
+            var p3 = pts[i + 2];
+
+            for (var s = 0; s < density; s++) {
+                var t = s / density;
+                var t2 = t * t;
+                var t3 = t2 * t;
+                var b0 = (-t3 + 3 * t2 - 3 * t + 1) / 6;
+                var b1 = (3 * t3 - 6 * t2 + 4) / 6;
+                var b2 = (-3 * t3 + 3 * t2 + 3 * t + 1) / 6;
+                var b3 = t3 / 6;
+                result.push({
+                    x: b0 * p0.x + b1 * p1.x + b2 * p2.x + b3 * p3.x,
+                    y: b0 * p0.y + b1 * p1.y + b2 * p2.y + b3 * p3.y
+                });
+            }
+        }
+        result.push(pts[pts.length - 1]);
+        return result;
+    }
+
+    /**
+     * Apply the selected smoothing algorithm to a stroke.
+     * Returns smoothed points array, or null if the algorithm draws inline (bezier).
+     */
+    function applySmoothing(rawStroke) {
+        if (_smoothingAlgorithm === 'none' || _smoothingLevel <= 0) return null;
+        switch (_smoothingAlgorithm) {
+            case 'chaikin':  return smoothChaikin(rawStroke);
+            case 'gaussian': return smoothGaussian(rawStroke);
+            case 'catmull':  return smoothCatmullRom(rawStroke);
+            case 'bspline':  return smoothBSpline(rawStroke);
+            case 'bezier':   return null; // inline
+            default:         return null;
+        }
+    }
+
+    // ── Async redraw with progress ────────────────────────────────────────
+
+    function cancelAsyncRedraw() {
+        _asyncAbort = true;
+        if (_redrawTimer) { clearTimeout(_redrawTimer); _redrawTimer = null; }
+        hideProgress();
+    }
+
+    function scheduleRedraw() {
+        cancelAsyncRedraw();
+        _redrawTimer = setTimeout(function () {
+            _redrawTimer = null;
+            redraw();
+        }, _redrawDebounceMs);
+    }
+
+    function estimateWork() {
+        var totalPts = 0;
+        for (var s = 0; s < _strokes.length; s++) totalPts += _strokes[s].length;
+        if (_smoothingAlgorithm === 'chaikin') {
+            var iters = Math.min(Math.floor(_smoothingLevel), 20);
+            return totalPts * Math.pow(2, Math.min(iters, 15));
+        }
+        if (_smoothingAlgorithm === 'gaussian') {
+            var r = Math.min(Math.ceil(_smoothingLevel * 5 * 2.5), 500);
+            return totalPts * r * 2;
+        }
+        if (_smoothingAlgorithm === 'catmull' || _smoothingAlgorithm === 'bspline') {
+            return totalPts * Math.max(1, Math.round(_smoothingLevel * 3));
+        }
+        return totalPts;
+    }
+
+    function showProgress(text) {
+        var $c = $(_canvas).parent();
+        if (!$c.find('.sig-smooth-progress').length) {
+            $c.css('position', 'relative');
+            $c.append('<div class="sig-smooth-progress"><i class="fas fa-spinner fa-spin me-1"></i><span class="sig-smooth-progress-text"></span></div>');
+        }
+        $c.find('.sig-smooth-progress-text').text(text || 'Smoothing...');
+        $c.find('.sig-smooth-progress').show();
+    }
+
+    function hideProgress() {
+        var $c = $(_canvas ? $(_canvas).parent() : []);
+        $c.find('.sig-smooth-progress').hide();
+    }
+
     // ── Undo / clear / redraw ─────────────────────────────────────────────
 
     function undoStroke() {
         if (_strokes.length === 0) return;
         _strokes.pop();
         if (_biometricData.length > 0) _biometricData.pop();
-        redraw();
+        scheduleRedraw();
     }
 
     function clear() {
+        cancelAsyncRedraw();
         _strokes = [];
         _currentStroke = [];
         _biometricData = [];
@@ -236,39 +448,132 @@ PDFalyzer.SigningCanvas = (function ($, P) {
 
     function redraw() {
         if (!_ctx || !_canvas) return;
+        cancelAsyncRedraw();
+        _asyncAbort = false;
+
+        var work = estimateWork();
+        var isHeavy = work > 200000;
+
+        if (isHeavy) {
+            redrawAsync();
+        } else {
+            redrawSync();
+        }
+    }
+
+    function redrawSync() {
+        clearCanvas();
+        for (var s = 0; s < _strokes.length; s++) {
+            var rawStroke = _strokes[s];
+            if (rawStroke.length < 2) continue;
+            var smoothed = applySmoothing(rawStroke);
+            if (smoothed && smoothed.length >= 2) {
+                drawSmoothPath(smoothed, computeAverageWidth(rawStroke));
+            } else {
+                drawStrokeInline(rawStroke);
+            }
+        }
+    }
+
+    function redrawAsync() {
+        clearCanvas();
+        var strokeIdx = 0;
+        var total = _strokes.length;
+        var startTime = performance.now();
+
+        showProgress('Smoothing stroke 1/' + total + '...');
+
+        function processNext() {
+            if (_asyncAbort || strokeIdx >= total) {
+                hideProgress();
+                return;
+            }
+
+            var rawStroke = _strokes[strokeIdx];
+            strokeIdx++;
+
+            if (rawStroke.length < 2) {
+                scheduleNext();
+                return;
+            }
+
+            var smoothed = applySmoothing(rawStroke);
+            if (smoothed && smoothed.length >= 2) {
+                drawSmoothPath(smoothed, computeAverageWidth(rawStroke));
+            } else {
+                drawStrokeInline(rawStroke);
+            }
+
+            var elapsed = performance.now() - startTime;
+            if (elapsed > 2000) {
+                showProgress('Smoothing stroke ' + strokeIdx + '/' + total + ' (' + Math.round(elapsed / 1000) + 's)...');
+            }
+
+            scheduleNext();
+        }
+
+        function scheduleNext() {
+            if (_asyncAbort) { hideProgress(); return; }
+            if (strokeIdx >= total) { hideProgress(); return; }
+            setTimeout(processNext, 0);
+        }
+
+        processNext();
+    }
+
+    function clearCanvas() {
         _ctx.clearRect(0, 0, _canvas.width, _canvas.height);
         _ctx.fillStyle = '#ffffff';
         _ctx.fillRect(0, 0, _canvas.width, _canvas.height);
+    }
 
-        for (var s = 0; s < _strokes.length; s++) {
-            var stroke = _strokes[s];
-            if (stroke.length < 2) continue;
+    function computeAverageWidth(stroke) {
+        var sum = 0, count = 0;
+        for (var i = 0; i < stroke.length; i++) {
+            if (stroke[i].width) { sum += stroke[i].width; count++; }
+        }
+        return count > 0 ? sum / count : _basePenWidth;
+    }
 
-            // Re-derive widths if needed, then draw with smoothing
-            for (var i = 1; i < stroke.length; i++) {
-                var prev = stroke[i - 1];
-                var cur = stroke[i];
-                var w = cur.width || (_basePenWidth + (cur.pressure || 0.5) * (_maxPenWidth - _basePenWidth));
+    function drawSmoothPath(pts, w) {
+        _ctx.lineWidth = w;
+        _ctx.strokeStyle = _penColor;
+        _ctx.lineCap = 'round';
+        _ctx.lineJoin = 'round';
+        _ctx.beginPath();
+        _ctx.moveTo(pts[0].x, pts[0].y);
+        for (var i = 1; i < pts.length; i++) {
+            _ctx.lineTo(pts[i].x, pts[i].y);
+        }
+        _ctx.stroke();
+    }
 
-                if (_smoothingEnabled && i >= 2) {
-                    var pp = stroke[i - 2];
-                    var mx1 = (pp.x + prev.x) / 2;
-                    var my1 = (pp.y + prev.y) / 2;
-                    var mx2 = (prev.x + cur.x) / 2;
-                    var my2 = (prev.y + cur.y) / 2;
-                    var cpx = prev.x + _smoothingLevel * (((mx1 + mx2) / 2) - prev.x);
-                    var cpy = prev.y + _smoothingLevel * (((my1 + my2) / 2) - prev.y);
-                    _ctx.lineWidth = w;
-                    _ctx.strokeStyle = _penColor;
-                    _ctx.lineCap = 'round';
-                    _ctx.lineJoin = 'round';
-                    _ctx.beginPath();
-                    _ctx.moveTo(mx1, my1);
-                    _ctx.quadraticCurveTo(cpx, cpy, mx2, my2);
-                    _ctx.stroke();
-                } else {
-                    drawLineSegment(prev, cur, w);
-                }
+    function drawStrokeInline(stroke) {
+        var isBezier = (_smoothingAlgorithm === 'bezier' && _smoothingLevel > 0);
+        for (var i = 1; i < stroke.length; i++) {
+            var prev = stroke[i - 1];
+            var cur = stroke[i];
+            var w = cur.width || (_basePenWidth + (cur.pressure || 0.5) * (_maxPenWidth - _basePenWidth));
+
+            if (isBezier && i >= 2) {
+                var pp = stroke[i - 2];
+                var sf = _smoothingLevel;
+                var mx1 = (pp.x + prev.x) / 2;
+                var my1 = (pp.y + prev.y) / 2;
+                var mx2 = (prev.x + cur.x) / 2;
+                var my2 = (prev.y + cur.y) / 2;
+                var cpx = prev.x + sf * (((mx1 + mx2) / 2) - prev.x);
+                var cpy = prev.y + sf * (((my1 + my2) / 2) - prev.y);
+                _ctx.lineWidth = w;
+                _ctx.strokeStyle = _penColor;
+                _ctx.lineCap = 'round';
+                _ctx.lineJoin = 'round';
+                _ctx.beginPath();
+                _ctx.moveTo(mx1, my1);
+                _ctx.quadraticCurveTo(cpx, cpy, mx2, my2);
+                _ctx.stroke();
+            } else {
+                drawLineSegment(prev, cur, w);
             }
         }
     }
@@ -318,11 +623,18 @@ PDFalyzer.SigningCanvas = (function ($, P) {
     }
 
     function setSmoothingLevel(level) {
-        _smoothingLevel = Math.max(0, Math.min(1, level || 0));
+        _smoothingLevel = Math.max(0, level || 0);
+        scheduleRedraw();
     }
 
-    function setSmoothingEnabled(enabled) {
-        _smoothingEnabled = !!enabled;
+    function setSmoothingAlgorithm(algo) {
+        var valid = ['none', 'bezier', 'chaikin', 'gaussian', 'catmull', 'bspline'];
+        _smoothingAlgorithm = valid.indexOf(algo) >= 0 ? algo : 'chaikin';
+        scheduleRedraw();
+    }
+
+    function getSmoothingAlgorithm() {
+        return _smoothingAlgorithm;
     }
 
     function setBiometricEnabled(enabled) {
@@ -340,7 +652,6 @@ PDFalyzer.SigningCanvas = (function ($, P) {
             var dx = (_canvas.width - dw) / 2;
             var dy = (_canvas.height - dh) / 2;
             _ctx.drawImage(img, dx, dy, dw, dh);
-            // Mark as having content so isEmpty() returns false
             _strokes = [[ {x: 0, y: 0, pressure: 0.5} ]];
         };
         img.src = dataUrl;
@@ -351,6 +662,7 @@ PDFalyzer.SigningCanvas = (function ($, P) {
         destroy: destroy,
         undoStroke: undoStroke,
         clear: clear,
+        redraw: redraw,
         toDataURL: toDataURL,
         isEmpty: isEmpty,
         hasStrokes: hasStrokes,
@@ -359,7 +671,8 @@ PDFalyzer.SigningCanvas = (function ($, P) {
         setMaxPenWidth: setMaxPenWidth,
         setMinPenWidth: setMinPenWidth,
         setSmoothingLevel: setSmoothingLevel,
-        setSmoothingEnabled: setSmoothingEnabled,
+        setSmoothingAlgorithm: setSmoothingAlgorithm,
+        getSmoothingAlgorithm: getSmoothingAlgorithm,
         setBiometricEnabled: setBiometricEnabled,
         getBiometricData: getBiometricData,
         loadImage: loadImage

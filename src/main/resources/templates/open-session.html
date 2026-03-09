@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="utf-8">
+    <title>Opening in PDFalyzer Studio...</title>
+</head>
+<body>
+<script th:inline="javascript">
+    /*<![CDATA[*/
+    var sessionId = /*[[${sessionId}]]*/ '';
+    try {
+        localStorage.setItem('pdfalyzer.currentSessionId', sessionId);
+    } catch (e) { /* ignore */ }
+    window.location.replace('/');
+    /*]]>*/
+</script>
+</body>
+</html>

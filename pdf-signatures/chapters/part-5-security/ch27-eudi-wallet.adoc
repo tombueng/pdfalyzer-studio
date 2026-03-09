@@ -1,0 +1,625 @@
+= EUDI Wallet & Digital Identity
+
+[.lead]
+For three decades, qualified electronic signatures have been a niche technology — expensive, complicated, and reserved for enterprises, notaries, and government agencies.
+In 2024, the European Union decided to change that.
+The revised eIDAS regulation puts a qualified signature creation capability in the pocket of every EU citizen, on a device they already own: their smartphone.
+
+This is not incremental improvement.
+This is a category shift.
+If it works — and the "if" is substantial — QES moves from a tool that a few thousand specialized users understand to a feature that 450 million Europeans can use as casually as they use contactless payment.
+
+This chapter covers the regulatory, architectural, and technical dimensions of the EUDI wallet and its impact on PDF digital signatures.
+We start with the political context (because regulation drives everything in this space), move through the architecture, and end with what you — the developer building signing or validation software — need to prepare.
+
+== eIDAS 2.0: What Changed and Why
+
+=== The Regulatory History
+
+The original eIDAS regulation ({eidas-reg}, Chapter 19) entered into force in 2014 and became fully effective in 2016.
+It was a success in the narrow sense: it created a functioning framework for qualified trust services, established the EU Trusted List, and enabled cross-border recognition of QES.
+
+It was a failure in the broad sense: almost nobody used it.
+
+The adoption numbers tell the story.
+By 2022, eight years after eIDAS entered into force, fewer than 14% of EU citizens had ever used a qualified electronic signature.
+The number who used QES regularly was a fraction of that.
+In some member states, the number of active QES users was in the low thousands — in countries with populations of tens of millions.
+
+The reasons for low adoption were structural:
+
+1. **Cost.** A qualified signing certificate costs 50-300 EUR per year. Most citizens have no reason to pay that.
+2. **Complexity.** Creating a QES required a smart card or USB token, driver software, and middleware that worked reliably on exactly zero consumer devices.
+3. **No killer application.** There was no consumer use case compelling enough to justify the cost and complexity. Tax filing, the most common candidate, was solved by other means in most member states.
+4. **eID fragmentation.** Each member state had its own electronic identity scheme, with its own technology stack, its own enrollment process, and its own level of adoption. Cross-border recognition of eIDs was technically possible under eIDAS but practically rare.
+
+The European Commission recognized by 2020 that voluntary adoption was not going to achieve the digital single market it wanted.
+Something more forceful was needed.
+
+=== Regulation (EU) 2024/1183
+
+On April 11, 2024, the revised eIDAS regulation — {eidas2-reg}, commonly called eIDAS 2.0 — entered into force.
+The revision keeps the trust services framework from eIDAS 1.0 largely intact (the three-tier signature model, QTSPs, the EU Trusted List — all unchanged) but adds a transformative new component.
+
+The headline change: **every EU member state must provide a European Digital Identity Wallet to its citizens and residents**.
+
+The timeline:
+
+.eIDAS 2.0 key dates
+[cols="2,5", options="header"]
+|===
+| Date | Milestone
+
+| April 11, 2024
+| eIDAS 2.0 enters into force
+
+| By November 2024
+| European Commission publishes the first set of implementing acts defining technical specifications
+
+| 2024-2025
+| Large-Scale Pilots (LSPs) across the EU test wallet implementations in real-world scenarios
+
+| By end of 2026
+| Member states must make the EUDI wallet available to all citizens and residents
+
+| 2027 onwards
+| Mandatory acceptance of the wallet by public services and, for certain use cases, private sector reliance parties
+
+|===
+
+=== The Political Context
+
+eIDAS 2.0 did not emerge from a vacuum.
+It was shaped by several converging political forces:
+
+**COVID-19 and the Digital COVID Certificate.** The EU Digital COVID Certificate (2021) demonstrated that a pan-European digital credential system could be built and deployed at scale in months.
+Over 1.8 billion certificates were issued across 46 countries.
+The technical infrastructure — QR codes, digital signatures, trust frameworks — proved that citizens would adopt digital credentials if the use case was compelling enough.
+The political lesson was clear: mandates work, voluntary adoption does not.
+
+**Strategic autonomy.** The European Commission increasingly frames digital identity as a matter of strategic autonomy.
+European citizens authenticate to online services using Google, Apple, and Facebook identity providers — American companies, subject to American law, storing European identity data on American infrastructure.
+The EUDI wallet is, in part, an assertion that European identity should be managed by European institutions.
+
+**The digital single market.** The EU's single market depends on cross-border transactions.
+Those transactions require identity verification.
+If every member state has its own identity system, cross-border identity verification remains fragmented — exactly the problem eIDAS 1.0 was supposed to solve and did not.
+
+**Article 45 and the browser wars.** The original eIDAS 2.0 proposal included a controversial provision (Article 45) that would have required web browsers to trust Qualified Website Authentication Certificates (QWACs) issued by QTSPs, without the ability to apply additional security requirements.
+Browser vendors — particularly Mozilla and Google — objected strenuously, arguing that this would undermine browser security by forcing them to trust certificates that did not meet their own security standards.
+The final text was amended to address some of these concerns, but the episode illustrates the tension between regulatory mandates and technical security communities.
+
+
+== The EUDI Wallet Concept
+
+=== What the Wallet Is
+
+The EUDI wallet is a smartphone application — provided by or on behalf of a member state — that allows citizens and residents to:
+
+1. **Store government-issued identity data (PID):** name, date of birth, nationality, and a unique persistent identifier — the digital equivalent of a national ID card or passport
+2. **Store qualified electronic attestations of attributes (QEAAs):** digitally signed attestations of specific attributes — university degrees, professional qualifications, driving licenses, age verification, right to work
+3. **Present credentials selectively:** share only the specific attributes required for a transaction (e.g., "I am over 18" without revealing date of birth or name)
+4. **Create qualified electronic signatures:** sign documents with QES, using a remote QSCD accessed through the wallet
+
+The wallet is _not_ a single application developed by the European Commission.
+Each member state is responsible for providing its own wallet implementation.
+The Commission defines the technical specifications and ensures interoperability; member states build or procure the implementations.
+
+=== What the Wallet Is Not
+
+The EUDI wallet is not a blockchain.
+It is not decentralized in the cryptocurrency sense.
+It is not self-sovereign identity (SSI), although it borrows some concepts from that space.
+
+The wallet is a _government-issued_ credential system.
+The identity data comes from authoritative government sources (civil registries, passport offices).
+The trust model is top-down: you trust the wallet because you trust the member state that issued it, and other member states trust it because the EU framework mandates mutual recognition.
+
+The wallet is also not mandatory for citizens.
+eIDAS 2.0 requires member states to _offer_ the wallet; it does not require citizens to _use_ it.
+However, Article 5b requires that a wide range of public and private sector entities accept the wallet — which creates strong incentives for adoption even without an explicit mandate.
+
+[NOTE]
+====
+The voluntary nature of the wallet is politically important.
+A mandatory government identity app on every citizen's phone would face significant political resistance, particularly in countries with strong privacy traditions (Germany, Austria, the Netherlands).
+By making the wallet optional for citizens but mandatory for reliance parties, eIDAS 2.0 creates adoption through demand-side pressure rather than supply-side compulsion.
+====
+
+
+== Architecture Reference Framework (ARF)
+
+=== Overview
+
+The Architecture Reference Framework (ARF) is the technical blueprint for the EUDI wallet ecosystem.
+Published and maintained by the European Commission, the ARF defines the architecture, protocols, data models, and trust framework for the wallet.
+
+As of early 2026, the ARF is at version 1.4 and still evolving.
+The core architecture is stable, but specific protocol choices and data formats are being refined based on pilot feedback.
+
+The ARF defines four main roles:
+
+.EUDI wallet ecosystem roles
+[cols="2,5", options="header"]
+|===
+| Role | Description
+
+| **Wallet User**
+| The citizen or resident who holds the wallet on their device
+
+| **Wallet Provider**
+| The member state (or entity acting on its behalf) that issues and manages the wallet application
+
+| **PID Provider / Attestation Provider**
+| The authoritative source that issues identity data (PID) or attribute attestations (QEAAs) into the wallet
+
+| **Relying Party**
+| The entity (public or private sector) that requests and validates credentials from the wallet
+
+|===
+
+=== The Trust Model
+
+The EUDI wallet trust model has multiple layers:
+
+1. **Device trust.** The wallet runs on the user's smartphone. The device's secure element or Trusted Execution Environment (TEE) provides hardware-backed key storage. The wallet checks that the device meets minimum security requirements (OS version, no root/jailbreak).
+
+2. **Wallet trust.** Each wallet implementation is certified by the member state that issues it. The certification confirms that the wallet meets the ARF's security and functional requirements. Wallet instances are registered with the member state's infrastructure.
+
+3. **PID/QEAA trust.** PID and QEAAs are digitally signed by the issuing authority (the PID Provider for identity data, the Attestation Provider for attributes). The signature uses a key that chains to the member state's entry in the EU Trusted List. Relying parties validate the attestation signatures against the EUTL, just as PDF signature validators check the signer's certificate against a trust store.
+
+4. **Relying party trust.** Relying parties that request credentials from the wallet must be registered and authenticated. The wallet verifies the relying party's identity before releasing any data — the user knows _who_ is requesting their data, and the wallet ensures the request is legitimate.
+
+[IMPORTANT]
+====
+The trust model for the EUDI wallet is fundamentally the same trust model as PDF digital signatures: X.509 certificates, certificate chains, trusted lists, and CMS/COSE signatures.
+If you understand how PDF signature validation works (Chapters 16-17), you understand the core of the wallet's trust model.
+The wallet adds selective disclosure and user consent on top, but the cryptographic foundations are identical.
+====
+
+
+== PID and QEAA
+
+=== Person Identification Data (PID)
+
+The PID is the wallet's core credential — the digital equivalent of a national ID card.
+It is issued by the member state's PID Provider (typically the civil registry or passport authority) and contains a minimum set of identity attributes.
+
+.Mandatory PID attributes (ARF v1.4)
+[cols="3,4", options="header"]
+|===
+| Attribute | Description
+
+| `family_name`
+| Current family name(s)
+
+| `given_name`
+| Current given name(s)
+
+| `birth_date`
+| Date of birth
+
+| `unique_id`
+| A persistent, unique identifier assigned by the member state
+
+| `age_over_18`
+| Boolean: is the holder over 18? (Derived attribute for age verification without revealing birth date)
+
+| `issuance_date`
+| When the PID was issued
+
+| `expiry_date`
+| When the PID expires
+
+| `issuing_authority`
+| The authority that issued the PID
+
+| `issuing_country`
+| The member state that issued the PID (ISO 3166-1 alpha-2)
+
+|===
+
+The PID is signed by the PID Provider using a key that chains to the member state's trust infrastructure.
+The signature format is currently specified as either **ISO/IEC 18013-5 mdoc** (the same format used for mobile driving licenses) or **SD-JWT** (Selective Disclosure JSON Web Token, IETF draft).
+The ARF supports both formats, with ongoing discussion about whether to mandate one or allow both.
+
+=== Qualified Electronic Attestations of Attributes (QEAA)
+
+QEAAs are the wallet's extensibility mechanism.
+While the PID provides core identity, QEAAs attest to specific attributes beyond identity:
+
+- **Educational credentials:** university degrees, professional certifications
+- **Professional qualifications:** medical licenses, legal bar admissions, engineering certifications
+- **Organizational identity:** employment status, company role, powers of representation
+- **Financial attributes:** bank account verification, creditworthiness attestations
+- **Travel documents:** digital driving licenses, digital travel credentials
+
+A QEAA is issued by a Qualified Trust Service Provider (QTSP) or a government authority.
+When issued by a QTSP, it carries the same legal weight as the paper credential it replaces — a QEAA attesting a university degree, issued by a QTSP after verification with the university, is legally equivalent to the paper diploma.
+
+The "qualified" designation is critical.
+An Electronic Attestation of Attributes (EAA) without the "qualified" prefix does not enjoy the same legal presumptions.
+The distinction mirrors the QES/AdES distinction: qualified attestations carry a legal presumption of correctness; non-qualified attestations are evidence to be evaluated on their merits.
+
+
+== Selective Disclosure and SD-JWT
+
+=== The Privacy Problem
+
+Traditional digital credentials have a privacy problem: they are all-or-nothing.
+If your credential contains your name, date of birth, address, and nationality, presenting it to verify your age requires revealing all four attributes — even though the relying party only needs to know that you are over 18.
+
+The EUDI wallet solves this through **selective disclosure** — the ability to present only a subset of the attributes in a credential, without invalidating the cryptographic signature.
+
+=== How SD-JWT Works
+
+The ARF specifies **SD-JWT (Selective Disclosure for JWTs)** as one of the credential formats for selective disclosure.
+SD-JWT is an IETF specification (currently in the RFC track) that extends JSON Web Tokens with selective disclosure capability.
+
+The mechanism works as follows:
+
+1. **Issuance.** The issuer creates a JWT containing all attributes, but each disclosable attribute is replaced with a hash of the attribute value combined with a random salt. The original attribute values and their salts are provided to the wallet holder as "disclosures" — separate, individually presentable data items.
+
+2. **Presentation.** When the wallet presents the credential to a relying party, it includes the JWT (with the hashed placeholders) plus only the disclosures for the attributes the relying party needs. The relying party can verify that each disclosed attribute matches its hash in the JWT, confirming it was part of the original signed credential — but attributes whose disclosures are withheld remain hidden.
+
+3. **Verification.** The relying party verifies the JWT signature (confirming it was issued by a trusted authority), then verifies each disclosed attribute against its hash in the JWT. Attributes that were not disclosed cannot be reconstructed from the hashes (the random salts ensure this).
+
+[source,json]
+----
+// Simplified SD-JWT structure (conceptual, not a real token)
+{
+  "iss": "https://pid.example-country.eu",
+  "iat": 1709913600,
+  "exp": 1741449600,
+  "cnf": { "jwk": { ... } },  // Holder binding key
+
+  // Selectively disclosable claims (hashed placeholders)
+  "_sd": [
+    "H3JQXF...base64url_hash_of_family_name_disclosure",
+    "K9PLWT...base64url_hash_of_given_name_disclosure",
+    "M2VRZN...base64url_hash_of_birth_date_disclosure"
+  ],
+
+  // Non-disclosable claims (always visible)
+  "age_over_18": true,
+  "issuing_country": "DE"
+}
+----
+
+=== The ISO/IEC 18013-5 mdoc Alternative
+
+The ARF also supports the **mdoc** format defined in ISO/IEC 18013-5 (originally for mobile driving licenses).
+mdoc uses CBOR (Concise Binary Object Representation) instead of JSON and COSE (CBOR Object Signing and Encryption) instead of JOSE.
+
+Both formats support selective disclosure.
+The choice between them is still under discussion in the ARF, with mdoc favored for proximity (NFC/BLE) use cases and SD-JWT favored for remote (online) use cases.
+
+For PDF signing purposes, the credential format does not directly matter — what matters is that the wallet can authenticate the user and authorize a signing operation.
+The credential format affects how the wallet proves the user's identity to the signing service, not how the PDF signature itself is structured.
+
+[TIP]
+====
+If you are building a service that accepts signed PDFs and also needs to verify the signer's attributes (e.g., a medical prescription service that needs to confirm the signer is a licensed doctor), you will need to handle QEAA validation _in addition to_ PDF signature validation.
+The QEAA is presented separately from the PDF — it is not embedded in the signature's CMS.
+Your validation workflow will have two parallel tracks: verify the PDF signature, and verify the QEAA.
+====
+
+
+== Signing with the Wallet
+
+=== The Signing Flow
+
+The most consequential feature of the EUDI wallet for this book's audience is its ability to create qualified electronic signatures.
+eIDAS 2.0 Article 5a(4)(d) requires that the wallet support QES creation.
+Article 45e goes further: member states must ensure that QES creation through the wallet is offered to natural persons free of charge for non-professional purposes.
+
+Free QES for every EU citizen.
+That sentence alone justifies this chapter.
+
+The signing flow works as follows:
+
+1. **The user initiates a signing request.** This could be from within the wallet app itself, or from an external application (a web portal, a desktop application, a government service) that redirects to the wallet via a protocol defined in the ARF (OpenID4VP — OpenID for Verifiable Presentations).
+
+2. **The wallet authenticates the user.** The user confirms their identity using the wallet's authentication mechanism — typically biometric (fingerprint or face recognition) or device PIN. This is the "sole control" requirement from eIDAS Article 26(c) and Article 29.
+
+3. **The wallet presents the document hash to a remote QSCD.** The wallet does _not_ contain the private signing key on the device itself. Instead, it communicates with a **remote QSCD** operated by a QTSP. The wallet sends a hash of the document to be signed (not the document itself — the hash is small and privacy-preserving).
+
+4. **The remote QSCD creates the signature.** The QSCD — an HSM in the QTSP's data center, certified as a Qualified Signature Creation Device — signs the hash with the user's private key. The private key was generated on and never leaves the QSCD.
+
+5. **The signature is returned to the requesting application.** The CMS `SignedData` (or the raw signature value, depending on the integration pattern) is returned to the application that initiated the signing request. The application embeds the signature in the PDF.
+
+.EUDI wallet signing flow
+[cols="1,5", options="header"]
+|===
+| Step | Description
+
+| 1
+| Application presents document to user and requests signature (via OpenID4VP)
+
+| 2
+| Wallet displays document summary and requests user authentication (biometric/PIN)
+
+| 3
+| Wallet sends document hash to remote QSCD at QTSP (over mTLS, authenticated by wallet instance credentials)
+
+| 4
+| QSCD signs the hash with user's private key; returns CMS `SignedData` with qualified certificate and signature timestamp
+
+| 5
+| Application receives CMS, embeds it in PDF `/Contents`, adds DSS data for LTV, and saves the signed PDF
+
+|===
+
+=== Remote QSCD: Why the Key Is Not on the Phone
+
+A natural question: why not put the signing key on the phone itself?
+Modern smartphones have secure elements and TEEs that can generate and store cryptographic keys.
+
+The answer is QSCD certification.
+
+A QSCD must be certified under Common Criteria EAL4+ (or equivalent) against specific Protection Profiles (EN 419 211 or EN 419 221).
+Smartphone secure elements are certified for payment (EMVCo) and some for FIDO authentication, but as of 2026, no smartphone secure element has been certified as a QSCD under the eIDAS Protection Profiles.
+
+The certification gap is not primarily technical — modern secure elements are arguably as secure as certified smart cards.
+The gap is procedural: QSCD certification requires extensive evaluation against specific attack models, documentation of the manufacturing process, and ongoing compliance monitoring.
+Smartphone vendors have not pursued this certification because, until eIDAS 2.0, there was no market demand for it on consumer devices.
+
+This may change.
+The ARF explicitly contemplates the possibility of "local QSCD" on a device — a future scenario where smartphone secure elements achieve QSCD certification and the signing key can reside on the phone.
+But for the initial wallet deployments, the architecture is remote QSCD.
+
+[NOTE]
+====
+Remote QSCD is not a compromise — it is the dominant model for QES today.
+Even before the EUDI wallet, most QES in the EU were created using remote QSCDs.
+Services like DocuSign (through its European qualified signing infrastructure), Swisscom, InfoCert, and D-Trust all operate remote QSCDs.
+The wallet extends this existing model to a new client (the smartphone) but does not fundamentally change the architecture.
+
+The Cloud Signature Consortium (CSC) API — the industry-standard REST API for remote signing — is being adapted for wallet integration.
+If your application already supports CSC-based remote signing (Chapter 22), adapting it for wallet-initiated signing is a relatively small change.
+====
+
+=== The Sole Control Assurance Problem
+
+eIDAS requires that the signing key be under the signatory's "sole control" (Article 26(c)).
+When the key is on a smart card in the signer's wallet, sole control is straightforward: the signer possesses the card and knows the PIN.
+
+When the key is in a remote QSCD, sole control is more complex.
+The signer does not physically possess the key.
+The key is in an HSM in a data center, managed by a QTSP.
+Sole control must be established through authentication mechanisms that ensure only the authorized signer can trigger a signing operation with that key.
+
+The SCAL (Sole Control Assurance Level) framework, defined in CEN EN 419 241-1, distinguishes two levels:
+
+- **SCAL1**: The QTSP relies on an external authentication mechanism (e.g., the wallet app's biometric authentication) to authorize signing. The QTSP trusts the authentication assertion from the wallet.
+- **SCAL2**: The QTSP independently verifies the signer's authorization — the signer must authenticate directly to the QTSP's infrastructure (e.g., through a separate OTP sent by the QTSP), in addition to any wallet-level authentication.
+
+SCAL2 is required for QES.
+This means the remote QSCD must have its own authentication of the signer, not just trust the wallet's claim that the user authenticated.
+
+In practice, this is implemented through a combination of:
+- Wallet-level biometric authentication (proves the user is holding the phone)
+- A cryptographic challenge from the QSCD that the wallet's secure element signs (proves the specific wallet instance is authorized)
+- An additional PIN or biometric confirmation presented to the QSCD's authentication service (proves the user explicitly authorized _this specific signing operation_)
+
+The user experience goal is to make this feel like a single authentication step (touch fingerprint, confirm signing), while the underlying protocol satisfies SCAL2's multi-factor requirement.
+
+
+== Impact on PDF Signing
+
+=== What Changes
+
+The EUDI wallet does not change the PDF signature format.
+A PDF signed through the wallet contains the same structures as any other PAdES signature: a `/Sig` dictionary with `/SubFilter` `ETSI.CAdES.detached`, a `/ByteRange` covering the file, a `/Contents` value containing CMS `SignedData`, and (for PAdES-B-LTA) a DSS dictionary with certificates and revocation data.
+
+What changes is the _volume_, the _source_, and the _validation path_.
+
+**Volume.** Free QES for 450 million EU citizens will produce orders of magnitude more qualified signatures than the current market.
+Your validation code must handle this volume.
+If your validation involves synchronous EUTL lookups for every signature, you need caching.
+If your trust store is updated manually, you need automation.
+
+**Source.** Wallet-generated signatures will come from certificates issued by QTSPs participating in the wallet ecosystem.
+These QTSPs will be on the EUTL.
+They may or may not be on Adobe's AATL.
+If they are not on the AATL, Acrobat users will see yellow warnings on legitimate QES — which will create pressure on Adobe to either auto-consume the EUTL or expand the AATL.
+
+**Validation path.** Wallet-generated signatures chain through a trust path that includes: the signer's qualified certificate (issued by a QTSP) -> the QTSP's intermediate/root certificate -> the EUTL entry for the QTSP.
+This is the same chain as any other QES.
+The novelty is that the signer is a consumer on a smartphone, not an enterprise user with a signing portal.
+
+=== PAdES-B-LTA from Mobile
+
+The wallet ecosystem targets PAdES-B-LTA as the default profile for wallet-generated signatures.
+This is the correct engineering decision: wallet-generated signatures will be used for contracts, government submissions, and official documents that require long-term verifiability.
+
+Producing a PAdES-B-LTA signature from a mobile device requires:
+
+1. **Signature creation** (CMS `SignedData` with `ESS-signing-certificate-v2`, via remote QSCD)
+2. **Signature timestamp** (RFC 3161 `TimeStampToken` from a TSA, embedded as unsigned CMS attribute)
+3. **DSS population** (certificates, OCSP responses, CRLs for the entire chain)
+4. **Document timestamp** (a separate signature dictionary with SubFilter `ETSI.RFC3161` covering the entire file including DSS)
+
+Steps 1-2 are performed by the QSCD/QTSP infrastructure.
+Steps 3-4 are performed by the application that embeds the signature in the PDF — which may be a server-side service, not the mobile device itself.
+
+The typical architecture:
+
+1. The mobile app sends the document hash to the QTSP via the wallet
+2. The QTSP signs the hash on the QSCD and obtains a signature timestamp from its TSA
+3. The CMS (with timestamp) is returned to the application server
+4. The server embeds the CMS in the PDF, populates the DSS, and adds a document timestamp
+5. The signed PDF is returned to the user or submitted to the relying party
+
+The mobile device never needs to perform the PDF manipulation itself — that is handled by the server.
+This is a practical necessity: PDF signing with LTV data is computationally modest but requires PDF parsing libraries that are not available on all mobile platforms.
+
+[source,java]
+----
+/**
+ * Server-side method that completes a wallet-initiated signing operation.
+ * The wallet has obtained a CMS SignedData from the remote QSCD;
+ * this method embeds it in the PDF and adds LTV data.
+ */
+public byte[] completeWalletSignature(byte[] pdfBytes,
+                                       byte[] cmsSignedData,
+                                       List<X509Certificate> chain) throws Exception {
+
+    PDDocument doc = Loader.loadPDF(pdfBytes);
+
+    // Create signature and set CMS from wallet/QSCD
+    PDSignature signature = new PDSignature();
+    signature.setFilter(PDSignature.FILTER_ADOBE_PPKLITE);
+    signature.setSubFilter(PDSignature.SUBFILTER_ETSI_CADES_DETACHED);
+    signature.setSignDate(Calendar.getInstance());
+
+    // Add signature with pre-built CMS
+    doc.addSignature(signature, content -> cmsSignedData);
+
+    // Save incrementally
+    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+    doc.saveIncremental(baos);
+    byte[] signedPdf = baos.toByteArray();
+    doc.close();
+
+    // Add DSS with LTV data (separate incremental save)
+    signedPdf = addDssWithLtvData(signedPdf, chain);
+
+    // Add document timestamp (another incremental save)
+    signedPdf = addDocumentTimestamp(signedPdf);
+
+    log.info("Wallet signature completed: PAdES-B-LTA, {} bytes", signedPdf.length);
+    return signedPdf;
+}
+----
+
+[WARNING]
+====
+The code above is simplified for illustration.
+A production implementation must handle: pre-allocating the `/Contents` placeholder, coordinating the byte range computation with the CMS injection, error handling for TSA timeouts, retry logic for remote QSCD communication failures, and verification of the completed signature.
+Chapter 29 covers the full PDFBox signing pipeline.
+====
+
+
+== Pilot Programs
+
+=== The Large-Scale Pilots
+
+The European Commission is funding four Large-Scale Pilots (LSPs) that test the EUDI wallet in real-world scenarios across multiple member states.
+Each pilot covers different use cases and involves different member states.
+
+.EUDI wallet Large-Scale Pilots (as of early 2026)
+[cols="2,3,4", options="header"]
+|===
+| Pilot | Lead Countries | Primary Use Cases
+
+| **POTENTIAL**
+| France, Germany, Italy, Spain
+| Government services (eID authentication), banking (customer onboarding), mobile driving license, SIM registration, QES signing
+
+| **NOBID**
+| Norway, Denmark, Sweden, Finland, Iceland, Latvia, Italy
+| Cross-border payment account opening, PID issuance and verification, age verification, organizational identity
+
+| **EWC (EU Digital Identity Wallet Consortium)**
+| Sweden, Finland, France, Germany, Czech Republic, Croatia, Italy, Austria, Greece, Romania
+| Travel (digital travel credentials), education (diploma attestation), digital payments, organizational wallet use cases
+
+| **DC4EU (Digital Credentials for Europe)**
+| Spain, Austria, Belgium, France, Germany, Italy, Luxembourg, Poland, Romania, Sweden
+| Education (European Digital Credentials for Learning), social security (Professional Qualifications, Portable Document A1)
+
+|===
+
+=== What the Pilots Are Testing
+
+The signing-relevant findings from the pilots (as of early 2026, with pilots still running):
+
+**QES from mobile works.** The core signing flow — user authentication, hash submission to remote QSCD, CMS return, PDF embedding — has been demonstrated successfully across multiple implementations.
+The user experience typically involves a single biometric confirmation (fingerprint or face recognition) with a clear "sign this document" prompt.
+
+**Cross-border validation is the challenge.** Creating the signature is (relatively) straightforward.
+Validating it across borders — ensuring that a signature created by a French citizen's wallet validates correctly in a German government portal — requires all parties to consume the EUTL, support the same PAdES profiles, and handle certificate chains from unfamiliar QTSPs.
+This is exactly the same interoperability problem discussed earlier in this chapter, amplified by scale.
+
+**TSA integration needs standardization.** Different wallet implementations use different TSAs, with different timestamp token sizes, different certificate chains, and different response times.
+The pilots have exposed edge cases where timestamp tokens from one TSA cause validation issues in validators that are not prepared for the TSA's specific certificate chain length.
+
+**User comprehension is limited.** In pilot user testing, most participants understood "sign this document" but did not understand what a qualified electronic signature _is_, how it differs from a basic electronic signature, or why it has legal equivalence to a handwritten signature.
+This is not a technical problem, but it has technical consequences: if users do not understand the significance of QES, they may not treat the signing authentication with appropriate care.
+
+
+== What Developers Need to Prepare
+
+=== If You Build Signing Software
+
+1. **Support wallet-initiated signing flows.** The wallet communicates with your application via OpenID4VP (OpenID for Verifiable Presentations). You will need to implement the RP (Relying Party) side of the OpenID4VP protocol to receive signing requests from the wallet.
+
+2. **Handle remote QSCD signatures.** Your application will receive a CMS `SignedData` blob from the QTSP, not generate it locally. Your signing pipeline must support "external CMS" injection — computing the byte range, sending the hash for external signing, receiving the CMS, and embedding it in the PDF.
+
+3. **Pre-allocate generously.** Wallet-generated CMS may include longer certificate chains than you are accustomed to (government PKI chains are often deeper than commercial CA chains). Pre-allocate at least 64 KB for PAdES-B-LTA.
+
+4. **Add DSS and document timestamps server-side.** The mobile device will not populate the DSS or add document timestamps. Your server must do this, which means your server needs access to OCSP responders and CRL distribution points for the signer's certificate chain, plus a TSA for the document timestamp.
+
+=== If You Build Validation Software
+
+1. **Consume the EUTL programmatically.** Wallet-generated signatures chain to QTSPs on the EUTL. If your validator uses a static trust store, it will reject these signatures. Implement automated EUTL consumption — fetch the LOT (List of Trusted Lists), parse each member state's trusted list, extract the trust anchors, and update your trust store on a regular schedule (daily is typical).
+
+2. **Cache the EUTL.** With millions of wallet-generated signatures to validate, you cannot fetch the EUTL for every validation. Cache the parsed trust anchors with a TTL (time-to-live) and refresh periodically.
+
+3. **Support deep certificate chains.** Government PKI chains can be 4-5 certificates deep (signer -> intermediate 1 -> intermediate 2 -> root). Ensure your chain-building code handles this without performance degradation.
+
+4. **Report the PAdES profile level.** Wallet-generated signatures should be PAdES-B-LTA. If a wallet-generated signature is missing LTV data (B-T or B-B instead of B-LTA), this indicates a problem in the signing pipeline. Report the profile level to help the signer or their application diagnose the issue.
+
+5. **Prepare for QEAA validation.** If your application needs to verify not just _who signed_ but _what qualifications the signer has_ (e.g., a medical prescription signed by a doctor), you will need to validate QEAAs in addition to the PDF signature. This is a separate validation path: the QEAA is a signed credential (SD-JWT or mdoc) that you verify against the issuing QTSP's certificate on the EUTL.
+
+=== If You Build Enterprise Systems
+
+1. **Update your trust store management.** If your enterprise trust store is managed manually (a Java `cacerts` file, a Windows certificate store), automate it. Wallet-generated signatures will come from QTSPs that may not be in your current trust store.
+
+2. **Budget for EUTL integration.** Consuming the EUTL is not trivial: the LOT and individual trusted lists are XML documents signed with specific certificates, using a specific schema (ETSI TS 119 612). The EU DSS framework (Chapter 23) provides a reference implementation, but integrating it into your architecture requires engineering effort.
+
+3. **Plan for volume.** If your system currently validates hundreds of qualified signatures per day, prepare for thousands or tens of thousands. The wallet will democratize QES, and your systems will see the increase.
+
+4. **Test with pilot certificates.** The EUDI wallet pilots issue test certificates that can be used for integration testing. Engage with the pilot programs relevant to your member state and obtain test credentials for your validation pipeline.
+
+
+== The Open Questions
+
+The EUDI wallet is ambitious, unprecedented, and not yet fully defined.
+Several significant questions remain open as of early 2026:
+
+**Will users actually adopt it?** Mandating reliance parties to accept the wallet creates demand, but the wallet still needs a compelling user experience. If the signing flow feels cumbersome — multiple authentication steps, slow QSCD response times, confusing consent screens — users will avoid it.
+
+**Will Apple and Google cooperate?** The wallet runs on smartphones, which means it needs integration with iOS and Android. Both platforms control access to NFC, secure elements, and biometric APIs. The EU Digital Markets Act (DMA) requires gatekeepers to allow third-party wallet apps to access device hardware, but the implementation details are being negotiated, and the mobile platforms have commercial interests in their own wallet ecosystems (Apple Pay, Google Pay).
+
+**What happens with AATL?** If hundreds of millions of qualified signatures are created through the wallet but the signing certificates are not in Adobe's AATL, Acrobat users will see yellow warnings on legitimate QES. This creates political pressure on Adobe to either accept the EUTL as a trust anchor by default or face regulatory action. The outcome will shape the PDF signature ecosystem for years.
+
+**Will the credential format converge?** The current ARF supports both SD-JWT and mdoc. Supporting two formats doubles the implementation effort for relying parties. The industry is watching to see if one format emerges as dominant or if the dual-format approach persists.
+
+**How will cross-border QES work in practice?** The technical framework is defined. The legal framework mandates mutual recognition. But whether a German government portal will actually accept a Romanian wallet-generated QES without friction — that depends on whether all the implementation details are correct across two different member state implementations, two different QTSP certificate chains, and two different validation stacks.
+
+The answers to these questions will determine whether the EUDI wallet becomes the most significant development in digital signing since eIDAS itself — or another ambitious European digital project that works in theory and disappoints in practice.
+
+[NOTE]
+====
+The EUDI wallet is a moving target.
+The ARF is being updated, implementing acts are being published, and pilots are generating findings that feed back into the specifications.
+If you are reading this in 2027 or later, some of the specifics in this chapter may have changed.
+The architectural principles — remote QSCD, selective disclosure, EUTL-based trust, PAdES-B-LTA as the target profile — are stable.
+The protocol details and credential format choices may have evolved.
+====
+
+
+== Key Takeaways
+
+- **eIDAS 2.0 ({eidas2-reg})** mandates that every EU member state offer a digital identity wallet to citizens by end of 2026, with QES creation capability included
+- **The EUDI wallet** is a smartphone application that stores government-issued identity data (PID) and qualified attribute attestations (QEAAs) and can create qualified electronic signatures
+- **Remote QSCD** is the signing architecture: the private key lives in a certified HSM operated by a QTSP, not on the phone itself — the wallet provides authentication and sole control
+- **Selective disclosure** (via SD-JWT or mdoc) allows users to share only the attributes a relying party needs, without revealing their full identity
+- **Free QES for citizens** (Article 45e) will dramatically increase the volume of qualified signatures — plan your infrastructure for orders-of-magnitude growth
+- **PAdES-B-LTA is the target profile** for wallet-generated signatures — server-side DSS population and document timestamping are required
+- **EUTL consumption is essential** — wallet-generated signatures chain to QTSPs that may not be in your current trust store; automate EUTL updates
+- **Four Large-Scale Pilots** (POTENTIAL, NOBID, EWC, DC4EU) are testing the wallet across sectors and member states; engage with them for test credentials
+- **Open questions remain** about user adoption, platform cooperation (Apple/Google), AATL integration, credential format convergence, and real-world cross-border validation
+- **The architectural principles are PDF-native** — if you understand PAdES, certificate chains, and the EUTL, you understand the cryptographic foundation of the EUDI wallet

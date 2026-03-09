@@ -67,12 +67,41 @@ PDFalyzer.ValidationTab = (function ($, P) {
             why: 'The AcroForm dictionary exists but its /Fields array is empty, while widget annotations are present on pages. These fields are orphaned and invisible to form processors.',
             fix: 'Adopt the orphaned widget annotations into the AcroForm /Fields array.',
             confidence: 'high', tab: 'fields', fixEndpoint: '/api/repair/acroform/'
+        },
+        'FORM-003': {
+            why: 'When /NeedAppearances is true, viewers regenerate all appearance streams on open. This destroys any hand-crafted signature visuals and causes rendering differences across viewers (Acrobat auto-sizes fonts differently from PDFBox, for example).',
+            fix: 'Generate complete appearance streams for all fields, then set /NeedAppearances to false. In PDFBox: acroForm.refreshAppearances() followed by acroForm.setNeedAppearances(false).',
+            confidence: 'high', tab: 'fields'
+        },
+        'FORM-004': {
+            why: 'An inconsistent parent/child chain means some viewers find the field while others do not. PDFBox traverses /Kids; Acrobat may resolve /Parent differently. This causes fields to silently disappear or duplicate depending on the viewer.',
+            fix: 'Verify the tree bidirectionally: every child\'s /Parent must list it in /Kids, and vice versa. Use the COS editor to correct the references.',
+            confidence: 'high', tab: 'fields'
+        },
+        'FORM-005': {
+            why: 'Without /SigFlags bit 1 (SignaturesExist), viewers may not check for signatures at all. Without bit 2 (AppendOnly), the next save may perform a full rewrite instead of an incremental save, invalidating every existing signature in the document.',
+            fix: 'Set /SigFlags to 3 on the AcroForm dictionary. This should be done before signing, not after. Use the COS editor to set the integer value.',
+            confidence: 'high', tab: 'signatures'
+        },
+        'FORM-006': {
+            why: 'A widget not in any page\'s /Annots array is invisible — the field exists in AcroForm but the user can never see or interact with it. Conversely, a widget on a page but not linked from AcroForm looks like a form field but cannot hold or submit data.',
+            fix: 'For invisible fields: add the widget dictionary to the correct page\'s /Annots array. For orphaned page widgets: link them into the AcroForm /Fields array.',
+            confidence: 'high', tab: 'fields', fixEndpoint: '/api/repair/acroform/'
+        },
+        'FORM-007': {
+            why: 'XFA (XML Forms Architecture) and AcroForm are parallel form systems. When both exist, different viewers use different layers: Acrobat prefers XFA, Chrome/Firefox/PDFBox use AcroForm. Field values can silently disagree, and a signature over one layer may not reflect what the other shows.',
+            fix: 'Remove the /XFA entry from the AcroForm dictionary to eliminate the dual-layer ambiguity. PDF 2.0 deprecated XFA entirely.',
+            confidence: 'high', tab: 'fields'
         }
     };
 
     function confidenceBadgeHtml(level) {
-        var cls = level === 'high' ? 'bg-success' : level === 'medium' ? 'bg-warning text-dark' : 'bg-secondary';
-        return '<span class="badge ' + cls + ' ms-1" style="font-size:10px;">Confidence: ' + level + '</span>';
+        var cls = level === 'high' ? 'bg-primary' : level === 'medium' ? 'bg-warning text-dark' : 'bg-secondary';
+        var tooltip = 'How confident the validator is that this issue is a real problem and not a false positive. ' +
+            'High = almost certainly a genuine issue; Medium = likely but may have edge-case exceptions; ' +
+            'Low = heuristic-based, verify manually.';
+        return '<span class="badge ' + cls + ' ms-1" style="font-size:10px;cursor:help;" ' +
+            'title="' + tooltip + '">Confidence: ' + level + '</span>';
     }
 
     function buildExplainerHtml(issue) {

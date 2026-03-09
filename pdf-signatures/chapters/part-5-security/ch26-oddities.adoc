@@ -1,0 +1,701 @@
+= Oddities & Annoyances
+
+[.lead]
+Every technology has its dark corners — the design decisions that made sense in 1999 but haunt us today, the interoperability failures that no spec can fix, the political arrangements that masquerade as technical standards.
+PDF digital signatures have more dark corners than most.
+
+This chapter is a tour of the things that will make you mutter unprintable words during implementation.
+Not bugs, exactly — bugs get fixed.
+These are _structural annoyances_: the problems baked into the specifications, the ecosystem, and the economics of PDF signing.
+Each one has wasted thousands of engineering hours across the industry.
+Understanding them will not make them go away, but it will stop you from wasting your own hours rediscovering what everyone else already knows and nobody bothered to write down.
+
+== The Adobe Approved Trust List Monopoly
+
+=== What the AATL Is
+
+Adobe Acrobat is the world's dominant PDF viewer.
+When a user opens a signed PDF in Acrobat, the first thing they see is a blue or green banner at the top of the document.
+Green means "Signed and all signatures are valid."
+Blue means "At least one signature has problems."
+Yellow means "Signed, but the signature cannot be verified."
+
+The difference between green and yellow, in the vast majority of cases, is not whether the signature is cryptographically correct.
+It is whether the signing certificate chains to a root in the **Adobe Approved Trust List (AATL)**.
+
+The AATL is a curated list of root certificates that Adobe trusts for document signing.
+It is published at `https://helpx.adobe.com/acrobat/kb/approved-trust-list2.html` and ships embedded in Acrobat.
+If your signing certificate chains to an AATL root, you get the green checkmark.
+If it does not — even if the certificate is perfectly valid, issued by a reputable CA, chains to a trust anchor in the operating system's trust store, and was created with impeccable cryptographic rigor — you get yellow.
+
+Yellow, in the real world, means "the customer calls support."
+
+=== The Economics of Green
+
+Getting your root certificate into the AATL requires meeting Adobe's technical requirements (documented in the "AATL Technical Requirements" PDF, which is itself signed with an AATL certificate — recursion intended) and paying a fee.
+The requirements include:
+
+- The root must be at least 4096-bit RSA or equivalent
+- The CA must carry an annual WebTrust for CAs audit or equivalent (ETSI EN 319 411)
+- The CA must use HSMs for root key protection
+- Document signing certificates must include specific key usage extensions
+- The CA must have a published CPS (Certification Practice Statement)
+
+These are reasonable requirements for a public trust anchor.
+The problem is not the technical bar — it is the gatekeeping.
+
+Adobe is a private company.
+The AATL is Adobe's private trust list.
+Adobe decides who gets in, Adobe decides who stays in, and Adobe decides the criteria.
+There is no appeals process, no regulatory oversight, and no obligation to accept any particular CA.
+
+For CAs, inclusion in the AATL is not optional — it is a commercial necessity.
+Enterprise customers demand the green checkmark.
+Government procurement specifications require it.
+A CA that is not in the AATL effectively cannot sell document signing certificates at competitive prices, because the certificates will produce yellow warnings in the software that 80% of users use to view PDFs.
+
+[IMPORTANT]
+====
+The AATL creates a two-tier market for document signing certificates.
+AATL-listed certificates cost significantly more than non-AATL certificates — typically $200-$500 per year for an individual signing certificate, versus $30-$50 for a certificate from a non-AATL CA.
+The price premium has nothing to do with cryptographic quality and everything to do with the color of a banner in one company's software.
+
+If you are building a signing service, the single most important commercial decision you will make is whether your use case requires the green checkmark.
+If your recipients will open signed PDFs in Acrobat (and they almost certainly will), you need AATL.
+If your recipients use a custom validation workflow that checks against the EU Trusted List or your own trust store, you do not.
+====
+
+=== The EUTL Alternative
+
+The EU Trusted List ({eidas-reg}, Article 22) is the European counterpart to the AATL.
+Every Qualified Trust Service Provider in the EU is listed on the EUTL, and a certificate chaining to a QTSP on the EUTL qualifies for the highest eIDAS tier regardless of whether Adobe has heard of the CA.
+
+But here is the catch: Acrobat does not validate against the EUTL by default.
+Acrobat uses the AATL.
+There is an option to enable EUTL validation in Acrobat (Edit > Preferences > Signatures > Verification > select "European Union Trusted Lists"), but it is off by default, and the vast majority of users never touch it.
+
+This means a signature with a qualified certificate from a QTSP that is _not_ in the AATL will show a yellow warning in Acrobat — even though it is legally a qualified electronic signature with the same standing as a handwritten signature under EU law.
+
+The legal framework says: this is a QES, as valid as ink.
+The software says: "The validity of the document certification is UNKNOWN."
+
+The user believes the software.
+
+[TIP]
+====
+If you are distributing signed PDFs to recipients who use Acrobat, and your QTSP is on the EUTL but not the AATL, include instructions for enabling EUTL validation in Acrobat.
+Better yet, embed the full certificate chain and LTV data so that validation depends on the trust store configuration rather than online lookups.
+Best of all: choose a QTSP that is on _both_ the AATL and the EUTL.
+Most major European QTSPs have pursued AATL membership precisely because of this problem.
+====
+
+=== The Political Dimension
+
+The AATL gives Adobe significant influence over the digital signing ecosystem.
+Adobe can, at its discretion, adjust requirements, add fees, or remove CAs.
+This is not a theoretical concern — Adobe has adjusted AATL requirements multiple times, each adjustment requiring CAs to re-certify and sometimes change their infrastructure.
+
+Some in the industry argue that this is appropriate: someone needs to curate trust, and Adobe has a legitimate interest in ensuring that signatures validated by its software are trustworthy.
+Others argue that a single company should not be the gatekeeper for a technology used in legal, governmental, and financial transactions across the globe.
+
+The emergence of the EUDI wallet (Chapter 27) may shift this dynamic.
+If QES becomes a consumer technology available to every EU citizen, the volume of qualified signatures will dwarf the current market — and the EUTL, not the AATL, will be the authoritative trust anchor for those signatures.
+Whether Adobe adjusts its defaults accordingly remains to be seen.
+
+
+== Broken Validation Across Viewers
+
+=== The Problem
+
+Take a signed PDF — any signed PDF — and open it in five different viewers.
+You will get five different answers about whether the signature is valid.
+
+This is not an exaggeration.
+It is the daily reality of PDF signature interoperability.
+
+The fundamental problem is that {iso32000-2} defines the _structure_ of a PDF signature but leaves enormous latitude in how viewers should _validate_ that structure.
+The specification says what a `/Sig` dictionary must contain, what the `/ByteRange` must cover, and how the CMS `SignedData` must be embedded.
+It does not say, with sufficient precision, what a viewer should do when the trust chain is incomplete, when the timestamp is missing, when the revocation data is stale, or when the certificate uses an algorithm the viewer does not support.
+
+ETSI EN 319 142 (PAdES) adds more precision, but it constrains _signing_ more than it constrains _validation_.
+A PAdES-B-LTA signature is well-defined in terms of what it must contain.
+What a validator must do with each piece of that content — and what it should report to the user when something is missing or ambiguous — is still underspecified.
+
+=== The Comparison
+
+The following table shows how five common validators handle the same edge cases.
+These are real behaviors observed in testing, not theoretical predictions.
+
+.Signature validation behavior across viewers (observed, not specified)
+[cols="3,2,2,2,2,2", options="header"]
+|===
+| Scenario | Acrobat DC | Foxit Reader | LibreOffice | macOS Preview | PDFBox
+
+| Valid PAdES-B-LTA, AATL cert
+| Green checkmark
+| Valid
+| Valid
+| Valid
+| Valid (programmatic)
+
+| Valid CMS, self-signed cert
+| Yellow warning
+| Unknown signer
+| Valid (if cert trusted)
+| Invalid
+| Valid (if cert in trust store)
+
+| Valid CMS, expired cert, no timestamp
+| Invalid (expired)
+| Invalid
+| Valid at signing time
+| Invalid
+| Depends on validation date
+
+| Valid CMS, EUTL cert, not in AATL
+| Yellow (unknown signer)
+| Valid (if EUTL enabled)
+| Valid
+| Unknown
+| Depends on trust store
+
+| SHA-1 digest algorithm
+| Warning (weak hash)
+| Valid (no warning)
+| Valid (no warning)
+| Valid
+| Valid (no warning)
+
+| Missing OCSP/CRL data
+| Warning (revocation unknown)
+| Valid (ignores)
+| Valid (ignores)
+| Valid (ignores)
+| No revocation check by default
+
+| Incremental update after signing
+| Modified after signing
+| Modified
+| May not detect
+| Does not detect
+| Detects (if coded)
+
+| SubFilter `ETSI.CAdES.detached`
+| Full validation
+| Full validation
+| Full validation
+| Partial
+| Full (if coded)
+
+| SubFilter `adbe.pkcs7.detached`
+| Full validation
+| Full validation
+| Full validation
+| Full validation
+| Full (if coded)
+
+| SubFilter `adbe.x509.rsa_sha1`
+| Legacy support
+| May fail
+| May fail
+| Fails
+| Not supported
+
+|===
+
+[WARNING]
+====
+The most dangerous row in this table is "Incremental update after signing."
+This is exactly the scenario that the Bochum Incremental Saving Attack (Chapter 24) exploits.
+If a viewer does not detect that the file was modified after signing, it will show a valid signature on a document whose content has been changed.
+As of 2026, most major viewers have patched this — but "most" is not "all," and not every installed version has been updated.
+====
+
+=== Why Viewers Disagree
+
+The disagreements stem from several root causes:
+
+**Different trust stores.** Acrobat uses AATL.
+Foxit uses the OS trust store.
+LibreOffice uses NSS (on Linux) or the OS store (on Windows/macOS).
+macOS Preview uses the Keychain.
+A certificate trusted by one store may not be trusted by another.
+
+**Different algorithm support.** Some viewers still accept SHA-1; others warn or reject.
+Some support ECDSA; others are RSA-only.
+Some parse CAdES extensions; others only understand basic CMS.
+
+**Different revocation policies.** Acrobat actively checks revocation status (OCSP and CRL) if the information is available.
+Foxit and LibreOffice are more lenient — they may skip revocation checks if the data is not embedded.
+macOS Preview performs minimal revocation checking.
+
+**Different byte range verification.** Acrobat carefully verifies that the byte range covers the entire file except the `/Contents` gap.
+Some other viewers are less rigorous — they check that the CMS signature verifies over the byte range data, but do not verify that the byte range actually covers the whole file.
+
+**Different handling of incremental updates.** This is the critical one.
+A proper validator must compare the signed byte range to the total file size and, if there are bytes after the signed range, analyze the incremental update to determine whether it contains permitted changes (adding signatures, annotations) or impermissible modifications (changing page content).
+Not all viewers perform this analysis with equal rigor.
+
+=== What You Can Do About It
+
+If you are a signature _creator_, your goal is to produce signatures that validate consistently across all major viewers:
+
+1. **Use PAdES-B-LTA.** It is the most broadly supported profile.
+2. **Use SubFilter `ETSI.CAdES.detached`.** All modern viewers support it, and it enables PAdES validation.
+3. **Use SHA-256 or SHA-384.** Never SHA-1. Avoid SHA-512 only because some older viewers have edge-case issues with it.
+4. **Embed the full certificate chain.** Do not rely on the viewer fetching missing intermediates — some viewers will not.
+5. **Embed OCSP responses and CRLs.** If the revocation data is in the DSS, viewers that check revocation will find it; viewers that do not check will simply ignore it.
+6. **Allocate sufficient space for `/Contents`.** We discuss this in detail later in this chapter.
+7. **Test in at least three viewers.** Acrobat, Foxit/LibreOffice, and one programmatic validator (PDFBox or EU DSS). If it validates in all three, it will validate almost everywhere.
+
+If you are a signature _validator_, your goal is to implement the most rigorous checks and report the most precise results:
+
+1. **Verify the byte range covers the entire file minus the `/Contents` gap.** This catches the Signature Wrapping Attack (Chapter 24).
+2. **Detect incremental updates after signing.** Compare the signed byte range to the file size. If there is trailing data, parse it and determine whether it represents permitted or impermissible changes.
+3. **Check revocation status.** Use embedded OCSP/CRL data if available; fall back to online checks if not; report clearly when revocation data is unavailable.
+4. **Report the PAdES profile level.** Tell the user whether the signature is B-B, B-T, B-LT, or B-LTA — this is much more informative than a binary "valid/invalid."
+
+
+== SubFilter Confusion
+
+=== The Five SubFilter Values
+
+The `/SubFilter` key in a signature dictionary tells the viewer what format the signature value (in `/Contents`) uses.
+Over the history of PDF, five SubFilter values have been defined:
+
+.SubFilter values defined across PDF versions and PAdES
+[cols="3,2,4", options="header"]
+|===
+| SubFilter | Defined In | Status and Usage
+
+| `adbe.pkcs7.detached`
+| PDF 1.3 (1999)
+| The original. CMS `SignedData` where the signed content is the byte range data (not included in the CMS structure). Still widely used. Supported by every viewer. Not PAdES-compliant on its own.
+
+| `adbe.pkcs7.sha1`
+| PDF 1.4 (2001)
+| The SHA-1 hash of the entire document is embedded as the CMS `EncapsulatedContentInfo`. Deprecated in {iso32000-2}. SHA-1 is broken for collision resistance since the SHAttered attack (2017). Do not use.
+
+| `adbe.x509.rsa_sha1`
+| PDF 1.3 (1999)
+| Raw RSA signature over SHA-1 hash. The certificate is in a separate `/Cert` key, not embedded in CMS. Extremely legacy. Most modern viewers cannot validate it. Do not use.
+
+| `ETSI.CAdES.detached`
+| PAdES (ETSI TS 102 778, 2009)
+| The PAdES SubFilter. CMS `SignedData` with CAdES extensions (ESS-signing-certificate-v2, optionally timestamp attributes). Required for all PAdES profiles. The recommended choice for any new implementation.
+
+| `ETSI.RFC3161`
+| {iso32000-2} (2017)
+| Document-level timestamp. The `/Contents` contains an RFC 3161 `TimeStampToken` instead of a regular CMS signature. Used for archive timestamps in PAdES-B-LTA. Not a "signature" in the user-facing sense — it proves the document existed at a specific time.
+
+|===
+
+=== Which One Should You Use?
+
+If you are implementing a new signing feature in 2026, the answer is simple: **`ETSI.CAdES.detached`** for signatures and **`ETSI.RFC3161`** for document-level timestamps.
+
+There is no reason to use `adbe.pkcs7.detached` in new implementations unless you have a specific compatibility requirement with a legacy system that cannot parse CAdES extensions.
+The practical difference between `adbe.pkcs7.detached` and `ETSI.CAdES.detached` is the presence of the `ESS-signing-certificate-v2` signed attribute (Chapter 17) — adding it makes the signature PAdES-B-B compliant at zero additional cost.
+
+`adbe.pkcs7.sha1` is deprecated and cryptographically broken.
+Do not use it.
+If you encounter it in a legacy document, validate it with the understanding that SHA-1 collision resistance has been publicly demonstrated to be insufficient since February 2017 (the SHAttered attack by Stevens et al.).
+
+`adbe.x509.rsa_sha1` is a relic of PDF 1.3.
+It separates the certificate from the signature in a way that no modern library handles well.
+If you encounter it, you are looking at a document from the early 2000s.
+
+=== What Happens with Unrecognized SubFilter Values
+
+{iso32000-2} §12.8.1 states that if a viewer encounters a SubFilter value it does not recognize, it should not attempt to validate the signature.
+In practice, viewers handle this inconsistently:
+
+- **Acrobat**: displays "The signature format is not supported" — a clear and honest message
+- **Foxit**: may attempt validation anyway and produce confusing results
+- **LibreOffice**: typically shows "Signature could not be verified" — accurate but unhelpful
+- **macOS Preview**: ignores the signature entirely — the document appears unsigned
+
+If you are implementing a validator and encounter an unknown SubFilter, the correct behavior is to report that the signature format is not recognized.
+Do not attempt to guess the format.
+Do not silently skip the signature.
+Report it.
+
+[NOTE]
+====
+A common source of SubFilter confusion in the wild: some signing tools produce a SubFilter of `adbe.pkcs7.detached` but include CAdES extensions (ESS-signing-certificate-v2) in the CMS signed attributes.
+Technically, this is a valid `adbe.pkcs7.detached` signature that _also_ happens to be PAdES-compliant — because PAdES compliance is about the content of the CMS, not just the SubFilter label.
+But some validators treat the SubFilter as a strict indicator: if it says `adbe.pkcs7.detached`, they skip CAdES-specific checks.
+The result: a signature that is PAdES-compliant by content but not recognized as such by label.
+
+For maximum compatibility, use the SubFilter that matches your intent.
+If you are producing PAdES signatures, use `ETSI.CAdES.detached`.
+====
+
+
+== PAdES vs {iso32000-2}: The Divergence
+
+=== Two Standards, One Problem
+
+{iso32000-2} defines how to embed a digital signature in a PDF.
+ETSI EN 319 142 (PAdES) defines additional requirements for that signature to be legally meaningful in Europe.
+
+These two standards _should_ be perfectly aligned.
+They are not.
+
+The divergence is not dramatic — PAdES is a strict subset of {iso32000-2}, so a PAdES-compliant signature is always a valid {iso32000-2} signature.
+But the two standards were developed by different organizations ({iso32000-2} by ISO TC 171, PAdES by ETSI ESI), on different timelines, with different constituencies.
+The result is a set of subtle mismatches that catch developers in the gap.
+
+=== Where They Disagree
+
+**Signed attributes.** {iso32000-2} requires the CMS `SignedData` to include `content-type` and `message-digest` signed attributes ({rfc5652} §11.1).
+PAdES _additionally_ requires `ESS-signing-certificate-v2` (ETSI EN 319 122-1 §5.7.3).
+A signature that satisfies {iso32000-2} but omits `ESS-signing-certificate-v2` is a valid PDF signature but _not_ a valid PAdES signature.
+This is the single most common PAdES compliance failure.
+
+**SubFilter semantics.** {iso32000-2} treats SubFilter as informational — it tells the viewer what format to expect, but the viewer is expected to parse the CMS and determine the format from the content.
+PAdES treats `ETSI.CAdES.detached` as a _requirement_ — a signature claiming PAdES compliance must use this SubFilter.
+A technically identical CMS blob wrapped in `adbe.pkcs7.detached` is not PAdES-compliant by label, even if the CMS content is identical.
+
+**Timestamp handling.** {iso32000-2} defines document-level timestamps (SubFilter `ETSI.RFC3161`) and signature timestamps (unsigned attribute `id-aa-signatureTimeStampToken` in the CMS).
+PAdES defines the same mechanisms but adds requirements about timestamp token format, the relationship between signature timestamps and document timestamps, and the order in which they must be embedded in PAdES-B-LTA.
+The PAdES requirements are stricter — a timestamp arrangement that is valid under {iso32000-2} may not satisfy PAdES-B-LTA's requirements for archive timestamps.
+
+**DSS dictionary.** The Document Security Store (DSS) dictionary — where certificates, OCSP responses, and CRLs are stored for LTV validation — is defined in {iso32000-2} §12.8.4.3 and also referenced in PAdES.
+The specifications agree on the structure but differ slightly on when DSS data is mandatory.
+{iso32000-2} treats DSS as optional enrichment.
+PAdES-B-LT and B-LTA _require_ DSS data — without it, the signature cannot claim the LT or LTA profile level.
+
+=== The Practical Consequence
+
+If you are building a signing service that needs to produce signatures valid in both the {iso32000-2} sense and the PAdES sense (and you almost certainly are), always target PAdES.
+PAdES is the stricter standard.
+A PAdES-B-LTA signature satisfies both standards simultaneously.
+A signature that targets only {iso32000-2} without PAdES awareness will fail PAdES validation — and PAdES validation is what matters for EU compliance, for AATL-listed CAs, and for most enterprise validation workflows.
+
+[IMPORTANT]
+====
+The EU DSS validation framework (Chapter 23) validates signatures against PAdES profiles, not against raw {iso32000-2}.
+If your signatures validate in EU DSS, they satisfy both standards.
+If you are building your own validator, validate against PAdES — it is the superset of requirements that covers both.
+====
+
+
+== The Timestamp Chicken-and-Egg Problem
+
+=== The Problem
+
+A PAdES-B-T signature requires a signature timestamp — an RFC 3161 `TimeStampToken` embedded as an unsigned CMS attribute.
+The timestamp proves when the signature was created.
+
+To obtain the timestamp, you must:
+
+1. Create the CMS `SignedData` (including the signed attributes and the signature value)
+2. Hash the signature value
+3. Send the hash to a Time Stamp Authority (TSA)
+4. Receive the `TimeStampToken` from the TSA
+5. Embed the token as an unsigned attribute in the CMS `SignedData`
+
+Here is the problem: the CMS `SignedData` is the `/Contents` value in the signature dictionary.
+The `/Contents` value is a hex string with a _fixed_ length — the space for it was allocated when the signature dictionary was written into the PDF, before the CMS was created.
+
+So the size of `/Contents` must be determined _before_ you know how large the CMS will be.
+And the size of the CMS depends on whether you include a timestamp — and how large that timestamp is.
+And you cannot obtain the timestamp until you have the CMS signature value.
+And you cannot have the signature value until you have the byte range.
+And the byte range depends on the size of `/Contents`.
+
+This is the chicken-and-egg.
+
+=== The Standard Solution
+
+The standard solution, used by every major signing library, is to **pre-allocate a fixed-size `/Contents` field**, create the CMS signature, obtain the timestamp, embed the timestamp in the CMS, and then pad the CMS to fit the pre-allocated space.
+
+[source,java]
+----
+// Pre-allocate /Contents with estimated size
+// The hex encoding doubles the byte count, so allocate 2x the expected CMS size
+int estimatedCmsSize = 16384;  // 16 KB — usually sufficient for B-T
+SignatureOptions sigOptions = new SignatureOptions();
+sigOptions.setPreferredSignatureSize(estimatedCmsSize);
+
+// The PDF is written with a /Contents placeholder of 2 * estimatedCmsSize hex chars
+// After signing, the actual CMS (with timestamp) is padded with zeros to fill the space
+----
+
+The padding is simple: after the CMS `SignedData` DER encoding, the remaining bytes in `/Contents` are filled with `0x00`.
+The hex encoding of these zero bytes produces `00` characters.
+The viewer knows to ignore trailing zeros after the DER-encoded CMS — the DER encoding is self-delimiting, so the parser can determine where the CMS ends and the padding begins.
+
+=== The 32 KB Problem
+
+How much space should you pre-allocate?
+This is a more consequential question than it appears.
+
+The CMS `SignedData` contains:
+
+- The DER-encoded `SignedData` structure itself (~100-300 bytes of overhead)
+- The signer's certificate (~1-2 KB)
+- Any intermediate certificates (~1-2 KB each, typically 1-3 intermediates)
+- The signature value (~256-512 bytes for RSA-2048/4096, ~64-72 bytes for ECDSA)
+- Signed attributes (~200-500 bytes)
+- The signature timestamp token (~3-8 KB, depending on the TSA)
+
+A typical PAdES-B-T signature with one intermediate certificate and a timestamp requires approximately 8-12 KB.
+A PAdES-B-LTA signature with embedded OCSP responses and CRLs in the CMS (rather than in the DSS) can require 15-30 KB.
+
+Most implementations pre-allocate **32 KB** (32,768 bytes, producing 65,536 hex characters in `/Contents`).
+This is sufficient for the vast majority of signatures.
+
+But not all.
+
+.Scenarios that exceed 32 KB
+[cols="3,5", options="header"]
+|===
+| Scenario | Why It Is Large
+
+| Long certificate chain
+| 4-5 intermediates, each 2 KB. Happens with some government CAs.
+
+| Large timestamp token
+| Some TSAs include their own certificate chain in the TimeStampToken. If the TSA has 3 intermediates, the token alone can be 10-15 KB.
+
+| Embedded CRLs
+| If a CRL is embedded directly in the CMS (as an unsigned attribute), it can be 50-200 KB. This is unusual for new implementations (CRLs go in the DSS instead), but some legacy signing tools do this.
+
+| Cross-certified chains
+| Government PKIs that cross-certify with multiple roots can produce chains with redundant certificates, inflating the CMS.
+
+| Multiple timestamps
+| Some workflows add both a signature timestamp and a content timestamp, doubling the timestamp overhead.
+
+|===
+
+If the CMS exceeds the pre-allocated `/Contents` size, the signing operation fails.
+The failure mode depends on the library:
+
+- **PDFBox**: throws an `IOException` with a message about the signature being too large for the placeholder
+- **iText**: throws a similar exception
+- **OpenPDF**: throws an exception
+
+The fix is simple: increase the pre-allocated size.
+But the fix means you allocated _more_ space that is filled with zero padding — wasted bytes in every PDF you sign.
+There is a tension between allocating enough space to handle edge cases and not bloating every PDF with unused padding.
+
+[TIP]
+====
+A practical compromise: pre-allocate 32 KB for PAdES-B-T signatures and 64 KB for PAdES-B-LTA signatures.
+If you know your signing chain is unusually long (government PKIs, cross-certified CAs), increase to 96 KB or 128 KB.
+The wasted space is insignificant compared to the risk of a signing failure in production.
+
+If you want to be precise, you can estimate the CMS size before allocating:
+
+1. Build a "dry run" CMS with a dummy signature value and a dummy timestamp of the expected size
+2. Measure its DER-encoded length
+3. Add a 50% safety margin
+4. Use that as your pre-allocation size
+
+This is more complex but avoids both undersizing and excessive oversizing.
+====
+
+
+== Silent Signing Failures
+
+=== The Taxonomy of Silence
+
+PDF signing can fail in ways that produce a valid-looking PDF with an invalid signature.
+The document opens.
+The pages render.
+But the signature is broken — and the failure may not be obvious until someone tries to validate it.
+
+These silent failures are particularly dangerous because they often are not detected at signing time.
+The signing code runs without exceptions.
+The PDF is saved.
+It is emailed, archived, or submitted to a government portal.
+And then, days or weeks later, someone discovers that the signature is invalid.
+
+=== Empty `/Contents`
+
+The most egregious silent failure: the `/Contents` value is present but contains only zero bytes.
+No CMS structure at all.
+
+This happens when the signing pipeline fails to inject the CMS into the `/Contents` placeholder after the byte range is computed and the CMS is generated.
+The PDF has the correct structure — the signature dictionary exists, the byte range is set, the `/Contents` key is there — but the value is all zeros.
+
+Some signing libraries have had bugs where exceptions during CMS generation were swallowed (caught and not re-thrown), leaving the `/Contents` empty.
+The resulting PDF looks signed — it has a signature field, possibly even a visual appearance — but the signature is cryptographically void.
+
+[CAUTION]
+====
+After every signing operation, _always_ verify the result.
+Open the output PDF, extract the `/Contents` value, and confirm it contains a valid DER-encoded CMS `SignedData`.
+This adds a few milliseconds to your signing pipeline and catches the most catastrophic failure mode.
+
+[source,java]
+----
+// Post-signing verification — always do this
+byte[] contents = extractContentsFromSignedPdf(signedPdfBytes);
+CMSSignedData cms = new CMSSignedData(contents);
+if (cms.getSignerInfos().getSigners().isEmpty()) {
+    throw new IllegalStateException(
+            "Signed PDF has no signers in CMS — signing failed silently");
+}
+log.info("Post-signing verification passed: {} signer(s) in CMS",
+        cms.getSignerInfos().getSigners().size());
+----
+====
+
+=== Bad Byte Range
+
+The `/ByteRange` array must specify two ranges that together cover the entire file except the `/Contents` hex string.
+A bad byte range — one that does not start at 0, does not end at the file's last byte, or has gaps other than the `/Contents` region — produces a signature that covers only part of the file.
+
+This can happen when:
+
+- The signing library miscalculates the offset of the `/Contents` value in the file
+- The file is modified (even trivially — whitespace changes, metadata updates) between byte range calculation and signature injection
+- A streaming writer flushes partial content, causing offset shifts
+
+The PDF opens fine.
+The signature exists.
+But a proper validator will detect that the byte range does not cover the entire file and report the signature as invalid or the document as modified.
+
+=== Missing Certificate Chain
+
+A CMS `SignedData` should include the signer's certificate and all intermediate certificates needed to build a chain to a trusted root.
+If the intermediates are missing, the validator must fetch them — and may not be able to.
+
+Missing intermediates are common in testing (developers use self-signed certificates and forget to include the chain) but also happen in production when:
+
+- The signing code includes only the signer's certificate, not the intermediates
+- The PKCS#12 keystore contains only the signer's certificate (the intermediates were not imported)
+- A library upgrade changed the default behavior for chain inclusion
+
+The signature validates if the validator can fetch or already has the missing intermediates.
+It fails if it cannot.
+This is a Heisenbug — the signature works on the developer's machine (where the intermediates are in the trust store) but fails on the customer's machine (where they are not).
+
+=== Expired Timestamp
+
+A signature timestamp proves when the signature was created.
+But the timestamp itself is signed by the TSA's certificate — and that certificate can expire.
+
+If the TSA certificate expires and the timestamp token does not include sufficient chain data for historical validation, validators may reject the timestamp.
+The signature itself may still verify, but the timestamp — which was the proof of when the signature was created — becomes unverifiable.
+
+For PAdES-B-LTA, this is handled by the archive timestamp mechanism: a document-level timestamp covers the entire file (including the DSS with revocation data for the signature timestamp).
+As long as the archive timestamp chain is valid, the signature timestamp can be verified historically.
+
+For PAdES-B-T signatures without LTV data, an expired TSA certificate means the timestamp can no longer be verified.
+The signature degrades from B-T to effectively B-B — you lose the proof of when it was created.
+
+[WARNING]
+====
+Monitor the expiration dates of the TSAs you use.
+TSA certificates typically have 10-15 year validity periods, so this is not an urgent problem — but it _is_ a problem that will arrive eventually.
+When it does, any PAdES-B-T signature without LTV data that used the expired TSA will lose its timestamp verifiability.
+
+This is another reason to prefer PAdES-B-LTA: the archive timestamp mechanism provides a renewable chain that survives individual certificate expirations.
+====
+
+
+== Reader-Enabled PDFs vs Signing Conflicts
+
+=== What Reader-Enabling Is
+
+Adobe Reader (the free version) historically could not save filled-in forms.
+To allow Reader users to fill in and save a form, the PDF author had to "enable" the PDF for Reader using Adobe Acrobat Pro.
+This was done by applying a special **usage rights signature** — a certification-level signature with a specific set of usage rights extensions that told Reader which features to unlock.
+
+The usage rights signature is stored in the document's permissions dictionary (`/Perms`) and uses a special Adobe-issued certificate.
+When Reader opens a document with a valid usage rights signature, it enables the specified features (fill-in, save, comment, etc.).
+
+=== The Conflict with Document Signing
+
+The problem arises when a Reader-enabled PDF needs to be signed.
+
+The usage rights signature is a certification signature — it was the first signature on the document, and it claims `/DocMDP` permissions.
+Adding an approval signature after the certification signature requires an incremental update, which is permitted under the DocMDP permissions level set by the usage rights signature.
+
+But here is the catch: some PDF editors, when they save the document after adding a signature, perform operations that invalidate the usage rights signature.
+This happens because:
+
+1. The editor modifies objects that the usage rights signature's byte range covers
+2. The editor performs a full save instead of an incremental save, destroying the incremental structure that the usage rights signature depends on
+3. The editor adds or modifies AcroForm entries in a way that the usage rights signature's `/FieldMDP` transform does not permit
+
+When the usage rights signature is invalidated, Reader reverts to its restricted mode — the user can no longer save the form.
+And if the document's approval signature depends on the AcroForm structure (which it does, since signature fields _are_ form fields), the interplay between the invalidated usage rights and the new signature can produce validation errors in Acrobat.
+
+=== The Historical Context
+
+Reader-enabling was a significant source of revenue for Adobe: Acrobat Pro was the only tool that could create the usage rights signature (because it used an Adobe-controlled certificate).
+Third-party libraries could not Reader-enable PDFs.
+
+{iso32000-2} deprecated the `/Perms` usage rights mechanism.
+PDF 2.0 assumes that all viewers can save forms without special enablement.
+But the real world is not PDF 2.0 — millions of Reader-enabled PDF 1.7 documents are still in circulation, and enterprises still generate new ones because their workflows depend on the Reader experience.
+
+[NOTE]
+====
+If your signing service processes documents that may be Reader-enabled, test the signing workflow with Reader-enabled PDFs specifically.
+Ensure your signing code performs an incremental save (not a full save) and does not modify objects covered by the usage rights signature.
+PDFBox's `PDDocument.saveIncremental()` is designed for this — but you must be careful not to load and re-save objects that the usage rights signature covers.
+====
+
+=== The Modern Alternative
+
+The practical alternative to Reader-enabling is to stop caring about it.
+Adobe Acrobat Reader DC (the current free version) can save filled-in forms without usage rights.
+The limitation existed in older versions of Reader (pre-DC) and was removed as Adobe shifted to a subscription model for Acrobat.
+
+If your user base has upgraded to Reader DC (and by 2026, most have), Reader-enabling is no longer necessary.
+If you must support legacy Reader versions, the only safe approach is to Reader-enable the PDF _after_ all signatures have been applied — which is usually not possible, since the usage rights signature must be the first signature.
+
+The real answer is: test your specific workflow, document the behavior, and warn your users if they are operating in a scenario where Reader-enabling and signing conflict.
+
+
+== Trailing Bytes and Garbage After `%%EOF`
+
+=== The Spec Says
+
+{iso32000-2} §7.5.5 states that a PDF file must end with `%%EOF`.
+Anything after the last `%%EOF` marker is not part of the PDF.
+
+In an incrementally saved PDF (which every signed PDF is — signing requires an incremental save), each revision ends with its own `%%EOF`.
+The last `%%EOF` in the file marks the end of the last revision.
+
+=== The Reality
+
+In practice, many tools append data after `%%EOF`:
+
+- Some PDF generators append a newline or carriage return after `%%EOF` (harmless but technically non-conformant)
+- Some content management systems append metadata or tracking information
+- Some signing tools, due to buffer sizing bugs, write a few extra bytes after the CMS injection
+- Some email systems append MIME boundary markers when the PDF is transmitted as an attachment
+
+These trailing bytes create a problem for signature validation: the signed byte range (as specified by `/ByteRange`) covers the file up to and including the last byte _as calculated at signing time_.
+If additional bytes appear after that, the file is longer than the signed byte range.
+A strict validator will flag this as "the document was modified after signing" — because, technically, it was, even if the modification was just a trailing newline.
+
+[TIP]
+====
+When your validator detects bytes beyond the signed byte range, examine what those bytes actually are before reporting "modified after signing."
+A few bytes of whitespace or a line break after `%%EOF` is cosmetically messy but not a security concern.
+A complete incremental update after the signed range is a genuine modification that needs careful analysis.
+
+Distinguish between "there are trailing bytes that are not an incremental update" (cosmetic) and "there is an incremental update that was not covered by any signature" (potentially malicious).
+====
+
+
+== Key Takeaways
+
+- **The AATL is a private trust list** controlled by Adobe that determines whether Acrobat shows a green or yellow banner — this gatekeeping creates a two-tier market for signing certificates
+- **Validation results differ across viewers** — the same PDF can show valid, invalid, or unknown depending on trust stores, algorithm support, revocation policies, and byte range verification rigor
+- **Use `ETSI.CAdES.detached`** for all new signatures — it is PAdES-compliant and universally supported
+- **PAdES is stricter than {iso32000-2}** — always target PAdES, because a PAdES signature satisfies both standards
+- **Pre-allocate 32-64 KB for `/Contents`** — undersizing causes signing failures; oversizing wastes a few KB of padding
+- **Always verify the result after signing** — check that `/Contents` contains valid CMS, the byte range is correct, and the chain is complete
+- **Monitor TSA certificate expiration** — expired TSA certs degrade B-T signatures to effectively B-B
+- **Reader-enabled PDFs conflict with signing** — test specifically if your workflow involves Reader-enabled documents
+- **Trailing bytes after `%%EOF`** are common and usually harmless, but your validator should distinguish cosmetic trailing data from actual post-signature modifications

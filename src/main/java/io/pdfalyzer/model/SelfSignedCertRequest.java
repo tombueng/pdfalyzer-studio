@@ -20,4 +20,5 @@ public class SelfSignedCertRequest {
     private String keyAlgorithm = "RSA";
     @Builder.Default
     private int keySize = 2048;
+    private String signatureAlgorithm;
 }

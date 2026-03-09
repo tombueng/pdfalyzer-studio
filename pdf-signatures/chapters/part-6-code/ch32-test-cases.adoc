@@ -1,0 +1,836 @@
+= Test Cases & Reference PDFs
+
+[.lead]
+Testing PDF digital signatures is one of the hardest testing problems in software engineering.
+A signature that is valid today may be invalid tomorrow because a certificate expired.
+A test that passes on your machine may fail on CI because the TSA server is unreachable.
+A verification test that ran perfectly for three years suddenly breaks because a CRL distribution point returns HTTP 404.
+Time, network, and third-party infrastructure are all embedded in your test surface — and they are all moving targets.
+
+This chapter covers how to build a test infrastructure that is deterministic, fast, and comprehensive.
+We generate our own keystores, mock external services, freeze time, and construct a test matrix that exercises every meaningful signature scenario.
+By the end, you will have a test suite that runs in seconds, needs no network access, and covers the full signing-to-verification round trip including PAdES compliance.
+
+== Why Testing PDF Signatures Is Hard
+
+=== The Three Enemies of Deterministic Signature Tests
+
+**Enemy 1: Time.**
+Certificate validation is time-dependent.
+A certificate that is valid right now has a `notBefore` and `notAfter` date range.
+If your test generates a certificate valid for one year and your test suite runs 13 months later, every test that validates that certificate will fail.
+Timestamps make this worse — a timestamp proves the signature was created at a specific time, and the TSA certificate has its own validity period.
+
+**Enemy 2: Network.**
+Real signing workflows depend on external services: TSA servers for timestamps, OCSP responders for revocation checks, CRL distribution points for certificate revocation lists.
+Any of these can be slow, unreachable, or returning unexpected responses.
+A test that calls a real TSA is a test that depends on the internet — and the internet is not deterministic.
+
+**Enemy 3: State.**
+PDF files are stateful.
+A signed PDF is a specific sequence of bytes, and any change — even adding a single trailing newline — invalidates the signature.
+Tests that generate PDFs must produce identical byte sequences across runs, or the test assertions become meaningless.
+Different versions of PDFBox may serialize objects in different orders, produce different padding sizes, or use different default values — any of which changes the output bytes.
+
+=== The Testing Strategy
+
+Our approach addresses all three enemies:
+
+1. **Generate test keystores programmatically** with explicit, long-lived validity periods (100 years — we are not testing certificate expiration unless we want to)
+2. **Mock all external services** (TSA, OCSP) using WireMock or BouncyCastle's in-process TSA
+3. **Freeze time** using a `Clock` abstraction so certificate and timestamp validation happens at a controlled instant
+4. **Generate reference PDFs as part of the test setup** rather than shipping binary PDF files in the repository
+
+== Test Infrastructure: JUnit 5 and Test Keystore Generation
+
+=== The Test Keystore Generator
+
+Every test needs cryptographic key material: a signing certificate, an intermediate CA, a root CA, and a TSA certificate.
+We generate all of these programmatically using BouncyCastle:
+
+[source,java]
+----
+/**
+ * Generates a complete PKI hierarchy for testing:
+ * Root CA -> Intermediate CA -> Signer certificate
+ * Plus a separate TSA certificate signed by the Root CA.
+ */
+@Slf4j
+public class TestKeystoreGenerator {
+
+    private static final int KEY_SIZE = 2048;
+    private static final String SIGNATURE_ALGORITHM = "SHA256withRSA";
+
+    /**
+     * Generate a complete test PKI and return it as an in-memory KeyStore.
+     */
+    public static KeyStore generateTestKeystore(char[] password)
+            throws Exception {
+        // Root CA — self-signed, 100-year validity
+        KeyPair rootKeyPair = generateKeyPair();
+        X509Certificate rootCert = generateRootCaCertificate(
+                rootKeyPair,
+                "CN=Test Root CA, O=PDFalyzer Test, C=DE",
+                100);
+
+        // Intermediate CA — signed by Root, 50-year validity
+        KeyPair intermediateKeyPair = generateKeyPair();
+        X509Certificate intermediateCert =
+                generateIntermediateCaCertificate(
+                        intermediateKeyPair,
+                        "CN=Test Intermediate CA, O=PDFalyzer Test, C=DE",
+                        rootKeyPair.getPrivate(),
+                        rootCert,
+                        50);
+
+        // Signer — signed by Intermediate, 10-year validity
+        KeyPair signerKeyPair = generateKeyPair();
+        X509Certificate signerCert = generateSignerCertificate(
+                signerKeyPair,
+                "CN=Test Signer, O=PDFalyzer Test, C=DE",
+                intermediateKeyPair.getPrivate(),
+                intermediateCert,
+                10);
+
+        // TSA — signed by Root, 50-year validity, with timeStamping EKU
+        KeyPair tsaKeyPair = generateKeyPair();
+        X509Certificate tsaCert = generateTsaCertificate(
+                tsaKeyPair,
+                "CN=Test TSA, O=PDFalyzer Test, C=DE",
+                rootKeyPair.getPrivate(),
+                rootCert,
+                50);
+
+        // Assemble into a PKCS12 KeyStore
+        KeyStore ks = KeyStore.getInstance("PKCS12");
+        ks.load(null, password);
+
+        // Store the signer's key + full chain
+        X509Certificate[] signerChain = {
+                signerCert, intermediateCert, rootCert
+        };
+        ks.setKeyEntry("signer", signerKeyPair.getPrivate(),
+                password, signerChain);
+
+        // Store the TSA's key + chain
+        X509Certificate[] tsaChain = { tsaCert, rootCert };
+        ks.setKeyEntry("tsa", tsaKeyPair.getPrivate(),
+                password, tsaChain);
+
+        // Store the root as a trusted cert entry
+        ks.setCertificateEntry("root", rootCert);
+
+        log.info("Generated test keystore with signer, TSA, and root");
+        return ks;
+    }
+
+    private static KeyPair generateKeyPair() throws Exception {
+        KeyPairGenerator gen = KeyPairGenerator.getInstance("RSA");
+        gen.initialize(KEY_SIZE);
+        return gen.generateKeyPair();
+    }
+
+    private static X509Certificate generateRootCaCertificate(
+            KeyPair keyPair, String dn, int validityYears)
+            throws Exception {
+
+        X500Name issuer = new X500Name(dn);
+        BigInteger serial = BigInteger.valueOf(
+                System.currentTimeMillis());
+        Date notBefore = new Date();
+        Date notAfter = Date.from(Instant.now()
+                .plus(Duration.ofDays(365L * validityYears)));
+
+        JcaX509v3CertificateBuilder builder =
+                new JcaX509v3CertificateBuilder(
+                        issuer, serial, notBefore, notAfter,
+                        issuer, keyPair.getPublic());
+
+        // CA extensions
+        builder.addExtension(Extension.basicConstraints, true,
+                new BasicConstraints(true));
+        builder.addExtension(Extension.keyUsage, true,
+                new KeyUsage(KeyUsage.keyCertSign | KeyUsage.cRLSign));
+
+        ContentSigner signer = new JcaContentSignerBuilder(
+                SIGNATURE_ALGORITHM).setProvider("BC")
+                .build(keyPair.getPrivate());
+
+        return new JcaX509CertificateConverter().setProvider("BC")
+                .getCertificate(builder.build(signer));
+    }
+
+    // Similar methods for intermediate, signer, and TSA certificates
+    // omitted for brevity — full listings in Appendix A
+}
+----
+
+=== JUnit 5 Test Base Class
+
+We use a shared base class that sets up the test PKI and provides utility methods:
+
+[source,java]
+----
+@Slf4j
+abstract class SignatureTestBase {
+
+    protected static KeyStore testKeystore;
+    protected static PrivateKey signerKey;
+    protected static X509Certificate[] signerChain;
+    protected static PrivateKey tsaKey;
+    protected static X509Certificate[] tsaChain;
+    protected static Set<TrustAnchor> trustAnchors;
+    protected static final char[] PASSWORD = "test".toCharArray();
+
+    @BeforeAll
+    static void setupPki() throws Exception {
+        Security.addProvider(new BouncyCastleProvider());
+
+        testKeystore = TestKeystoreGenerator
+                .generateTestKeystore(PASSWORD);
+
+        signerKey = (PrivateKey) testKeystore.getKey("signer", PASSWORD);
+        signerChain = Arrays.stream(
+                testKeystore.getCertificateChain("signer"))
+                .map(c -> (X509Certificate) c)
+                .toArray(X509Certificate[]::new);
+
+        tsaKey = (PrivateKey) testKeystore.getKey("tsa", PASSWORD);
+        tsaChain = Arrays.stream(
+                testKeystore.getCertificateChain("tsa"))
+                .map(c -> (X509Certificate) c)
+                .toArray(X509Certificate[]::new);
+
+        X509Certificate rootCert = (X509Certificate)
+                testKeystore.getCertificate("root");
+        trustAnchors = Set.of(new TrustAnchor(rootCert, null));
+
+        log.info("Test PKI initialized — signer: {}, root: {}",
+                signerChain[0].getSubjectX500Principal(),
+                rootCert.getSubjectX500Principal());
+    }
+
+    /**
+     * Generate a minimal unsigned PDF for testing.
+     */
+    protected byte[] generateTestPdf(String content) throws IOException {
+        try (PDDocument doc = new PDDocument()) {
+            PDPage page = new PDPage();
+            doc.addPage(page);
+            try (PDPageContentStream cs =
+                    new PDPageContentStream(doc, page)) {
+                cs.beginText();
+                cs.setFont(new PDType1Font(
+                        Standard14Fonts.FontName.HELVETICA), 12);
+                cs.newLineAtOffset(72, 700);
+                cs.showText(content);
+                cs.endText();
+            }
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            doc.save(baos);
+            return baos.toByteArray();
+        }
+    }
+}
+----
+
+== Test PDF Generation Scenarios
+
+=== Generating Signed PDFs Programmatically
+
+Rather than shipping pre-built signed PDFs (which become stale and opaque), we generate them as part of each test.
+This ensures every test controls its own input and can vary specific parameters:
+
+[source,java]
+----
+/**
+ * Sign a PDF with the test keystore and return the signed bytes.
+ */
+protected byte[] signPdf(byte[] pdfBytes, boolean addTimestamp,
+        String subFilter) throws Exception {
+
+    try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+        PDSignature pdSig = new PDSignature();
+        pdSig.setFilter(PDSignature.FILTER_ADOBE_PPKLITE);
+        pdSig.setSubFilter(COSName.getPDFName(subFilter));
+        pdSig.setName("Test Signer");
+        pdSig.setReason("Integration test");
+        pdSig.setSignDate(Calendar.getInstance());
+
+        SignatureInterface sigInterface =
+                new TestSignatureInterface(
+                        signerKey, signerChain,
+                        addTimestamp ? tsaKey : null,
+                        addTimestamp ? tsaChain : null);
+
+        doc.addSignature(pdSig, sigInterface);
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        doc.saveIncremental(baos);
+        return baos.toByteArray();
+    }
+}
+----
+
+=== Scenario Generators
+
+Each test scenario generates a specific type of signed PDF:
+
+[source,java]
+----
+/**
+ * Generate a PDF signed with different configurations.
+ */
+protected byte[] generateScenario(TestScenario scenario)
+        throws Exception {
+
+    byte[] pdf = generateTestPdf("Scenario: " + scenario.name());
+
+    return switch (scenario) {
+        case BASIC_PKCS7 ->
+            signPdf(pdf, false, "adbe.pkcs7.detached");
+        case BASIC_PADES ->
+            signPdf(pdf, false, "ETSI.CAdES.detached");
+        case PADES_WITH_TIMESTAMP ->
+            signPdf(pdf, true, "ETSI.CAdES.detached");
+        case SELF_SIGNED ->
+            signPdfWithSelfSigned(pdf);
+        case EXPIRED_CERT ->
+            signPdfWithExpiredCert(pdf);
+        case MULTI_SIGNATURE ->
+            signPdfTwice(pdf);
+        case TAMPERED_AFTER_SIGNING ->
+            tamperSignedPdf(signPdf(pdf, false,
+                    "adbe.pkcs7.detached"));
+        case MISSING_INTERMEDIATE ->
+            signPdfWithMissingIntermediate(pdf);
+    };
+}
+----
+
+== Test Matrix: Scenario to Expected Result
+
+The following table defines every test scenario, what it tests, and the expected outcome at each verification step.
+This is the specification for your test suite — every row should be a test method:
+
+.Signature test matrix
+[cols="3,1,1,1,1,1,3", options="header"]
+|===
+| Scenario | ByteRange | Hash | CMS | Chain | Trust | Notes
+
+| Basic PKCS#7 (adbe.pkcs7.detached)
+| OK
+| OK
+| OK
+| OK
+| OK
+| Baseline — everything should pass
+
+| Basic PAdES (ETSI.CAdES.detached)
+| OK
+| OK
+| OK
+| OK
+| OK
+| Same as PKCS#7 but with PAdES SubFilter
+
+| PAdES with timestamp
+| OK
+| OK
+| OK
+| OK
+| OK
+| Timestamp attribute present and valid
+
+| Self-signed certificate
+| OK
+| OK
+| OK
+| FAIL
+| FAIL
+| CMS is valid but chain has no trusted root
+
+| Expired certificate (no timestamp)
+| OK
+| OK
+| OK
+| FAIL
+| FAIL
+| CertPathValidator rejects expired cert
+
+| Expired certificate (with timestamp)
+| OK
+| OK
+| OK
+| OK
+| OK
+| Timestamp proves signing was within validity
+
+| Multi-signature document
+| WARN
+| OK
+| OK
+| OK
+| OK
+| First sig has trailing bytes (second revision)
+
+| Tampered after signing
+| OK
+| FAIL
+| --
+| --
+| --
+| Hash mismatch — document was modified
+
+| Missing intermediate certificate
+| OK
+| OK
+| OK
+| FAIL
+| FAIL
+| Chain cannot be built without intermediate
+
+| Revoked certificate
+| OK
+| OK
+| OK
+| FAIL
+| FAIL
+| Requires OCSP/CRL mock returning "revoked"
+
+| Wrong SubFilter for content
+| OK
+| OK
+| OK
+| OK
+| OK
+| SubFilter says PAdES but ESS attr is missing
+
+| Empty /Contents (zero-length CMS)
+| OK
+| FAIL
+| FAIL
+| --
+| --
+| CMSException during parsing
+
+| Invisible signature (zero-size widget)
+| OK
+| OK
+| OK
+| OK
+| OK
+| Cryptographically identical to visible sig
+
+|===
+
+Each row in this matrix translates directly to a test method.
+The "--" entries mean that step is not reached because an earlier step failed fatally.
+
+== Mocking TSA and OCSP
+
+=== In-Process TSA with BouncyCastle
+
+For timestamp tests, we need a TSA that returns deterministic timestamp tokens without hitting the network.
+BouncyCastle provides everything you need to build one in-process:
+
+[source,java]
+----
+/**
+ * In-process TSA for testing.
+ * Produces valid RFC 3161 timestamp tokens using the test TSA key.
+ */
+@Slf4j
+public class InProcessTsa {
+
+    private final PrivateKey tsaKey;
+    private final X509Certificate tsaCert;
+    private final AtomicLong serialNumber = new AtomicLong(1);
+
+    public InProcessTsa(PrivateKey tsaKey, X509Certificate tsaCert) {
+        this.tsaKey = tsaKey;
+        this.tsaCert = tsaCert;
+    }
+
+    /**
+     * Generate a timestamp token for the given data hash.
+     */
+    public TimeStampToken timestamp(byte[] dataToTimestamp)
+            throws Exception {
+
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(dataToTimestamp);
+
+        TimeStampRequestGenerator reqGen =
+                new TimeStampRequestGenerator();
+        reqGen.setCertReq(true);
+        TimeStampRequest request =
+                reqGen.generate(TSPAlgorithms.SHA256, hash);
+
+        // Build the timestamp token
+        JcaSignerInfoGeneratorBuilder sigGenBuilder =
+                new JcaSignerInfoGeneratorBuilder(
+                        new JcaDigestCalculatorProviderBuilder()
+                                .setProvider("BC").build());
+
+        ContentSigner contentSigner = new JcaContentSignerBuilder(
+                "SHA256withRSA").setProvider("BC").build(tsaKey);
+        SignerInfoGenerator sigGen = sigGenBuilder.build(
+                contentSigner,
+                new JcaX509CertificateHolder(tsaCert));
+
+        DigestCalculatorProvider dcProv =
+                new JcaDigestCalculatorProviderBuilder()
+                        .setProvider("BC").build();
+        DigestCalculator dgCalc =
+                dcProv.get(new AlgorithmIdentifier(NISTObjectIdentifiers.id_sha256));
+
+        TimeStampTokenGenerator tsTokenGen =
+                new TimeStampTokenGenerator(sigGen, dgCalc,
+                        new ASN1ObjectIdentifier("1.2.3.4.5")); // Test policy
+        tsTokenGen.addCertificates(
+                new JcaCertStore(List.of(tsaCert)));
+
+        TimeStampResponseGenerator tsRespGen =
+                new TimeStampResponseGenerator(tsTokenGen,
+                        TSPAlgorithms.ALLOWED);
+
+        TimeStampResponse response = tsRespGen.generate(
+                request, serialNumber.getAndIncrement(), new Date());
+
+        log.info("Generated test timestamp — serial: {}, time: {}",
+                serialNumber.get() - 1, new Date());
+        return response.getTimeStampToken();
+    }
+}
+----
+
+=== Mocking OCSP with WireMock
+
+For revocation checking tests, we use WireMock to simulate an OCSP responder.
+This lets us return "good," "revoked," or "unknown" responses without any real PKI:
+
+[source,java]
+----
+/**
+ * Configure a WireMock OCSP responder stub.
+ * Returns a pre-built OCSP response for any request.
+ */
+public static void stubOcspResponder(WireMockServer wireMock,
+        OCSPResp response) throws Exception {
+
+    wireMock.stubFor(post(urlEqualTo("/ocsp"))
+            .withHeader("Content-Type",
+                    equalTo("application/ocsp-request"))
+            .willReturn(aResponse()
+                    .withStatus(200)
+                    .withHeader("Content-Type",
+                            "application/ocsp-response")
+                    .withBody(response.getEncoded())));
+}
+
+/**
+ * Build a "good" OCSP response for testing.
+ */
+public static OCSPResp buildGoodOcspResponse(
+        X509Certificate targetCert,
+        X509Certificate issuerCert,
+        PrivateKey responderKey,
+        X509Certificate responderCert) throws Exception {
+
+    BasicOCSPRespBuilder respBuilder =
+            new JcaBasicOCSPRespBuilder(
+                    responderCert.getPublicKey(),
+                    new JcaDigestCalculatorProviderBuilder()
+                            .setProvider("BC").build()
+                            .get(CertificateID.HASH_SHA1));
+
+    CertificateID certId = new JcaCertificateID(
+            new JcaDigestCalculatorProviderBuilder()
+                    .setProvider("BC").build()
+                    .get(CertificateID.HASH_SHA1),
+            new JcaX509CertificateHolder(issuerCert),
+            targetCert.getSerialNumber());
+
+    respBuilder.addResponse(certId, CertificateStatus.GOOD);
+
+    ContentSigner signer = new JcaContentSignerBuilder("SHA256withRSA")
+            .setProvider("BC").build(responderKey);
+    BasicOCSPResp basicResp = respBuilder.build(signer,
+            new X509CertificateHolder[]{ new JcaX509CertificateHolder(
+                    responderCert) },
+            new Date());
+
+    return new OCSPRespBuilder().build(
+            OCSPRespBuilder.SUCCESSFUL, basicResp);
+}
+----
+
+== Time Travel in Tests
+
+=== The Clock Abstraction
+
+The most reliable way to handle time-dependent tests is to inject a `Clock` into any component that checks certificate validity or timestamp times:
+
+[source,java]
+----
+/**
+ * Verification service that accepts an injectable Clock
+ * for deterministic testing.
+ */
+@Slf4j
+public class VerificationService {
+
+    private final Clock clock;
+
+    /**
+     * Production constructor — uses system clock.
+     */
+    public VerificationService() {
+        this.clock = Clock.systemUTC();
+    }
+
+    /**
+     * Test constructor — uses injected clock.
+     */
+    public VerificationService(Clock clock) {
+        this.clock = clock;
+    }
+
+    public VerificationReport verify(byte[] pdfBytes,
+            PDSignature signature,
+            Set<TrustAnchor> trustAnchors) {
+        // ... all validation uses this.clock instead of new Date()
+        Date validationTime = Date.from(clock.instant());
+        // ...
+    }
+}
+----
+
+=== Testing Expired Certificates
+
+With the `Clock` abstraction, testing expired certificate scenarios becomes straightforward:
+
+[source,java]
+----
+@Test
+void expiredCertificateWithoutTimestampShouldFail() throws Exception {
+    // Generate a certificate valid for only 1 second
+    KeyPair keyPair = generateKeyPair();
+    X509Certificate shortLivedCert =
+            generateCertWithValidity(keyPair, Duration.ofSeconds(1));
+
+    // Sign the PDF
+    byte[] pdf = generateTestPdf("Short-lived cert test");
+    byte[] signed = signPdfWith(pdf, keyPair.getPrivate(),
+            new X509Certificate[]{ shortLivedCert });
+
+    // Travel forward in time — certificate is now expired
+    Clock futureClock = Clock.fixed(
+            Instant.now().plus(Duration.ofDays(1)),
+            ZoneOffset.UTC);
+    VerificationService verifier = new VerificationService(futureClock);
+
+    VerificationReport report = verifier.verify(
+            signed, extractSignature(signed), trustAnchors);
+
+    assertEquals(ValidationResult.OK, report.getHashResult());
+    assertEquals(ValidationResult.OK, report.getCmsResult());
+    assertEquals(ValidationResult.CHAIN_INVALID,
+            report.getChainResult());
+}
+
+@Test
+void expiredCertificateWithTimestampShouldPass() throws Exception {
+    // Same setup, but this time we add a timestamp
+    byte[] signed = signPdfWith(pdf, keyPair.getPrivate(),
+            new X509Certificate[]{ shortLivedCert },
+            true /* addTimestamp */);
+
+    // The timestamp proves the signature was created
+    // before the cert expired
+    Clock futureClock = Clock.fixed(
+            Instant.now().plus(Duration.ofDays(1)),
+            ZoneOffset.UTC);
+    VerificationService verifier = new VerificationService(futureClock);
+
+    VerificationReport report = verifier.verify(
+            signed, extractSignature(signed), trustAnchors);
+
+    assertEquals(ValidationResult.OK, report.getChainResult());
+    assertNotNull(report.getTimestampTime());
+}
+----
+
+== Complete Signing-to-Verification Round-Trip Test
+
+This is the most important test in the suite — it exercises the entire pipeline end-to-end:
+
+[source,java]
+----
+@Test
+void completeRoundTripSignAndVerify() throws Exception {
+    // 1. Generate a test PDF
+    byte[] unsignedPdf = generateTestPdf(
+            "Round-trip test — " + Instant.now());
+    log.info("Generated unsigned PDF: {} bytes", unsignedPdf.length);
+
+    // 2. Sign with the test keystore (PAdES + timestamp)
+    byte[] signedPdf = signPdf(unsignedPdf, true,
+            "ETSI.CAdES.detached");
+    log.info("Generated signed PDF: {} bytes", signedPdf.length);
+
+    // 3. Extract the signature
+    try (PDDocument doc = Loader.loadPDF(signedPdf)) {
+        List<PDSignature> sigs = doc.getSignatureDictionaries();
+        assertEquals(1, sigs.size(), "Expected exactly one signature");
+
+        PDSignature sig = sigs.get(0);
+        assertEquals("ETSI.CAdES.detached",
+                sig.getSubFilter());
+
+        // 4. Run the complete verification pipeline
+        VerificationService verifier = new VerificationService();
+        VerificationReport report =
+                verifier.verify(signedPdf, sig, trustAnchors);
+
+        // 5. Assert every step passed
+        assertEquals(ValidationResult.OK,
+                report.getByteRangeResult(),
+                "ByteRange check should pass");
+        assertEquals(ValidationResult.OK,
+                report.getHashResult(),
+                "Hash verification should pass");
+        assertEquals(ValidationResult.OK,
+                report.getCmsResult(),
+                "CMS verification should pass");
+        assertEquals(ValidationResult.OK,
+                report.getChainResult(),
+                "Certificate chain should validate");
+        assertEquals(ValidationResult.OK,
+                report.getTrustResult(),
+                "Trust evaluation should pass");
+
+        // 6. Verify timestamp is present and valid
+        assertNotNull(report.getTimestampTime(),
+                "Timestamp should be present");
+        assertEquals(ValidationResult.OK,
+                report.getTimestampResult(),
+                "Timestamp should be valid");
+
+        assertTrue(report.isValid(), "Signature should be valid");
+        assertTrue(report.isTrusted(), "Signature should be trusted");
+
+        log.info("Round-trip test PASSED — all steps verified");
+    }
+}
+----
+
+== PAdES Compliance Test
+
+A PAdES-compliant signature must include specific signed attributes beyond what plain CMS requires.
+We test for these explicitly:
+
+[source,java]
+----
+@Test
+void padesSignatureShouldHaveRequiredAttributes() throws Exception {
+    byte[] pdf = generateTestPdf("PAdES compliance test");
+    byte[] signed = signPdf(pdf, true, "ETSI.CAdES.detached");
+
+    try (PDDocument doc = Loader.loadPDF(signed)) {
+        PDSignature sig = doc.getSignatureDictionaries().get(0);
+        CMSSignedData cmsData = parseCmsSignedData(signed, sig);
+        SignerInformation signerInfo = cmsData.getSignerInfos()
+                .getSigners().iterator().next();
+
+        AttributeTable signedAttrs =
+                signerInfo.getSignedAttributes();
+
+        // PAdES-B-B: Required signed attributes
+        assertNotNull(
+                signedAttrs.get(CMSAttributes.contentType),
+                "contentType attribute is required");
+        assertNotNull(
+                signedAttrs.get(CMSAttributes.messageDigest),
+                "messageDigest attribute is required");
+        assertNotNull(
+                signedAttrs.get(
+                    PKCSObjectIdentifiers.id_aa_signingCertificateV2),
+                "ESS-signing-certificate-v2 is required for PAdES");
+
+        // PAdES-B-B: signingTime SHOULD NOT be present
+        // (PAdES relies on timestamps, not claimed signing time)
+        Attribute signingTime =
+                signedAttrs.get(CMSAttributes.signingTime);
+        if (signingTime != null) {
+            log.warn("signingTime attribute is present — " +
+                    "PAdES recommends omitting it in favor " +
+                    "of a timestamp");
+        }
+
+        // PAdES-B-T: Timestamp unsigned attribute
+        AttributeTable unsignedAttrs =
+                signerInfo.getUnsignedAttributes();
+        assertNotNull(unsignedAttrs,
+                "PAdES-B-T requires unsigned attributes");
+        assertNotNull(
+                unsignedAttrs.get(
+                    PKCSObjectIdentifiers
+                        .id_aa_signatureTimeStampToken),
+                "PAdES-B-T requires a signature timestamp");
+
+        // Verify the digest algorithm is SHA-256 or stronger
+        String digestAlg = signerInfo.getDigestAlgOID();
+        assertNotEquals("1.3.14.3.2.26", digestAlg,
+                "SHA-1 is not allowed for PAdES — " +
+                "must use SHA-256 or stronger");
+
+        log.info("PAdES compliance test PASSED");
+    }
+}
+----
+
+== Reference PDF Corpus: Naming Convention
+
+For reference PDFs that you ship with your test suite (for regression testing or interoperability testing), use a consistent naming convention that encodes the signature properties in the filename:
+
+[source]
+----
+Naming pattern:
+  <scenario>_<subfilter>_<timestamp>_<cert-type>_<extras>.pdf
+
+Examples:
+  basic_pkcs7-detached_no-ts_ca-signed_v1.pdf
+  basic_cades-detached_rfc3161_ca-signed_v1.pdf
+  pades-b-t_cades-detached_rfc3161_ca-signed_v1.pdf
+  pades-b-lt_cades-detached_rfc3161_ca-signed_dss_v1.pdf
+  selfsigned_pkcs7-detached_no-ts_self-signed_v1.pdf
+  multi-sig_pkcs7-detached_no-ts_ca-signed_2sigs_v1.pdf
+  tampered_pkcs7-detached_no-ts_ca-signed_modified_v1.pdf
+  invisible_cades-detached_rfc3161_ca-signed_zero-widget_v1.pdf
+----
+
+The `_v1` suffix is a version number.
+When you regenerate reference PDFs (because you changed the test keystore or signing code), increment the version number.
+This ensures old and new reference files can coexist temporarily during migration.
+
+[TIP]
+====
+Store reference PDFs in `src/test/resources/reference-pdfs/` and regenerate them with a dedicated test utility class.
+Never edit reference PDFs by hand — they should always be produced by code.
+Commit the generated PDFs to your repository so tests can run without a generation step, but include the generator so anyone can rebuild them.
+====
+
+== Key Takeaways
+
+- PDF signature testing is hard because of three enemies: time, network, and state — address all three explicitly
+- Generate test keystores programmatically with long validity periods (100 years) to avoid time-rot
+- Use an in-process TSA built from BouncyCastle instead of hitting real TSA servers
+- Mock OCSP responders with WireMock for deterministic revocation testing
+- Inject a `Clock` abstraction into verification services so you can freeze or advance time in tests
+- Build a test matrix that maps every scenario to expected per-step results
+- The round-trip test (generate PDF, sign, extract, verify) is the single most important test in the suite
+- Test PAdES compliance explicitly: check for `ESS-signing-certificate-v2`, proper SubFilter, and SHA-256+
+- Use a consistent naming convention for reference PDFs that encodes all signature properties in the filename
+- Generate reference PDFs from code, not by hand — commit both the generator and the generated files

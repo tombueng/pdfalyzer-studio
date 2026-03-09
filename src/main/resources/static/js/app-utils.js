@@ -281,8 +281,7 @@ PDFalyzer.Utils = (function ($) {
     }
 
     function tabSkeleton(tab) {
-        if (tab === 'structure' || tab === 'forms' || tab === 'bookmarks' ||
-                tab === 'rawcos' || tab === 'attachments') {
+        if (tab === 'structure' || tab === 'forms' || tab === 'rawcos') {
             var rows = [
                 { w: '68%', ml: 8  }, { w: '52%', ml: 28 }, { w: '78%', ml: 28 },
                 { w: '44%', ml: 48 }, { w: '58%', ml: 48 }, { w: '71%', ml: 8  },
@@ -338,6 +337,12 @@ PDFalyzer.Utils = (function ($) {
         }, 2000);
     }
 
+    // Simple i18n stub: returns the fallback value.
+    // Future: look up key from a loaded message bundle.
+    function i18n(key, fallback) {
+        return fallback || key;
+    }
+
     return { showLoading: showLoading, hideLoading: hideLoading,
              toast: toast, apiFetch: apiFetch, escapeHtml: escapeHtml,
              reportClientError: reportClientError, formatBytes: formatBytes,
@@ -345,5 +350,6 @@ PDFalyzer.Utils = (function ($) {
              refreshAfterMutation: refreshAfterMutation,
              initClearableInputs: initClearableInputs,
              tabSkeleton: tabSkeleton,
-             startRamMonitor: startRamMonitor };
+             startRamMonitor: startRamMonitor,
+             i18n: i18n };
 })(jQuery);

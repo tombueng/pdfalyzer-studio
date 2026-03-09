@@ -1,0 +1,664 @@
+[[ch07]]
+= PDF File Structure
+ifdef::env-github[]
+:tip-caption: :bulb:
+:note-caption: :information_source:
+:important-caption: :heavy_exclamation_mark:
+:caution-caption: :fire:
+:warning-caption: :warning:
+endif::[]
+
+[.lead]
+Every PDF file on earth -- whether it is a single-page receipt from your corner bakery or a 4,000-page securities filing with twelve nested signatures -- is built from the same four structural components, arranged in the same order, governed by the same rules that John Warnock and Chuck Geschke laid down at Adobe in 1993.
+If you want to understand why a signature's `/ByteRange` array contains raw file offsets, why cross-reference tables use fixed-width 20-byte entries, or why some PDFs have three `%%EOF` markers, you have to understand this structure at the byte level.
+
+This chapter dismantles a PDF file from the first byte to the last.
+We will trace headers, decode every object type the specification defines, read cross-reference tables in both the classic ASCII format and the newer compressed stream format, examine the trailer dictionary, walk through a minimal PDF byte by byte, and then connect all of it back to the one thing we care about most: digital signatures.
+
+== The Four Sections
+
+{iso32000-2} Section 7.5 defines the layout.
+Every conforming PDF file consists of these four parts, in this order:
+
+1. **Header** -- a single line declaring the PDF version, plus an optional binary comment
+2. **Body** -- the collection of indirect objects that define everything in the document: pages, fonts, images, form fields, annotations, and signatures
+3. **Cross-reference table** -- an index that maps object numbers to byte offsets in the file, enabling random access without linear scanning
+4. **Trailer** -- a dictionary that tells the parser where to find the cross-reference table, which object is the document root, and (for incremental updates) where to find the previous cross-reference section
+
+This four-part structure has been stable since PDF 1.0.
+PDF 1.5 introduced an alternative binary representation for the cross-reference data (cross-reference streams), and PDF 2.0 deprecated some legacy metadata keys, but the fundamental anatomy has not changed in over three decades.
+
+=== The Header
+
+A PDF file begins with a version identifier on the first line:
+
+[source]
+----
+%PDF-1.7
+----
+
+That is nine bytes: the five characters `%PDF-`, the version number, and a line ending.
+The `%` character is the PDF comment delimiter, which means the header line is technically a comment -- a design choice that lets non-PDF-aware tools skip it without error.
+
+The version in the header is the _file_ version.
+{iso32000-2} Section 7.5.2 specifies that a `/Version` key in the document catalog may override this value.
+In practice, many generators write `%PDF-1.7` in the header and then set `/Version /2.0` in the catalog when they need PDF 2.0 features.
+This dual-version mechanism exists for backward compatibility: an older parser that does not understand the catalog `/Version` will still see a version number it can process (or at least attempt to process) in the header.
+
+==== The Binary Comment Trick
+
+Immediately after the header line, you will almost always find a second comment line containing four or more bytes with values above 127 (0x80):
+
+[source]
+----
+%âãÏÓ
+----
+
+This is not decoration.
+Its purpose is purely practical: it forces file-type detection heuristics -- in web servers, email gateways, FTP clients, operating systems -- to classify the file as binary rather than ASCII text.
+Without this line, a transfer in ASCII mode (remember the FTP `ASCII` vs `BINARY` setting?) could mangle the binary stream data inside the PDF.
+{iso32000-2} Section 7.5.2 recommends but does not require this binary hint.
+
+You will occasionally encounter PDFs without the binary comment -- usually from minimalist generators or test harnesses.
+The file is still valid, but it is more vulnerable to transfer corruption.
+
+TIP: When debugging PDF files at the byte level, the header is your first sanity check.
+If `%PDF-` is not the first five bytes, something has happened upstream: a Unicode BOM was prepended, an HTML wrapper was added, a proxy rewrote the response body, or the file was opened as text and line endings were converted.
+We have encountered every one of these in production systems.
+
+=== The Body
+
+The body contains all the PDF objects that constitute the document.
+Page trees, content streams, font dictionaries, image data, form fields, metadata, and -- critically for us -- signature dictionaries and their CMS payloads.
+
+Objects in the body are written as **indirect objects**, each wrapped in a numbered envelope:
+
+[source]
+----
+7 0 obj
+<< /Type /Page /MediaBox [0 0 612 792] /Contents 12 0 R >>
+endobj
+----
+
+The prefix `7 0 obj` means "object number 7, generation number 0."
+The keyword `endobj` marks the end of the object.
+Between them is the object's value -- here, a dictionary describing a page.
+
+Objects may appear in any order.
+There is no requirement that object 1 precedes object 2, or that page objects come before font objects.
+The cross-reference table handles the mapping from logical object number to physical byte offset.
+This is a fundamental design principle: **the physical ordering of objects in the file has no bearing on the logical structure of the document**.
+
+Different PDF generators produce wildly different orderings.
+Adobe Acrobat tends to cluster related objects together.
+Apache PDFBox writes objects in the order they were allocated in memory.
+Linearized PDFs (the "fast web view" format described in {iso32000-2} Section 7.6) deliberately reorder objects so that the first page can be displayed before the entire file is downloaded.
+None of this changes the logical content -- but it changes the byte offsets, which in turn changes the byte range that a signature covers.
+
+WARNING: Some tools assume objects appear in numerical order.
+They do not.
+If you are writing a PDF parser or debugging one, never assume object N appears before object N+1 in the file.
+Always consult the cross-reference table.
+
+=== The Cross-Reference Table
+
+After the body comes the cross-reference table (commonly called the "xref table") -- an index that records the byte offset where each object starts in the file.
+
+[source]
+----
+xref
+0 8
+0000000000 65535 f
+0000000015 00000 n
+0000000078 00000 n
+0000000178 00000 n
+0000000331 00000 n
+0000000409 00000 n
+0000000553 00000 n
+0000000715 00000 n
+----
+
+The keyword `xref` marks the beginning.
+The line `0 8` means "this section starts at object number 0 and contains 8 entries."
+Each subsequent line is exactly 20 bytes (including the line terminator) and contains three fields:
+
+- **Byte offset** (10 digits, zero-padded) -- the position in the file where the object starts
+- **Generation number** (5 digits, zero-padded) -- used for object versioning; almost always `00000`
+- **In-use flag** -- `n` means the object is in use; `f` means it is free (deleted)
+
+The very first entry (object 0) is always free, with generation number 65535.
+It serves as the head of a linked list of free objects.
+Each free entry's "byte offset" field actually contains the object number of the _next_ free entry, forming a chain.
+This mechanism allows PDF writers to reuse deleted object numbers -- a feature that mattered when PDFs were small and object numbers precious, and that is now mostly vestigial.
+
+[NOTE]
+====
+The 20-byte-per-entry format is non-negotiable.
+This rigidity is deliberate: it enables random access to any entry via arithmetic (`entry_offset = xref_start + header_bytes + object_number * 20`) without scanning the entire table.
+This random-access property is what allows a viewer to display a single page from a 10,000-page document without loading the whole file into memory.
+====
+
+The generation number increments when an object is deleted and its number is later reused, preventing stale references (`7 0 R`) from resolving to the wrong content.
+In practice, nearly every object you encounter in the wild has generation 0.
+The mechanism exists, the specification defines it carefully, and production PDFs almost never exercise it.
+
+=== The Trailer
+
+Immediately after the cross-reference table comes the trailer:
+
+[source]
+----
+trailer
+<<
+  /Size 8
+  /Root 1 0 R
+  /Info 6 0 R
+  /ID [<a9f2c74b...> <a9f2c74b...>]
+>>
+startxref
+4892
+%%EOF
+----
+
+The trailer dictionary is the most important dictionary in the file, because _everything_ starts here.
+A PDF parser begins at the **end** of the file.
+It searches backward for `%%EOF`, then backward for `startxref`, reads the byte offset (4892), and jumps to that offset to find the cross-reference table.
+From the xref table, it reads the trailer dictionary.
+From the trailer dictionary's `/Root` key, it finds the document catalog.
+From the catalog, it can navigate to every object in the document.
+
+**Parsing a PDF starts from the end, not the beginning.**
+This backward-search strategy is fundamental to how incremental updates work (Chapter 8), and it is the reason a PDF can be extended by appending data without rewriting the beginning of the file.
+
+.Trailer Dictionary Keys -- {iso32000-2} Section 7.5.5, Table 15
+[cols="2,2,6", options="header"]
+|===
+| Key | Type | Description
+
+| `/Size`
+| integer
+| Total number of entries in the cross-reference table (including object 0). One greater than the highest object number used.
+
+| `/Root`
+| indirect reference
+| The document catalog -- root of the entire logical document tree.
+
+| `/Info`
+| indirect reference
+| Document information dictionary. Optional and deprecated in PDF 2.0 (replaced by XMP metadata), but still universally present in real-world files.
+
+| `/ID`
+| array of two byte strings
+| File identifiers. The first element is assigned at creation and never changes; the second is updated on each save. Signatures depend on `/ID` -- PAdES profiles strongly recommend it.
+
+| `/Prev`
+| integer
+| Byte offset of the _previous_ cross-reference section. This is how incremental updates chain together (Chapter 8).
+
+| `/Encrypt`
+| dictionary or reference
+| Encryption dictionary. The signature value itself (`/Contents`) is never encrypted even in encrypted PDFs, but the surrounding content may be.
+|===
+
+IMPORTANT: The `/ID` array is not cosmetic.
+Some signing tools use the first element as input to seed value dictionaries.
+Some validators check `/ID` consistency across incremental revisions.
+If a tool strips or regenerates `/ID` during processing, existing signatures may fail validation.
+We have seen this happen with document management systems that "normalize" PDFs on upload.
+
+
+== PDF Object Types
+
+Every value in a PDF file is one of exactly ten types, defined in {iso32000-2} Section 7.3.
+Understanding them is necessary for reading raw PDF structure, debugging signatures at the COS level, and working with PDFBox's object model.
+
+=== Boolean, Integer, Real, Null
+
+**Boolean** -- the keywords `true` or `false`.
+Used in flags like `/NeedAppearances true`.
+
+**Integer** -- a signed whole number with no decimal point: `42`, `-7`, `0`.
+The four values in a `/ByteRange` array are integers.
+Integers in PDF have no fixed bit width; implementations typically use 64-bit storage.
+
+**Real** -- a signed number with a decimal point: `3.14`, `-0.001`, `72.0`.
+Used in coordinate values, transformation matrices, and font metrics.
+
+**Null** -- the keyword `null`.
+A dictionary key mapped to `null` is equivalent to the key being absent.
+Null references are resolved as "object not found."
+
+=== String (Literal and Hexadecimal)
+
+PDF has two string representations:
+
+**Literal string** -- parentheses-delimited: `(Hello World)`.
+Backslash escapes handle special characters: `\(`, `\)`, `\\`, `\n`, `\r`, `\t`, and octal escapes like `\101` (the letter A).
+Unbalanced parentheses must be escaped; balanced ones need not be.
+
+**Hexadecimal string** -- angle-bracket-delimited hex pairs: `<48656C6C6F>`.
+Each pair of hex digits represents one byte.
+The `/Contents` value in a signature dictionary is always a hex string because it contains raw binary CMS data.
+The hex string is right-padded with zeros to fill the space reserved during signing.
+
+=== Name
+
+A slash-prefixed identifier: `/Type`, `/Page`, `/Sig`, `/ByteRange`.
+Names are atoms, not strings -- they serve as dictionary keys and enumeration values.
+Names containing characters outside the printable ASCII range use a `#xx` hex escape: `/F#23oo` represents the name `F#oo`.
+
+=== Array
+
+An ordered collection enclosed in square brackets: `[0 14000 30408 14592]`.
+Arrays can contain any mix of types, including other arrays and dictionaries.
+The `/ByteRange` value is an array of four integers.
+
+=== Dictionary
+
+Key-value pairs enclosed in double angle brackets:
+
+[source]
+----
+<< /Type /Sig /Filter /Adobe.PPKLite /SubFilter /adbe.pkcs7.detached >>
+----
+
+Keys are always names.
+Values can be any type.
+Dictionaries are the workhorse of PDF -- every page, every font, every annotation, every signature is a dictionary or contains one.
+
+=== Stream
+
+A dictionary followed by raw binary data, delimited by `stream` and `endstream`:
+
+[source]
+----
+8 0 obj
+<< /Type /XObject /Subtype /Image /Length 12345 /Filter /FlateDecode >>
+stream
+...binary data (12345 bytes, possibly compressed)...
+endstream
+endobj
+----
+
+Streams are the only mechanism for storing bulk data: page drawing instructions, images, embedded font programs, cross-reference data, and CMap tables.
+The `/Length` key must be exact -- if it is wrong, the parser reads too few or too many bytes, corrupting everything that follows.
+
+[CAUTION]
+====
+A wrong `/Length` is one of the most common forms of PDF corruption from buggy generators.
+When debugging a corrupt PDF, always compare the `/Length` value against the actual byte count between `stream` and `endstream`.
+QPDF's `--check` flag catches this automatically.
+====
+
+=== Indirect Object and Indirect Reference
+
+An **indirect object** wraps any value with an object number and generation number: `12 0 obj ... endobj`.
+An **indirect reference** is a pointer to such an object: `12 0 R`.
+The cross-reference table resolves these: given `12 0 R`, the parser looks up object 12, generation 0, in the xref table, seeks to the recorded byte offset, and reads the object.
+
+Indirect references are the glue that holds a PDF together.
+The catalog references the page tree, the page tree references individual pages, pages reference content streams and annotations, annotations reference appearance streams -- all through indirect references.
+
+
+[[ch07-xref-streams]]
+== Cross-Reference Streams
+
+PDF 1.5 introduced **cross-reference streams** -- an alternative to the classic ASCII xref table that stores the same data in a compressed binary stream object.
+
+=== Why They Exist
+
+The classic xref table has two problems.
+First, the 20-bytes-per-entry format is wasteful: a PDF with 100,000 objects needs a 2 MB xref table of pure ASCII text.
+Cross-reference streams compress this data 5-10x using standard stream filters (typically FlateDecode).
+Second, the classic format has no entry type for objects stored inside object streams (covered next); cross-reference streams introduce a Type 2 entry for exactly this purpose.
+
+=== Structure
+
+[source]
+----
+42 0 obj
+<<
+  /Type /XRef
+  /Size 100
+  /W [1 3 1]
+  /Index [0 100]
+  /Root 1 0 R
+  /Info 5 0 R
+  /ID [<abc123> <abc123>]
+  /Filter /FlateDecode
+  /Length 487
+>>
+stream
+...compressed binary data...
+endstream
+endobj
+----
+
+The stream dictionary serves double duty: it contains both the stream parameters (`/Filter`, `/Length`) and the trailer parameters (`/Root`, `/Info`, `/ID`, `/Prev`, `/Size`).
+There is no separate `trailer` keyword when cross-reference streams are used.
+
+The `/W` array specifies field widths in bytes for each entry.
+`/W [1 3 1]` means: 1 byte for the type field, 3 bytes for field 2, 1 byte for field 3 -- 5 bytes total per entry.
+
+.Cross-Reference Stream Entry Types -- {iso32000-2} Section 7.5.8, Table 18
+[cols="1,4,4", options="header"]
+|===
+| Type | Field 2 Meaning | Field 3 Meaning
+
+| 0
+| Next free object number
+| Generation number of the free entry
+
+| 1
+| Byte offset of the object in the file
+| Generation number
+
+| 2
+| Object number of the containing object stream
+| Index of this object within that object stream
+|===
+
+Type 2 is the key innovation.
+It says "this object is not a standalone indirect object in the file body; it is packed inside object stream N, at position M."
+Classic xref tables cannot express this.
+
+The `/Index` array specifies which object numbers are covered.
+`/Index [0 100]` means entries for objects 0 through 99.
+A cross-reference stream can have multiple subsections: `/Index [0 50 200 10]` covers objects 0-49 and 200-209.
+
+WARNING: Some PDF libraries produce files that start with a classic xref table but switch to cross-reference streams in incremental updates (or vice versa).
+This is legal per the specification, but it trips up parsers that expect consistency.
+PDFBox handles the transition transparently; not all tools do.
+
+
+== Object Streams
+
+PDF 1.5 also introduced **object streams**: multiple indirect objects packed into a single compressed stream, eliminating the repeated `N 0 obj`...`endobj` framing overhead.
+
+[source]
+----
+10 0 obj
+<< /Type /ObjStm /N 5 /First 32 /Filter /FlateDecode /Length 418 >>
+stream
+...compressed data containing 5 objects...
+endstream
+endobj
+----
+
+The `/N` key gives the count of packed objects; `/First` gives the byte offset within the decompressed data where the first object's value begins (the preceding bytes contain a table of object numbers and offsets).
+
+Not everything can live in an object stream.
+{iso32000-2} Section 7.5.7 excludes: stream objects (they have their own `stream`/`endstream` framing), the encryption dictionary, objects with non-zero generation numbers, and the cross-reference stream itself.
+Signature dictionaries _can_ technically live in object streams (they are dictionaries, not streams), but signing tools almost never place them there because it would complicate byte-range calculation.
+
+TIP: If you need to find a signature dictionary in a raw PDF, do not search for `/Type /Sig` in the file bytes -- it might be compressed inside an object stream.
+Use `qpdf --show-object=N` where N is the object number.
+QPDF decompresses object streams transparently.
+
+
+== Hex Dump Walkthrough: A Minimal Valid PDF
+
+Let us trace through a complete, minimal PDF file, annotating every section:
+
+[source]
+----
+%PDF-1.7                                          <1>
+%âãÏÓ                                             <2>
+
+1 0 obj                                            <3>
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+
+2 0 obj                                            <4>
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+
+3 0 obj                                            <5>
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]
+   /Contents 4 0 R
+   /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+
+4 0 obj                                            <6>
+<< /Length 44 >>
+stream
+BT /F1 24 Tf 100 700 Td (Hello) Tj ET
+endstream
+endobj
+
+5 0 obj                                            <7>
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+
+xref                                               <8>
+0 6
+0000000000 65535 f
+0000000015 00000 n
+0000000066 00000 n
+0000000121 00000 n
+0000000286 00000 n
+0000000384 00000 n
+
+trailer                                            <9>
+<< /Size 6 /Root 1 0 R >>
+startxref                                          <10>
+453
+%%EOF                                              <11>
+----
+
+<1> Header: PDF version 1.7
+<2> Binary hint: four bytes above 0x80, forcing binary classification
+<3> Catalog: root of the document tree; `/Pages` points to the page tree root
+<4> Pages node: page tree root with one child page
+<5> Page: defines the media size (US Letter), references a content stream and font resources
+<6> Content stream: drawing instructions -- Begin Text, set font F1 at 24pt, move to (100,700), show "Hello", End Text
+<7> Font: a reference to standard Helvetica (not embedded -- viewers provide a substitute)
+<8> Cross-reference table: six entries mapping object numbers to byte offsets
+<9> Trailer: `/Size 6` (six xref entries), `/Root` points to the catalog
+<10> `startxref`: byte offset of the `xref` keyword
+<11> `%%EOF`: end-of-file marker
+
+A parser reads this _backward_: find `%%EOF`, find `startxref`, jump to byte 453, parse the xref table, read the trailer, follow `/Root` to object 1, and navigate from there.
+
+NOTE: This minimal PDF omits a `/Info` dictionary, `/ID` array, and font embedding.
+Production PDFs have dozens to hundreds of objects, but the structural skeleton is identical.
+
+
+== How Different Generators Produce Different Structures
+
+Not all PDFs are created equal at the byte level, and the differences matter when you are computing byte ranges for signatures.
+
+**Adobe Acrobat** produces linearized files by default, with objects reordered for progressive display and a hint table at the beginning.
+It uses cross-reference streams in modern versions.
+
+**Apache PDFBox** ({pdfbox-version}) writes objects in memory-allocation order, uses classic xref tables by default, and does not linearize.
+Its incremental save mode (`saveIncremental()`) produces clean append-only updates.
+
+**iText / OpenPDF** frequently uses cross-reference streams even for PDF 1.7 files, and its object ordering varies by version.
+
+**LibreOffice** produces classic xref tables with object ordering that appears semi-random (it reflects internal processing order).
+
+**Microsoft Word** (Save as PDF) produces well-structured files with cross-reference streams and object streams, heavily compressed.
+
+**QPDF** can transform between any of these representations: linearize, de-linearize, convert xref tables to streams or vice versa, unpack object streams, and normalize whitespace.
+It is the Swiss Army knife of PDF structural debugging.
+
+[TIP]
+====
+When comparing two versions of a signed PDF at the structural level:
+
+[source,bash]
+----
+# Show all xref entries and their origins
+qpdf --show-xref document.pdf
+
+# Convert to JSON for semantic comparison
+qpdf --json document-v1.pdf > /tmp/v1.json
+qpdf --json document-v2.pdf > /tmp/v2.json
+diff /tmp/v1.json /tmp/v2.json
+
+# Decompress everything for human-readable byte-level comparison
+qpdf --qdf --object-streams=disable input.pdf readable.pdf
+----
+====
+
+
+== Why File Structure Matters for Signatures
+
+We have spent this chapter on raw PDF anatomy for a specific reason: **PDF digital signatures operate at the byte level**, not the logical-object level.
+
+The `/ByteRange` array in a signature dictionary specifies exactly which bytes in the physical file are hashed and signed.
+Verification reads those exact bytes, computes a cryptographic hash, and compares it against the hash embedded in the CMS `SignedData` structure.
+If a single byte differs -- because an object was renumbered, a cross-reference entry was reformatted, whitespace was normalized, or a stream was recompressed -- the hash will not match, and the signature is invalid.
+
+This has concrete consequences:
+
+**Re-saving breaks signatures.**
+Loading a signed PDF into memory and writing it back out -- even without changing any logical content -- rewrites the file from scratch: new object ordering, new byte offsets, new xref entries.
+The bytes change.
+The signature dies.
+Signed PDFs must be saved incrementally (Chapter 8).
+
+**Linearization affects byte layout.**
+Linearizing a PDF after signing rearranges objects for progressive display.
+The bytes move.
+The signature breaks.
+Always linearize _before_ signing, never after.
+
+**Cross-reference format affects layout.**
+Whether a file uses classic xref tables or xref streams changes the physical bytes in the file.
+A signature computed against one format will not validate if the format changes, even when the logical content is identical.
+
+**Object streams affect findability.**
+If a signature dictionary is packed inside an object stream, byte-level tools that search for `/Type /Sig` in the raw file will miss it.
+Always use proper PDF parsing, never raw byte scanning, when searching for signature-related objects.
+
+
+== PDFBox COS Layer: Mapping PDF Types to Java
+
+PDFBox's COS (Carousel Object System) layer provides a one-to-one mapping from PDF types to Java classes:
+
+.PDFBox COS Type Mapping
+[cols="2,3,4", options="header"]
+|===
+| PDF Type | PDFBox Class | Notes
+
+| Boolean | `COSBoolean` | Singleton `TRUE`/`FALSE`
+| Integer | `COSInteger` | Wraps `long`; common values cached
+| Real | `COSFloat` | Wraps `float`
+| String | `COSString` | Both literal and hex; `setForceHexForm(true)` for hex output
+| Name | `COSName` | Interned: `COSName.TYPE`, `COSName.SIG`, custom via `COSName.getPDFName("ByteRange")`
+| Null | `COSNull` | Singleton `COSNull.NULL`
+| Array | `COSArray` | Ordered list of `COSBase`
+| Dictionary | `COSDictionary` | `getItem()` returns raw value; `getDictionaryObject()` dereferences indirect refs
+| Stream | `COSStream` | Extends `COSDictionary`; `createInputStream()` for decoded data
+| Indirect ref | `COSObject` | Wraps `COSBase` with object number and generation
+|===
+
+[IMPORTANT]
+====
+The distinction between `getItem()` and `getDictionaryObject()` is critical when working with signatures.
+`getItem()` returns the raw value -- if the entry is an indirect reference, you get the `COSObject` wrapper (which carries the object number).
+`getDictionaryObject()` follows the reference and returns the target dictionary.
+Use `getDictionaryObject()` when you need the content; use `getItem()` when you need the object number (e.g., to correlate with xref byte offsets).
+====
+
+Here is how to traverse the file structure from trailer to signature dictionaries using PDFBox {pdfbox-version}:
+
+[source,java]
+----
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.cos.COSArray;
+import org.apache.pdfbox.cos.COSDictionary;
+import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.cos.COSString;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.interactive.form.PDAcroForm;
+import org.apache.pdfbox.pdmodel.interactive.form.PDField;
+import org.apache.pdfbox.pdmodel.interactive.form.PDSignatureField;
+
+try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+    // Inspect the trailer
+    COSDictionary trailer = doc.getDocument().getTrailer();
+    COSArray id = trailer.getCOSArray(COSName.ID);
+    log.info("File ID present: {}", id != null);
+    log.info("Trailer /Size: {}", trailer.getInt(COSName.SIZE));
+
+    // Navigate to signatures through the AcroForm
+    PDAcroForm acroForm = doc.getDocumentCatalog().getAcroForm();
+    if (acroForm == null) {
+        log.info("No AcroForm -- no form fields or signatures");
+        return;
+    }
+
+    for (PDField field : acroForm.getFieldTree()) {
+        if (field instanceof PDSignatureField sigField) {
+            COSDictionary sigDict = sigField.getCOSObject();
+            COSDictionary sigValue = sigDict.getCOSDictionary(COSName.V);
+
+            if (sigValue != null) {
+                COSName subFilter = sigValue.getCOSName(COSName.SUB_FILTER);
+                COSArray byteRange = sigValue.getCOSArray(
+                    COSName.getPDFName("ByteRange"));
+                COSString contents = (COSString) sigValue.getDictionaryObject(
+                    COSName.CONTENTS);
+
+                log.info("Signature '{}': SubFilter={}, ByteRange={}",
+                    field.getFullyQualifiedName(), subFilter, byteRange);
+                log.info("  /Contents hex length: {} bytes",
+                    contents.getBytes().length);
+            }
+        }
+    }
+}
+----
+
+
+== Common Structural Problems and Debugging
+
+=== Incorrect /Length Values
+
+A stream's `/Length` does not match its actual byte count.
+This corrupts parsing downstream and can shift xref offsets, making byte-range verification fail.
+QPDF catches this:
+
+[source,bash]
+----
+qpdf --check suspect.pdf
+----
+
+=== Missing /ID Array
+
+Some generators omit `/ID` entirely.
+While technically optional, its absence can trip up validators that check it as part of integrity verification.
+Use the PDFBox code above to detect missing `/ID` programmatically.
+
+=== Multiple %%EOF Markers
+
+A PDF with incremental updates (Chapter 8) will have multiple `%%EOF` markers.
+This is normal for signed documents.
+But some web-based PDF processors strip everything after the first `%%EOF`, destroying all incremental updates and all signatures.
+
+=== Trailing Bytes After Final %%EOF
+
+Bytes after the last `%%EOF` are not part of the PDF.
+For signed documents, the `/ByteRange` of the outermost signature must cover every byte up to the end of the file.
+Trailing bytes outside the byte range create a validation gap that the Bochum ISA attacks (Chapter 24) exploited.
+
+=== Cross-Reference Table Corruption
+
+Byte offsets in the xref table do not match actual object positions.
+This happens when a tool modifies the body without rebuilding the xref, or when binary transfer corrupts bytes.
+
+WARNING: QPDF can repair broken xref tables, but repair involves a full rewrite, which invalidates all signatures.
+Use `--check` for diagnosis without modification.
+For signed documents, repair is not an option -- you need the original uncorrupted file.
+
+
+== What Comes Next
+
+We have now dissected the complete physical structure of a PDF file: header, body, cross-reference table (in both classic ASCII and compressed stream formats), object streams, trailer, and `%%EOF`.
+We have mapped every PDF object type to its PDFBox COS class, walked through a minimal file byte by byte, and connected the physical structure to the requirements of digital signatures.
+
+Chapter 8 builds directly on this foundation with **incremental updates** -- the append-only mechanism that makes PDF signatures possible in the first place.
+If this chapter was about the structure of a single snapshot, Chapter 8 is about how those snapshots stack on top of each other, forming the layered history that signatures depend on to survive.

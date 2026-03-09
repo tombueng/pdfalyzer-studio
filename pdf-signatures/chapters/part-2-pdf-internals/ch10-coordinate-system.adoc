@@ -1,0 +1,555 @@
+= PDF Coordinate System
+
+[.lead]
+The PDF coordinate system is the single most common source of signature placement bugs.
+It is conceptually simple — an origin at the bottom-left corner, units in points — but it collides head-on with how every screen coordinate system works, how page rotation transforms visual layout without changing coordinates, and how annotation rectangles encode position in a way that rewards precision and punishes guessing.
+
+If you have ever placed a signature at what you thought was the bottom of a page and found it at the top, or created a perfectly valid signature that appeared as a mirror image on a rotated page, or spent an afternoon trying to figure out why your annotation rectangle produced a zero-height invisible box — this chapter is for you.
+
+We will cover the coordinate system from first principles, work through every page box that {iso32000-2} defines, explain how page rotation interacts with coordinates, show how the Current Transformation Matrix works, and then tie it all back to signature placement with practical PDFBox code and debugging techniques.
+
+== User Space: The Default Coordinate System
+
+Every PDF page has a **user space** coordinate system defined in {iso32000-2} Section 8.3.2.
+The rules are few but non-negotiable:
+
+* The **origin** is at the **bottom-left** corner of the page.
+* The **x-axis** increases to the **right**.
+* The **y-axis** increases **upward**.
+* One unit equals **1/72 of an inch** — which is exactly one **typographic point**.
+
+That last property is not a coincidence.
+PDF was born as a page description language for printing, and the typographic point has been the standard unit of measure in the printing industry since the 18th century.
+When the specification says a page is 612 units wide and 792 units tall, that's 8.5 by 11 inches — US Letter size.
+A4 paper (the ISO 216 standard used nearly everywhere outside the US) is 595.28 by 841.89 points (210 by 297 millimetres).
+
+NOTE: The 1/72-inch definition is a convenient approximation.
+The traditional printer's point (the Didot point, the Pica point) varies slightly depending on which historical tradition you follow.
+PDF sidesteps this ambiguity by defining one user space unit as _exactly_ 1/72 inch, period.
+{iso32000-2} Section 8.3.2.3 makes this explicit.
+
+The bottom-left origin is where most coordinate confusion begins.
+Every windowing system you have used — HTML, Java Swing, JavaFX, Android, iOS, Win32 — places the origin at the **top-left** corner with the y-axis increasing **downward**.
+We are trained to think of y=0 as the top.
+In PDF, y=0 is the bottom.
+
+This means that when you want to place a signature 50 points from the top of a US Letter page, the y-coordinate is not 50 — it is 792 minus 50 minus the height of the signature rectangle.
+We will return to this conversion formula repeatedly throughout this chapter because it is the root cause of the most common signature positioning bugs.
+
+== Page Boxes: The Five Rectangles
+
+A PDF page does not have a single "size."
+It has up to five nested rectangles, each serving a different purpose.
+{iso32000-2} Section 14.11.2 defines them all.
+Understanding which box matters for signature placement — and which boxes most documents actually define — prevents an entire category of positioning errors.
+
+=== MediaBox (Required)
+
+The **MediaBox** defines the physical medium — the full extent of the page as it would be printed or rendered.
+It is the only required page box; every other box defaults to the MediaBox if absent.
+
+For a US Letter page:
+[source]
+----
+/MediaBox [0 0 612 792]
+----
+
+The array is `[llx lly urx ury]` — lower-left x, lower-left y, upper-right x, upper-right y.
+The MediaBox almost always starts at the origin `[0 0 ...]`, but it does not have to.
+A MediaBox of `[100 100 712 892]` is perfectly legal and defines the same 612-by-792 point area, just shifted.
+Most tools normalize to zero, but when debugging coordinates, never assume.
+
+=== CropBox
+
+The **CropBox** defines the region to which the page contents are clipped when displayed or printed.
+Think of it as the visible window into the MediaBox.
+If absent, the CropBox defaults to the MediaBox.
+
+A common use case: a document designed for A4 paper with crop marks.
+The MediaBox includes the crop marks (larger than the final page), and the CropBox clips to the actual content area.
+
+For signature placement, the CropBox is the relevant boundary in most viewers.
+Adobe Acrobat positions annotations relative to the CropBox, not the MediaBox, when they differ.
+
+WARNING: If you compute signature coordinates against the MediaBox but the document has a smaller CropBox, your signature may appear to be shifted or partially off-screen.
+Always check `page.getCropBox()` in PDFBox and use its dimensions as the reference frame.
+
+=== BleedBox
+
+The **BleedBox** defines the region to which the page contents are clipped when output in a production (printing) environment.
+It is slightly larger than the TrimBox to allow for bleed — the area where ink extends beyond the final cut edge to avoid white margins from imprecise cutting.
+
+The BleedBox is relevant for professional printing workflows and has no meaningful impact on digital signature placement.
+We mention it for completeness.
+
+=== TrimBox
+
+The **TrimBox** defines the intended final dimensions of the page after trimming.
+In a print-production workflow, the TrimBox is the "real" page boundary — the finished product.
+
+Like the BleedBox, the TrimBox is irrelevant for signature placement in digital workflows.
+However, if you are building a signing service that handles print-ready PDFs, be aware that the TrimBox may be significantly smaller than the MediaBox, and your users' mental model of "the page" aligns with the TrimBox, not the MediaBox.
+
+=== ArtBox
+
+The **ArtBox** defines the extent of the page's "meaningful content" as intended by the author.
+It is rarely used in practice and has no impact on signature placement.
+
+=== Which Box Matters for Signatures?
+
+For digital signature placement, the decision tree is simple:
+
+1. **Use the CropBox** as your reference frame.
+   In PDFBox, `page.getCropBox()` returns the CropBox if defined, otherwise it falls back to the MediaBox.
+   This is the correct default.
+
+2. If you need to verify that your annotation rectangle falls within the visible area, check against the CropBox.
+
+3. Never assume the CropBox starts at `[0 0 ...]`.
+   A CropBox of `[50 50 562 742]` shifts the visible origin.
+
+TIP: PDFBox's `PDPage.getCropBox()` handles the fallback-to-MediaBox logic automatically.
+You almost never need to call `getMediaBox()` directly for positioning purposes.
+The one exception is when you need to know the physical page dimensions for coordinate translation on pages with a non-zero CropBox origin.
+
+== Annotation Rectangles
+
+Every annotation — including signature widget annotations — has a `/Rect` entry that specifies its position on the page.
+The `/Rect` is an array of four numbers:
+
+[source]
+----
+/Rect [x1 y1 x2 y2]
+----
+
+Where `[x1 y1]` is the **lower-left** corner and `[x2 y2]` is the **upper-right** corner, both in user space coordinates relative to the page's coordinate system.
+
+For a signature that should appear 100 points from the left edge, 50 points from the bottom edge, and is 200 points wide by 60 points tall:
+
+[source]
+----
+/Rect [100 50 300 110]
+----
+
+That gives us: lower-left at (100, 50), upper-right at (100+200, 50+60) = (300, 110).
+
+IMPORTANT: The convention is lower-left to upper-right.
+If you accidentally swap these — providing upper-left to lower-right, for example — some viewers will silently normalize the rectangle, while others will render a zero-area or inverted annotation.
+PDFBox's `PDRectangle` constructor takes `(x, y, width, height)` where `(x, y)` is the lower-left corner, so it handles this correctly if you feed it the right values.
+
+== Why Signature Positioning Goes Wrong
+
+Here is the bug that every developer writes exactly once.
+We want a signature at the visual top-right corner of a US Letter page.
+In screen coordinates (top-left origin), that would be approximately `(400, 30)` for a rectangle starting near the top-right.
+So we write:
+
+[source,java]
+----
+PDRectangle rect = new PDRectangle(400, 30, 200, 50);
+----
+
+And the signature appears at the **bottom-right** of the page.
+Because y=30 in PDF user space is 30 points from the _bottom_, not 30 points from the top.
+
+The correct conversion is:
+
+[source,java]
+----
+float pageHeight = page.getCropBox().getHeight();
+float desiredTopOffset = 30;    // 30 points from the visual top
+float signatureHeight = 50;
+
+float pdfY = pageHeight - desiredTopOffset - signatureHeight;
+PDRectangle rect = new PDRectangle(400, pdfY, 200, signatureHeight);
+----
+
+The formula is: `pdfY = pageHeight - topOffset - rectangleHeight`.
+
+This is the single most important formula in this chapter.
+Memorize it, put it in a utility method, and never compute it inline.
+
+WARNING: If your signing UI lets users click a position on a rendered page, the click coordinates are in screen space (origin top-left).
+You must invert the y-axis before creating the PDF annotation rectangle.
+Failing to do so produces signatures that appear to be vertically "mirrored" — a signature placed at the top appears at the bottom, and vice versa.
+
+== Page Rotation
+
+The `/Rotate` key in a page dictionary specifies a rotation angle that viewers should apply when displaying the page.
+Legal values are 0, 90, 180, and 270 (degrees, clockwise).
+
+Here is the critical insight that trips up even experienced developers: **page rotation does not change the coordinate system**.
+It changes how the viewer _displays_ the coordinates, but the coordinates themselves — and the annotation rectangles — remain in the original, unrotated space.
+
+Consider a US Letter page with `/Rotate 90`.
+The viewer displays it in landscape orientation: 792 points wide and 612 points tall.
+But the MediaBox is still `[0 0 612 792]` and the coordinate system still has its origin at the bottom-left corner of the _unrotated_ page.
+
+This means that if you compute an annotation rectangle for a 90-degree-rotated page using the visual (rotated) dimensions, your coordinates will be wrong.
+The annotation will appear in a completely unexpected location because the viewer applies the rotation _after_ positioning the annotation in the unrotated coordinate space.
+
+=== Rotation and Signature Placement
+
+To place a signature at a specific visual position on a rotated page, we must think in the _unrotated_ coordinate space and account for the rotation.
+
+For a page rotated 90 degrees clockwise:
+
+* The visual width (what the user sees) corresponds to the unrotated height (792 for US Letter).
+* The visual height corresponds to the unrotated width (612 for US Letter).
+* A point at visual position (vx, vy) — where vy is measured from the visual top — maps to unrotated coordinates (vy_from_bottom, vx) approximately, depending on the rotation direction.
+
+The general approach in PDFBox:
+
+[source,java]
+----
+PDRectangle cropBox = page.getCropBox();
+int rotation = page.getRotation();
+
+float pageWidth, pageHeight;
+if (rotation == 90 || rotation == 270) {
+    // Visual dimensions are swapped
+    pageWidth = cropBox.getHeight();
+    pageHeight = cropBox.getWidth();
+} else {
+    pageWidth = cropBox.getWidth();
+    pageHeight = cropBox.getHeight();
+}
+
+// Now compute visual position
+float visualX = 400;                          // from left of visual page
+float visualTopOffset = 30;                   // from top of visual page
+float sigWidth = 200;
+float sigHeight = 50;
+
+// Convert to PDF coordinates depending on rotation
+float pdfX, pdfY;
+switch (rotation) {
+    case 0:
+        pdfX = cropBox.getLowerLeftX() + visualX;
+        pdfY = cropBox.getUpperRightY() - visualTopOffset - sigHeight;
+        break;
+    case 90:
+        pdfX = cropBox.getLowerLeftX() + visualTopOffset;
+        pdfY = cropBox.getLowerLeftY() + visualX;
+        // Width and height swap in the annotation rect
+        float temp = sigWidth;
+        sigWidth = sigHeight;
+        sigHeight = temp;
+        break;
+    case 180:
+        pdfX = cropBox.getUpperRightX() - visualX - sigWidth;
+        pdfY = cropBox.getLowerLeftY() + visualTopOffset;
+        break;
+    case 270:
+        pdfX = cropBox.getUpperRightX() - visualTopOffset - sigHeight;
+        pdfY = cropBox.getUpperRightY() - visualX - sigWidth;
+        temp = sigWidth;
+        sigWidth = sigHeight;
+        sigHeight = temp;
+        break;
+    default:
+        throw new IllegalArgumentException("Invalid rotation: " + rotation);
+}
+
+PDRectangle signatureRect = new PDRectangle(pdfX, pdfY, sigWidth, sigHeight);
+----
+
+TIP: Wrap this coordinate transformation in a dedicated utility method and unit-test it for all four rotation values.
+This is the kind of code where an off-by-one error in a single case produces a bug that only manifests for rotated pages — which may be 5% of your input documents, ensuring the bug survives initial testing and surfaces in production.
+
+== Transformation Matrices and the CTM
+
+{iso32000-2} Section 8.3.3 defines the **Current Transformation Matrix (CTM)** — a 3x3 affine transformation matrix that maps user space coordinates to device space coordinates.
+Every content stream operates under a CTM that controls translation, scaling, rotation, and skewing.
+
+The CTM is represented as six numbers `[a b c d e f]`, corresponding to the matrix:
+
+----
+| a  b  0 |
+| c  d  0 |
+| e  f  1 |
+----
+
+For signature appearances, the CTM matters because the appearance stream (the Form XObject that draws the visual signature) has its own coordinate system.
+The `/BBox` of the appearance stream defines the drawing area, and the viewer maps this BBox into the annotation rectangle using a transformation derived from the rectangle dimensions and the BBox dimensions.
+
+When the appearance stream's BBox does not match the annotation rectangle's aspect ratio, the viewer scales the appearance to fit — potentially distorting the signature image.
+If the BBox is `[0 0 200 50]` but the annotation rectangle is 200 by 100 points, the appearance will be stretched vertically by a factor of 2.
+
+IMPORTANT: When creating signature appearances in PDFBox, always ensure the appearance stream's BBox matches the dimensions of the annotation rectangle.
+If you use `PDRectangle` for both and create them from the same width and height values, this happens automatically.
+The bug occurs when one is constructed independently of the other, or when the annotation rectangle is modified after the appearance is created.
+
+Content streams use operators like `cm` (concatenate matrix) to modify the CTM:
+
+[source]
+----
+1 0 0 1 100 200 cm    % translate by (100, 200)
+0.5 0 0 0.5 0 0 cm    % scale by 50%
+----
+
+For signature placement, you rarely need to manipulate the CTM directly.
+PDFBox handles the coordinate mapping between the appearance stream and the annotation rectangle.
+But when debugging a signature that appears at the wrong size or position, checking the CTM in the appearance stream's content is a valuable diagnostic step.
+
+== Signature Appearance Rectangles and Page Coordinates
+
+The annotation rectangle (`/Rect`) positions the signature on the page.
+The appearance stream's BBox defines the drawing canvas.
+The relationship between them determines how the visual signature is rendered.
+
+Here is the complete chain:
+
+1. The page has a coordinate system defined by its MediaBox (or CropBox).
+2. The annotation's `/Rect` specifies where on the page the annotation sits, in page coordinates.
+3. The appearance stream has a `/BBox` that defines its internal drawing area.
+4. The viewer computes a transformation from the BBox to the Rect — scaling and translating the appearance stream content to fill the annotation rectangle.
+5. If the page has a `/Rotate` value, the viewer rotates the entire visual output _after_ all of the above.
+
+This chain explains why a signature appearance that looks correct on one page can appear distorted on another: if the target page has different dimensions or a different rotation, and you reuse the same appearance stream without adjusting the annotation rectangle, the scaling transformation changes.
+
+== PDFBox Coordinate Handling
+
+PDFBox provides `PDRectangle` as the primary class for working with rectangles in PDF user space.
+The key methods:
+
+[source,java]
+----
+PDRectangle mediaBox = page.getMediaBox();   // Physical page extent
+PDRectangle cropBox = page.getCropBox();     // Visible page extent (falls back to MediaBox)
+int rotation = page.getRotation();           // 0, 90, 180, or 270
+
+// PDRectangle stores lower-left corner + width/height
+float llx = cropBox.getLowerLeftX();
+float lly = cropBox.getLowerLeftY();
+float urx = cropBox.getUpperRightX();
+float ury = cropBox.getUpperRightY();
+float width = cropBox.getWidth();
+float height = cropBox.getHeight();
+----
+
+NOTE: `PDRectangle` predefined constants include `PDRectangle.A4` (595.28 x 841.89) and `PDRectangle.LETTER` (612 x 792).
+These are useful for creating new pages but should never be used as the reference for positioning on an existing page — always query the actual page's CropBox.
+
+=== Practical Example: Placing a Visible Signature
+
+The following complete example places a visible signature rectangle at a specific visual position on a page, correctly handling rotation:
+
+[source,java]
+----
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
+
+public class SignaturePositionCalculator {
+
+    /**
+     * Computes the PDF annotation rectangle for a signature at a given
+     * visual position, accounting for page rotation and CropBox offset.
+     *
+     * @param page         the target page
+     * @param visualX      x offset from the left of the visual page (points)
+     * @param visualY      y offset from the top of the visual page (points)
+     * @param visualWidth  desired visual width of the signature (points)
+     * @param visualHeight desired visual height of the signature (points)
+     * @return the annotation rectangle in PDF user space coordinates
+     */
+    public static PDRectangle computeSignatureRect(
+            PDPage page,
+            float visualX, float visualY,
+            float visualWidth, float visualHeight) {
+
+        PDRectangle crop = page.getCropBox();
+        int rotation = page.getRotation();
+
+        float pdfX, pdfY, pdfW, pdfH;
+
+        switch (rotation) {
+            case 0:
+                pdfX = crop.getLowerLeftX() + visualX;
+                pdfY = crop.getUpperRightY() - visualY - visualHeight;
+                pdfW = visualWidth;
+                pdfH = visualHeight;
+                break;
+            case 90:
+                pdfX = crop.getLowerLeftX() + visualY;
+                pdfY = crop.getLowerLeftY() + visualX;
+                pdfW = visualHeight;
+                pdfH = visualWidth;
+                break;
+            case 180:
+                pdfX = crop.getUpperRightX() - visualX - visualWidth;
+                pdfY = crop.getLowerLeftY() + visualY;
+                pdfW = visualWidth;
+                pdfH = visualHeight;
+                break;
+            case 270:
+                pdfX = crop.getUpperRightX() - visualY - visualHeight;
+                pdfY = crop.getUpperRightY() - visualX - visualWidth;
+                pdfW = visualHeight;
+                pdfH = visualWidth;
+                break;
+            default:
+                throw new IllegalArgumentException(
+                    "Unsupported rotation: " + rotation);
+        }
+
+        return new PDRectangle(pdfX, pdfY, pdfW, pdfH);
+    }
+}
+----
+
+Call this with visual coordinates — "200 points from the left, 50 points from the top, 180 wide, 40 tall" — and it returns the correct PDF rectangle regardless of rotation.
+
+== Common Coordinate Bugs
+
+Over years of building PDF signing tools, we have seen the same bugs recur.
+Here is a catalog.
+
+=== Flipped Signatures (Y-axis Inversion)
+
+**Symptom**: The signature appears at the vertical opposite of where it should be.
+A signature placed near the top of the page appears near the bottom.
+
+**Cause**: Using screen-space y-coordinates (origin top-left) directly as PDF y-coordinates (origin bottom-left) without inverting.
+
+**Fix**: Apply the formula `pdfY = cropBox.getUpperRightY() - screenY - signatureHeight`.
+
+=== Signatures on the Wrong Page Position (Rotated Pages)
+
+**Symptom**: The signature appears in a completely unexpected location — not just vertically flipped, but seemingly random — and only on certain documents.
+
+**Cause**: The page has a non-zero `/Rotate` value, and the coordinate calculation does not account for it.
+Many developers test exclusively with non-rotated pages and never encounter this until a customer submits a rotated document.
+
+**Fix**: Always check `page.getRotation()` and apply the rotation-aware coordinate transformation shown above.
+
+=== Zero-Area Annotation (Invisible Signature Becomes Truly Invisible)
+
+**Symptom**: The signature field exists (it shows in the signature panel), but nothing is visible on the page.
+
+**Cause**: The annotation rectangle has zero width or height, typically because the lower-left and upper-right corners are identical, or because a coordinate calculation produced a negative dimension that the viewer clamped to zero.
+
+**Fix**: Always validate that the computed rectangle has positive width and height before creating the annotation.
+Log the rectangle values during development:
+
+[source,java]
+----
+log.debug("Signature rect: x={}, y={}, w={}, h={}",
+    rect.getLowerLeftX(), rect.getLowerLeftY(),
+    rect.getWidth(), rect.getHeight());
+----
+
+=== Signature Appears Off-Page
+
+**Symptom**: The signature field exists, the signature validates, but nothing is visible.
+Unlike the zero-area case, the rectangle has positive dimensions — it's just outside the visible CropBox.
+
+**Cause**: Coordinates were computed against the MediaBox, but the CropBox is smaller.
+Or the CropBox has a non-zero origin that was not accounted for.
+
+**Fix**: Always compute against `page.getCropBox()` and include the CropBox's lower-left offset in your calculations.
+
+=== Distorted Signature Appearance
+
+**Symptom**: The signature image or text appears stretched or squashed.
+
+**Cause**: The appearance stream's BBox has a different aspect ratio than the annotation rectangle.
+The viewer scales the BBox to fit the Rect, distorting the content.
+
+**Fix**: Ensure the appearance stream's BBox dimensions match the annotation rectangle's width and height.
+
+== Debugging Coordinates with QPDF and RUPS
+
+When a signature appears in the wrong place, you need to inspect the raw PDF objects.
+Two tools are indispensable.
+
+=== QPDF
+
+QPDF (https://qpdf.sourceforge.io/) is a command-line tool that can dump every object in a PDF in a human-readable JSON format:
+
+[source,bash]
+----
+qpdf --json input.pdf > /tmp/structure.json
+----
+
+Then search for the annotation rectangle:
+
+[source,bash]
+----
+grep -A2 '"Rect"' /tmp/structure.json
+----
+
+You will see the raw `/Rect` array values.
+Compare them against the page's `/MediaBox` and `/CropBox` to verify they fall within the visible area.
+
+QPDF can also show page-level dictionaries:
+
+[source,bash]
+----
+qpdf --show-object=3 input.pdf   # show object 3 (a page, for example)
+----
+
+=== RUPS (Reading and Updating PDF Syntax)
+
+RUPS is a Java Swing application from the iText team that provides a tree view of every PDF object.
+It is invaluable for visual debugging because you can navigate the object tree, inspect annotation rectangles, and see the page boxes side by side.
+
+To inspect a signature's coordinates in RUPS:
+
+1. Open the PDF in RUPS.
+2. Navigate to **Pages** -> **Page N** -> **Annots** (the annotations array).
+3. Find the signature widget annotation.
+4. Check the `/Rect` value — this is the annotation rectangle in page coordinates.
+5. Go back to the page and check `/MediaBox`, `/CropBox`, and `/Rotate`.
+6. Verify that the Rect falls within the CropBox and that you've accounted for the rotation.
+
+TIP: RUPS also lets you inspect the appearance stream's BBox.
+Navigate into the annotation's `/AP` -> `/N` and check the `/BBox` entry.
+If the BBox dimensions don't match the Rect dimensions, you've found your distortion bug.
+
+=== PDFBox Programmatic Inspection
+
+You can also inspect coordinates programmatically, which is useful in automated tests:
+
+[source,java]
+----
+try (PDDocument doc = Loader.loadPDF(new File("signed.pdf"))) {
+    for (PDPage page : doc.getPages()) {
+        log.info("Page MediaBox: {}", page.getMediaBox());
+        log.info("Page CropBox:  {}", page.getCropBox());
+        log.info("Page Rotation: {}", page.getRotation());
+
+        for (var annot : page.getAnnotations()) {
+            if ("Sig".equals(annot.getSubtype())) {
+                PDRectangle rect = annot.getRectangle();
+                log.info("Sig annotation Rect: [{}, {}, {}, {}]",
+                    rect.getLowerLeftX(), rect.getLowerLeftY(),
+                    rect.getUpperRightX(), rect.getUpperRightY());
+            }
+        }
+    }
+}
+----
+
+CAUTION: When writing integration tests for signature placement, always test with at least four documents: one for each rotation value (0, 90, 180, 270).
+Also test with a document that has a CropBox smaller than its MediaBox.
+These five test cases catch the vast majority of coordinate bugs before they reach production.
+
+== Summary
+
+The PDF coordinate system is a solved problem — the rules are clear and have not changed since PDF 1.0.
+The difficulty lies entirely in the mismatch between PDF's bottom-left origin and the top-left origin of every UI framework, compounded by page rotation's effect on visual layout.
+
+For signature placement, remember these principles:
+
+* Always use the CropBox (via `page.getCropBox()`) as your reference frame.
+* Always invert the y-axis when converting from screen coordinates: `pdfY = cropBoxTop - screenY - height`.
+* Always check `page.getRotation()` and transform coordinates accordingly.
+* Always ensure the appearance stream BBox matches the annotation rectangle dimensions.
+* Always test with rotated pages and non-standard CropBoxes.
+
+These are not complex algorithms.
+They are simple arithmetic applied consistently.
+The bugs come from skipping a step, not from the math being hard.

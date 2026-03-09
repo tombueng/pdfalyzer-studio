@@ -338,7 +338,7 @@
 .font-map-row-warning { border-left: 3px solid #fa8c16; }
 .font-map-row-danger { border-left: 3px solid #dc3545; background: rgba(220,53,69,0.04); }
 .font-map-row-mismatch { border-left: 3px solid #fadb14; }
-.font-map-row-unknown { border-left: 3px solid #6c757d; }
+.font-map-row-unknown { border-left: 3px solid #9ca3ab; }
 .font-map-row-used-problem { background: rgba(220,53,69,0.08); }
 
 /* Summary table row status borders */
@@ -360,7 +360,7 @@
 .diag-badge-warn { color: #fa8c16; }
 .diag-badge-danger { color: #dc3545; }
 .diag-badge-mismatch { color: #fadb14; }
-.diag-badge-muted { color: #6c757d; }
+.diag-badge-muted { color: #9ca3ab; }
 
 /* Compact status icons */
 .diag-icon { font-size: 13px; cursor: default; }
@@ -368,11 +368,11 @@
 .diag-icon-warn { color: #fa8c16; }
 .diag-icon-danger { color: #dc3545; }
 .diag-icon-mismatch { color: #fadb14; }
-.diag-icon-muted { color: #6c757d; }
+.diag-icon-muted { color: #9ca3ab; }
 
 /* Glyph absent indicator */
 .font-glyph-absent {
-    color: rgba(220,53,69,0.6);
+    color: rgba(220,53,69,0.8);
     font-size: 18px;
     display: inline-flex;
     align-items: center;

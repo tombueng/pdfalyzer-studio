@@ -1,0 +1,288 @@
+% ═══════════════════════════════════════════════════════════════════════════════
+% PDF Digital Signatures — Technical Reference
+% LaTeX preamble for professional book typesetting
+% ═══════════════════════════════════════════════════════════════════════════════
+
+% ── Page geometry ────────────────────────────────────────────────────────────
+% Geometry is set by pandoc via -V geometry="..." to avoid option clash.
+% Do not load \usepackage{geometry} here.
+
+% ── Typography ───────────────────────────────────────────────────────────────
+\usepackage{fontspec}
+\setmainfont{Noto Serif}[
+    BoldFont={Noto Serif Bold},
+    ItalicFont={Noto Serif Italic},
+    BoldItalicFont={Noto Serif Bold Italic}
+]
+\setsansfont{Noto Sans}[
+    BoldFont={Noto Sans Bold},
+    ItalicFont={Noto Sans Italic}
+]
+\setmonofont{DejaVu Sans Mono}[
+    Scale=0.85
+]
+
+\usepackage{microtype}          % Microtypographic improvements
+\usepackage{setspace}
+\setstretch{1.08}               % Slightly increased line spacing for readability
+
+% ── Colors ───────────────────────────────────────────────────────────────────
+\usepackage{xcolor}
+\definecolor{accent}{HTML}{0f3460}
+\definecolor{linkcolor}{HTML}{1a73e8}
+\definecolor{codebackground}{HTML}{1e1e2e}
+\definecolor{codetext}{HTML}{cdd6f4}
+\definecolor{notecolor}{HTML}{0f3460}
+\definecolor{warningcolor}{HTML}{e65100}
+\definecolor{cautioncolor}{HTML}{b71c1c}
+\definecolor{tipcolor}{HTML}{2e7d32}
+\definecolor{importantcolor}{HTML}{6a1b9a}
+\definecolor{sidebarcolor}{HTML}{f5f5f5}
+
+% ── Headers and footers ─────────────────────────────────────────────────────
+\usepackage{fancyhdr}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[LE]{\small\textit{\leftmark}}
+\fancyhead[RO]{\small\textit{\rightmark}}
+\fancyfoot[C]{\small\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+\renewcommand{\footrulewidth}{0pt}
+
+% ── Chapter and section styling ──────────────────────────────────────────────
+\usepackage{titlesec}
+
+\titleformat{\chapter}[display]
+    {\normalfont\Huge\bfseries\sffamily\color{accent}}
+    {\chaptertitlename\ \thechapter}
+    {20pt}
+    {\Huge}
+\titlespacing*{\chapter}{0pt}{-30pt}{30pt}
+
+\titleformat{\section}
+    {\normalfont\Large\bfseries\sffamily\color{accent}}
+    {\thesection}{1em}{}
+\titleformat{\subsection}
+    {\normalfont\large\bfseries\sffamily}
+    {\thesubsection}{1em}{}
+\titleformat{\subsubsection}
+    {\normalfont\normalsize\bfseries\sffamily}
+    {\thesubsubsection}{1em}{}
+
+% ── Code listings ────────────────────────────────────────────────────────────
+\usepackage{listings}
+\lstdefinestyle{default}{
+    backgroundcolor=\color{codebackground},
+    basicstyle=\small\ttfamily\color{codetext},
+    breakatwhitespace=false,
+    breaklines=true,
+    captionpos=b,
+    keepspaces=true,
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    tabsize=4,
+    frame=single,
+    rulecolor=\color{codebackground},
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    numbersep=8pt,
+    xleftmargin=1.5em,
+    framexleftmargin=1.5em,
+    aboveskip=1em,
+    belowskip=0.8em,
+    % Language-specific keyword colors
+    keywordstyle=\color[HTML]{89b4fa}\bfseries,
+    stringstyle=\color[HTML]{a6e3a1},
+    commentstyle=\color[HTML]{6c7086}\itshape,
+}
+\lstset{style=default}
+
+% Java language definition
+\lstdefinelanguage{Java21}{
+    morekeywords={abstract,assert,boolean,break,byte,case,catch,char,class,
+        const,continue,default,do,double,else,enum,extends,final,finally,
+        float,for,goto,if,implements,import,instanceof,int,interface,long,
+        native,new,package,private,protected,public,return,short,static,
+        strictfp,super,switch,synchronized,this,throw,throws,transient,
+        try,var,void,volatile,while,yield,record,sealed,permits,when},
+    sensitive=true,
+    morecomment=[l]{//},
+    morecomment=[s]{/*}{*/},
+    morestring=[b]",
+    morestring=[b]',
+}
+
+% ASN.1 definition
+\lstdefinelanguage{ASN1}{
+    morekeywords={SEQUENCE,SET,CHOICE,OPTIONAL,IMPLICIT,EXPLICIT,
+        OF,INTEGER,BOOLEAN,OCTET,STRING,BIT,NULL,OBJECT,IDENTIFIER,
+        ANY,DEFINED,BY},
+    sensitive=true,
+    morecomment=[l]{--},
+    morestring=[b]",
+}
+
+% ── Admonitions (NOTE, WARNING, etc.) ────────────────────────────────────────
+\usepackage{tcolorbox}
+\tcbuselibrary{breakable,skins}
+
+\newtcolorbox{notebox}{
+    colback=notecolor!5, colframe=notecolor!70,
+    fonttitle=\bfseries\sffamily, title=Note,
+    breakable, left=4pt, right=4pt, top=4pt, bottom=4pt,
+    boxrule=0.5pt, arc=2pt
+}
+\newtcolorbox{warningbox}{
+    colback=warningcolor!5, colframe=warningcolor!70,
+    fonttitle=\bfseries\sffamily, title=Warning,
+    breakable, left=4pt, right=4pt, top=4pt, bottom=4pt,
+    boxrule=0.5pt, arc=2pt
+}
+\newtcolorbox{cautionbox}{
+    colback=cautioncolor!5, colframe=cautioncolor!70,
+    fonttitle=\bfseries\sffamily, title=Caution,
+    breakable, left=4pt, right=4pt, top=4pt, bottom=4pt,
+    boxrule=0.5pt, arc=2pt
+}
+\newtcolorbox{importantbox}{
+    colback=importantcolor!5, colframe=importantcolor!70,
+    fonttitle=\bfseries\sffamily, title=Important,
+    breakable, left=4pt, right=4pt, top=4pt, bottom=4pt,
+    boxrule=0.5pt, arc=2pt
+}
+\newtcolorbox{tipbox}{
+    colback=tipcolor!5, colframe=tipcolor!70,
+    fonttitle=\bfseries\sffamily, title=Tip,
+    breakable, left=4pt, right=4pt, top=4pt, bottom=4pt,
+    boxrule=0.5pt, arc=2pt
+}
+\newtcolorbox{sidebarbox}{
+    colback=sidebarcolor, colframe=gray!40,
+    fonttitle=\bfseries\sffamily,
+    breakable, left=6pt, right=6pt, top=6pt, bottom=6pt,
+    boxrule=0.3pt, arc=3pt
+}
+
+% ── Tables ───────────────────────────────────────────────────────────────────
+\usepackage{booktabs}
+\usepackage{longtable}
+\usepackage{array}
+\renewcommand{\arraystretch}{1.3}   % More vertical breathing room in tables
+
+% ── Graphics & TikZ ──────────────────────────────────────────────────────────
+\usepackage{graphicx}
+\usepackage{float}
+\usepackage{caption}
+
+% TikZ — all diagrams are rendered natively in LaTeX
+\usepackage{tikz}
+\usetikzlibrary{
+    arrows.meta,        % Arrow tips
+    positioning,        % Relative node placement
+    calc,               % Coordinate calculations
+    decorations.pathreplacing, % Braces
+    shapes.geometric,   % Diamond, ellipse, etc.
+    shapes.multipart,   % Split nodes (for ASN.1 structures)
+    fit,                % Fit node around others
+    backgrounds,        % Background layers
+    chains,             % Chain positioning
+    matrix              % Matrix of nodes
+}
+
+% forest — for tree diagrams (AcroForm field tree, ASN.1, certificate chain)
+\usepackage[edges]{forest}
+\captionsetup{
+    font={small,sf},
+    labelfont={bf,color=accent},
+    format=hang,
+    margin=1cm
+}
+
+% ── Table of Contents ───────────────────────────────────────────────────────
+% Widen the number fields so deep section numbers (e.g. 12.2.11) don't
+% overlap with the title text.
+\usepackage{tocloft}
+\setlength{\cftsecnumwidth}{3.5em}      % section (e.g. 12.2)
+\setlength{\cftsubsecnumwidth}{4.5em}   % subsection (e.g. 12.2.11)
+\setlength{\cftsubsubsecnumwidth}{5.5em}% subsubsection (e.g. 12.2.11.1)
+
+% ── Cross-references and links ───────────────────────────────────────────────
+\usepackage{hyperref}
+\hypersetup{
+    colorlinks=true,
+    linkcolor=accent,
+    citecolor=accent,
+    urlcolor=linkcolor,
+    bookmarks=true,
+    bookmarksnumbered=true,
+    pdfauthor={PDFalyzer Studio Contributors},
+    pdftitle={PDF Digital Signatures — A Technical Reference},
+    pdfsubject={PDF, Digital Signatures, eIDAS, PAdES, CMS, X.509},
+    pdfkeywords={PDF, digital signatures, PAdES, CAdES, eIDAS, X.509, CMS, PKCS7, PDFBox, BouncyCastle}
+}
+
+% ── Index ────────────────────────────────────────────────────────────────────
+\usepackage{makeidx}
+\makeindex
+
+% ── Bibliography ─────────────────────────────────────────────────────────────
+\usepackage[
+    backend=biber,
+    style=numeric,
+    sorting=nyt,
+    maxnames=3,
+    minnames=1
+]{biblatex}
+
+% ── Misc ─────────────────────────────────────────────────────────────────────
+\usepackage{enumitem}               % Better list formatting
+\setlist{noitemsep,topsep=3pt}      % Compact lists
+
+\usepackage{csquotes}               % Smart quotes
+\usepackage{xurl}                   % Better URL line breaking
+
+% ── Override pandoc syntax highlighting to plain monospace ─────────────────
+% Pandoc generates \begin{Shaded}\begin{Highlighting}[]\end{Highlighting}\end{Shaded}
+% with token commands like \NormalTok, \KeywordTok, etc.
+% We redefine everything to plain \ttfamily output — no colors, no background box.
+\usepackage{fancyvrb}
+\DefineVerbatimEnvironment{Highlighting}{Verbatim}{
+    commandchars=\\\{\},
+    fontsize=\small,
+    xleftmargin=1.5em,
+    breaklines=true
+}
+\renewenvironment{Shaded}{}{}
+% Redefine all pandoc token commands to plain text
+\renewcommand{\AlertTok}[1]{#1}
+\renewcommand{\AnnotationTok}[1]{#1}
+\renewcommand{\AttributeTok}[1]{#1}
+\renewcommand{\BaseNTok}[1]{#1}
+\renewcommand{\BuiltInTok}[1]{#1}
+\renewcommand{\CharTok}[1]{#1}
+\renewcommand{\CommentTok}[1]{#1}
+\renewcommand{\CommentVarTok}[1]{#1}
+\renewcommand{\ConstantTok}[1]{#1}
+\renewcommand{\ControlFlowTok}[1]{#1}
+\renewcommand{\DataTypeTok}[1]{#1}
+\renewcommand{\DecValTok}[1]{#1}
+\renewcommand{\DocumentationTok}[1]{#1}
+\renewcommand{\ErrorTok}[1]{#1}
+\renewcommand{\ExtensionTok}[1]{#1}
+\renewcommand{\FloatTok}[1]{#1}
+\renewcommand{\FunctionTok}[1]{#1}
+\renewcommand{\ImportTok}[1]{#1}
+\renewcommand{\InformationTok}[1]{#1}
+\renewcommand{\KeywordTok}[1]{#1}
+\renewcommand{\NormalTok}[1]{#1}
+\renewcommand{\OperatorTok}[1]{#1}
+\renewcommand{\OtherTok}[1]{#1}
+\renewcommand{\PreprocessorTok}[1]{#1}
+\renewcommand{\RegionMarkerTok}[1]{#1}
+\renewcommand{\SpecialCharTok}[1]{#1}
+\renewcommand{\SpecialStringTok}[1]{#1}
+\renewcommand{\StringTok}[1]{#1}
+\renewcommand{\VariableTok}[1]{#1}
+\renewcommand{\VerbatimStringTok}[1]{#1}
+\renewcommand{\WarningTok}[1]{#1}

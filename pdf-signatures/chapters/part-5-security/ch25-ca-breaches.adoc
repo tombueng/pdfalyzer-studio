@@ -1,0 +1,700 @@
+= Certificate Authority Breaches
+
+[.lead]
+Every PDF digital signature carries an implicit assertion: "I trust the certificate authority that issued this certificate."
+That assertion is not a mathematical fact — it is an organizational, operational, and political judgment.
+And like all judgments, it can turn out to be catastrophically wrong.
+
+This chapter chronicles the most consequential certificate authority failures of the past two decades.
+Not because they are historical curiosities, but because each one contains lessons that directly affect how you should build, validate, and maintain PDF digital signatures today.
+A CA breach does not just compromise web traffic.
+It retroactively undermines every document signed with certificates issued by that CA — contracts, tax filings, court submissions, medical records.
+The signatures do not become invalid in a cryptographic sense; the math still checks out.
+They become _untrustworthy_, which in the real world is worse.
+
+== Why CA Breaches Matter for PDF Signatures
+
+When you sign a PDF, the recipient validates your signature by chaining your signing certificate back to a trusted root.
+That chain passes through one or more intermediate CAs, each vouching for the next, until it reaches a root certificate that the validator explicitly trusts — either because it is in Adobe's AATL, in the EU Trusted List, in the operating system's trust store, or in a custom trust configuration.
+
+The entire chain is only as strong as its weakest link.
+If any CA in the chain is compromised, an attacker can issue fraudulent certificates — certificates that look legitimate but are controlled by the attacker.
+Documents signed with those fraudulent certificates will pass validation in any viewer that trusts the compromised CA.
+
+Worse, when a compromised CA is discovered and revoked, the collateral damage extends to _every_ legitimate certificate that CA ever issued.
+If you signed a contract last year with a certificate from CA-X, and CA-X is discovered to be compromised this year, your signature's trustworthiness is now in question — not because your key was compromised, but because the entity vouching for your identity can no longer be trusted.
+
+This is the fundamental fragility of the PKI trust model: trust is transitive, delegated, and revocable.
+You cannot sign a document and walk away confident that the signature will still be trusted in five years, because you cannot predict whether the CA that issued your certificate will still be trusted in five years.
+
+[IMPORTANT]
+====
+The only mitigation for CA compromise is **embedding revocation evidence at signing time**.
+A PAdES-B-LTA signature includes OCSP responses and CRLs captured when the signature was created.
+If the CA is later revoked, the embedded evidence proves that the certificate was valid _at the time of signing_ — before the breach was discovered.
+Without LTV data, a validator checking the signature after the CA revocation has no way to distinguish between a legitimate pre-breach signature and a fraudulent one.
+====
+
+== DigiNotar (2011): The Breach That Broke a Country
+
+=== Background: A Small CA With a Big Responsibility
+
+DigiNotar was a Dutch certificate authority founded in 1998, headquartered in Beverwijk, a small town near Amsterdam.
+The company was originally an offshoot of the Dutch notarial profession — the name is a portmanteau of "Digital Notary" — and it carved out a niche issuing certificates for Dutch government services, notaries, and businesses.
+
+In 2010, VASCO Data Security International (now OneSpan) acquired DigiNotar for approximately 10 million euros.
+At the time, DigiNotar was one of the root CAs trusted by every major browser and operating system.
+Its certificates were embedded in the trust stores of Windows, macOS, Firefox, Chrome, and by extension, in the trust stores used by PDF viewers.
+
+DigiNotar also operated **PKIoverheid** (PKI for Government) — the Dutch government's public key infrastructure.
+PKIoverheid certificates were used across Dutch government digital services, including the DigiD electronic identity system, tax filing, and — critically for our purposes — official government document signing.
+
+=== The Attack
+
+In June 2011, an attacker gained access to DigiNotar's certificate issuance infrastructure.
+The attack was later attributed to a state-sponsored actor operating from Iran, though the attacker also posted messages claiming to be a lone Iranian hacker named "Comodohacker" — the same handle used in the Comodo breach earlier that year.
+
+The attacker exploited multiple vulnerabilities in DigiNotar's infrastructure:
+
+- The CA's servers ran outdated, unpatched software
+- Network segmentation between the public-facing servers and the certificate issuance systems was inadequate
+- The HSMs (Hardware Security Modules) that should have required physical authorization for certificate issuance were configured to allow automated remote issuance
+- Audit logs were incomplete and inconsistent — DigiNotar did not have reliable records of which certificates had been issued
+
+Once inside, the attacker issued over **531 fraudulent certificates** for high-value domains.
+The confirmed targets included:
+
+.Known fraudulently issued DigiNotar certificates (partial list)
+[cols="3,3", options="header"]
+|===
+| Domain | Significance
+
+| google.com, www.google.com | Gmail, Google Search — primary communication tool for millions
+| login.yahoo.com | Yahoo Mail
+| login.live.com | Microsoft Hotmail/Outlook
+| addons.mozilla.org | Firefox extension repository
+| login.skype.com | Skype communications
+| global.sts.microsoft.com | Microsoft federation services
+| www.sis.gov.uk | UK Secret Intelligence Service (MI6)
+| www.cia.gov | US Central Intelligence Agency
+| mossad.gov.il | Israeli intelligence service
+| azadegi.com | Iranian opposition news website
+| Several wildcard certs | Covering entire TLDs and subdomains
+|===
+
+=== The Use: Surveillance of Iranian Citizens
+
+The fraudulent certificates were not issued for financial fraud.
+They were used for **mass surveillance**.
+
+In July and August 2011, the fraudulent `google.com` certificate was deployed in man-in-the-middle (MITM) attacks targeting Iranian internet users.
+The Iranian government (or an actor with access to Iranian internet infrastructure) intercepted HTTPS connections to Google services — primarily Gmail — by presenting the fraudulent DigiNotar certificate.
+Because DigiNotar was a trusted root CA, browsers accepted the certificate without warning.
+
+The victims were Iranian citizens communicating via Gmail during a period of significant political tension.
+The Arab Spring protests had swept through Tunisia, Egypt, Libya, and Syria.
+Iran's Green Movement, which had erupted after the disputed 2009 presidential election, was still active.
+The surveillance targeted people who thought their communications were private.
+
+The scale of the interception was significant.
+Fox-IT, the Dutch forensics firm that later investigated the breach, estimated that approximately **300,000 unique IP addresses** — almost all Iranian — had been subjected to MITM attacks using the fraudulent Google certificate.
+
+=== Discovery: How Certificate Pinning Saved the Day
+
+The attack was discovered on August 28, 2011, by an Iranian user of Google Chrome.
+
+Chrome has a feature called **certificate pinning** (also known as HPKP, HTTP Public Key Pinning, or in Chrome's case, a hardcoded pin set).
+For a small number of high-value domains — including google.com — Chrome maintains a built-in list of expected certificate public keys.
+If the presented certificate's public key does not match any of the pinned keys, Chrome refuses the connection and displays a prominent error, even if the certificate otherwise validates correctly against the trust store.
+
+When the Iranian Chrome user attempted to connect to Google, Chrome detected that the presented certificate (signed by DigiNotar) did not match Google's pinned public keys.
+Chrome displayed an error.
+The user reported the error to Google.
+
+[NOTE]
+====
+Certificate pinning was not designed as a comprehensive defense against CA compromise.
+It only worked for the handful of domains that Google had pre-configured pins for.
+If the attacker had only issued certificates for domains that Chrome did not pin — the intelligence agency websites, the Iranian opposition news site, the Yahoo and Skype domains — the attack might have continued undetected for months.
+
+The lesson is humbling: the discovery of one of the most significant CA compromises in internet history was essentially an accident — it depended on one user, in one country, using one specific browser, connecting to one specific domain that happened to have certificate pinning enabled.
+====
+
+=== The Response: Death of a CA
+
+Once Google confirmed the fraudulent certificate, events moved rapidly:
+
+- **August 29, 2011**: Google published a Chrome update blocking the specific DigiNotar intermediate certificate used to sign the fraudulent Google certificate
+- **August 30, 2011**: Mozilla pushed a Firefox update removing DigiNotar's root from the trust store entirely
+- **September 2, 2011**: The Dutch government's GovCERT (Government Computer Emergency Response Team) issued an advisory acknowledging the breach
+- **September 3, 2011**: Google, Microsoft, and Apple all pushed updates removing DigiNotar from their trust stores
+- **September 5, 2011**: The Dutch government formally revoked DigiNotar's authorization to issue PKIoverheid certificates
+- **September 20, 2011**: DigiNotar's parent company VASCO filed for DigiNotar's bankruptcy in Dutch court
+
+The entire collapse — from discovery to bankruptcy — took less than four weeks.
+
+Fox-IT's forensic investigation, published in their report "DigiNotar Certificate Authority breach — 'Operation Black Tulip'" (named with Dutch irony), found that the breach was far more extensive than initially reported.
+The attacker had been inside DigiNotar's systems since at least June 17, 2011, had compromised multiple CA servers, and had access to issuing infrastructure for both DigiNotar's commercial certificates and the PKIoverheid government certificates.
+
+=== Impact on PDF Signatures
+
+The immediate impact on PDF signatures was severe and irreversible.
+
+Any PDF document signed with a DigiNotar-issued certificate became **unverifiable** the moment browsers and operating systems removed DigiNotar from their trust stores.
+Adobe Acrobat, which uses the Windows certificate store (on Windows) or its own AATL (on macOS), stopped trusting DigiNotar certificates.
+A signed PDF that showed a green checkmark on September 2 showed a warning on September 4.
+
+The documents themselves had not changed.
+The signatures had not been tampered with.
+The signing keys had not been compromised (in most cases — the legitimate certificate holders were not the ones attacked).
+But the trust anchor for those certificates no longer existed.
+
+For Dutch government agencies, this was particularly painful.
+PKIoverheid certificates were used to sign official government documents, notarial deeds, and legal filings.
+The Dutch government had to issue emergency replacement certificates through other CAs and re-sign critical documents — a process that took months.
+
+[WARNING]
+====
+This is the nightmare scenario for long-lived signed documents.
+A contract signed in 2010 with a DigiNotar certificate and stored in an archive had its trust chain severed in 2011.
+If the signature did not include LTV data (OCSP responses and CRLs embedded at signing time, as in PAdES-B-LTA), there was _no way_ to prove after the fact that the certificate was valid when the signature was created.
+The document was, for all practical purposes, unsigned.
+
+This is why PAdES-B-LTA exists.
+This is why you embed revocation data.
+This is not a theoretical concern — it happened.
+====
+
+=== Lessons from DigiNotar
+
+The DigiNotar breach taught the PKI community several painful lessons:
+
+1. **A single CA compromise can retroactively invalidate thousands of signatures.** Trust is not permanent. It is not even stable. It can be revoked at any time, with retrospective effect.
+
+2. **CA security is only as strong as the weakest operational practice.** DigiNotar had HSMs, but they were misconfigured. They had audit logs, but they were incomplete. They had network segmentation, but it was insufficient. The technology existed to prevent the breach; the organization failed to deploy it correctly.
+
+3. **Certificate pinning is a band-aid, not a solution.** It helped detect _this_ breach, but it does not scale. You cannot pin every domain's certificate in every application.
+
+4. **Government PKI is not immune.** DigiNotar operated critical Dutch government infrastructure. Government CAs are not inherently more trustworthy than commercial ones — they are subject to the same operational failures.
+
+5. **Bankruptcy is the final revocation.** When a CA goes bankrupt, its certificates do not gracefully expire. They are abruptly distrusted. There is no migration path, no deprecation period, no gentle sunset. One day the certificates work; the next day they do not.
+
+== Comodo (2011): The Parallel Breach
+
+=== The Attack
+
+Just five months before DigiNotar's collapse, in March 2011, a similar attack targeted Comodo — at the time, one of the world's largest commercial CAs.
+
+The attacker compromised **registration authority (RA) accounts** at Comodo's reseller partners — specifically, the Italian firm GlobalTrust.it and the Argentine firm InstantSSL.it.
+Registration authorities are entities authorized to perform identity verification on behalf of a CA; they can request certificate issuance without having direct access to the CA's root key.
+
+Using the compromised RA credentials, the attacker obtained **nine fraudulent certificates** for high-value domains:
+
+- login.live.com (Microsoft)
+- mail.google.com (Google)
+- www.google.com (Google)
+- login.yahoo.com (Yahoo, three separate certificates)
+- login.skype.com (Skype)
+- addons.mozilla.org (Mozilla)
+- An additional "global trustee" certificate
+
+The target list was remarkably similar to the DigiNotar targets — because the same attacker was behind both breaches.
+
+=== The Response: How Comodo Got It Right
+
+Comodo's response was dramatically faster and more effective than DigiNotar's would be five months later.
+
+Comodo detected the fraudulent issuance **within hours** — their monitoring systems flagged the unusual certificate requests from the compromised RA accounts.
+The nine certificates were revoked within the same day.
+Comodo published a detailed incident report, contacted browser vendors, and cooperated fully with the investigation.
+
+The key differences between Comodo's response and DigiNotar's later failure:
+
+.Comodo vs DigiNotar incident response comparison
+[cols="3,3,3", options="header"]
+|===
+| Factor | Comodo | DigiNotar
+
+| Detection time
+| Hours
+| Weeks (possibly months)
+
+| Number of fraudulent certs
+| 9
+| 531+
+
+| Disclosure
+| Immediate and transparent
+| Delayed and incomplete
+
+| Certificate revocation
+| Same day
+| Gradual, over weeks
+
+| Root trust impact
+| Root preserved (reseller revoked)
+| Entire root removed
+
+| Business outcome
+| Continued operating
+| Bankruptcy
+
+| CA audit logs
+| Complete and useful
+| Incomplete and unreliable
+|===
+
+Comodo survived because it detected the breach quickly, responded transparently, and demonstrated that the compromise was limited to reseller accounts — not the root CA infrastructure.
+The attackers got nine certificates; at DigiNotar, they got the keys to the kingdom.
+
+=== The Attacker's Manifesto
+
+The attacker posted a manifesto online claiming to be a 21-year-old Iranian, acting alone, motivated by anger at Western governments' treatment of Iran.
+The manifesto, written in broken English, contained enough technical detail about both the Comodo and DigiNotar breaches to be credible.
+Whether the attacker was truly a lone wolf or a front for state-sponsored activity remains debated.
+The operational sophistication of the MITM infrastructure deployed against Iranian citizens (requiring cooperation with or access to Iranian ISP infrastructure) suggests state involvement, regardless of who wrote the code.
+
+[TIP]
+====
+From a PDF signing perspective, the Comodo incident reinforces a critical point: **your signing certificate's trustworthiness depends not only on your CA, but on every reseller, registration authority, and partner in the CA's issuance chain**.
+When selecting a CA for document signing certificates, ask about their RA model.
+How many resellers can request certificate issuance?
+What monitoring exists for anomalous issuance patterns?
+How quickly can fraudulent certificates be detected and revoked?
+====
+
+== Symantec Distrust (2017-2018): The Slow-Motion Collapse
+
+=== Background: The World's Largest CA
+
+If DigiNotar was a small CA that died quickly, Symantec was a giant that died slowly.
+
+Through a series of acquisitions — **VeriSign** (2010), **Thawte** (via VeriSign), **GeoTrust** (via VeriSign), and **RapidSSL** (via GeoTrust) — Symantec had become the world's largest certificate authority by 2015.
+At its peak, Symantec and its subsidiary brands had issued approximately **30% of all TLS certificates on the public internet**.
+
+That market share made Symantec's CA operation systemically important.
+It also made it a tempting target for scrutiny.
+
+=== The Mis-Issuance Scandal
+
+In September 2015, Google's Certificate Transparency (CT) monitoring detected that Symantec had issued several test certificates for google.com domains — without Google's authorization.
+Symantec claimed these were test certificates issued by employees during internal testing, and that they had been revoked quickly.
+
+Google investigated further and discovered that the problem was much larger:
+
+- Symantec had issued **at least 164 certificates** for domains without proper authorization
+- Some were issued by Symantec employees, others by RA partners (including CrossCert, a Korean RA)
+- The unauthorized issuance spanned multiple years
+- Symantec's internal controls had failed to detect the mis-issuances
+- When confronted, Symantec's initial disclosures underreported the scope of the problem
+
+In March 2017, Google engineers Ryan Sleevi and Devon O'Brien published a detailed analysis on the Chromium bug tracker, proposing a phased distrust of all Symantec-issued certificates.
+The proposal was unprecedented: no one had ever suggested distrusting certificates from the world's largest CA.
+
+=== The Distrust Timeline
+
+What followed was a two-year negotiation between Google, Mozilla, Symantec, and the broader CA/Browser Forum.
+The timeline:
+
+- **March 2017**: Google proposes phased Symantec distrust in Chrome
+- **April 2017**: Symantec contests the proposal, arguing the issues were limited
+- **July 2017**: Google, Mozilla, and Symantec reach a compromise plan: Symantec must transition to a new infrastructure operated by a different CA
+- **August 2017**: DigiCert announces acquisition of Symantec's CA business for approximately $950 million
+- **December 2017**: DigiCert completes the acquisition and begins re-issuing certificates under DigiCert roots
+- **April 2018**: Chrome 66 distrusts Symantec certificates issued before June 1, 2016
+- **October 2018**: Chrome 70 distrusts ALL remaining Symantec certificates
+- **October 2018**: Firefox follows with similar distrust in Firefox 63
+
+The distrust was progressive: older certificates were distrusted first, giving website operators time to obtain replacement certificates.
+But the endpoint was absolute: after October 2018, no Symantec-issued certificate was trusted by Chrome or Firefox.
+
+=== Impact on PDF Signatures
+
+The Symantec distrust had a less dramatic but more insidious impact on PDF signatures than the DigiNotar breach.
+
+DigiNotar's collapse was sudden — trust was revoked in days, and the relatively small number of affected certificates limited the blast radius.
+Symantec's distrust was gradual, but the scale was enormous.
+
+- **Thousands of document signing certificates** had been issued under Symantec, VeriSign, Thawte, and GeoTrust brands
+- Many of these certificates were in Adobe's AATL (Adobe Approved Trust List)
+- As Symantec certificates were distrusted, PDF signatures chaining to those certificates showed warnings in validators that followed Chrome/Firefox trust decisions
+- Adobe's trust store (AATL) moved independently from browsers — Adobe did not automatically distrust Symantec certificates just because Chrome did
+- This created a confusing situation where a signed PDF might validate in Acrobat (using AATL) but fail in a web-based validator (using the browser trust store)
+
+[NOTE]
+====
+The Symantec case illustrates an important distinction: **PDF trust stores and web browser trust stores are not the same thing**.
+Adobe Acrobat maintains its own trust list (AATL), which is updated on its own schedule, with its own criteria.
+A certificate can be distrusted by Chrome but still trusted by Acrobat — or vice versa.
+This is both a feature (PDF signatures are not automatically affected by browser trust decisions) and a bug (trust status becomes inconsistent across different validation contexts).
+====
+
+The transition to DigiCert mitigated some of the damage — DigiCert re-issued certificates under its own roots, and existing Symantec customers could obtain replacement certificates.
+But for documents already signed with Symantec-chain certificates, the question of long-term trust remained unresolved.
+
+[source,java]
+----
+/**
+ * Checks whether a signing certificate chains to a currently trusted root.
+ * This is the kind of check you need to perform when validating old signatures
+ * whose CAs may have been distrusted since signing time.
+ */
+public CertificateChainStatus validateChainTrust(
+        X509Certificate signerCert,
+        List<X509Certificate> chain,
+        Set<TrustAnchor> currentTrustAnchors,
+        Date signingTime) throws Exception {
+
+    // Build the certificate path
+    CertificateFactory cf = CertificateFactory.getInstance("X.509");
+    CertPath certPath = cf.generateCertPath(chain);
+
+    // Configure the path validator with the signing time
+    PKIXParameters params = new PKIXParameters(currentTrustAnchors);
+    params.setDate(signingTime);  // Validate as of signing time, not now
+    params.setRevocationEnabled(false);  // We check revocation separately
+
+    try {
+        CertPathValidator validator = CertPathValidator.getInstance("PKIX");
+        PKIXCertPathValidatorResult result =
+                (PKIXCertPathValidatorResult) validator.validate(certPath, params);
+
+        TrustAnchor anchor = result.getTrustAnchor();
+        log.info("Certificate chain valid at signing time. Trust anchor: {}",
+                anchor.getTrustedCert().getSubjectX500Principal());
+
+        return CertificateChainStatus.builder()
+                .valid(true)
+                .trustAnchor(anchor.getTrustedCert().getSubjectX500Principal().getName())
+                .validationTime(signingTime)
+                .build();
+
+    } catch (CertPathValidatorException e) {
+        log.warn("Certificate chain validation failed at index {}: {}",
+                e.getIndex(), e.getMessage());
+
+        return CertificateChainStatus.builder()
+                .valid(false)
+                .failureReason(e.getMessage())
+                .failedCertificateIndex(e.getIndex())
+                .validationTime(signingTime)
+                .build();
+    }
+}
+----
+
+== Let's Encrypt: The Free CA's Growing Pains
+
+=== The 2020 Mass Revocation
+
+Let's Encrypt, the free, automated CA that has issued over three billion certificates since its launch in 2015, does not issue document signing certificates.
+Its certificates are exclusively for TLS (web server) use.
+So why does a Let's Encrypt incident appear in a book about PDF signatures?
+
+Because the 2020 mass revocation event demonstrated something important about the fragility of CA infrastructure at scale — a fragility that applies equally to every CA in the PDF signing ecosystem.
+
+On March 3, 2020, Let's Encrypt announced that it had discovered a bug in its **CAA (Certificate Authority Authorization) checking code**.
+CAA is a DNS-based mechanism that allows domain owners to specify which CAs are authorized to issue certificates for their domain.
+Before issuing a certificate, a CA must check the domain's CAA records and refuse issuance if the domain specifies a different CA.
+
+The bug: Let's Encrypt's validation system checked CAA records when a domain was first validated, but did not re-check them when issuing a certificate if the validation result was cached.
+This meant that if a domain's CAA record changed after the initial validation (for example, to explicitly prohibit Let's Encrypt from issuing certificates), Let's Encrypt would still issue the certificate based on the stale cached result.
+
+This violated the CA/Browser Forum's Baseline Requirements, which mandate that CAA records be checked within 8 hours of certificate issuance.
+
+=== The Chaos
+
+Let's Encrypt identified approximately **3,048,289 certificates** that had been issued without a compliant CAA check at issuance time.
+The Baseline Requirements required these certificates to be revoked within 5 days.
+
+Let's Encrypt gave certificate holders **24 hours** to renew their certificates before revocation.
+For the ACME-based automated renewal ecosystem that Let's Encrypt had built, this should have been manageable — the whole point of Let's Encrypt is automated certificate management.
+
+In practice, it was chaos.
+Not every certificate holder had functional automated renewal.
+Not every server was properly configured for ACME.
+Some certificates were on devices that could not easily be updated.
+The announcement came on a Tuesday evening (US time), giving operators one business day to respond.
+
+=== Relevance to PDF Signing
+
+The Let's Encrypt incident did not directly affect any PDF signatures.
+But it demonstrated three principles that every PDF signing architect should internalize:
+
+1. **Scale amplifies errors.** A single bug in a CA's issuance pipeline can affect millions of certificates. The larger the CA, the larger the blast radius. When choosing a CA for document signing, understand that the CA's operational quality affects every certificate they issue — including yours.
+
+2. **Revocation at scale is operationally brutal.** Even with 24 hours notice and automated tooling, millions of certificates could not be renewed in time. Now imagine the same scenario with document signing certificates, where "renewal" means re-signing every document that was signed with the revoked certificate. There is no automated tool for that.
+
+3. **Compliance requirements drive revocation timelines.** The Baseline Requirements gave Let's Encrypt no discretion — the certificates _had_ to be revoked within 5 days, regardless of the impact. EU regulations impose similar requirements on Qualified Trust Service Providers. If a QTSP discovers a compliance issue, it may be required to revoke certificates on a timeline that does not allow for graceful migration.
+
+[CAUTION]
+====
+If your QTSP discovers a compliance issue and is required to revoke your signing certificate, every PDF you signed with that certificate becomes suspect — unless you embedded LTV data at signing time.
+This is not a far-fetched scenario.
+It has happened to web certificates.
+It will happen to document signing certificates.
+Plan accordingly.
+====
+
+== Certificate Transparency: The Response to CA Failures
+
+=== What Certificate Transparency Is
+
+Certificate Transparency (CT) was invented by Google engineers **Ben Laurie** and **Adam Langley** in 2012 (published as {rfc5280} companion document RFC 6962, and later updated in RFC 9162), directly in response to the DigiNotar and Comodo breaches.
+
+The core insight: if CAs cannot be trusted to only issue authorized certificates, we need a public audit mechanism that makes _every_ issued certificate visible to domain owners and the broader community.
+
+CT works as follows:
+
+1. When a CA issues a certificate, it submits the certificate to one or more **CT logs** — append-only, cryptographically verifiable public databases
+2. The CT log returns a **Signed Certificate Timestamp (SCT)** — a promise that the certificate will be included in the log within a specified time (the "Maximum Merge Delay," typically 24 hours)
+3. The SCT is embedded in the certificate (as an X.509 extension), in the TLS handshake (as a TLS extension), or in the OCSP response (as an OCSP extension)
+4. Browsers verify that certificates come with valid SCTs — if a certificate has no SCT, Chrome treats it as untrusted (since April 2018)
+5. Domain owners (and anyone else) can monitor CT logs for certificates issued for their domains — if an unauthorized certificate appears, they can demand revocation
+
+=== How CT Detects Rogue Certificates
+
+CT does not _prevent_ a compromised CA from issuing rogue certificates.
+It makes rogue certificates _detectable_.
+
+If the DigiNotar attack had happened in a CT world, the fraudulent `google.com` certificate would have appeared in public CT logs within 24 hours of issuance.
+Google's CT monitoring infrastructure would have detected it immediately — not because a user in Iran happened to be running Chrome, but because Google continuously monitors every CT log for certificates mentioning google.com.
+
+The detection would have been systematic, automatic, and fast.
+
+=== CT and PDF: Limited but Growing
+
+Certificate Transparency was designed for the web PKI ecosystem.
+Its adoption in the document signing world has been slower:
+
+- **Document signing certificates are not required to have SCTs.** The CA/Browser Forum Baseline Requirements mandate CT for TLS certificates, but no equivalent mandate exists for document signing certificates.
+- **Adobe's AATL does not require CT.** CAs in the AATL are not required to log their document signing certificates in CT logs.
+- **The EU Trusted List does not reference CT.** The eIDAS regulatory framework does not mention Certificate Transparency.
+
+However, CT is increasingly relevant for PDF signatures:
+
+- Some CAs voluntarily log their document signing certificates in CT logs
+- Organizations building their own signature validation can incorporate CT log monitoring as an additional trust signal
+- The EUDI Wallet infrastructure (Chapter 27) may incorporate CT-like transparency mechanisms for wallet-issued certificates
+
+[source,java]
+----
+/**
+ * Fetches and embeds revocation data (OCSP and CRL) at signing time,
+ * creating the foundation for long-term validation that survives CA revocation.
+ * This is the essential defense against CA breach impact.
+ */
+public LtvData collectRevocationData(List<X509Certificate> chain)
+        throws Exception {
+
+    List<byte[]> ocspResponses = new ArrayList<>();
+    List<byte[]> crls = new ArrayList<>();
+
+    // For each certificate in the chain (except the root),
+    // fetch OCSP response and/or CRL
+    for (int i = 0; i < chain.size() - 1; i++) {
+        X509Certificate cert = chain.get(i);
+        X509Certificate issuer = chain.get(i + 1);
+
+        // Try OCSP first (preferred — smaller, more specific)
+        byte[] ocspResponse = fetchOcspResponse(cert, issuer);
+        if (ocspResponse != null) {
+            log.info("OCSP response obtained for: {}",
+                    cert.getSubjectX500Principal());
+            ocspResponses.add(ocspResponse);
+        }
+
+        // Also fetch CRL as fallback
+        byte[] crl = fetchCrl(cert);
+        if (crl != null) {
+            log.info("CRL obtained for: {} ({} bytes)",
+                    cert.getSubjectX500Principal(), crl.length);
+            crls.add(crl);
+        }
+
+        if (ocspResponse == null && crl == null) {
+            log.warn("No revocation data available for: {}. " +
+                    "LTV validation may fail for this certificate.",
+                    cert.getSubjectX500Principal());
+        }
+    }
+
+    return LtvData.builder()
+            .certificates(chain.stream()
+                    .map(c -> {
+                        try { return c.getEncoded(); }
+                        catch (Exception e) { throw new RuntimeException(e); }
+                    })
+                    .collect(Collectors.toList()))
+            .ocspResponses(ocspResponses)
+            .crls(crls)
+            .collectionTime(new Date())
+            .build();
+}
+----
+
+== What These Incidents Taught Us
+
+=== Trust Is Fragile and Revocable
+
+The PKI model assumes that root CAs are trustworthy.
+DigiNotar proved that assumption can fail catastrophically.
+Symantec proved it can fail gradually.
+Comodo proved it can fail and be recovered from — but only if the CA responds competently.
+
+For PDF signature architects, the lesson is: **design for CA failure**.
+Assume that any CA in your signing certificate's chain might be distrusted at some point in the future.
+Your architecture should handle that scenario gracefully.
+
+=== Long-Term Validity Requires Embedded Evidence
+
+The single most important defense against CA breach impact is **embedding revocation data at signing time**.
+
+A PAdES-B-LTA signature includes:
+
+- The complete certificate chain (signer, intermediates, root)
+- OCSP responses for every certificate in the chain, obtained at signing time
+- CRLs as fallback revocation evidence
+- A signature timestamp proving when the signature was created
+- A document timestamp proving when the validation data was embedded
+
+With all this data embedded, a validator can determine that the signing certificate was valid _at the time of signing_ — even if the CA is later revoked.
+The embedded OCSP response from 2024 proves the certificate was not revoked in 2024, regardless of what happens to the CA in 2025.
+
+Without this data, the validator is left with an impossible question: was this certificate valid when the signature was created?
+If the CA is gone, there is no one to ask.
+
+=== You Cannot Predict CA Longevity
+
+DigiNotar: bankrupt in 4 weeks.
+Symantec CA: sold and sunset in 18 months.
+Let's Encrypt: a compliance bug affecting 3 million certificates.
+
+When you select a CA for your document signing certificates, you are making a bet on that CA's continued trustworthiness.
+History suggests this bet is riskier than most organizations realize.
+
+Practical mitigations:
+
+1. **Use PAdES-B-LTA for anything that matters.** The 5 seconds of extra processing time to fetch and embed revocation data is negligible compared to the cost of re-signing thousands of documents after a CA revocation.
+
+2. **Have a certificate migration plan.** Know how you will transition to a new CA if your current CA is compromised, acquired, or distrusted. This includes having backup certificates from a second CA.
+
+3. **Monitor your CA's compliance status.** Subscribe to CA/Browser Forum mailing lists, Google's security blog, and Mozilla's CA program communications. You want to know about problems with your CA before your customers do.
+
+4. **Re-timestamp archived documents periodically.** A PAdES-B-LTA archival timestamp can be refreshed by adding a new document timestamp — extending the signature's verifiability beyond the original TSA's certificate lifetime.
+
+== Timeline: Major CA Incidents (2001-2024)
+
+.Major CA security incidents and their impact on digital signatures
+[cols="1,2,4", options="header"]
+|===
+| Year | Incident | Impact and Outcome
+
+| 2001
+| VeriSign issues fraudulent Microsoft code-signing certs
+| Two certificates issued to an impersonator claiming to be Microsoft. Revoked quickly, but demonstrated that even the largest CA could be socially engineered. Led to improved identity verification procedures.
+
+| 2008
+| Debian weak key vulnerability (CVE-2008-0166)
+| A Debian-specific OpenSSL bug caused all keys generated on Debian/Ubuntu systems for 18 months to be predictable. Affected SSL certificates, SSH keys, and potentially signing keys. Not a CA breach per se, but CAs had to revoke certificates whose keys were generated on affected systems.
+
+| 2011 (Mar)
+| Comodo reseller compromise
+| 9 fraudulent certificates issued via compromised RA accounts. Revoked within hours. CA survived. Attacker claimed Iranian motivation.
+
+| 2011 (Jul-Sep)
+| DigiNotar breach
+| 531+ fraudulent certificates. Used for mass MITM surveillance of Iranian citizens. CA bankrupt within 4 weeks. Dutch government PKI severely disrupted. All DigiNotar-chained PDF signatures became unverifiable.
+
+| 2012
+| Trustwave subordinate CA for DLP
+| Trustwave issued a subordinate CA certificate to a private company for use in DLP (Data Loss Prevention) traffic inspection. Technically allowed the company to issue certificates for any domain. Caused industry debate about acceptable CA practices.
+
+| 2013
+| ANSSI/Google France intermediate cert
+| A French government intermediate CA (operated by ANSSI) issued unauthorized certificates for Google domains. Google detected via CT/pinning. Limited scope but raised concerns about government CAs.
+
+| 2014
+| India CCA/NIC breach
+| India's National Informatics Centre (NIC), operating under the Indian Controller of Certifying Authorities (CCA), issued unauthorized certificates for Google and Yahoo domains. Google detected via CT. Indian CCA root was constrained in trust stores.
+
+| 2015
+| CNNIC/MCS Holdings
+| China Internet Network Information Center (CNNIC) delegated certificate issuance to MCS Holdings (an Egyptian company), which issued unauthorized certificates for Google domains via a MITM proxy. Google and Mozilla distrusted CNNIC's root certificates.
+
+| 2015-2018
+| Symantec mis-issuance and distrust
+| Thousands of certificates issued without proper authorization. Progressive distrust by Chrome and Firefox over 2 years. Symantec CA sold to DigiCert for $950M. Massive impact on document signing certificates issued under Symantec, VeriSign, Thawte, and GeoTrust brands.
+
+| 2017
+| WoSign/StartCom distrust
+| Chinese CA WoSign acquired StartCom (Israeli CA) without disclosure, backdated SHA-1 certificates to avoid browser deadlines, and made false statements to browser vendors. Both CAs distrusted by all major browsers.
+
+| 2020
+| Let's Encrypt CAA bug revocation
+| 3 million certificates revoked due to CAA checking non-compliance. 24-hour notice to certificate holders. Demonstrated operational fragility of CA infrastructure at scale.
+
+| 2022
+| TrustCor allegations
+| Investigative reporting linked TrustCor (a Panamanian CA) to a company involved in distributing spyware. Mozilla, Google, and Microsoft removed TrustCor from their trust stores. No evidence of fraudulent certificate issuance, but trust was revoked on the basis of the CA operator's associations.
+
+| 2023
+| e-Tugra suspended from CCADB
+| Turkish CA e-Tugra suspended from the Common CA Database (CCADB) after security researchers discovered critical vulnerabilities in its infrastructure, including exposed admin panels and improperly secured HSMs.
+|===
+
+[NOTE]
+====
+This timeline only includes publicly known incidents.
+The actual number of CA compromises is certainly higher — not every breach is detected, and not every detected breach is publicly disclosed.
+The incidents we know about are the ones where detection mechanisms worked.
+The ones we should worry about are the ones where they did not.
+====
+
+== Impact on PDF Signature Validation: What Happens in Practice
+
+When a CA is revoked, the practical impact on PDF signature validation depends on several factors:
+
+=== The Validator's Trust Store
+
+Different validators use different trust stores:
+
+- **Adobe Acrobat (Windows)**: Uses AATL plus optionally the Windows certificate store
+- **Adobe Acrobat (macOS)**: Uses AATL plus optionally the macOS Keychain
+- **Foxit Reader**: Uses the operating system's trust store
+- **LibreOffice**: Uses the operating system's trust store (via NSS on Linux)
+- **EU DSS validation service**: Uses the EU Trusted List (EUTL)
+- **Custom Java applications**: Use the JVM's `cacerts` trust store or a custom `TrustStore`
+
+When a CA is revoked, the timing and scope of the revocation varies across these stores.
+AATL updates are published by Adobe on their own schedule.
+OS trust store updates come via system updates.
+The EUTL is updated when a member state's supervisory body modifies its trusted list.
+
+This means a signed PDF can show different validation results in different viewers during the transition period — "valid" in one that has not yet received the revocation update, "invalid" in one that has.
+
+=== Whether LTV Data Is Present
+
+If the signature includes embedded revocation data (PAdES-B-LT or B-LTA), a competent validator can perform **historical validation**: it checks the embedded OCSP response or CRL to determine the certificate's status at the time of signing, rather than its status now.
+
+If the signature does not include LTV data, the validator must check the certificate's current status — and if the CA has been revoked, the chain cannot be validated at all.
+
+=== The Certificate's Position in the Chain
+
+If only an intermediate CA is revoked (as in the Comodo case), the impact is limited to certificates issued through that specific intermediate.
+Other intermediates under the same root may be unaffected.
+
+If the root CA is revoked (as in DigiNotar's case), _every_ certificate in the chain is affected — there is no way to validate the chain without a trusted root.
+
+== Key Takeaways
+
+- **CA breaches retroactively undermine PDF signatures** — the math does not change, but the trust does
+- **DigiNotar (2011)** showed that a small CA's failure can have outsized impact — 531 rogue certs, mass surveillance, bankruptcy in 4 weeks
+- **Comodo (2011)** showed that fast, transparent response can save a CA — 9 rogue certs, revoked in hours, CA survived
+- **Symantec (2015-2018)** showed that even the largest CA is not too big to distrust — 30% of TLS certificates, distrusted over 2 years
+- **Let's Encrypt (2020)** showed that compliance bugs at scale force brutal revocation timelines — 3 million certs, 24-hour notice
+- **Certificate Transparency** makes rogue certificates detectable but does not prevent them
+- **PAdES-B-LTA is the only reliable defense** — embedded revocation data at signing time proves certificate validity regardless of what happens to the CA later
+- **Always have a CA migration plan** — your CA's trustworthiness is not guaranteed for the lifetime of your signed documents
+- **Monitor your CA's status** — you want to know about problems before your validators do
+- **Re-timestamp archived documents** periodically to extend their verifiability beyond any single CA's lifetime

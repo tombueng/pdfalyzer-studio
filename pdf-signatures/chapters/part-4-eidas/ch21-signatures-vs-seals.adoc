@@ -1,0 +1,361 @@
+= Qualified Signatures vs Seals
+
+[.lead]
+Here is a question that trips up almost every developer the first time they encounter it: if an electronic signature and an electronic seal use exactly the same cryptographic mechanism -- the same RSA or ECDSA algorithm, the same CMS SignedData structure, the same PAdES profile, the same qualified certificate from the same QTSP, stored on the same model of QSCD -- what, exactly, is the difference?
+
+The answer is not technical.
+It is legal.
+A signature is created by a _natural person_ (a human being) and expresses that person's intent.
+A seal is created by a _legal person_ (a company, government agency, association) and proves the origin and integrity of data.
+Same bytes, same math, different legal meaning -- and getting it wrong can mean the difference between a legally binding contract and an authenticated invoice.
+
+== The Fundamental Distinction
+
+=== Signatures: Natural Persons
+
+An electronic signature under {eidas-reg} is always attributed to a **natural person**.
+Article 3(10) defines an electronic signature as "data in electronic form which is attached to or logically associated with other data in electronic form and which is used by the signatory to sign."
+Article 3(9) defines "signatory" as "a natural person who creates an electronic signature."
+
+A company cannot sign.
+A department cannot sign.
+A server cannot sign.
+Only a human can sign, and a signature expresses that human's **intent** -- consent, approval, acknowledgment, or whatever the signing context requires.
+
+=== Seals: Legal Persons
+
+An electronic seal is attributed to a **legal person** -- a company, government agency, or any entity with legal personality.
+{eidas-reg} Article 3(25) defines an electronic seal as "data in electronic form, which is attached to or logically associated with other data in electronic form to ensure the latter's origin and integrity."
+
+Note the careful wording.
+A seal does not express _intent_.
+It proves **origin** (the data came from this organization) and **integrity** (the data has not been tampered with).
+When Acme Corp seals an invoice, the seal says: "This invoice was produced by Acme Corp, and it has not been modified since."
+It says nothing about which employee generated it or whether anyone reviewed it.
+
+== eIDAS Articles 25 vs 35
+
+=== Article 25: Signatures
+
+- **25(1)**: Non-discrimination -- an electronic signature shall not be denied legal effect solely because it is electronic
+- **25(2)**: A qualified electronic signature has the **equivalent legal effect of a handwritten signature**
+- **25(3)**: A QES from one member state is recognized in all member states
+
+The critical phrase in 25(2) is "equivalent legal effect."
+This is the strongest possible legal recognition -- a QES _is_ a handwritten signature for all legal purposes.
+
+=== Article 35: Seals
+
+- **35(1)**: Non-discrimination (same principle as 25(1))
+- **35(2)**: A qualified electronic seal enjoys a **presumption of integrity of the data and of correctness of the origin**
+- **35(3)**: Mutual recognition across member states
+- **Article 36**: Advanced seal requirements (same four properties as Art. 26, adapted for legal persons)
+- **Article 38**: Qualified certificates for seals must meet Annex III requirements
+- **Article 40**: Member states may define additional legal effects beyond the presumption
+
+.Legal effects comparison
+[cols="2,3,3", options="header"]
+|===
+| Aspect | Qualified Signature (QES) | Qualified Seal (QESeal)
+
+| Created by
+| Natural person (human)
+| Legal person (organization)
+
+| Legal effect
+| Equivalent to handwritten signature (Art. 25(2))
+| Presumption of integrity and origin (Art. 35(2))
+
+| Expresses intent?
+| Yes -- the signer intends to be bound
+| No -- proves origin and integrity only
+
+| Cross-border
+| Mandatory recognition (Art. 25(3))
+| Mandatory recognition (Art. 35(3))
+|===
+
+[IMPORTANT]
+====
+The difference between "legal equivalence" and "presumption of integrity and origin" is not academic.
+A QES provides **non-repudiation of commitment** -- the signer personally committed to the content.
+A QESeal provides **non-repudiation of origin** -- the data came from the stated organization.
+
+If a contract requires a signature, a seal will not suffice -- even a qualified seal.
+A seal on a contract proves only that the document came from the company, not that any authorized representative agreed to its terms.
+Conversely, for automated invoices, a seal is the _correct_ choice -- attributing personal intent to a batch process would be legally inappropriate.
+====
+
+== Same Code, Different Certificate
+
+=== What Differs in the Certificate
+
+From a cryptographic perspective, there is zero difference.
+Both are X.509 certificates, both use the same algorithms, both can be issued by the same QTSP.
+The differences are in the metadata:
+
+.Certificate differences: signature vs seal
+[cols="2,3,3", options="header"]
+|===
+| Field | Signature Certificate | Seal Certificate
+
+| Subject CN
+| Natural person's name ("Maria Schmidt")
+| Organization name ("Acme GmbH")
+
+| Certificate Policy OID
+| `0.4.0.194112.1.2` (QCP-n) or `...1.1` (QCP-n-qscd)
+| `0.4.0.194112.1.3` (QCP-l) or `...1.4` (QCP-l-qscd)
+
+| QCStatements: QcType
+| `0.4.0.1862.1.6.1` (esign)
+| `0.4.0.1862.1.6.2` (eseal)
+
+| eIDAS Annex
+| Annex I
+| Annex III
+|===
+
+=== Creating a Seal vs a Signature in Java
+
+The code is **identical**.
+The only difference is which certificate and private key you load.
+
+[source,java]
+----
+import java.io.ByteArrayOutputStream;
+import java.security.PrivateKey;
+import java.security.cert.X509Certificate;
+
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.interactive.digitalsignature.PDSignature;
+
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+
+/**
+ * Creates either a qualified signature or a qualified seal on a
+ * PDF document. The cryptographic operation is identical -- the
+ * distinction is entirely in the certificate used.
+ *
+ * Signature: cert has QcType esign (0.4.0.1862.1.6.1),
+ *            subject = "CN=Alice Smith"
+ * Seal:      cert has QcType eseal (0.4.0.1862.1.6.2),
+ *            subject = "O=Acme Corp, C=DE"
+ */
+@Slf4j
+@RequiredArgsConstructor
+public class PdfSignOrSealService {
+
+    private final PrivateKey privateKey;
+    private final X509Certificate[] certificateChain;
+
+    public byte[] signOrSeal(byte[] pdfBytes, String reason,
+            String location) throws Exception {
+
+        PDDocument doc = Loader.loadPDF(pdfBytes);
+
+        PDSignature sig = new PDSignature();
+        sig.setFilter(PDSignature.FILTER_ADOBE_PPKLITE);
+        sig.setSubFilter(
+                PDSignature.SUBFILTER_ETSI_CADES_DETACHED);
+        sig.setReason(reason);    // <1>
+        sig.setLocation(location);
+
+        CmsSignatureCreator signer = new CmsSignatureCreator(
+                privateKey, certificateChain);
+
+        doc.addSignature(sig, signer);
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        doc.saveIncremental(baos);
+        doc.close();
+
+        log.info("PDF signed/sealed: cert={}, reason={}",
+                certificateChain[0].getSubjectX500Principal(),
+                reason);
+        return baos.toByteArray();
+    }
+}
+----
+<1> The reason field typically differs: "Contract approval by Alice Smith" for a signature vs "Authenticated by Acme Corp" for a seal
+
+=== Detecting Signature vs Seal During Validation
+
+[source,java]
+----
+import java.security.cert.X509Certificate;
+
+import org.bouncycastle.asn1.ASN1Encodable;
+import org.bouncycastle.asn1.ASN1ObjectIdentifier;
+import org.bouncycastle.asn1.ASN1OctetString;
+import org.bouncycastle.asn1.ASN1Sequence;
+
+import lombok.extern.slf4j.Slf4j;
+
+/**
+ * Determines whether a certificate is for electronic signatures
+ * (natural person) or electronic seals (legal person) by
+ * examining the QcType statement in QCStatements.
+ */
+@Slf4j
+public class SignatureOrSealDetector {
+
+    private static final String QC_STATEMENTS_OID =
+            "1.3.6.1.5.5.7.1.3";
+    private static final String QC_TYPE_OID = "0.4.0.1862.1.6";
+    private static final String ESIGN_OID = "0.4.0.1862.1.6.1";
+    private static final String ESEAL_OID = "0.4.0.1862.1.6.2";
+
+    public enum CertType { SIGNATURE, SEAL, UNKNOWN }
+
+    public CertType detect(X509Certificate cert) {
+        byte[] extValue = cert.getExtensionValue(QC_STATEMENTS_OID);
+        if (extValue == null) {
+            return CertType.UNKNOWN;
+        }
+
+        try {
+            byte[] octets = ASN1OctetString.getInstance(extValue)
+                    .getOctets();
+            ASN1Sequence statements =
+                    ASN1Sequence.getInstance(octets);
+
+            for (ASN1Encodable statement : statements) {
+                ASN1Sequence seq =
+                        ASN1Sequence.getInstance(statement);
+                String oid = ASN1ObjectIdentifier.getInstance(
+                        seq.getObjectAt(0)).getId();
+
+                if (!QC_TYPE_OID.equals(oid) || seq.size() < 2) {
+                    continue;
+                }
+
+                ASN1Sequence typeSeq = ASN1Sequence.getInstance(
+                        seq.getObjectAt(1));
+                for (ASN1Encodable entry : typeSeq) {
+                    String typeOid = ASN1ObjectIdentifier
+                            .getInstance(entry).getId();
+                    if (ESIGN_OID.equals(typeOid)) {
+                        log.info("Certificate type: SIGNATURE");
+                        return CertType.SIGNATURE;
+                    }
+                    if (ESEAL_OID.equals(typeOid)) {
+                        log.info("Certificate type: SEAL");
+                        return CertType.SEAL;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("Failed to parse QCStatements", e);
+        }
+        return CertType.UNKNOWN;
+    }
+}
+----
+
+[TIP]
+====
+If the QcType statement is absent (some older certificates predate ETSI EN 319 412-5), fall back to the certificate policy OID: `0.4.0.194112.1.2` / `...1.1` indicate signature certificates, `0.4.0.194112.1.3` / `...1.4` indicate seal certificates.
+As a last resort, check the subject DN -- a certificate with only an organization name (no personal CN) is likely a seal, though this heuristic is not definitive.
+====
+
+== Use Cases: When to Sign, When to Seal
+
+=== Contracts and Agreements: Signature
+
+Any document requiring personal commitment -- contracts, NDAs, medical prescriptions, regulatory filings, court submissions -- needs a **signature**.
+The signer is the specific human being who agrees.
+{eidas-reg} Article 27 requires member states that mandate handwritten signatures for public services to accept QES.
+
+=== Invoices and Automated Documents: Seal
+
+Documents needing organizational authentication without personal approval -- invoices, bank statements, payslips, automated reports -- are candidates for **seals**.
+EU VAT Directive 2006/112/EC (Article 233) recognizes electronic seals as meeting invoice authenticity and integrity requirements.
+
+=== Hybrid Workflows
+
+Many real-world workflows combine both:
+
+1. An organization **seals** a document template (e.g., a bank seals a loan agreement)
+2. A natural person **signs** to express personal agreement (e.g., the customer signs the loan)
+3. The organization's representative **signs** to accept (a natural person acting as agent)
+
+The seal and signatures coexist as separate signature dictionaries in the same PDF, each with its own byte range and CMS structure.
+Validators should display both, clearly distinguishing "Sealed by Acme Corp" from "Signed by Alice Smith."
+
+== Server-Side Seal Creation and Batch Sealing
+
+Because seals represent organizations rather than individuals, they are ideal for **automated, server-side creation**.
+No human needs to be present at the moment of sealing.
+
+=== The Architecture
+
+1. The organization holds a **qualified seal certificate** with its private key on an **HSM** (certified as a Qualified Seal Creation Device)
+2. An application server generates documents (invoices, reports, certificates)
+3. The server calls the HSM to sign each document -- no human interaction per document
+4. The HSM authenticates the application server (mutual TLS, API key), not a person
+
+This is the critical difference from signatures: for QES, the signatory must authenticate _per signing operation_ (sole control).
+For seals, the organization's security policies ensure only authorized systems can trigger sealing.
+This makes batch processing feasible.
+
+[WARNING]
+====
+At high volumes, watch for two bottlenecks:
+
+1. **HSM throughput**: a single signing operation takes 1-10ms (RSA-2048 is slower than ECDSA P-256).
+At 50,000 documents per minute, you may need multiple HSM partitions or load balancing.
+
+2. **TSA throughput**: if adding qualified timestamps (PAdES-B-T), the TSA becomes the constraint.
+Most commercial TSAs handle hundreds of requests per second, but verify against your volume requirements.
+====
+
+=== Cost Implications
+
+**Signature certificates** are per-person, per-year: 50-300 EUR per natural person.
+For 500 employees, the annual cost is substantial.
+
+**Seal certificates** are per-organization, per-year.
+A single seal certificate can produce millions of seals at a fixed cost.
+The per-document cost approaches zero at scale.
+
+This asymmetry drives the architectural decision: seals for volume, signatures for commitment.
+
+== Common Pitfalls
+
+=== Displaying Seals as Signatures
+
+If your validation UI says "Signed by Acme Corp" when it encounters a seal, you are misleading the user.
+The correct display is "Sealed by" or "Authenticated by" -- language that communicates origin without implying personal intent.
+
+=== Using Signature Certificates for Automation
+
+If your batch pipeline signs 10,000 documents per hour with Alice's personal qualified certificate, you have a problem.
+Alice is not exercising sole control over each operation, and may not even be aware of most of them.
+Use a seal certificate for automation and reserve signature certificates for workflows requiring individual human approval.
+
+=== Ignoring the Certificate Type in Code
+
+Because the signing code is identical, it is easy to accidentally use a seal certificate for a signature workflow or vice versa.
+Your application must validate the certificate _before_ signing: check QcType, reject mismatches, and never rely on the user to "use the right certificate."
+
+[CAUTION]
+====
+Some older qualified certificates lack a QcType statement entirely.
+For these, you must fall back to the EUTL service entry's qualifiers or the certificate policy OID.
+This is yet another reason to use the EU DSS library (Chapter 23), which handles these edge cases.
+====
+
+== Key Takeaways
+
+- **Signatures** are for natural persons and express **intent** -- Article 25(2) gives QES the legal equivalence of a handwritten signature
+- **Seals** are for legal persons and prove **origin and integrity** -- Article 35(2) gives qualified seals a presumption of integrity and correct origin, not equivalence to a signature
+- The cryptographic mechanism is **identical** -- same CMS, same PAdES, same QSCD; the only difference is the certificate (QcType esign vs eseal, certificate policy QCP-n vs QCP-l)
+- Use **signatures** for contracts, agreements, approvals -- anything requiring personal human commitment
+- Use **seals** for invoices, automated reports, official publications -- organizational authentication without personal approval
+- **Server-side batch sealing** is the dominant seal use case: HSM-backed, no per-operation human auth, millions of documents at fixed cost
+- **Enforce the certificate type in code** -- do not allow seal certs for signature workflows or vice versa
+- Display seals correctly: "Sealed by" not "Signed by" -- the legal distinction matters
+- {eidas2-reg} focuses on personal QES via the EUDI wallet; seals continue on HSM infrastructure, with rising volume from QEAAs
