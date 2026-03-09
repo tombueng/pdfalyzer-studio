@@ -228,7 +228,15 @@
     /* ── Toggle panel ────────────────────────────────────────────── */
     function togglePanel() {
         const panel = document.getElementById('themePickerPanel');
-        if (panel) panel.classList.toggle('open');
+        if (!panel) return;
+        const opening = !panel.classList.contains('open');
+        if (opening) {
+            const dt = document.getElementById('displayTuningPanel');
+            const dp = document.getElementById('designPickerPanel');
+            if (dt) dt.classList.remove('open');
+            if (dp) dp.classList.remove('open');
+        }
+        panel.classList.toggle('open');
     }
 
     /* ── Init ────────────────────────────────────────────────────── */
@@ -256,6 +264,13 @@
         // Remove legacy navbar button if still present
         const legacyBtn = document.getElementById('themePickerBtn');
         if (legacyBtn) legacyBtn.closest('.dropdown')?.remove();
+
+        // Close on outside click
+        document.addEventListener('click', (e) => {
+            if (!panel.classList.contains('open')) return;
+            if (panel.contains(e.target) || (statusBtn && statusBtn.contains(e.target))) return;
+            panel.classList.remove('open');
+        }, true);
     }
 
     if (document.readyState === 'loading') {

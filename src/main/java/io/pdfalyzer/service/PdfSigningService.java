@@ -71,6 +71,9 @@ import lombok.extern.slf4j.Slf4j;
 public class PdfSigningService {
 
     private static final int SIGNATURE_CONTAINER_SIZE = 32768;
+    private static final int SIGNATURE_CONTAINER_SIZE_WITH_TSA = 65536;
+
+    private final TsaClientService tsaClientService;
 
     /**
      * Apply a digital signature to the given PDF bytes.
@@ -115,8 +118,11 @@ public class PdfSigningService {
 
             sigField.setValue(signature);
 
+            boolean useTsa = "B-T".equals(pending.getPadesProfile())
+                    && pending.getTsaUrl() != null && !pending.getTsaUrl().isBlank();
+
             SignatureOptions sigOptions = new SignatureOptions();
-            sigOptions.setPreferredSignatureSize(SIGNATURE_CONTAINER_SIZE);
+            sigOptions.setPreferredSignatureSize(useTsa ? SIGNATURE_CONTAINER_SIZE_WITH_TSA : SIGNATURE_CONTAINER_SIZE);
 
             // Visual appearance
             if (!"invisible".equals(pending.getVisualMode())) {
@@ -128,7 +134,10 @@ public class PdfSigningService {
                 embedBiometricData(signature, pending.getBiometricData(), pending.getBiometricFormat());
             }
 
-            CmsSignatureInterface cmsInterface = new CmsSignatureInterface(keyMaterial, pending.getPadesProfile());
+            CmsSignatureInterface cmsInterface = new CmsSignatureInterface(
+                    keyMaterial, pending.getPadesProfile(),
+                    useTsa ? tsaClientService : null,
+                    useTsa ? pending.getTsaUrl() : null);
             doc.addSignature(signature, cmsInterface, sigOptions);
 
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -417,10 +426,15 @@ public class PdfSigningService {
 
         private final SigningKeyMaterial keyMaterial;
         private final String padesProfile;
+        private final TsaClientService tsaClient;
+        private final String tsaUrl;
 
-        CmsSignatureInterface(SigningKeyMaterial keyMaterial, String padesProfile) {
+        CmsSignatureInterface(SigningKeyMaterial keyMaterial, String padesProfile,
+                              TsaClientService tsaClient, String tsaUrl) {
             this.keyMaterial = keyMaterial;
             this.padesProfile = padesProfile;
+            this.tsaClient = tsaClient;
+            this.tsaUrl = tsaUrl;
         }
 
         @Override
@@ -460,10 +474,43 @@ public class PdfSigningService {
 
                 CMSProcessableByteArray cmsContent = new CMSProcessableByteArray(contentBytes);
                 CMSSignedData signedData = gen.generate(cmsContent, false);
+
+                // PAdES-B-T: embed RFC 3161 timestamp token as unsigned attribute
+                if ("B-T".equals(padesProfile) && tsaClient != null && tsaUrl != null) {
+                    signedData = embedTimestampToken(signedData);
+                }
+
                 return signedData.getEncoded();
             } catch (Exception e) {
                 throw new IOException("CMS signing failed: " + e.getMessage(), e);
             }
+        }
+
+        private CMSSignedData embedTimestampToken(CMSSignedData signedData) throws Exception {
+            // Get the signature value from the first (only) signer
+            var signerInfo = signedData.getSignerInfos().getSigners().iterator().next();
+            byte[] signatureBytes = signerInfo.getSignature();
+
+            // Request timestamp token from TSA
+            byte[] tsTokenBytes = tsaClient.getTimestampToken(tsaUrl, signatureBytes);
+
+            // Build unsigned attribute with the timestamp token
+            var tsToken = org.bouncycastle.asn1.ASN1Primitive.fromByteArray(tsTokenBytes);
+            ASN1EncodableVector unsignedAttrsVec = new ASN1EncodableVector();
+            unsignedAttrsVec.add(new Attribute(
+                    PKCSObjectIdentifiers.id_aa_signatureTimeStampToken,
+                    new DERSet(tsToken)));
+            AttributeTable unsignedAttrs = new AttributeTable(unsignedAttrsVec);
+
+            // Replace the signer info with one that includes the unsigned attributes
+            var newSignerInfo = org.bouncycastle.cms.SignerInformation.addCounterSigners(
+                    signerInfo, new org.bouncycastle.cms.SignerInformationStore(new ArrayList<>()));
+            newSignerInfo = org.bouncycastle.cms.SignerInformation.replaceUnsignedAttributes(
+                    signerInfo, unsignedAttrs);
+
+            var newSignerInfos = new org.bouncycastle.cms.SignerInformationStore(
+                    java.util.Collections.singletonList(newSignerInfo));
+            return CMSSignedData.replaceSigners(signedData, newSignerInfos);
         }
 
         private AttributeTable buildSignedAttributes(X509Certificate cert) throws Exception {

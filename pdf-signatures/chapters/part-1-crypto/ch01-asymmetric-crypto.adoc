@@ -1,0 +1,772 @@
+[[ch01]]
+= Asymmetric Cryptography Primer
+ifdef::env-github[]
+:tip-caption: :bulb:
+:note-caption: :information_source:
+:important-caption: :heavy_exclamation_mark:
+:caution-caption: :fire:
+:warning-caption: :warning:
+endif::[]
+
+[.lead]
+This chapter builds the cryptographic foundation that everything else in this book depends on.
+We start with the key distribution problem that asymmetric cryptography was invented to solve, work through RSA and elliptic curve algorithms at a conceptual level, and end with practical Java code that generates the key pairs you will use to sign PDFs.
+
+If you can already explain why RSA-2048 and ECDSA with P-256 provide roughly equivalent security, and you know why BouncyCastle exists alongside the JDK's built-in providers, skip to Chapter 2.
+Everyone else: this is where your journey into PDF signatures begins.
+
+
+== The Key Distribution Problem
+
+Before we talk about RSA, elliptic curves, or any of the algorithms that make PDF signatures possible, we need to understand the problem they were invented to solve.
+
+Symmetric cryptography -- where the same key encrypts and decrypts -- has been around for millennia.
+Caesar ciphers, Enigma machines, AES-256: they all share a single fundamental weakness.
+Both parties must possess the same secret key.
+If Alice wants to send an encrypted message to Bob, she and Bob must first agree on a shared secret.
+In person, this is trivial -- write the key on a piece of paper and hand it over.
+Over a network, it is a nightmare.
+
+This is the **key distribution problem**: how do you securely share a secret with someone you have never met, over a channel that an adversary controls?
+
+For most of human history, the answer was "you don't -- you use a trusted courier."
+Governments ran key distribution networks.
+Military organizations employed dedicated personnel whose sole job was transporting codebooks.
+Banks used armored vehicles.
+None of this scales to the internet, where you need to establish secure communications with millions of strangers, instantly, without any prior arrangement.
+
+In 1976, Whitfield Diffie and Martin Hellman published "New Directions in Cryptography," describing a system where two parties could agree on a shared secret over a public channel without ever having communicated before.
+A year later, Ronald Rivest, Adi Shamir, and Leonard Adleman published the RSA algorithm -- the first practical public-key cryptosystem.
+(Clifford Cocks at GCHQ had independently discovered an equivalent system in 1973, but it was classified until 1997. Cryptography has a habit of being invented multiple times.)
+
+The insight behind all of these systems is the same: **mathematical one-way functions**.
+Operations that are easy to perform in one direction but computationally infeasible to reverse.
+Multiplying two large primes takes microseconds; factoring their product takes longer than the age of the universe.
+This asymmetry -- easy forward, hard backward -- is the foundation of everything that follows.
+
+
+== Key Pairs: The Fundamental Asymmetry
+
+An asymmetric key pair consists of two mathematically related keys:
+
+* A **private key** -- kept secret, never shared, never transmitted
+* A **public key** -- derived from the private key, freely distributable
+
+The relationship between them has two critical properties:
+
+1. **It is computationally infeasible to derive the private key from the public key.** Given a public key, there is no known efficient algorithm to compute the corresponding private key. The security of the entire system rests on this.
+
+2. **Operations performed with one key can only be reversed with the other.** Data encrypted with the public key can only be decrypted with the private key. Data signed with the private key can only be verified with the public key.
+
+This second property is what makes digital signatures possible.
+When you sign a PDF, your private key produces a cryptographic value that is mathematically bound to both your key and the document content.
+Anyone who has your public key -- which is embedded in your certificate, which is embedded in the PDF itself -- can verify that the signature was produced by someone holding the corresponding private key.
+
+They cannot forge a new signature.
+They cannot modify the document without invalidating the signature.
+They cannot extract your private key from the signature or the public key.
+
+This is the fundamental asymmetry that gives asymmetric cryptography its name, and it is the reason PDF digital signatures work at all.
+
+[NOTE]
+====
+The terms "encrypt" and "decrypt" are technically imprecise when applied to digital signatures.
+Signing is not encryption in the classical sense -- you are not hiding data; you are producing a proof.
+The distinction matters in formal cryptographic contexts and in legal frameworks like eIDAS ({eidas-reg}).
+
+Throughout this book, we use "sign" and "verify" for signature operations, reserving "encrypt" and "decrypt" for actual confidentiality operations.
+Many older references (and some library APIs, including parts of the JCA) conflate the two.
+Do not let the terminology confuse you.
+====
+
+
+== RSA: The Workhorse
+
+RSA, named after Rivest, Shamir, and Adleman, remains the most widely deployed asymmetric algorithm in the world.
+Every PDF viewer supports it.
+Every certificate authority issues RSA certificates.
+Every signing library implements it.
+If you encounter a signed PDF in production, there is an overwhelming probability that it was signed with RSA.
+
+=== The Mathematical Basis
+
+The security of RSA rests on the **integer factorization problem**: given the product of two large primes, recover the original primes.
+Multiplication is trivial; factoring is believed to be computationally infeasible for sufficiently large numbers.
+Here is how this translates into a key pair.
+
+1. **Choose two large primes, _p_ and _q_.** These primes are generated independently using a cryptographically secure random number generator.
+For RSA-2048, each prime is approximately 1024 bits long.
+Finding primes of this size is itself nontrivial -- it requires probabilistic primality tests (Miller-Rabin is the standard), and several candidates may be tested before a probable prime is found.
+This is why RSA key generation is noticeably slower than ECDSA key generation.
+
+2. **Compute the modulus _n = p * q_.** This product _n_ appears in both the public and private keys.
+For RSA-2048, _n_ is a 2048-bit number.
+Computing _n_ from _p_ and _q_ takes microseconds.
+Recovering _p_ and _q_ from _n_ is the hard problem.
+
+3. **Compute the totient.** Euler's totient function for _n_ is _phi(n) = (p - 1)(q - 1)_.
+This value is used to derive the private exponent and is then discarded.
+It must never be stored or revealed -- knowing _phi(n)_ is equivalent to knowing the factorization of _n_.
+
+4. **Choose the public exponent _e_.** In practice, _e_ is almost always 65537 (0x10001).
+This value was chosen because it is prime, it has a low Hamming weight (only two bits set), and it makes modular exponentiation during verification fast.
+You will see 65537 in virtually every RSA certificate you examine.
+Some ancient systems used _e_ = 3, which is faster but has known vulnerabilities when combined with naive padding.
+
+5. **Compute the private exponent _d_.** _d_ is the modular inverse of _e_ modulo _phi(n)_: _d * e = 1 mod phi(n)_.
+This is computed using the extended Euclidean algorithm.
+Knowing _d_ requires knowing _phi(n)_, which requires knowing _p_ and _q_.
+
+6. **The public key** is the pair (_n_, _e_).
+
+7. **The private key** is the pair (_n_, _d_).
+In practice, the private key also stores _p_, _q_, and several precomputed values (the CRT -- Chinese Remainder Theorem -- parameters) that make signing four times faster.
+
+=== Why Large Primes Matter
+
+The security of RSA depends on the inability of an attacker to factor _n_ and recover _p_ and _q_.
+The difficulty of factoring grows super-polynomially with the size of _n_.
+The best known classical factoring algorithm is the General Number Field Sieve (GNFS), whose complexity is roughly:
+
+----
+exp( (1.923 + o(1)) * (ln n)^(1/3) * (ln ln n)^(2/3) )
+----
+
+This means that doubling the key size does _not_ merely double the work -- it increases it by many orders of magnitude.
+Factoring a 768-bit RSA modulus was achieved in 2009 by a team of researchers using hundreds of machines over two years.
+Factoring a 1024-bit modulus is estimated to be within the reach of a well-funded nation-state.
+Factoring a 2048-bit modulus is estimated to require more computation than humanity can currently muster.
+
+=== RSA Key Sizes vs Security Levels
+
+The size of an RSA key is the bit length of the modulus _n_.
+Larger modulus means harder factoring means more security -- but also slower operations.
+
+.RSA key sizes and their practical characteristics
+[cols="1,1,2,2,3", options="header"]
+|===
+| Key Size | Security Level | Sign Time (relative) | Signature Size | Status
+
+| 1024-bit
+| ~80-bit
+| 1x (baseline)
+| 128 bytes
+| **Broken.** NIST disallowed after 2013. Do not use for any purpose. You will still encounter these in legacy PDFs -- they were common before 2010.
+
+| 2048-bit
+| ~112-bit
+| ~4x
+| 256 bytes
+| **Current minimum.** NIST SP 800-57 minimum through 2030. This is what most CAs issue today. Adobe AATL requires at least 2048-bit RSA.
+
+| 3072-bit
+| ~128-bit
+| ~9x
+| 384 bytes
+| **Recommended for new deployments.** Provides 128-bit security -- the level NIST considers adequate through at least 2030 and likely well beyond.
+
+| 4096-bit
+| ~140-bit
+| ~16x
+| 512 bytes
+| **Conservative choice.** Noticeable performance impact for high-volume signing. Some government requirements mandate this. The additional security margin over 3072 is modest relative to the performance cost.
+|===
+
+WARNING: RSA-1024 is not merely "weak" -- it is **factored**. In 2010, a team factored a 768-bit RSA modulus. The computational cost of factoring 1024-bit moduli is within reach of well-funded adversaries. If you encounter a signed PDF with an RSA-1024 certificate, the signature provides no meaningful security guarantee, even if the viewer shows it as "valid." Many viewers do not check key size during validation.
+
+=== Performance Impact of Key Size
+
+RSA has an unusual asymmetry in its operation costs: **verification is fast; signing is slow**.
+
+This is because the public exponent _e_ is small (65537), making the modular exponentiation during verification much cheaper than the exponentiation with the large private exponent _d_ during signing.
+For PDF signatures, this works in our favor: documents are signed once but verified many times.
+
+However, RSA's performance degrades sharply as key sizes increase.
+The signing operation scales roughly as O(k^3^) where _k_ is the key size in bits.
+Doubling the key size makes signing approximately eight times slower.
+For a desktop application signing a single document, this is irrelevant.
+For a server processing thousands of signing requests per second, the difference between 2048-bit and 4096-bit RSA is significant.
+
+=== Why RSA-1024 Persists in the Wild
+
+If RSA-1024 is broken, why do you still encounter it in signed PDFs?
+The answer is a combination of institutional inertia, cost, and the peculiar nature of long-lived documents.
+
+Government agencies issued RSA-1024 certificates throughout the 2000s for document signing infrastructure.
+Many of those signed documents still exist, still circulate, and still need to be validated.
+Some organizations operate signing infrastructure on hardware security modules (HSMs) that cannot be easily re-keyed -- the cost of replacing an HSM fleet across dozens of offices can be enormous.
+Other systems operate in air-gapped environments where updating cryptographic infrastructure requires physical site visits.
+
+The practical consequence: your validation code must _handle_ RSA-1024 gracefully, even if it correctly flags it as insecure.
+Refusing to parse a legacy document because the key size is too small is unhelpful.
+Displaying it as "valid" without qualification is irresponsible.
+The right approach is what PDFalyzer does: show the signature, show the key size, and let the user draw the appropriate conclusion.
+
+[TIP]
+====
+**How to check the key size of a certificate in a signed PDF:**
+
+In PDFalyzer, open the Signatures tab and look at the "Public Key" section of any signature.
+The key size is displayed directly.
+
+From the command line, extract the certificate and use OpenSSL:
+
+[source,bash]
+----
+openssl x509 -in cert.pem -text -noout | grep "Public-Key"
+----
+
+In Java with BouncyCastle, it is one line:
+
+[source,java]
+----
+int keySize = ((RSAPublicKey) cert.getPublicKey()).getModulus().bitLength();
+----
+
+If you see 1024 or less, the certificate was issued before modern standards were enforced, and the signature's cryptographic value is nil.
+====
+
+
+== Elliptic Curve Cryptography: Smaller Keys, Same Security
+
+In the mid-1980s, Neal Koblitz and Victor Miller independently proposed using elliptic curves over finite fields as the basis for public-key cryptography.
+The core idea: the **elliptic curve discrete logarithm problem (ECDLP)** is believed to be harder than integer factorization for equivalent key sizes.
+This means we can achieve the same security level with dramatically smaller keys.
+
+=== Elliptic Curve Basics
+
+An elliptic curve, for cryptographic purposes, is the set of points _(x, y)_ satisfying an equation of the form _y^2^ = x^3^ + ax + b_ over a finite field.
+The "finite field" part is important: we are not working with real numbers and smooth curves.
+We are working with integers modulo a large prime _p_, and the curve is a discrete set of points.
+
+The cryptographic operation on these points is **point addition**: given two points on the curve, there is a geometric rule for computing a third point.
+Repeated point addition (scalar multiplication) gives us the one-way function: given a point _G_ and a scalar _d_, computing _Q = d * G_ is efficient.
+Recovering _d_ from _Q_ and _G_ (the ECDLP) is computationally infeasible.
+
+You do not need to understand the geometry to use ECDSA effectively.
+What matters is the practical consequence: the ECDLP is harder than integer factorization for the same key size, which is why a 256-bit elliptic curve key provides the same security as a 3072-bit RSA key.
+
+=== The NIST Curves: P-256, P-384, P-521
+
+The standard curves for ECDSA, defined by NIST in FIPS 186-4:
+
+.NIST standard curves for ECDSA
+[cols="1,1,1,3", options="header"]
+|===
+| Curve | Security Level | Signature Size | Notes
+
+| P-256 (secp256r1)
+| 128-bit
+| 64 bytes
+| The workhorse. Universally supported. Adobe Acrobat, PDFBox, iText, BouncyCastle -- everyone supports P-256. If you are choosing an ECDSA curve for PDF signing, this is the default choice.
+
+| P-384 (secp384r1)
+| 192-bit
+| 96 bytes
+| Required by certain government profiles (e.g., NSA Suite B, CNSS Policy 15). Broader support than P-521 but less than P-256.
+
+| P-521 (secp521r1)
+| 256-bit
+| 132 bytes
+| Maximum security. The name is not a typo -- it is 521 bits, not 512. Rarely used in practice for PDF signatures because the security margin over P-384 is excessive for most threat models, and some tools have spotty support.
+|===
+
+IMPORTANT: The curve names are a source of endless confusion. "P-256" is the NIST name. "secp256r1" is the SECG (Standards for Efficient Cryptography Group) name. "prime256v1" is the OpenSSL name. They are all the same curve. You will encounter all three names in certificate metadata, library APIs, and documentation. When PDFBox reports a signature algorithm, it uses the JCA name; when BouncyCastle constructs the CMS structure, it uses OIDs; when you read the certificate in OpenSSL, it says "prime256v1." They are all P-256.
+
+=== Why ECDSA Signatures Are Smaller
+
+The practical consequence of the ECDLP's difficulty is striking.
+RSA-3072 provides the same security as ECC-256, but the RSA key is twelve times larger.
+This size difference cascades through every part of the system: smaller keys mean smaller certificates, smaller CMS structures in the PDF's `/Contents` field, faster network transmission of signed documents, and less storage overhead.
+
+.Equivalent security levels across algorithms (NIST SP 800-57 Part 1, Rev. 5)
+[cols="1,1,1,2", options="header"]
+|===
+| Security Level | RSA Key Size | ECC Key Size | Ratio
+
+| 112-bit
+| 2048-bit
+| 224-bit
+| 9:1
+
+| 128-bit
+| 3072-bit
+| 256-bit
+| 12:1
+
+| 192-bit
+| 7680-bit
+| 384-bit
+| 20:1
+
+| 256-bit
+| 15360-bit
+| 521-bit
+| 30:1
+|===
+
+For PDF signatures specifically, the `/Contents` hex string must be large enough to hold the entire CMS `SignedData` structure, including the signer's certificate chain.
+With RSA-4096 certificates and a chain of three certificates, this blob can exceed 10 KB.
+With ECDSA P-256, the same chain might be 3 KB.
+Chapter 13 covers why the size of `/Contents` matters -- it determines the byte range gap, which must be estimated before signing.
+
+=== ECDSA Adoption in PDF Signatures
+
+ECDSA adoption in PDF has been slower than in TLS, where P-256 became the dominant algorithm years ago.
+The reasons are institutional rather than technical.
+
+Certificate authorities have been issuing RSA signing certificates for two decades, and existing workflows are built around RSA.
+Many enterprise signing solutions -- particularly those using HSMs provisioned in the 2010s -- have RSA keys burned into hardware.
+The Adobe AATL program includes ECDSA certificates from several providers, but the majority of AATL roots remain RSA.
+
+That said, new deployments increasingly choose ECDSA.
+The eIDAS 2.0 Architecture Reference Framework ({eidas2-reg}) lists ECDSA as a recommended algorithm for the EUDI wallet.
+If you are starting a new signing project and you have control over the certificate procurement process, ECDSA with P-256 is the technically superior choice.
+
+CAUTION: The random nonce _k_ in ECDSA is a notorious source of catastrophic failures. If the same _k_ is used for two different messages, the private key can be algebraically recovered. This is not a theoretical concern -- it has happened in production. Sony's PlayStation 3 code-signing key was extracted in 2010 because they used a constant value for _k_. The Bitcoin Android wallet vulnerability in 2013 was caused by a weak random number generator producing predictable _k_ values. Modern implementations use deterministic nonce generation (RFC 6979) to eliminate this class of bugs entirely. BouncyCastle {bc-version} supports RFC 6979 deterministic signatures.
+
+
+== EdDSA and Ed25519: The Future Direction
+
+Edwards-curve Digital Signature Algorithm (EdDSA) is a modern signature scheme designed by Daniel J. Bernstein and colleagues, published as RFC 8032 in 2017.
+It addresses several practical shortcomings of ECDSA while providing equivalent or better security.
+
+=== Bernstein's Work and Design Philosophy
+
+Daniel J. Bernstein -- "djb" to everyone in the cryptographic community -- designed Curve25519 in 2005 and the Ed25519 signature scheme in 2011 with a very specific philosophy: eliminate every source of implementation error.
+
+The NIST curves (P-256, P-384) have been criticized for their opaque parameter generation -- NIST never fully explained how the "random" seed values were chosen, which fueled suspicion (especially after the Dual_EC_DRBG backdoor scandal in 2013, where the NSA was found to have inserted a backdoor into a NIST-standardized random number generator).
+Bernstein designed Curve25519 with fully transparent, verifiable parameters -- every constant has a documented justification.
+
+More importantly, Ed25519 was designed to be _implementable_ without the subtle pitfalls that plague ECDSA:
+
+1. **Deterministic signatures.** EdDSA does not use a random nonce. The nonce is derived deterministically from the private key and the message. This eliminates the entire class of nonce-reuse vulnerabilities. There is no Sony PS3 scenario with EdDSA -- it is structurally impossible.
+
+2. **Constant-time by design.** The algorithm was designed from the ground up to run in constant time. There are no data-dependent branches or memory accesses that could leak information about the private key through timing, power analysis, or cache behavior.
+
+3. **No parameter negotiation.** You use Ed25519 (128-bit security) or Ed448 (224-bit security). That is it. No curves to choose, no hash functions to configure, no padding schemes to get wrong.
+
+=== Ed25519 and Ed448
+
+EdDSA defines two concrete instances:
+
+* **Ed25519**: Based on Curve25519 (a twisted Edwards curve). Provides ~128-bit security. Signatures are 64 bytes, public keys are 32 bytes. This is the one everyone uses.
+
+* **Ed448**: Based on Curve448 (the "Goldilocks" curve, named by Mike Hamburg because 448 = 224 * 2, a "just right" security level). Provides ~224-bit security. Signatures are 114 bytes, public keys are 57 bytes.
+
+=== EdDSA and PDF: Adoption Status
+
+Here is where the good news ends, at least for PDF signatures.
+
+As of 2026, **EdDSA support in the PDF signature ecosystem is minimal**.
+{iso32000-2} does not explicitly mention EdDSA.
+The PAdES standards ({etsi-pades}) reference ECDSA but not EdDSA.
+Adobe Acrobat does not support EdDSA signatures -- a PDF signed with Ed25519 will show as "unknown algorithm" or "signature invalid" in Acrobat.
+
+[WARNING]
+====
+**Do not use EdDSA for PDF signatures in production today.**
+
+While the algorithm itself is excellent, the ecosystem does not support it.
+A signature that cannot be validated by the dominant PDF viewer is, for all practical purposes, useless.
+
+That said, EdDSA adoption is accelerating in the broader PKI ecosystem (TLS, SSH, code signing), and it is a matter of when -- not if -- PDF viewers add support.
+The eIDAS 2.0 Architecture Reference Framework ({eidas2-reg}) includes EdDSA in its list of acceptable algorithms for the EUDI wallet.
+When EUDI wallet-based PDF signing becomes mainstream (Chapter 27), EdDSA support in PDF viewers will follow.
+====
+
+
+== Algorithm Comparison
+
+.Algorithm comparison for PDF digital signatures (as of 2026)
+[cols="2,1,1,1,1,2", options="header"]
+|===
+| Property | RSA-3072 | ECDSA P-256 | ECDSA P-384 | Ed25519 | Notes
+
+| Security level
+| 128-bit
+| 128-bit
+| 192-bit
+| ~128-bit
+| All except P-384 provide equivalent security.
+
+| Public key size
+| ~400 bytes
+| ~90 bytes
+| ~120 bytes
+| 32 bytes
+| Encoded sizes (SubjectPublicKeyInfo).
+
+| Signature size
+| 384 bytes
+| 64 bytes
+| 96 bytes
+| 64 bytes
+| Raw signature value before CMS packaging.
+
+| Keygen speed
+| Slow (probabilistic prime search)
+| Fast
+| Fast
+| Fast
+| RSA-3072 keygen: 200-1500ms. EC: under 5ms.
+
+| Sign speed
+| Moderate
+| Fast
+| Fast
+| Fast
+| RSA scales poorly with key size.
+
+| Verify speed
+| Fast
+| Moderate
+| Moderate
+| Fast
+| RSA verification is cheap (small _e_).
+
+| Adobe Acrobat
+| Full support
+| Full support
+| Full support
+| No support
+| Acrobat drives compatibility requirements.
+
+| PDF spec support
+| {iso32000-2}
+| {iso32000-2}
+| {iso32000-2}
+| Not mentioned
+| EdDSA OIDs are not in the PDF spec.
+
+| PAdES support
+| Yes
+| Yes
+| Yes
+| No
+| PAdES references ECDSA, not EdDSA.
+|===
+
+.Algorithm support across PDF viewers and libraries (as of early 2026)
+[cols="2,1,1,1,1", options="header"]
+|===
+| Viewer / Library | RSA | ECDSA (P-256) | ECDSA (P-384/P-521) | EdDSA
+
+| Adobe Acrobat DC
+| Yes
+| Yes
+| Yes (P-384); Partial (P-521)
+| No
+
+| Foxit Reader
+| Yes
+| Yes
+| Yes (P-384); No (P-521)
+| No
+
+| PDFBox {pdfbox-version}
+| Yes
+| Yes
+| Yes
+| Partial (via BouncyCastle provider)
+
+| iText 8.x
+| Yes
+| Yes
+| Yes
+| No
+
+| BouncyCastle {bc-version}
+| Yes
+| Yes
+| Yes
+| Yes (Ed25519, Ed448)
+
+| LibreOffice Draw
+| Yes
+| Yes
+| Partial
+| No
+|===
+
+
+== Connecting to PDF: OIDs and SignerInfo
+
+When a PDF signature is created, the signing algorithm is encoded as an ASN.1 Object Identifier (OID) inside the CMS `SignedData` structure ({rfc5652}).
+Specifically, it appears in the `SignerInfo.digestEncryptionAlgorithm` field (the CMS name for the signature algorithm -- "digestEncryptionAlgorithm" is a historical misnomer that has caused confusion for two decades, but we are stuck with it).
+
+.Common algorithm OIDs you will encounter in PDF signatures
+[cols="3,3,2", options="header"]
+|===
+| Algorithm | OID | Where You See It
+
+| RSA (PKCS#1 v1.5)
+| `1.2.840.113549.1.1.1`
+| Legacy signatures. The hash algorithm is specified separately in `digestAlgorithm`.
+
+| SHA-256 with RSA
+| `1.2.840.113549.1.1.11`
+| Most common in modern PDF signatures.
+
+| SHA-384 with RSA
+| `1.2.840.113549.1.1.12`
+| Higher-security RSA.
+
+| SHA-512 with RSA
+| `1.2.840.113549.1.1.13`
+| Government and defense contexts.
+
+| RSASSA-PSS
+| `1.2.840.113549.1.1.10`
+| Probabilistic padding. Hash specified in parameters.
+
+| ECDSA with SHA-256
+| `1.2.840.10045.4.3.2`
+| Growing adoption.
+
+| ECDSA with SHA-384
+| `1.2.840.10045.4.3.3`
+| Common with P-384 curves.
+
+| Ed25519
+| `1.3.101.112`
+| Not yet seen in production PDF signatures.
+|===
+
+TIP: When you encounter the OID `1.2.840.113549.1.1.1` (plain RSA) in the `digestEncryptionAlgorithm` field, do not panic. This does not mean the signature used no hash. It means the CMS was constructed in the older style where the signature algorithm OID says "RSA" and the hash algorithm is determined solely by the `digestAlgorithm` field in the `SignerInfo`. Both styles -- the combined OID like `1.2.840.113549.1.1.11` (SHA-256 with RSA) and the split approach -- are valid per {rfc5652}. PDFBox and BouncyCastle handle both transparently.
+
+
+== Java's Cryptographic Provider Model and BouncyCastle
+
+Before we write any code, we need to understand how Java organizes its cryptographic implementations, because this directly affects how you generate keys, create signatures, and interact with BouncyCastle.
+
+=== JCA, JCE, and the Provider Architecture
+
+The **Java Cryptography Architecture (JCA)** defines abstract interfaces -- `KeyPairGenerator`, `Signature`, `MessageDigest`, `Cipher` -- and a **provider model** where concrete implementations are plugged in at runtime.
+The **Java Cryptography Extension (JCE)** extends JCA with additional capabilities.
+In modern Java (since JDK 9), the distinction is mostly historical.
+
+[source,java]
+----
+// This does NOT specify which implementation to use
+KeyPairGenerator kpg = KeyPairGenerator.getInstance("RSA");
+
+// The JCA searches registered providers in priority order
+// and returns the first one that supports "RSA"
+----
+
+The JDK ships with built-in providers: `SUN`, `SunRsaSign`, `SunEC`, `SunJCE`.
+These cover the basics -- RSA, ECDSA with NIST curves, AES, SHA-2 hashes.
+For many applications, the built-in providers are sufficient.
+
+For PDF signatures, they are not.
+
+=== Why BouncyCastle Exists
+
+The **Legion of the Bouncy Castle** (yes, that is the organization's legal name, registered in Australia) provides the most comprehensive open-source cryptographic library for Java.
+BouncyCastle is not an alternative to the JCA -- it is a **JCA provider** that plugs into the same framework.
+
+We need BouncyCastle for PDF signatures for several reasons:
+
+1. **CMS/PKCS#7 implementation.** The JDK does not include a CMS library. BouncyCastle's `bcpkix` module provides `CMSSignedDataGenerator`, `CMSSignedData`, and everything else needed to construct and parse the CMS `SignedData` structures that PDF signatures require ({rfc5652}).
+
+2. **Algorithm breadth.** BouncyCastle supports algorithms the JDK does not, including EdDSA (Ed25519, Ed448), certain elliptic curves, and legacy algorithms that appear in older signed PDFs.
+
+3. **ASN.1 library.** BouncyCastle includes a complete ASN.1 parsing and generation library -- essential for working with X.509 certificates, CMS structures, and OCSP responses at the byte level.
+
+4. **Certificate generation.** The `bcpkix` module includes `X509v3CertificateBuilder` for creating X.509 certificates programmatically -- something you cannot do with the JDK alone.
+
+=== Provider Registration
+
+[source,java]
+----
+import java.security.Security;
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
+
+// Register BouncyCastle as a JCA provider
+// This must happen before any cryptographic operations
+Security.addProvider(new BouncyCastleProvider());
+----
+
+TIP: In a Spring Boot application, register the BouncyCastle provider in a `@PostConstruct` method of a `@Configuration` class. This ensures it is available before any bean that needs cryptographic operations is initialized. PDFalyzer does this in `BouncyCastleConfig.java`. If you forget this step, you will get `NoSuchAlgorithmException` or `NoSuchProviderException` at runtime -- and the error message will not tell you that a missing provider registration is the cause.
+
+
+== Practical Code: Generating Key Pairs
+
+=== RSA Key Pair Generation
+
+[source,java]
+----
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.Security;
+import java.security.interfaces.RSAPrivateKey;
+import java.security.interfaces.RSAPublicKey;
+
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
+
+public class RsaKeyPairExample {
+
+    public static KeyPair generateRsaKeyPair(int keySize) throws Exception {
+        Security.addProvider(new BouncyCastleProvider());
+
+        KeyPairGenerator kpg = KeyPairGenerator.getInstance("RSA", "BC");
+        kpg.initialize(keySize);
+        return kpg.generateKeyPair();
+    }
+
+    public static void main(String[] args) throws Exception {
+        KeyPair kp = generateRsaKeyPair(3072);
+
+        RSAPublicKey pub = (RSAPublicKey) kp.getPublic();
+        RSAPrivateKey priv = (RSAPrivateKey) kp.getPrivate();
+
+        System.out.println("Algorithm:    " + pub.getAlgorithm());
+        System.out.println("Key size:     " + pub.getModulus().bitLength() + " bits");
+        System.out.println("Pub exponent: " + pub.getPublicExponent());
+        System.out.println("Pub format:   " + pub.getFormat());  // X.509
+        System.out.println("Priv format:  " + priv.getFormat()); // PKCS#8
+    }
+}
+----
+
+The output will show a 3072-bit key with public exponent 65537, the public key in X.509 (SubjectPublicKeyInfo) format, and the private key in PKCS#8 format.
+These format names -- X.509 for public keys, PKCS#8 for private keys -- are the standard encodings that appear in PEM files.
+Chapter 5 covers key material formats in detail.
+
+=== ECDSA Key Pair Generation
+
+[source,java]
+----
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.Security;
+import java.security.interfaces.ECPrivateKey;
+import java.security.interfaces.ECPublicKey;
+import java.security.spec.ECGenParameterSpec;
+
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
+
+public class EcdsaKeyPairExample {
+
+    public static KeyPair generateEcdsaKeyPair(String curveName) throws Exception {
+        Security.addProvider(new BouncyCastleProvider());
+
+        KeyPairGenerator kpg = KeyPairGenerator.getInstance("EC", "BC");
+        kpg.initialize(new ECGenParameterSpec(curveName));
+        return kpg.generateKeyPair();
+    }
+
+    public static void main(String[] args) throws Exception {
+        // P-256: use the SECG name, not the NIST name
+        KeyPair kp = generateEcdsaKeyPair("secp256r1");
+
+        ECPublicKey pub = (ECPublicKey) kp.getPublic();
+        ECPrivateKey priv = (ECPrivateKey) kp.getPrivate();
+
+        System.out.println("Algorithm:   " + pub.getAlgorithm());
+        System.out.println("Curve order: " + pub.getParams().getOrder().bitLength() + " bits");
+        System.out.println("Pub format:  " + pub.getFormat());  // X.509
+        System.out.println("Priv format: " + priv.getFormat()); // PKCS#8
+
+        // The public key is a point on the curve (x, y)
+        System.out.println("Pub X:       " + pub.getW().getAffineX().bitLength() + " bits");
+        System.out.println("Pub Y:       " + pub.getW().getAffineY().bitLength() + " bits");
+    }
+}
+----
+
+Note the curve name: `"secp256r1"`, not `"P-256"`.
+The JCA uses SECG names in `ECGenParameterSpec`.
+BouncyCastle accepts both, but for portability, use the SECG name.
+
+=== Performance Comparison
+
+[source,java]
+----
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.Security;
+import java.security.spec.ECGenParameterSpec;
+
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
+
+public class KeyPairComparisonExample {
+
+    public static void main(String[] args) throws Exception {
+        Security.addProvider(new BouncyCastleProvider());
+
+        // RSA-3072: ~128-bit security
+        long start = System.nanoTime();
+        KeyPairGenerator rsaKpg = KeyPairGenerator.getInstance("RSA", "BC");
+        rsaKpg.initialize(3072);
+        KeyPair rsaKp = rsaKpg.generateKeyPair();
+        long rsaTime = System.nanoTime() - start;
+
+        // ECDSA P-256: ~128-bit security
+        start = System.nanoTime();
+        KeyPairGenerator ecKpg = KeyPairGenerator.getInstance("EC", "BC");
+        ecKpg.initialize(new ECGenParameterSpec("secp256r1"));
+        KeyPair ecKp = ecKpg.generateKeyPair();
+        long ecTime = System.nanoTime() - start;
+
+        System.out.println("RSA-3072 keygen:    " + rsaTime / 1_000_000 + " ms");
+        System.out.println("ECDSA P-256 keygen: " + ecTime / 1_000_000 + " ms");
+        System.out.println("RSA pub key size:   " + rsaKp.getPublic().getEncoded().length + " bytes");
+        System.out.println("EC pub key size:    " + ecKp.getPublic().getEncoded().length + " bytes");
+        System.out.println("RSA priv key size:  " + rsaKp.getPrivate().getEncoded().length + " bytes");
+        System.out.println("EC priv key size:   " + ecKp.getPrivate().getEncoded().length + " bytes");
+    }
+}
+----
+
+On a typical machine, RSA-3072 key generation takes 200-1500 ms (it varies because finding large primes is probabilistic), while ECDSA P-256 key generation completes in under 5 ms.
+The encoded key sizes will show the RSA public key at roughly 400 bytes versus 90 bytes for the EC public key.
+
+These numbers matter in practice.
+If you are building a self-signed certificate generator for testing (as we do in Chapter 29), RSA key generation is the bottleneck.
+If you are deploying a signing service that provisions per-user keys, the hundred-fold speed advantage of ECDSA key generation is worth considering.
+
+
+== Choosing an Algorithm for PDF Signatures
+
+Given all of the above, what should you actually use?
+
+**For maximum compatibility: RSA-2048 or RSA-3072 with SHA-256.**
+Every PDF viewer, every library, every validation service supports this combination.
+If your signed PDFs need to be validated by the widest possible audience -- and they usually do -- RSA with SHA-256 is the safe choice.
+Use 3072-bit keys for new deployments; 2048-bit is acceptable for existing systems but provides only 112-bit security.
+
+**For smaller signatures and modern infrastructure: ECDSA with P-256 and SHA-256.**
+If you control the validation environment (e.g., an internal document management system) or if you are targeting modern viewers (Adobe Acrobat 2020+, PDFBox 3.x, iText 8.x), ECDSA P-256 gives you 128-bit security with much smaller key material.
+The CMS blob in `/Contents` will be noticeably smaller, which simplifies byte range estimation.
+
+**For future-proofing: watch EdDSA, but do not deploy it yet.**
+EdDSA is the superior algorithm by every technical measure, but the PDF ecosystem has not caught up.
+When Adobe Acrobat adds EdDSA support -- likely driven by EUDI wallet adoption -- it will become the preferred choice.
+
+[TIP]
+====
+**The algorithm choice affects your certificate, not your code.**
+
+The PDF signing code in PDFBox does not care whether you give it an RSA key or an ECDSA key.
+The `SignatureInterface.sign(InputStream content)` method receives the document bytes and returns a CMS blob.
+Whether that blob contains an RSA signature or an ECDSA signature depends entirely on what key material you provide.
+
+This means you can switch algorithms by changing your certificate and keystore -- the signing code remains identical.
+We demonstrate this in Chapter 29.
+====
+
+
+== Summary
+
+Asymmetric cryptography provides two operations that make digital signatures possible: signing with a private key, and verifying with the corresponding public key.
+The security of the system rests on mathematical problems -- integer factorization for RSA, the elliptic curve discrete logarithm for ECDSA and EdDSA -- that are easy to set up but computationally infeasible to reverse.
+
+RSA remains the dominant algorithm for PDF signatures due to universal support across all viewers and libraries.
+ECDSA with P-256 offers equivalent security at 128 bits with dramatically smaller keys and faster operations.
+EdDSA (Ed25519, Ed448) is technically superior but lacks ecosystem support for PDF signatures as of 2026.
+
+Java's JCA provider model allows BouncyCastle to extend the JDK's cryptographic capabilities, and BouncyCastle is essential for PDF signatures because it provides the CMS, ASN.1, and certificate generation capabilities that the JDK lacks.
+
+In the next chapter, we examine hash functions and the mechanics of the signing operation itself -- how the document's bytes are reduced to a fixed-length digest, how that digest is signed, and what happens when the hash algorithm is compromised (as SHA-1 was, with devastating consequences for the PDF ecosystem).

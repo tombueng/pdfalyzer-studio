@@ -40,6 +40,10 @@ public class PendingSignatureData {
     private String biometricData;
     private String biometricFormat; // "json", "json-zip", "binary"
 
+    // TSA (Time Stamp Authority)
+    private String tsaServerId;
+    private String tsaUrl;
+
     // Tracking
     private long createdAt;
     private int orderIndex;

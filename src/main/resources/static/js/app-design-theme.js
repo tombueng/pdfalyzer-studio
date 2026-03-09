@@ -165,7 +165,15 @@
     /* ── Toggle panel ─────────────────────────────────────────────── */
     function togglePanel() {
         const panel = document.getElementById('designPickerPanel');
-        if (panel) panel.classList.toggle('open');
+        if (!panel) return;
+        const opening = !panel.classList.contains('open');
+        if (opening) {
+            const dt = document.getElementById('displayTuningPanel');
+            const tp = document.getElementById('themePickerPanel');
+            if (dt) dt.classList.remove('open');
+            if (tp) tp.classList.remove('open');
+        }
+        panel.classList.toggle('open');
     }
 
     /* ── Close panel on outside click ────────────────────────────── */

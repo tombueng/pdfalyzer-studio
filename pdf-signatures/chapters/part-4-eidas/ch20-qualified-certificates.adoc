@@ -1,0 +1,705 @@
+= Qualified Certificates & Trust Services
+
+[.lead]
+A certificate is just a data structure -- some ASN.1 fields, a public key, and a signature from someone who claims to be a Certificate Authority.
+What makes a certificate _qualified_ is not a technical property you can detect by parsing bytes alone.
+It is a legal status, conferred by a government supervisory body, published in a machine-readable trust infrastructure, and backed by an institutional apparatus that most developers have never heard of, let alone queried programmatically.
+
+This chapter takes you through that entire apparatus: the Qualified Trust Service Providers that issue qualified certificates, the EU Trusted List that publishes who they are, the technical requirements that separate a qualified certificate from an ordinary one, the QSCD hardware that protects the keys, and the Java code you need to actually parse and verify all of this.
+If Chapter 19 was the legal framework, this chapter is the plumbing.
+
+== Qualified Trust Service Providers (QTSPs)
+
+=== What a QTSP Is
+
+A **Qualified Trust Service Provider** is an organization that has been audited, approved, and listed by a national supervisory body within the EU as meeting the requirements of {eidas-reg} Articles 20-24.
+The word "qualified" is doing serious work here -- it is not a marketing term, not a self-declaration, and not something you obtain by installing software.
+It is a legal status, analogous to a bank receiving a banking license: you cannot call yourself a QTSP unless a government body says you are one.
+
+A QTSP can provide one or more qualified trust services:
+
+- **Qualified certificates for electronic signatures** (natural persons)
+- **Qualified certificates for electronic seals** (legal persons)
+- **Qualified timestamps** (RFC 3161 tokens from a qualified TSA)
+- **Qualified electronic delivery services** (certified email equivalents)
+- **Qualified website authentication certificates** (the controversial Article 45, rewritten in eIDAS 2.0)
+- **Qualified electronic attestations of attributes** (new in {eidas2-reg})
+
+The qualification is _per-service_, not per-organization.
+A provider might be qualified for timestamps but not for certificates, or for seals but not for signatures.
+This matters when you are parsing the EU Trusted List -- you need to check not just whether the provider is listed, but _which services_ are qualified.
+
+=== How to Become a QTSP
+
+The path to becoming a QTSP is neither quick nor cheap.
+Here is the process, simplified but accurate:
+
+1. **Establish the infrastructure.** You need HSMs (certified to Common Criteria EAL4+ or equivalent), a secure data center (typically ISO 27001 certified), redundant systems, trained personnel, and documented processes for every aspect of certificate lifecycle management -- issuance, suspension, revocation, key generation, key destruction.
+
+2. **Write a Certificate Practice Statement (CPS).** This is the document that describes, in exhaustive detail, how you operate: identity verification procedures, key management, certificate profiles, revocation handling, disaster recovery, incident response.
+A CPS for a QTSP is typically 80-150 pages long.
+
+3. **Get a conformity assessment.** An accredited **Conformity Assessment Body (CAB)** evaluates your infrastructure, processes, and CPS against {eidas-reg} and the applicable ETSI standards (primarily ETSI EN 319 401 for general TSP requirements and ETSI EN 319 411-1/411-2 for certificate issuance).
+The assessment produces a **Conformity Assessment Report (CAR)**.
+
+4. **Submit to the national supervisory body.** Each EU member state designates a supervisory body for QTSPs: in Germany, the **Bundesnetzagentur** (Federal Network Agency); in France, **ANSSI**; in Italy, **AgID** (Agenzia per l'Italia Digitale).
+You submit the CAR, your CPS, and supporting documentation.
+
+5. **Supervisory body review and approval.** The supervisory body reviews everything, may request additional information or on-site inspections, and eventually grants or denies qualified status.
+
+6. **Listing on the national Trusted List.** Once approved, the supervisory body adds your service(s) to the national **Trusted Service Status List (TSL)** -- the country's portion of the EU Trusted List.
+Your qualified status takes effect when the updated TSL is published.
+
+7. **Ongoing supervision.** Qualification is not a one-time event.
+{eidas-reg} Article 20(1) mandates audits at least every 24 months.
+{eidas-reg} Article 19(2) requires QTSPs to report security incidents to the supervisory body within 24 hours.
+
+[WARNING]
+====
+The entire process from initial infrastructure setup to EUTL listing typically takes **18-36 months** and costs **several hundred thousand to several million euros**, depending on the scope of services and the jurisdiction.
+This is by design: the barrier to entry ensures that only well-resourced, professionally operated organizations can issue qualified certificates.
+
+If someone offers you "qualified certificates" from a provider that is not on the EUTL, they are either confused about what "qualified" means or deliberately misleading you.
+Always verify against the EUTL.
+====
+
+=== The Supervision Model
+
+The eIDAS supervision model is a two-layer structure:
+
+**National layer:** Each member state's supervisory body is responsible for QTSPs established in its territory.
+The supervisory body grants and revokes qualified status, maintains the national TSL, conducts or commissions audits, handles incident reports, and imposes sanctions for non-compliance.
+
+**EU layer:** The European Commission maintains the **List of Trusted Lists (LOTL)** -- a master document that points to every national TSL.
+The Commission does not supervise individual QTSPs; it supervises the supervisory bodies indirectly, through the mutual evaluation mechanism and through the eIDAS Expert Group.
+
+.Supervision hierarchy
+[cols="1,3,3", options="header"]
+|===
+| Level | Entity | Responsibility
+
+| EU
+| European Commission
+| Maintains LOTL, sets technical standards via implementing acts, coordinates mutual evaluations
+
+| National
+| Supervisory Body (Bundesnetzagentur, ANSSI, AgID, etc.)
+| Grants/revokes qualified status, maintains national TSL, audits QTSPs, handles incidents
+
+| Provider
+| QTSP (DigiCert, D-Trust, InfoCert, etc.)
+| Operates trust services, issues certificates, complies with ETSI standards, reports incidents
+|===
+
+== The EU Trusted List (EUTL)
+
+=== Architecture: The LOT Hierarchy
+
+The EUTL is not a single list -- it is a **hierarchy of cryptographically signed XML documents**:
+
+1. The **LOTL (List of Trusted Lists)** is the root.
+Maintained by the European Commission, published at a well-known URL.
+The LOTL contains pointers (URLs) to every national TSL, along with the certificates used to verify each national TSL's signature.
+
+2. Each **national TSL (Trusted Service Status List)** lists the trust service providers in that country, their services, the status of each service (granted, withdrawn, deprecated), and the CA certificates associated with each service.
+
+3. Each TSL is **digitally signed** using an XML Advanced Electronic Signature (XAdES) -- the same trust-no-one verification model applied to the trust infrastructure itself.
+
+The LOTL URL is:
+
+----
+https://ec.europa.eu/tools/lotl/eu-lotl.xml
+----
+
+[NOTE]
+====
+This URL has been stable for years, but production systems should make it configurable.
+The official reference for the LOTL location is Commission Implementing Decision (EU) 2015/1505.
+The LOTL itself contains a `NextUpdate` field indicating when the next version will be published.
+National TSLs are updated on varying schedules -- some monthly, some quarterly, some whenever a change occurs.
+====
+
+=== XML Schema
+
+The TSL XML schema is defined in ETSI TS 119 612 (replacing the older ETSI TS 102 231).
+The schema is verbose, deeply nested, and frankly exhausting to read -- but it is well-structured and consistent.
+
+[source,xml]
+----
+<!-- Simplified LOTL structure -->
+<TrustServiceStatusList xmlns="http://uri.etsi.org/02231/v2#">
+  <SchemeInformation>
+    <TSLVersionIdentifier>5</TSLVersionIdentifier>
+    <TSLSequenceNumber>321</TSLSequenceNumber>
+    <TSLType>
+      http://uri.etsi.org/TrstSvc/TrustedList/TSLType/EUlistofthelists
+    </TSLType>
+    <SchemeOperatorName>
+      <Name xml:lang="en">European Commission</Name>
+    </SchemeOperatorName>
+    <ListIssueDateTime>2026-02-15T00:00:00Z</ListIssueDateTime>
+    <NextUpdate>
+      <dateTime>2026-08-15T00:00:00Z</dateTime>
+    </NextUpdate>
+  </SchemeInformation>
+
+  <TrustServiceProviderList>
+    <TrustServiceProvider>
+      <TSPInformation>
+        <TSPName><Name xml:lang="en">Germany</Name></TSPName>
+      </TSPInformation>
+      <TSPServices>
+        <TSPService>
+          <ServiceInformation>
+            <ServiceTypeIdentifier>
+              http://uri.etsi.org/TrstSvc/Svctype/TLIssuer
+            </ServiceTypeIdentifier>
+            <ServiceSupplyPoints>
+              <ServiceSupplyPoint>
+                https://www.bundesnetzagentur.de/.../TrustedList.xml
+              </ServiceSupplyPoint>
+            </ServiceSupplyPoints>
+          </ServiceInformation>
+        </TSPService>
+      </TSPServices>
+    </TrustServiceProvider>
+    <!-- ... 26 more countries ... -->
+  </TrustServiceProviderList>
+</TrustServiceStatusList>
+----
+
+Each **national TSL** then contains the actual QTSP entries with their service certificates:
+
+[source,xml]
+----
+<!-- Simplified national TSL structure (Germany) -->
+<TrustServiceStatusList xmlns="http://uri.etsi.org/02231/v2#">
+  <TrustServiceProviderList>
+    <TrustServiceProvider>
+      <TSPInformation>
+        <TSPName>
+          <Name xml:lang="en">D-Trust GmbH</Name>
+        </TSPName>
+      </TSPInformation>
+      <TSPServices>
+        <TSPService>
+          <ServiceInformation>
+            <ServiceTypeIdentifier>
+              http://uri.etsi.org/TrstSvc/Svctype/CA/QC
+            </ServiceTypeIdentifier>
+            <ServiceStatus>
+              http://uri.etsi.org/TrstSvc/TrustedList/Svcstatus/granted
+            </ServiceStatus>
+            <StatusStartingTime>2018-07-01T00:00:00Z</StatusStartingTime>
+            <ServiceDigitalIdentity>
+              <DigitalId>
+                <X509Certificate>MIIE...base64...</X509Certificate>
+              </DigitalId>
+            </ServiceDigitalIdentity>
+            <ServiceInformationExtensions>
+              <Extension Critical="true">
+                <Qualifications>
+                  <QualificationElement>
+                    <Qualifiers>
+                      <Qualifier uri="http://uri.etsi.org/TrstSvc/
+                        TrustedList/SvcInfoExt/QCWithQSCD"/>
+                    </Qualifiers>
+                  </QualificationElement>
+                </Qualifications>
+              </Extension>
+            </ServiceInformationExtensions>
+          </ServiceInformation>
+        </TSPService>
+      </TSPServices>
+    </TrustServiceProvider>
+  </TrustServiceProviderList>
+</TrustServiceStatusList>
+----
+
+=== Key Service Types and Statuses
+
+.EUTL service type identifiers for PDF-relevant services
+[cols="3,4", options="header"]
+|===
+| Service Type URI | Meaning
+
+| `.../Svctype/CA/QC`
+| CA issuing **qualified certificates** (check qualifiers for esign/eseal/web)
+
+| `.../Svctype/TSA/QTST`
+| **Qualified timestamp** authority
+
+| `.../Svctype/Certstatus/OCSP/QC`
+| **Qualified OCSP** responder
+
+| `.../Svctype/Certstatus/CRL/QC`
+| **Qualified CRL** issuer
+|===
+
+.EUTL service status values
+[cols="3,4", options="header"]
+|===
+| Status URI | Meaning
+
+| `.../Svcstatus/granted`
+| Currently qualified -- this is what you are looking for
+
+| `.../Svcstatus/withdrawn`
+| Qualification has been withdrawn
+
+| `.../Svcstatus/recognisedatnationallevel`
+| Not EU-qualified, but recognized under national law
+
+| `.../Svcstatus/deprecated`
+| Service deprecated by the supervisory body
+|===
+
+[IMPORTANT]
+====
+A common mistake in EUTL parsing is to check only the current status.
+You also need to check the **service history**.
+A service that was `granted` from 2019-01-01 to 2023-06-30 and then `withdrawn` was qualified during that window.
+A certificate issued during the `granted` period is still a qualified certificate, even though the service is now withdrawn.
+
+The TSL includes a `ServiceHistory` element with `ServiceHistoryInstance` entries recording every status change.
+Your validation logic must check whether the certificate was issued (and the signature created) during a period when the service status was `granted`.
+====
+
+=== Cryptographic Signing of the TSL
+
+Every TSL (including the LOTL) is signed with an XAdES signature.
+To trust the contents, you must:
+
+1. **Verify the XML signature** on the TSL document
+2. **Verify the signing certificate** against the LOTL (for national TSLs) or against the Commission's well-known certificate (for the LOTL itself)
+3. **Check freshness** -- the TSL must not be past its `NextUpdate` date (or not past it by more than a configurable grace period)
+
+The LOTL signing certificate is published by the European Commission at a well-known URL.
+When the signing certificate rotates, the new certificate is announced in advance in the LOTL itself -- this is the **pivot mechanism**, and it is one of the trickiest parts of EUTL parsing to implement correctly.
+
+[TIP]
+====
+For production systems, implement a scheduled refresh -- daily or weekly -- that re-downloads, re-verifies, and re-parses the entire EUTL hierarchy.
+The EU DSS library (Chapter 23) provides a `TrustedListsCertificateSource` that handles all of this automatically, including caching, refresh scheduling, signature verification, and the pivot mechanism.
+====
+
+== Qualified Certificates: What Makes Them Qualified
+
+A certificate is "qualified" when three conditions are simultaneously true:
+
+1. It is issued by a CA whose certificate issuance service has `granted` status in the EUTL
+2. The certificate contains specific technical indicators (the QCStatements extension)
+3. The CA followed the procedures defined in its CPS, which was approved during the conformity assessment
+
+Condition 3 is not something you can verify programmatically -- it is an institutional guarantee, backed by the supervisory body's ongoing oversight.
+Conditions 1 and 2 are what your code checks.
+
+=== The QCStatements Extension
+
+The technical indicator of a qualified certificate is the **QCStatements extension** (OID `1.3.6.1.5.5.7.1.3`), defined in ETSI EN 319 412-5.
+This extension contains a sequence of statements, each identified by an OID:
+
+.QCStatements OIDs relevant to PDF signatures
+[cols="3,2,4", options="header"]
+|===
+| OID | Short Name | Meaning
+
+| `0.4.0.1862.1.1`
+| id-etsi-qcs-QcCompliance
+| This certificate is issued as a **qualified certificate** under {eidas-reg}
+
+| `0.4.0.1862.1.4`
+| id-etsi-qcs-QcSSCD
+| The private key resides on a **Qualified Signature/Seal Creation Device**
+
+| `0.4.0.1862.1.6`
+| id-etsi-qcs-QcType
+| The type: esign (`...6.1` = signature), eseal (`...6.2` = seal), web (`...6.3`)
+
+| `0.4.0.1862.1.3`
+| id-etsi-qcs-QcRetentionPeriod
+| How long the CA retains registration information after certificate expiry
+
+| `0.4.0.1862.1.5`
+| id-etsi-qcs-QcPDS
+| URL of the PKI Disclosure Statement (human-readable CPS summary)
+
+| `0.4.0.1862.1.2`
+| id-etsi-qcs-QcLimitValue
+| Monetary transaction limit (rarely used)
+|===
+
+[WARNING]
+====
+Do **not** trust the QCStatements extension alone.
+Anyone can put `id-etsi-qcs-QcCompliance` in a self-signed certificate.
+The QCStatements assertion is only meaningful when the issuing CA is listed in the EUTL with `granted` status for a `CA/QC` service.
+
+The correct validation logic is:
+
+1. Check that the issuing CA's certificate matches one in the EUTL with `ServiceTypeIdentifier` of `CA/QC` and status `granted`
+2. Check the period: the certificate's `notBefore` date must fall within the service's `granted` status period
+3. _Then_ check QCStatements for the specific type (esign, eseal, web)
+4. _Then_ check for QcSSCD if you need to verify QSCD usage
+
+Steps 1-2 without steps 3-4: you know the CA is qualified, but not necessarily this specific certificate.
+Steps 3-4 without steps 1-2: you have a self-asserted claim with no institutional backing.
+You need all four.
+====
+
+=== Certificate Policy OIDs
+
+Qualified certificates also carry specific **Certificate Policy** OIDs in the `certificatePolicies` extension (OID `2.5.29.32`), defined in ETSI EN 319 411-2:
+
+.Certificate Policy OIDs for qualified certificates
+[cols="3,4", options="header"]
+|===
+| OID | Meaning
+
+| `0.4.0.194112.1.2`
+| QCP-n: Qualified Certificate Policy for **natural persons** (signatures)
+
+| `0.4.0.194112.1.3`
+| QCP-l: Qualified Certificate Policy for **legal persons** (seals)
+
+| `0.4.0.194112.1.1`
+| QCP-n-qscd: Natural person certificates with QSCD
+
+| `0.4.0.194112.1.4`
+| QCP-l-qscd: Legal person certificates with QSCD
+
+| `0.4.0.194112.1.0`
+| QCP-w: Website authentication
+|===
+
+The `-qscd` variants indicate that the CA has verified that the subscriber's private key is on a QSCD.
+This is a stronger assertion than the QcSSCD statement alone -- the policy OID says "the CA has verified the key is on a QSCD according to the procedures defined in ETSI EN 319 411-2."
+
+=== QSCD Requirements
+
+A Qualified Signature Creation Device (or Qualified Seal Creation Device -- QSCD covers both) must meet the requirements of {eidas-reg} Annex II:
+
+1. The private key must be generated on the device and never leave it
+2. The signing operation must occur on the device itself
+3. Access to the private key must require authentication of the legitimate holder (PIN, biometric, etc.)
+4. The private key cannot be derived from signatures or the public key with reasonable assurance
+
+**Certification path:** Common Criteria evaluation (ISO/IEC 15408) at EAL4+ against Protection Profiles defined in EN 419 211 (for smart cards and tokens) or EN 419 221 (for HSMs and remote signing).
+A national certification body (BSI in Germany, ANSSI in France) performs the evaluation.
+
+**Hardware categories in practice:**
+
+- **Smart cards** (Thales IDPrime MD, Atos CardOS): private key generated on chip, never exported, signing performed on-card
+- **USB tokens** (SafeNet eToken 5110, YubiKey 5 FIPS): same security model as smart cards, USB form factor
+- **HSMs** (Thales Luna, Utimaco SecurityServer): rack-mounted devices for server-side signing; basis for remote signing (Chapter 22)
+
+[CAUTION]
+====
+Not every HSM is a certified QSCD.
+An HSM may be FIPS 140-2 Level 3 or Common Criteria EAL4+ certified for _general cryptographic operations_ without being certified as a QSCD under the specific EN 419 211/221 Protection Profiles.
+The QSCD certification must reference the eIDAS-specific Protection Profiles.
+====
+
+== Real-World QTSPs
+
+When you are debugging why a particular qualified certificate does or does not validate, knowing who issued it and where they are listed is invaluable.
+Here are the QTSPs you are most likely to encounter:
+
+**D-Trust GmbH** (Germany) -- a subsidiary of the Bundesdruckerei (the organization that prints German passports).
+Listed in the German TSL, supervised by the Bundesnetzagentur.
+Dominant in German government and enterprise contexts.
+
+**DigiCert / QuoVadis** (Netherlands, Belgium) -- DigiCert acquired QuoVadis in 2019, inheriting QTSP status in multiple EU countries.
+One of the few providers with both AATL and eIDAS qualified status -- useful when documents must validate in both Adobe Acrobat and European government systems.
+
+**GlobalSign** (Belgium) -- listed as a QTSP in Belgium, supervised by the FPS Economy.
+Strong enterprise presence.
+AATL membership plus EUTL listing gives broad compatibility.
+
+**Swisscom Trust Services** (Austria, Switzerland) -- the Swiss telecoms giant operates a QTSP listed in the _Austrian_ TSL (not Swiss -- because Switzerland is not in the EU) plus ZertES qualification in Switzerland.
+Their remote signing service is popular for high-volume enterprise signing.
+
+**InfoCert** (Italy) -- one of the largest European QTSPs by volume.
+Listed in the Italian TSL, supervised by AgID.
+Part of the Tinexta Group.
+Deeply embedded in Italian public administration.
+
+**Asseco Data Systems / Certum** (Poland) -- the dominant QTSP in Central/Eastern Europe.
+If you encounter qualified certificates from Polish organizations, Certum is the likely issuer.
+
+[NOTE]
+====
+This list is not exhaustive -- there are over 200 qualified trust services listed across the EUTL.
+The EU maintains a browsable version at `https://eidas.ec.europa.eu/efda/tl-browser/` where you can filter by country, service type, and status.
+====
+
+== Java Code: Parsing the EUTL
+
+=== Downloading and Parsing the LOTL
+
+[source,java]
+----
+import java.io.InputStream;
+import java.net.URI;
+import java.util.ArrayList;
+import java.util.List;
+
+import javax.xml.parsers.DocumentBuilderFactory;
+
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NodeList;
+
+import lombok.Data;
+import lombok.extern.slf4j.Slf4j;
+
+/**
+ * Parses the EU List of Trusted Lists (LOTL) to extract
+ * pointers to each national Trusted Service Status List.
+ */
+@Slf4j
+public class EutlLotlParser {
+
+    private static final String LOTL_URL =
+            "https://ec.europa.eu/tools/lotl/eu-lotl.xml";
+    private static final String TSL_NS =
+            "http://uri.etsi.org/02231/v2#";
+
+    @Data
+    public static class TslPointer {
+        private String countryCode;
+        private String tslUrl;
+    }
+
+    public List<TslPointer> parseLotl() throws Exception {
+        log.info("Downloading LOTL from: {}", LOTL_URL);
+
+        DocumentBuilderFactory factory =
+                DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(true);
+        // Prevent XXE attacks
+        factory.setFeature(
+                "http://apache.org/xml/features/"
+                + "disallow-doctype-decl", true);
+
+        Document doc;
+        try (InputStream in = URI.create(LOTL_URL).toURL()
+                .openStream()) {
+            doc = factory.newDocumentBuilder().parse(in);
+        }
+
+        List<TslPointer> pointers = new ArrayList<>();
+        NodeList nodes = doc.getElementsByTagNameNS(
+                TSL_NS, "OtherTSLPointer");
+
+        for (int i = 0; i < nodes.getLength(); i++) {
+            Element pointer = (Element) nodes.item(i);
+
+            NodeList locations = pointer.getElementsByTagNameNS(
+                    TSL_NS, "TSLLocation");
+            if (locations.getLength() == 0) {
+                continue;
+            }
+            String url = locations.item(0).getTextContent().trim();
+
+            NodeList territories = pointer.getElementsByTagNameNS(
+                    TSL_NS, "SchemeTerritory");
+            String country = territories.getLength() > 0
+                    ? territories.item(0).getTextContent().trim()
+                    : "UNKNOWN";
+
+            TslPointer p = new TslPointer();
+            p.setCountryCode(country);
+            p.setTslUrl(url);
+            pointers.add(p);
+
+            log.debug("Found TSL: country={}, url={}", country, url);
+        }
+
+        log.info("Parsed LOTL: {} national TSL pointers",
+                pointers.size());
+        return pointers;
+    }
+}
+----
+
+=== Matching Certificates Against the EUTL
+
+[source,java]
+----
+import java.io.ByteArrayInputStream;
+import java.io.InputStream;
+import java.net.URI;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Base64;
+import java.util.List;
+
+import javax.xml.parsers.DocumentBuilderFactory;
+
+import org.w3c.dom.Document;
+import org.w3c.dom.Element;
+import org.w3c.dom.NodeList;
+
+import lombok.Data;
+import lombok.extern.slf4j.Slf4j;
+
+/**
+ * Parses a national TSL and matches signer certificates
+ * against qualified CA services listed in the EUTL.
+ */
+@Slf4j
+public class EutlCertificateMatcher {
+
+    private static final String TSL_NS =
+            "http://uri.etsi.org/02231/v2#";
+
+    @Data
+    public static class QualifiedCaEntry {
+        private String providerName;
+        private String status;
+        private X509Certificate caCertificate;
+    }
+
+    /**
+     * Downloads a national TSL and extracts all CA/QC services
+     * with "granted" status.
+     */
+    public List<QualifiedCaEntry> parseNationalTsl(String tslUrl)
+            throws Exception {
+        log.info("Parsing national TSL: {}", tslUrl);
+
+        DocumentBuilderFactory factory =
+                DocumentBuilderFactory.newInstance();
+        factory.setNamespaceAware(true);
+        factory.setFeature(
+                "http://apache.org/xml/features/"
+                + "disallow-doctype-decl", true);
+
+        Document doc;
+        try (InputStream in = URI.create(tslUrl).toURL()
+                .openStream()) {
+            doc = factory.newDocumentBuilder().parse(in);
+        }
+
+        List<QualifiedCaEntry> entries = new ArrayList<>();
+        NodeList services = doc.getElementsByTagNameNS(
+                TSL_NS, "TSPService");
+        CertificateFactory cf =
+                CertificateFactory.getInstance("X.509");
+
+        for (int i = 0; i < services.getLength(); i++) {
+            Element svc = (Element) services.item(i);
+
+            // Check service type
+            NodeList typeNodes = svc.getElementsByTagNameNS(
+                    TSL_NS, "ServiceTypeIdentifier");
+            if (typeNodes.getLength() == 0) {
+                continue;
+            }
+            String type = typeNodes.item(0)
+                    .getTextContent().trim();
+            if (!type.contains("CA/QC")) {
+                continue;
+            }
+
+            // Check status
+            NodeList statusNodes = svc.getElementsByTagNameNS(
+                    TSL_NS, "ServiceStatus");
+            if (statusNodes.getLength() == 0) {
+                continue;
+            }
+            String status = statusNodes.item(0)
+                    .getTextContent().trim();
+            if (!status.contains("granted")) {
+                continue;
+            }
+
+            // Extract CA certificate
+            NodeList certNodes = svc.getElementsByTagNameNS(
+                    TSL_NS, "X509Certificate");
+            if (certNodes.getLength() == 0) {
+                continue;
+            }
+            String b64 = certNodes.item(0).getTextContent()
+                    .replaceAll("\\s", "");
+            byte[] certBytes = Base64.getDecoder().decode(b64);
+            X509Certificate cert = (X509Certificate)
+                    cf.generateCertificate(
+                        new ByteArrayInputStream(certBytes));
+
+            QualifiedCaEntry entry = new QualifiedCaEntry();
+            entry.setStatus(status);
+            entry.setCaCertificate(cert);
+            entries.add(entry);
+
+            log.info("Found qualified CA: {}",
+                    cert.getSubjectX500Principal());
+        }
+
+        return entries;
+    }
+
+    /**
+     * Checks whether the given signer certificate was issued
+     * by a CA listed in the EUTL with "granted" status.
+     */
+    public boolean isIssuedByQualifiedCa(
+            X509Certificate signerCert,
+            X509Certificate issuerCert,
+            List<QualifiedCaEntry> eutlEntries) {
+        byte[] issuerEncoded;
+        try {
+            issuerEncoded = issuerCert.getEncoded();
+        } catch (Exception e) {
+            log.error("Failed to encode issuer cert", e);
+            return false;
+        }
+
+        for (QualifiedCaEntry entry : eutlEntries) {
+            try {
+                byte[] eutlEncoded =
+                        entry.getCaCertificate().getEncoded();
+                if (Arrays.equals(issuerEncoded, eutlEncoded)) {
+                    log.info("Issuer matched EUTL entry: {}",
+                            entry.getCaCertificate()
+                                .getSubjectX500Principal());
+                    return true;
+                }
+            } catch (Exception e) {
+                log.warn("Failed to encode EUTL cert", e);
+            }
+        }
+        return false;
+    }
+}
+----
+
+[CAUTION]
+====
+The code above is educational -- it demonstrates the mechanics of EUTL parsing and certificate matching.
+A production implementation must also:
+
+- **Verify the XML signatures** on the LOTL and every national TSL
+- **Handle the LOTL pivot mechanism** when the signing certificate rotates
+- **Parse service history** to support time-based qualification checks
+- **Cache and refresh** the hierarchy on a schedule (not on every validation)
+- **Parse QCStatements** from the signer's certificate to determine the qualification type
+
+For production use, the **EU DSS library** (Chapter 23) provides `TrustedListsCertificateSource`, which handles all of this correctly.
+Do not reimplement this from scratch unless you have a very specific reason.
+====
+
+== Key Takeaways
+
+- A **QTSP** is not a self-declared status -- it requires conformity assessment, supervisory body approval, and listing in the EUTL; the process takes 18-36 months and significant investment
+- The **EUTL** is a hierarchy: the LOTL (Commission) points to national TSLs (supervisory bodies); every document is cryptographically signed with XAdES
+- A certificate is qualified when: its issuer is in the EUTL with `granted` status for `CA/QC`, _and_ the certificate contains the `QcCompliance` QCStatement
+- **QCStatements** carry machine-readable qualification data: QcCompliance, QcSSCD, QcType (esign/eseal/web)
+- **Certificate Policy OIDs** from ETSI EN 319 411-2 encode the qualification policy: QCP-n, QCP-l, with `-qscd` variants
+- **QSCDs** require Common Criteria EAL4+ certification against EN 419 211/221 Protection Profiles -- not every HSM qualifies
+- Check **service history** when validating: a certificate issued during a `granted` period is qualified even if the service is now `withdrawn`
+- Real-world QTSPs include D-Trust (DE), DigiCert/QuoVadis (NL/BE), GlobalSign (BE), Swisscom (AT/CH), InfoCert (IT), Certum (PL), and over 200 others
+- For production EUTL validation, use the EU DSS framework's `TrustedListsCertificateSource` -- do not reimplement the parsing, pivot handling, and signature verification from scratch

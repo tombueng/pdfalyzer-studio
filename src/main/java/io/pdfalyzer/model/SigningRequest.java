@@ -44,6 +44,10 @@ public class SigningRequest {
     @Builder.Default
     private String biometricFormat = "json-zip"; // "json", "json-zip", "binary"
 
+    // TSA (Time Stamp Authority)
+    private String tsaServerId;
+    private String tsaUrl;
+
     // Password (transient — not stored, only used at signing time)
     private String keyPassword;
 }

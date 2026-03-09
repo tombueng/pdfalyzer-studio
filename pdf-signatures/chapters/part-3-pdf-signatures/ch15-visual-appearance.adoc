@@ -1,0 +1,496 @@
+= Visual Appearance of Signatures
+
+[.lead]
+A digital signature has two faces.
+The cryptographic face — the CMS `SignedData`, the byte range, the certificate chain — is what makes the signature _valid_.
+The visual face — what the user sees in the PDF viewer — is what makes the signature _trustworthy to a human reader_.
+These two faces are entirely independent, and understanding their independence is critical for both security and usability.
+
+The visual appearance of a PDF signature is an **annotation appearance stream** — a miniature PDF drawing that shows the signer's name, date, reason, and optionally a handwritten signature image, a company logo, or other graphical elements.
+This appearance stream is part of the signed bytes (it lives inside the signature field's widget annotation), but it is _not_ cryptographically bound to the CMS in any meaningful way.
+A valid CMS signature does not guarantee that the visual appearance accurately represents the signer — it only guarantees that the bytes haven't changed.
+
+This distinction is exactly what Shadow Attacks (Chapter 24) exploit: an attacker can create a PDF where the visual appearance shows one thing to the signer and something different to the recipient, with the signature validating correctly in both cases.
+
+This chapter explains how signature appearances work, how to create them with PDFBox, what the layer model means, and how different viewers handle appearance rendering.
+
+== Appearance Streams: The Basics
+
+=== What an Appearance Stream Is
+
+Every annotation in a PDF — not just signatures — can have an **appearance stream**.
+An appearance stream is a Form XObject (a `/Type /XObject /Subtype /Form` stream) that contains the drawing instructions for how the annotation looks.
+
+For a signature widget annotation, the appearance stream is stored under the `/AP` (Appearance) key:
+
+[source]
+----
+<< /Type /Annot
+   /Subtype /Widget
+   /FT /Sig
+   /T (SignatureField1)
+   /V 15 0 R                    % the /Sig dictionary
+   /Rect [100 600 300 650]      % position on the page (x1 y1 x2 y2)
+   /AP <<
+     /N 20 0 R                  % Normal appearance stream
+   >>
+>>
+----
+
+The `/N` key holds the **normal** appearance — the one shown when the annotation is not being interacted with.
+Annotations can also have `/R` (rollover — shown on mouse hover) and `/D` (down — shown when clicked), but signature appearances only use `/N`.
+
+The appearance stream (object 20 in this example) is a Form XObject:
+
+[source]
+----
+20 0 obj
+<< /Type /XObject
+   /Subtype /Form
+   /BBox [0 0 200 50]          % bounding box in the stream's coordinate space
+   /Resources << /Font << /F1 21 0 R >> >>
+   /Length 142
+>>
+stream
+BT
+/F1 10 Tf
+0 35 Td
+(Digitally signed by: Test Signer) Tj
+0 -15 Td
+(Date: 2026-03-08 12:00:00 UTC) Tj
+0 -15 Td
+(Reason: I approve this document) Tj
+ET
+endstream
+endobj
+----
+
+This is a complete miniature PDF page: it has a bounding box, font resources, and drawing instructions using the standard PDF content stream operators (`BT`/`ET` for text blocks, `Tf` for font selection, `Td` for positioning, `Tj` for showing text).
+
+=== Visible vs. Invisible Signatures
+
+Not all signatures need a visual appearance.
+A signature can be:
+
+**Visible**: The signature field has a non-zero `/Rect` (annotation rectangle) and an appearance stream.
+The user sees a signature block on a specific page.
+
+**Invisible**: The signature field either has a zero-size `/Rect` (`[0 0 0 0]`), or has no appearance stream, or is not associated with any page.
+The signature exists cryptographically but doesn't appear on any page.
+
+Invisible signatures are common in automated signing workflows where the PDF is being signed programmatically (e.g., a server signing all outgoing invoices) and there's no need for a visual indicator on the document.
+The signature is still listed in the viewer's signature panel — the user can still inspect it, verify the certificate, and check the validation status.
+
+[TIP]
+====
+Even for invisible signatures, some viewers (notably Adobe Acrobat) display a blue banner at the top of the document saying "Signed and all signatures are valid" or similar.
+This banner is not part of the PDF content — it's the viewer's UI.
+====
+
+== The Layer Model: n0, n2, and n4
+
+=== Adobe's Legacy Layer System
+
+Adobe Acrobat uses a layer-based approach to compose signature appearances.
+This system was designed by Adobe for their own implementation and is not formally part of the ISO 32000 specification — but because Adobe Acrobat is the dominant viewer, understanding it matters.
+
+The layers are:
+
+- **n0** (Layer 0 — Background): Contains the background graphic and a static validity indicator.
+  Adobe Acrobat uses this to show the blue "valid" checkmark or the red "invalid" X.
+  This layer is generated and updated by Acrobat itself — it is not typically set by the signing application.
+
+- **n2** (Layer 2 — Content): Contains the signer's information — name, date, reason, location, and optionally a handwritten signature image or company logo.
+  **This is the layer you create** when building a visual signature appearance.
+
+- **n4** (Layer 4 — Text overlay): An optional text overlay, rarely used.
+
+In practice, most signing applications (including PDFBox-based implementations) create a single appearance stream that serves as the entire appearance — they don't use the n0/n2/n4 layer decomposition.
+Adobe Acrobat, when it encounters a signature without layer-based appearances, creates its own composite appearance using the provided stream as the content layer and adding its own validity indicators.
+
+[NOTE]
+====
+The layer model is an implementation detail of Adobe Acrobat, not a spec requirement.
+When you create a signature appearance with PDFBox, you create a single Form XObject for the `/AP /N` entry.
+Acrobat will overlay its own validity graphics on top.
+Other viewers (LibreOffice, Foxit, browser-based viewers) each handle the appearance differently — some show your appearance as-is, some add their own decorations.
+====
+
+=== What This Means for Your Implementation
+
+When building a signature appearance with PDFBox:
+
+1. **Create a single Form XObject** with the signer's information
+2. **Don't worry about n0/n2/n4 layers** — the single appearance works across all viewers
+3. **Set reasonable fonts and sizes** — the appearance will be rendered in the space defined by the signature field's `/Rect`
+4. **Include key information**: signer's name, signing date/time, reason (if applicable)
+5. **Test in multiple viewers** — Acrobat, Foxit, LibreOffice, and a browser-based viewer — to ensure the appearance renders correctly in each
+
+== Creating Signature Appearances with PDFBox
+
+=== Basic Text Appearance
+
+The simplest appearance shows the signer's name and date:
+
+[source,java]
+----
+private PDFormXObject createSignatureAppearance(PDDocument doc,
+        PDRectangle rect, String signerName, Calendar signDate)
+        throws IOException {
+
+    PDFormXObject form = new PDFormXObject(doc.getDocument().createCOSStream());
+    form.setResources(new PDResources());
+    form.setBBox(new PDRectangle(rect.getWidth(), rect.getHeight()));
+
+    PDFont font = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
+    form.getResources().put(COSName.getPDFName("F1"), font);
+
+    float fontSize = 8;
+    String dateStr = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss z")
+            .format(signDate.getTime());
+
+    // Build the content stream manually
+    try (OutputStream os = form.getStream().createOutputStream()) {
+        String content = String.join("\n",
+            "BT",
+            "/F1 " + fontSize + " Tf",
+            "0 " + (rect.getHeight() - fontSize - 2) + " Td",
+            "(" + escapeForPdf(signerName) + ") Tj",
+            "0 -" + (fontSize + 2) + " Td",
+            "(Date: " + escapeForPdf(dateStr) + ") Tj",
+            "ET"
+        );
+        os.write(content.getBytes(StandardCharsets.US_ASCII));
+    }
+
+    return form;
+}
+
+private String escapeForPdf(String text) {
+    return text.replace("\\", "\\\\")
+               .replace("(", "\\(")
+               .replace(")", "\\)");
+}
+----
+
+[WARNING]
+====
+In PDFBox 3.x, you **cannot** use `PDPageContentStream` to write to a Form XObject.
+`PDPageContentStream` is strictly for page content.
+For Form XObjects, you must write raw PDF operators to the stream's output stream, as shown above.
+
+This is one of the breaking changes from PDFBox 2.x, where `PDPageContentStream` could be used with Form XObjects via a constructor overload that accepted a `PDFormXObject` parameter.
+That constructor no longer exists in 3.x.
+====
+
+=== Appearance with Signature Image
+
+Many signing workflows include a handwritten signature image — either captured via a canvas on a web page or tablet, or uploaded as a PNG/JPEG file.
+Adding an image to the appearance requires embedding it as a PDF image XObject:
+
+[source,java]
+----
+private PDFormXObject createAppearanceWithImage(PDDocument doc,
+        PDRectangle rect, String signerName, Calendar signDate,
+        byte[] signatureImagePng) throws IOException {
+
+    PDFormXObject form = new PDFormXObject(doc.getDocument().createCOSStream());
+    form.setResources(new PDResources());
+    form.setBBox(new PDRectangle(rect.getWidth(), rect.getHeight()));
+
+    // Add font
+    PDFont font = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
+    form.getResources().put(COSName.getPDFName("F1"), font);
+
+    // Add signature image
+    PDImageXObject image = PDImageXObject.createFromByteArray(
+            doc, signatureImagePng, "signature");
+    form.getResources().put(COSName.getPDFName("Img0"), image);
+
+    // Layout: image on the left, text on the right
+    float imgWidth = rect.getWidth() * 0.4f;
+    float imgHeight = rect.getHeight() - 4;
+    float textX = imgWidth + 5;
+    float fontSize = 7;
+    String dateStr = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss z")
+            .format(signDate.getTime());
+
+    try (OutputStream os = form.getStream().createOutputStream()) {
+        StringBuilder sb = new StringBuilder();
+        // Draw image
+        sb.append("q\n");  // save graphics state
+        sb.append(imgWidth).append(" 0 0 ").append(imgHeight)
+          .append(" 2 2 cm\n");  // transform matrix
+        sb.append("/Img0 Do\n");  // draw image
+        sb.append("Q\n");  // restore graphics state
+        // Draw text
+        sb.append("BT\n");
+        sb.append("/F1 ").append(fontSize).append(" Tf\n");
+        sb.append(textX).append(" ")
+          .append(rect.getHeight() - fontSize - 2).append(" Td\n");
+        sb.append("(Digitally signed by:) Tj\n");
+        sb.append("0 -").append(fontSize + 2).append(" Td\n");
+        sb.append("(").append(escapeForPdf(signerName)).append(") Tj\n");
+        sb.append("0 -").append(fontSize + 2).append(" Td\n");
+        sb.append("(Date: ").append(escapeForPdf(dateStr)).append(") Tj\n");
+        sb.append("ET\n");
+        os.write(sb.toString().getBytes(StandardCharsets.US_ASCII));
+    }
+
+    return form;
+}
+----
+
+=== Attaching the Appearance to the Signature
+
+After creating the appearance Form XObject, attach it to the signature field's widget annotation:
+
+[source,java]
+----
+// Create signature field and widget annotation
+PDSignature signature = new PDSignature();
+// ... set signature properties ...
+
+// Set the visual rectangle on page 1
+PDPage page = doc.getPage(0);
+PDRectangle rect = new PDRectangle(100, 600, 200, 50);
+
+SignatureOptions options = new SignatureOptions();
+options.setPreferredSignatureSize(65536);
+options.setPage(0);  // page index (0-based)
+options.setVisualSignature(
+    createSignatureAppearance(doc, rect, "Test Signer", Calendar.getInstance()));
+
+doc.addSignature(signature, signingInterface, options);
+doc.saveIncremental(outputStream);
+----
+
+== Appearance Rendering Across Viewers
+
+=== How Different Viewers Handle Appearances
+
+One of the most frustrating aspects of PDF signature appearances is that different viewers render them differently — even when the appearance stream is identical.
+
+.Signature appearance rendering behavior across major viewers
+[cols="2,5", options="header"]
+|===
+| Viewer | Behavior
+
+| **Adobe Acrobat**
+| Overlays its own validity indicator (blue checkmark / red X) on layer n0.
+  Your appearance stream is rendered on layer n2.
+  Acrobat may resize your content to fit its layer model.
+  If `/NeedAppearances` is true in the AcroForm, Acrobat may regenerate appearances from scratch.
+
+| **Foxit Reader**
+| Renders the appearance stream mostly as provided.
+  Adds a small validity icon in the corner.
+  Generally the most faithful rendering of custom appearances.
+
+| **LibreOffice Draw**
+| Renders the appearance stream as-is.
+  Does not overlay validity indicators on the appearance itself — shows validation status in a separate panel.
+  Good for testing that your raw appearance looks correct.
+
+| **Chrome (built-in viewer)**
+| Renders appearance streams but does not validate signatures.
+  No validity indicators.
+  The appearance is what you see — useful for checking visual layout.
+
+| **Firefox (pdf.js)**
+| Renders appearance streams.
+  Does not validate signatures (though experimental validation support has been discussed).
+  Like Chrome, useful for layout testing.
+
+| **Okular (KDE)**
+| Renders appearances and provides signature validation.
+  May show validity status differently from other viewers.
+|===
+
+[IMPORTANT]
+====
+**Always test your signature appearances in at least three viewers** — Adobe Acrobat, a non-Adobe desktop viewer (Foxit or LibreOffice), and a browser.
+Appearances that look perfect in Acrobat may render differently in other viewers due to:
+
+- Different font fallback behavior (if the font isn't embedded)
+- Different handling of the coordinate system and bounding box
+- Different overlay/decoration behavior
+- Different treatment of transparency and blending
+====
+
+=== The `/NeedAppearances` Problem
+
+The AcroForm dictionary has a boolean flag `/NeedAppearances` that tells viewers whether to regenerate form field appearances from scratch.
+If this flag is `true`, some viewers (notably Adobe Acrobat) will ignore the existing appearance streams and generate their own based on the field's value.
+
+For signature fields, this is usually not what you want.
+If `/NeedAppearances` is true and Acrobat regenerates the signature's appearance, your carefully crafted visual (with the signer's image, custom layout, etc.) gets replaced with Acrobat's default rendering.
+
+**Always set `/NeedAppearances` to `false`** (or remove the key entirely — the default is `false`) before signing:
+
+[source,java]
+----
+PDAcroForm acroForm = doc.getDocumentCatalog().getAcroForm();
+if (acroForm != null) {
+    acroForm.getCOSObject().setBoolean(COSName.NEED_APPEARANCES, false);
+}
+----
+
+== Positioning: Getting the Rectangle Right
+
+=== The Coordinate System
+
+PDF uses a **bottom-left origin** coordinate system where (0, 0) is at the lower-left corner of the page.
+The y-axis goes _up_, not down.
+This is the opposite of most screen coordinate systems and is a common source of positioning errors.
+
+The signature field's `/Rect` array defines the annotation rectangle as `[x1 y1 x2 y2]`, where:
+
+- `(x1, y1)` is the lower-left corner
+- `(x2, y2)` is the upper-right corner
+
+So a signature field at the bottom-right of an A4 page (595 x 842 points) might have:
+
+[source]
+----
+/Rect [395 50 575 100]    % 180pt wide, 50pt tall, near bottom-right
+----
+
+[WARNING]
+====
+A common mistake: specifying the rectangle with screen coordinates (origin at top-left, y going down).
+If you compute `y = pageHeight - desiredY`, make sure you do this for _both_ y1 and y2, and that y1 < y2.
+
+**Debug tip**: If your signature appearance shows up in the wrong position, check:
+
+1. Is the page rotated? (A `/Rotate` key on the page dictionary changes the visible coordinate system)
+2. Is the `MediaBox` the expected size? (Custom page sizes shift everything)
+3. Did you flip y1 and y2? (The lower-left corner must have the smaller y value)
+====
+
+=== Handling Page Rotation
+
+PDF pages can have a `/Rotate` key that specifies a rotation angle (0, 90, 180, or 270 degrees).
+This rotation affects how the page is _displayed_ but does not change the coordinate system of the page content or annotations.
+
+This means that on a 90-degree rotated page (landscape orientation achieved via rotation), the annotation rectangle coordinates are still in the unrotated coordinate space.
+To place a signature at the visual bottom-right of a rotated page, you need to account for the rotation.
+
+[source,java]
+----
+PDPage page = doc.getPage(pageIndex);
+int rotation = page.getRotation();
+PDRectangle mediaBox = page.getMediaBox();
+
+float sigWidth = 200;
+float sigHeight = 50;
+float margin = 30;
+
+PDRectangle sigRect;
+switch (rotation) {
+    case 0:   // Normal portrait
+        sigRect = new PDRectangle(
+            mediaBox.getWidth() - sigWidth - margin,
+            margin,
+            sigWidth, sigHeight);
+        break;
+    case 90:  // Landscape (rotated clockwise)
+        sigRect = new PDRectangle(
+            margin,
+            margin,
+            sigHeight, sigWidth);  // swap width/height
+        break;
+    case 180: // Upside-down portrait
+        sigRect = new PDRectangle(
+            margin,
+            mediaBox.getHeight() - sigHeight - margin,
+            sigWidth, sigHeight);
+        break;
+    case 270: // Landscape (rotated counter-clockwise)
+        sigRect = new PDRectangle(
+            mediaBox.getWidth() - sigHeight - margin,
+            mediaBox.getHeight() - sigWidth - margin,
+            sigHeight, sigWidth);
+        break;
+    default:
+        sigRect = new PDRectangle(margin, margin, sigWidth, sigHeight);
+}
+----
+
+== Security Implications of Visual Appearances
+
+=== The Appearance/Content Disconnect
+
+The visual appearance of a signature is stored in the PDF's object structure, which is covered by the byte range.
+But the appearance is not cryptographically bound to the _identity_ of the signer.
+The appearance can show anything — "Signed by Alice" while the CMS is signed by Bob's certificate.
+
+A conforming viewer should display the certificate information from the CMS (not from the appearance) in its signature properties panel.
+But what the user _sees_ on the page is the appearance — and most users trust the visual appearance more than the signature properties panel.
+
+This is a deliberate design trade-off in PDF: the signer (or the signing application) controls what the appearance looks like, and the viewer overlays validity information.
+The validity indicators (checkmarks, status banners) come from the viewer's own analysis of the CMS — they don't come from the appearance stream.
+
+=== Shadow Attacks and Visual Appearances
+
+Shadow Attacks (Chapter 24) exploit the gap between what a signer sees and what the document contains.
+In the **Replace** variant, the attacker creates a form field with a specific visual appearance, then changes the field's value (and thus its appearance) after the signer certifies the document.
+Because the certification allows form filling (P=2 or P=3), the change is permitted — but the visual content of the document has changed dramatically.
+
+The defense is the same as for all Shadow Attacks: validate not just the cryptographic integrity but also the _semantic_ integrity — what changed between revisions, and were those changes consistent with the displayed content?
+
+[TIP]
+====
+**For maximum security**: When validating a signed PDF, don't just check the signature's validity.
+Extract the revision that was signed (by truncating the file at the byte range end — see Chapter 13) and compare its visual rendering to the current document.
+If they differ, the document has been modified since signing — even if the modifications were technically "permitted" by the MDP level.
+====
+
+== Common Appearance Problems
+
+=== Problem: Blank Signature Rectangle
+
+**Symptom**: The signature field shows as an empty box in the viewer.
+
+**Causes**:
+
+- No appearance stream set (the `/AP` dictionary is missing)
+- `/NeedAppearances` is `true`, and the viewer regenerated an empty appearance
+- The Form XObject has an empty stream (no drawing instructions)
+- The bounding box (`/BBox`) is [0 0 0 0] or has zero dimensions
+
+=== Problem: Text Appears Clipped or Off-Screen
+
+**Symptom**: Only part of the signature text is visible, or the text appears outside the signature rectangle.
+
+**Causes**:
+
+- The text positioning (`Td` operators) exceeds the Form XObject's `/BBox`
+- The font size is too large for the available space
+- The `/BBox` doesn't match the annotation's `/Rect` dimensions
+
+**Fix**: Ensure the Form XObject's `/BBox` width and height match the annotation `/Rect` dimensions, and that all drawing instructions fall within the `/BBox`.
+
+=== Problem: Font Not Rendering
+
+**Symptom**: Text appears as squares, dots, or is completely invisible.
+
+**Causes**:
+
+- The font resource is not declared in the Form XObject's `/Resources`
+- The font name in the content stream (`/F1`) doesn't match the resource key
+- Non-ASCII characters used with a non-embedded Standard 14 font (Standard 14 fonts only support WinAnsiEncoding)
+
+**Fix**: For text beyond basic Latin characters (accented letters, CJK, etc.), embed a TrueType or Type0 font. Standard 14 fonts (Helvetica, Times, Courier, etc.) only support a limited character set.
+
+== Key Takeaways
+
+- Signature appearance is an **annotation appearance stream** — a Form XObject with drawing instructions
+- The appearance is **visually independent** from the cryptographic signature — they can show different things
+- **Invisible signatures** have zero-size rectangles or no appearance stream — they exist cryptographically but don't show on the page
+- The **n0/n2/n4 layer model** is Adobe's implementation detail, not a spec requirement — create a single Form XObject for maximum compatibility
+- **PDFBox 3.x** requires writing raw PDF operators to Form XObject streams — `PDPageContentStream` only works for pages
+- **Always set `/NeedAppearances` to `false`** before signing to prevent viewers from regenerating your custom appearance
+- **Test in multiple viewers** — Acrobat, Foxit, LibreOffice, and browsers all render appearances differently
+- The **coordinate system** is bottom-left origin with y going up — account for page rotation when positioning
+- Visual appearances are a **security surface** — Shadow Attacks exploit the disconnect between appearance and content

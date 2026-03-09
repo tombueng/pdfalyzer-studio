@@ -2,9 +2,14 @@ package io.pdfalyzer.service;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.cos.COSArray;
+import org.apache.pdfbox.cos.COSBase;
+import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDDocumentInformation;
@@ -14,6 +19,8 @@ import org.apache.pdfbox.pdmodel.common.PDMetadata;
 import org.apache.pdfbox.pdmodel.font.PDFont;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotation;
 import org.apache.pdfbox.pdmodel.interactive.form.PDAcroForm;
+import org.apache.pdfbox.pdmodel.interactive.form.PDField;
+import org.apache.pdfbox.pdmodel.interactive.form.PDSignatureField;
 import org.springframework.stereotype.Service;
 
 import io.pdfalyzer.model.ValidationIssue;
@@ -126,10 +133,14 @@ public class ValidationService {
 
     private void validateFormFields(PDDocument doc, List<ValidationIssue> issues) {
         int widgetCount = 0;
+        Set<COSDictionary> pageWidgetDicts = new HashSet<>();
         for (int i = 0; i < doc.getNumberOfPages(); i++) {
             try {
                 for (PDAnnotation annot : doc.getPage(i).getAnnotations()) {
-                    if ("Widget".equals(annot.getSubtype())) widgetCount++;
+                    if ("Widget".equals(annot.getSubtype())) {
+                        widgetCount++;
+                        pageWidgetDicts.add(annot.getCOSObject());
+                    }
                 }
             } catch (Exception e) {
                 log.debug("Error scanning page {} for widget annotations", i, e);
@@ -137,6 +148,8 @@ public class ValidationService {
         }
 
         PDAcroForm acroForm = doc.getDocumentCatalog().getAcroForm();
+
+        // FORM-001: Widgets exist but no AcroForm at all
         if (widgetCount > 0 && acroForm == null) {
             issues.add(new ValidationIssue(
                     "WARNING", "FORM-001",
@@ -144,15 +157,158 @@ public class ValidationService {
                     "PDF 2.0, Section 12.7.2",
                     "Document Catalog",
                     "form"));
+            return;
         }
 
-        if (acroForm != null && acroForm.getFields().isEmpty() && widgetCount > 0) {
+        if (acroForm == null) return;
+
+        boolean hasFields = !acroForm.getFields().isEmpty();
+
+        // FORM-002: AcroForm /Fields empty but widgets on pages
+        if (!hasFields && widgetCount > 0) {
             issues.add(new ValidationIssue(
                     "WARNING", "FORM-002",
                     "AcroForm exists but declares no fields, yet " + widgetCount + " widget annotation(s) were found — fields are orphaned",
                     "PDF 2.0, Section 12.7.3",
                     "AcroForm",
                     "form"));
+        }
+
+        // FORM-003: NeedAppearances is true
+        if (acroForm.getNeedAppearances()) {
+            issues.add(new ValidationIssue(
+                    "WARNING", "FORM-003",
+                    "/NeedAppearances is true — viewers will regenerate appearance streams on open, which can destroy existing signature visuals and cause rendering inconsistencies across viewers",
+                    "PDF 2.0, Section 12.7.2 Table 225",
+                    "AcroForm",
+                    "form"));
+        }
+
+        // FORM-007: XFA present alongside AcroForm
+        COSBase xfa = acroForm.getCOSObject().getDictionaryObject(COSName.getPDFName("XFA"));
+        if (xfa != null) {
+            issues.add(new ValidationIssue(
+                    "WARNING", "FORM-007",
+                    "Document contains an XFA form definition alongside AcroForm — field values may disagree between the two and signing behavior depends on which layer the viewer uses. XFA was deprecated in PDF 2.0",
+                    "PDF 2.0, Section 12.7.8 (deprecated)",
+                    "AcroForm",
+                    "form"));
+        }
+
+        if (!hasFields) return;
+
+        // FORM-004: Field hierarchy parent↔child inconsistency
+        validateFieldHierarchy(acroForm, issues);
+
+        // FORM-005: SigFlags not set or wrong when signature fields exist
+        validateSigFlags(acroForm, issues);
+
+        // FORM-006: Orphaned widgets / fields (widget missing from page /Annots or not linked to AcroForm)
+        validateFieldWidgetLinkage(acroForm, pageWidgetDicts, issues);
+    }
+
+    private void validateFieldHierarchy(PDAcroForm acroForm, List<ValidationIssue> issues) {
+        try {
+            for (PDField field : acroForm.getFieldTree()) {
+                COSDictionary fieldDict = field.getCOSObject();
+                COSBase parentRef = fieldDict.getDictionaryObject(COSName.PARENT);
+                if (!(parentRef instanceof COSDictionary parentDict)) continue;
+
+                COSBase kidsBase = parentDict.getDictionaryObject(COSName.KIDS);
+                if (!(kidsBase instanceof COSArray kidsArr)) {
+                    issues.add(new ValidationIssue(
+                            "WARNING", "FORM-004",
+                            "Field '" + field.getFullyQualifiedName() + "' has a /Parent with no /Kids array — broken hierarchy",
+                            "PDF 2.0, Section 12.7.3.1",
+                            "Field: " + field.getFullyQualifiedName(),
+                            "form"));
+                    continue;
+                }
+
+                boolean found = false;
+                for (int i = 0; i < kidsArr.size(); i++) {
+                    if (kidsArr.getObject(i) == fieldDict) { found = true; break; }
+                }
+                if (!found) {
+                    issues.add(new ValidationIssue(
+                            "WARNING", "FORM-004",
+                            "Field '" + field.getFullyQualifiedName() + "' references a /Parent that does not list it in /Kids — hierarchy is inconsistent",
+                            "PDF 2.0, Section 12.7.3.1",
+                            "Field: " + field.getFullyQualifiedName(),
+                            "form"));
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Error validating field hierarchy", e);
+        }
+    }
+
+    private void validateSigFlags(PDAcroForm acroForm, List<ValidationIssue> issues) {
+        boolean hasSigField = false;
+        try {
+            for (PDField field : acroForm.getFieldTree()) {
+                if (field instanceof PDSignatureField) { hasSigField = true; break; }
+            }
+        } catch (Exception e) {
+            log.debug("Error scanning for signature fields", e);
+        }
+
+        if (!hasSigField && !acroForm.isSignaturesExist()) return;
+
+        boolean sigExist = acroForm.isSignaturesExist();
+        boolean appendOnly = acroForm.isAppendOnly();
+
+        if (!sigExist && !appendOnly) {
+            issues.add(new ValidationIssue(
+                    "WARNING", "FORM-005",
+                    "/SigFlags is missing or 0 despite signature fields being present — viewers may not recognize signatures and subsequent saves could destroy them",
+                    "PDF 2.0, Section 12.7.2 Table 225",
+                    "AcroForm",
+                    "form"));
+        } else if (!appendOnly) {
+            issues.add(new ValidationIssue(
+                    "WARNING", "FORM-005",
+                    "/SigFlags bit 2 (AppendOnly) is not set — a non-incremental save will invalidate all existing signatures",
+                    "PDF 2.0, Section 12.7.2 Table 225",
+                    "AcroForm",
+                    "form"));
+        }
+    }
+
+    private void validateFieldWidgetLinkage(PDAcroForm acroForm, Set<COSDictionary> pageWidgetDicts,
+                                            List<ValidationIssue> issues) {
+        try {
+            Set<COSDictionary> fieldWidgetDicts = new HashSet<>();
+            for (PDField field : acroForm.getFieldTree()) {
+                for (var widget : field.getWidgets()) {
+                    COSDictionary wDict = widget.getCOSObject();
+                    fieldWidgetDicts.add(wDict);
+                    if (!pageWidgetDicts.contains(wDict)) {
+                        issues.add(new ValidationIssue(
+                                "WARNING", "FORM-006",
+                                "Field '" + field.getFullyQualifiedName() + "' has a widget not present in any page's /Annots — it will be invisible and non-interactive",
+                                "PDF 2.0, Section 12.7.3.1",
+                                "Field: " + field.getFullyQualifiedName(),
+                                "form"));
+                        break;
+                    }
+                }
+            }
+
+            int orphaned = 0;
+            for (COSDictionary pw : pageWidgetDicts) {
+                if (!fieldWidgetDicts.contains(pw)) orphaned++;
+            }
+            if (orphaned > 0) {
+                issues.add(new ValidationIssue(
+                        "WARNING", "FORM-006",
+                        orphaned + " widget annotation(s) on pages are not linked to any AcroForm field — they appear as form fields visually but are non-functional",
+                        "PDF 2.0, Section 12.7.3.1",
+                        "Page annotations",
+                        "form"));
+            }
+        } catch (Exception e) {
+            log.debug("Error validating field-widget linkage", e);
         }
     }
 

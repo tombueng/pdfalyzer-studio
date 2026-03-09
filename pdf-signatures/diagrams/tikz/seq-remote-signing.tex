@@ -1,0 +1,50 @@
+% Sequence diagram: Remote Signing Flow (Chapter 22)
+\documentclass[border=10pt]{standalone}
+\usepackage{pgf-umlsd}
+\usepackage{fontspec}
+\setmainfont{Noto Serif}
+\setsansfont{Noto Sans}
+\setmonofont{DejaVu Sans Mono}[Scale=0.85]
+\usepackage{xcolor}
+\definecolor{accent}{HTML}{0f3460}
+\definecolor{clientcolor}{HTML}{e3f2fd}
+\definecolor{servercolor}{HTML}{fce4ec}
+
+\begin{document}
+\begin{sequencediagram}
+  \newthread[clientcolor]{client}{Client Application}
+  \newinst[4]{server}{Remote Signing Server (QTSP)}
+
+  \begin{call}{client}{1. Load PDF, prepare signature dict}{client}{byte range ready}
+  \end{call}
+
+  \begin{call}{client}{2. Build CMS signed attributes}{client}{signedAttrs}
+  \end{call}
+
+  \begin{call}{client}{3. Hash signed attributes (SHA-256)}{client}{32-byte hash}
+  \end{call}
+
+  \begin{call}{client}{4. Authenticate (OAuth 2.0)}{server}{access token}
+    \begin{callself}{server}{5. Verify token}{}
+    \end{callself}
+  \end{call}
+
+  \begin{call}{client}{6. Send hash + credentialId + SAD}{server}{signature bytes}
+    \begin{callself}{server}{7. Verify SAD}{}
+    \end{callself}
+    \begin{callself}{server}{8. Load private key from HSM}{}
+    \end{callself}
+    \begin{callself}{server}{9. Sign hash (RSA/ECDSA)}{}
+    \end{callself}
+  \end{call}
+
+  \begin{call}{client}{11. Embed signature in CMS SignerInfo}{client}{}
+  \end{call}
+
+  \begin{call}{client}{12. Request timestamp from TSA (optional)}{client}{}
+  \end{call}
+
+  \begin{call}{client}{13--14. Embed CMS in PDF, save}{client}{signed PDF}
+  \end{call}
+\end{sequencediagram}
+\end{document}

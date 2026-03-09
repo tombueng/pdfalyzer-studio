@@ -1,0 +1,397 @@
+= PDF Digital Signatures — A Technical Reference
+:doctype: book
+include::book-attributes.adoc[]
+
+[preface]
+== Preface
+
+PDF digital signatures are one of those technologies that seem straightforward until you actually have to implement them.
+You read the spec, write some code, run a test — and the signature validates in your tool but fails in Adobe Acrobat.
+Or it works in Acrobat but fails the EU's validation service.
+Or it works everywhere on Monday and breaks on Friday because a timestamp authority renewed its certificate.
+
+If you've been there, this book is for you.
+
+This is a technical reference for engineers, developers, and security researchers who need to understand PDF digital signatures at the deepest level — from the raw bytes in the file to the legal framework that gives those bytes legal standing across 27 EU member states.
+Every claim is backed by precise references to {iso32000-2}, the ETSI PAdES standards, relevant RFCs, and the eIDAS regulation.
+Code examples use Apache PDFBox {pdfbox-version} and BouncyCastle {bc-version} on Java {java-version}, because that's what most of us actually use in production.
+
+=== Who This Book Is For
+
+You are a software engineer, a security researcher, or a technically curious person who needs to _understand_ PDF signatures, not just use them.
+Maybe you're building a signing service.
+Maybe you're debugging why a customer's signature shows "invalid" in one viewer but "valid" in another.
+Maybe you're the person who got handed a government compliance checklist that says "PAdES-B-LTA" and nobody in your organization knows what that means.
+
+We assume you know how to program, that you've encountered public-key cryptography before (even if the details are fuzzy), and that you're comfortable reading data structures.
+We do _not_ assume you know anything about PDF internals, CMS, or the European regulatory landscape.
+Parts I and II build that foundation from scratch.
+
+=== What This Book Is Not
+
+This is not a tutorial.
+There are no "Hello World" signing examples in Chapter 1.
+If you need to sign a PDF in the next 20 minutes, copy the code from Chapter 28 and come back later to understand why it works.
+
+This is not a product manual.
+We use PDFBox and BouncyCastle because they're open-source, widely deployed, and well-documented.
+The concepts apply equally to iText, OpenPDF, or any other library — the PDF specification doesn't care what language you write in.
+
+This is not a legal guide.
+We explain the eIDAS regulation and its technical requirements in detail, but we are engineers, not lawyers.
+When legal precision matters — and with qualified electronic signatures, it always does — consult someone with a law degree.
+
+=== How This Book Is Organized
+
+The book is structured in six parts, each building on the previous:
+
+**Part I: Cryptographic Foundations** (Chapters 1–6) starts from first principles.
+If you can explain the difference between RSA and ECDSA, between a certificate and a key pair, between CMS and PKCS#7 — skip ahead.
+If any of those distinctions are hazy, start here.
+We cover just enough cryptography to make the rest of the book make sense, with a focus on the specific algorithms and structures you'll encounter in PDF signatures.
+
+**Part II: PDF Internals** (Chapters 7–11) dissects the PDF file format itself.
+You'll learn how objects, cross-reference tables, and incremental updates work — because you cannot understand PDF signatures without understanding incremental saves.
+You'll also learn about AcroForm fields, annotations, and coordinate systems, because signature fields are form fields, signature appearances are annotations, and the coordinate system _will_ trip you up.
+
+**Part III: PDF Digital Signatures** (Chapters 12–18) is the heart of the book.
+This is where we take apart the `/Sig` dictionary key by key, trace the byte range byte by byte, and walk through the CMS structure field by field.
+We cover approval and certification signatures, visual appearances, validation logic, PAdES profiles, and long-term validation.
+If you only read one part of this book, read this one.
+
+**Part IV: eIDAS & Qualified Signatures** (Chapters 19–23) enters the regulatory world.
+The European eIDAS regulation created a legal framework where a digital signature can have the same legal standing as a handwritten one — but only if it meets very specific technical requirements.
+We explain what those requirements are, how the EU Trusted List works, what a Qualified Trust Service Provider does, and how remote signing via the Cloud Signature Consortium API fits into the picture.
+
+**Part V: Security, Incidents & Outlook** (Chapters 24–27) covers what can go wrong — and what has gone wrong.
+The Ruhr University Bochum research team published devastating attacks against PDF signature validation in 2019–2021.
+We analyze every attack technically, explain why it worked, and show how to defend against it.
+We also cover certificate authority breaches, industry oddities, and the emerging EUDI wallet.
+
+**Part VI: Code & Implementation** (Chapters 28–31) is where theory meets production.
+Complete, tested Java code for signing, CMS construction, verification, and analysis — not snippets, but full classes you can drop into a project.
+We also provide test cases and reference PDFs for every scenario discussed in the book.
+
+=== Conventions Used in This Book
+
+PDF dictionary keys are written in monospace with a leading slash: `/SubFilter`, `/ByteRange`, `/Contents`.
+When we show a full dictionary, it's presented as a code listing with callout annotations explaining each key.
+
+Spec references follow this pattern: "{iso32000-2} §12.8.1" means ISO 32000-2:2020, section 12.8.1.
+RFC references: "{rfc5652} §5" means RFC 5652, section 5.
+We use these abbreviations consistently throughout.
+
+Code examples are Java {java-version} using PDFBox {pdfbox-version} and BouncyCastle {bc-version}.
+Every code listing compiles and runs — the source is in the book's repository alongside test cases that verify the examples.
+
+Admonition blocks carry specific meaning:
+
+NOTE: Additional context, background, or alternative approaches.
+
+TIP: Practical advice from experience — the kind of thing a senior colleague would tell you over coffee.
+
+IMPORTANT: Something you must understand to avoid a specific class of bugs.
+
+WARNING: A common mistake or misunderstanding that leads to broken signatures.
+
+CAUTION: A security-relevant issue that could lead to signature bypasses or compliance failures.
+
+=== A Note on the PDF Specification
+
+The PDF specification has a complicated history.
+Adobe published it as a proprietary format in 1993, released it as ISO 32000-1 in 2008, and then {iso32000-2} superseded it in 2020 with significant changes to the digital signature sections.
+
+Throughout this book, we reference {iso32000-2} as the authoritative source.
+Where the behavior of older PDF versions matters (and for digital signatures, it often does — plenty of documents in the wild still use PDF 1.7 features), we note the differences explicitly.
+
+The PAdES standards (ETSI EN 319 142) add an additional layer of requirements on top of ISO 32000-2.
+They don't replace the PDF spec — they constrain it.
+A PAdES-compliant signature is always a valid ISO 32000-2 signature, but not every valid ISO 32000-2 signature is PAdES-compliant.
+This distinction matters enormously in the EU, and increasingly, everywhere else.
+
+=== Three Decades of PDF: A Timeline
+
+PDF was born as a page description language for printing.
+Digital signatures were an afterthought — bolted on six years later in PDF 1.3, using a cryptographic framework (PKCS#7) that predated PDF itself.
+Understanding why PDF signatures work the way they do — and why they break the way they break — requires understanding the history that shaped them.
+
+The following table traces every major milestone in the evolution of PDF and, specifically, the digital signature infrastructure built on top of it.
+Some of these are format changes.
+Some are regulatory events.
+Some are security incidents that forced the entire industry to rethink assumptions it had held for years.
+All of them left marks on the code you will write or debug.
+
+.The evolution of PDF and PDF digital signatures, 1993–2026
+[cols="1,2,5",options="header"]
+|===
+|Year |Event |What happened and why it matters
+
+|1993
+|**PDF 1.0** released (Acrobat 1.0)
+|Adobe published the Portable Document Format as a proprietary specification for reliable cross-platform document rendering.
+No forms, no interactivity, no signatures — just pages, text, images, and fonts.
+The file structure established here (header, body, cross-reference table, trailer) survives unchanged to this day.
+Every PDF you sign in 2026 still starts with `%PDF-1.x` or `%PDF-2.0` and ends with `%%EOF`.
+
+|1996
+|**PDF 1.2** (Acrobat 3.0)
+|Introduced **AcroForm** — interactive form fields that users could fill in.
+This matters for signatures because signature fields _are_ form fields.
+The `/AcroForm` dictionary, the field tree, widget annotations — all of the infrastructure that Chapter 9 dissects — was born here.
+PDF 1.2 also added Unicode support and Flate compression, both of which are ubiquitous in modern PDFs.
+
+|1999
+|**PDF 1.3** — digital signatures introduced (Acrobat 4.0)
+|The moment PDF gained the ability to carry cryptographic signatures.
+Adobe defined the `/Sig` dictionary type, the `/ByteRange` array, the `/Contents` hex string for the signature value, and the `/SubFilter` key with its initial value `adbe.pkcs7.detached`.
+The design decision to embed the CMS signature _inside_ the PDF file (rather than as a detached sidecar) and to define the signed region as a byte range with a gap for the signature value itself — these were architectural choices made in 1999 that we still live with.
+Every quirk in Chapter 12 traces back to this release.
+
+|2001
+|**PDF 1.4** (Acrobat 5.0)
+|Added **transparency** (the imaging model's biggest change ever), 128-bit RC4 encryption, and **tagged PDF** for accessibility.
+For signatures: PDF 1.4 formalized the `adbe.pkcs7.sha1` SubFilter (where the SHA-1 hash of the entire document is embedded as the CMS content, rather than using a detached signature).
+This SubFilter is now deprecated but still appears in legacy documents.
+Acrobat 5 also introduced **certification signatures** (`/DocMDP` transform) — the distinction between "I approve this document" and "I certify this is the authoritative version" starts here.
+
+|2003
+|**PDF 1.5** (Acrobat 6.0)
+|Introduced **object streams** and **cross-reference streams** — a complete reworking of how PDF files store their internal structure.
+Instead of the classic ASCII cross-reference table, PDF 1.5 allows binary cross-reference data compressed inside stream objects.
+This matters for signatures because the byte range must cover the _entire_ file structure, and cross-reference streams change where objects physically live in the file.
+PDF 1.5 also added **XFA forms** (Adobe's XML-based form format), which would become a persistent source of interoperability problems for signatures on XFA documents — a problem so annoying that {iso32000-2} deprecated XFA entirely.
+
+|2005
+|**PDF 1.6** (Acrobat 7.0)
+|**AES-128 encryption** replaced the weak RC4-based encryption from earlier versions.
+Embedded file streams (attachments) and 3D content were added.
+For signatures: PDF 1.6 refined the interaction between encryption and signing — a signed, encrypted PDF requires careful handling to ensure the signature covers the encrypted content correctly.
+The `/NeedAppearances` flag behavior was also clarified, which matters because a missing appearance stream on a signature field causes some viewers to show a blank signature block.
+
+|2006
+|**PDF 1.7** (Acrobat 8.0)
+|The last version of PDF that Adobe defined unilaterally before handing the specification to ISO.
+PDF 1.7 solidified the **AES-256 encryption** scheme and finalized the AcroForm/XFA coexistence model.
+The vast majority of signed PDFs in the wild today are PDF 1.7 documents — not because of any technical limitation of PDF 2.0, but because template authors, form generators, and enterprise software have not yet migrated.
+When you debug a signature failure in production, you are almost certainly looking at a PDF 1.7 file.
+
+|2008
+|**ISO 32000-1:2008** — PDF becomes an ISO standard
+|Adobe donated the PDF 1.7 specification to ISO, making it an open international standard.
+The technical content was essentially identical to Adobe's PDF Reference 1.7, but the governance changed: future changes would go through the ISO committee process, not Adobe's product team.
+For signatures, this was the moment PDF digital signatures gained the credibility of an ISO-backed specification — a prerequisite for government and regulated-industry adoption.
+
+|2009
+|**PAdES** — ETSI TS 102 778 (Parts 1–5)
+|The European Telecommunications Standards Institute published the first **PDF Advanced Electronic Signatures** standards.
+PAdES defined profiles for how CMS signatures should be embedded in PDF to meet European legal requirements: which signed attributes are mandatory (ESS signing-certificate-v2), which SubFilter values to use (`ETSI.CAdES.detached`), and how to embed timestamps, revocation data, and long-term validation information.
+PAdES didn't replace ISO 32000 — it constrained it.
+A PAdES-compliant signature is always a valid ISO 32000 signature, but the reverse is not true.
+This distinction — and the interoperability problems it causes when a PDF viewer validates against ISO 32000 rules but not PAdES rules — is a recurring theme in this book (Chapters 17 and 26).
+
+|2011
+|**DigiNotar breach** — CA infrastructure crisis
+|A Dutch certificate authority, DigiNotar, was completely compromised by an attacker who issued over 500 fraudulent certificates — including certificates for google.com, mozilla.org, and intelligence agencies.
+The certificates were used in man-in-the-middle attacks against Iranian dissidents.
+Every major browser vendor revoked trust in DigiNotar within weeks; the company went bankrupt within months.
+For PDF signatures: DigiNotar was a wake-up call about the fragility of the certificate trust model that all digital signatures depend on.
+If a CA can be compromised, any signature issued by that CA's certificates becomes suspect.
+This incident accelerated the adoption of Certificate Transparency logs and tighter CA audit requirements — both of which affected the trust infrastructure behind PDF signatures.
+Chapter 25 covers this and other CA breaches in detail.
+
+|2012
+|**Adobe Approved Trust List (AATL)** formalized
+|Adobe formalized its **AATL** program — a curated list of root certificates that Acrobat trusts for signature validation.
+If your signing certificate chains up to an AATL root, Acrobat shows a green checkmark.
+If it doesn't — even if the certificate is perfectly valid, issued by a reputable CA, and chains to a trust anchor in your OS trust store — Acrobat shows a warning.
+This created a de facto monopoly on "valid" PDF signatures: to get a green checkmark in the world's dominant PDF viewer, you need an AATL-listed certificate, which costs significantly more than a standard code-signing certificate.
+The AATL remains one of the most contentious aspects of the PDF signature ecosystem (Chapter 26).
+
+|2014
+|**eIDAS Regulation** (EU 910/2014) enacted
+|The European Union passed the **Electronic Identification, Authentication and Trust Services** regulation, creating a legal framework where digital signatures can have the same legal standing as handwritten signatures — but only if they meet strict technical requirements.
+eIDAS defined three tiers: **electronic signatures** (any electronic indication of signing intent), **advanced electronic signatures** (uniquely linked to the signatory, capable of identifying them, under their sole control, linked to the data so any change is detectable), and **qualified electronic signatures** (advanced + created by a qualified device + based on a qualified certificate issued by a qualified trust service provider).
+Only QES has automatic legal equivalence to a handwritten signature across all EU member states.
+PAdES became the primary technical mechanism for creating eIDAS-compliant signatures in PDF.
+Chapters 19–23 cover the entire eIDAS ecosystem.
+
+|2016
+|**eIDAS fully effective** (July 1, 2016)
+|The eIDAS regulation became fully effective across all EU member states, with the **EU Trusted List (EUTL)** operational.
+The EUTL is a machine-readable, cryptographically signed list of every Qualified Trust Service Provider in the EU — the authoritative source for determining whether a signing certificate qualifies for the highest legal tier.
+For developers: if your application needs to validate whether a PDF signature is a qualified electronic signature, you must check the signing certificate against the EUTL, not just against a generic trust store.
+The EUTL XML schema, its signature validation, and the LOT (List of Trusted Lists) hierarchy are covered in Chapter 20.
+
+|2017
+|**ISO 32000-2:2017** — PDF 2.0, first edition
+|The first major revision of the PDF specification under ISO governance.
+PDF 2.0 deprecated XFA forms, removed several legacy features, and made significant changes to the digital signature sections.
+Notably: the `adbe.pkcs7.sha1` SubFilter was deprecated (SHA-1 is cryptographically broken for collision resistance since the SHAttered attack of February 2017), and the specification added the `ETSI.RFC3161` SubFilter for document-level timestamps.
+PDF 2.0 also clarified the byte range coverage rules and tightened the requirements around incremental updates after signing — changes that were partly motivated by early reports of the signature validation problems that Bochum would systematically expose two years later.
+
+|2019
+|**"1 Trillion Dollar Refund"** — Bochum attacks (CCS 2019)
+|The Ruhr University Bochum team published their landmark paper at ACM CCS 2019, systematically breaking PDF signature validation in every major viewer.
+They identified three attack classes: **Universal Signature Forgery (USF)** — crafting a signed PDF with a garbage or empty signature value that viewers accepted as valid; **Incremental Saving Attack (ISA)** — appending unsigned changes to a signed PDF that viewers failed to flag; and **Signature Wrapping Attack (SWA)** — relocating the signature's byte range to point at attacker-controlled data.
+Of 22 desktop viewers tested, all were vulnerable to at least one attack.
+The paper title referenced the fact that signed PDFs are used for tax refund claims, insurance payouts, and financial contracts — if signatures could be forged, the financial exposure was enormous.
+This research is the subject of Chapter 24.
+
+|2020
+|**ISO 32000-2:2020** — PDF 2.0, second edition
+|The second edition of PDF 2.0 incorporated corrections and clarifications, including tightened language around signature validation motivated by the Bochum attacks.
+In the same year, Adobe issued **CVE-2020-9592** and **CVE-2020-9596** and patched Acrobat against USF, ISA, and SWA.
+Foxit, Nitro, LibreOffice, Okular, and every other major viewer released their own patches.
+The PAdES standards were also updated (ETSI EN 319 142-1 V1.1.1) to align with the second edition of ISO 32000-2.
+
+|2021
+|**Shadow Attacks** (NDSS 2021)
+|The Bochum team published a follow-up: **Shadow Attacks**.
+Unlike the 2019 attacks (which modified a PDF _after_ signing), Shadow Attacks prepared malicious content _before_ the document was signed.
+The attacker created a PDF with hidden content (invisible text, overlapping images, replaced form fields) that the signer could not see during signing — but that became visible when the recipient opened the document.
+The signature validated correctly because the signed bytes were genuinely signed by the legitimate signer.
+The attack exploited the gap between what the signer _saw_ and what the bytes _contained_ — a fundamental problem in any visual-document signing model.
+Three variants were demonstrated: **Hide** (hiding content behind overlapping elements), **Replace** (swapping visible content via interactive form features), and **Hide-and-Replace** (combining both).
+Again, all major viewers were vulnerable.
+
+|2022
+|**ETSI EN 319 142-1 V1.2.1** — PAdES update
+|ETSI updated the PAdES standard to align with ISO 32000-2:2020 and to incorporate lessons from the Bochum attacks.
+The update clarified requirements around signature scope validation, incremental update handling, and the relationship between the byte range and the visible document content.
+It also formalized the PAdES-B-LTA profile's requirements for archival timestamps in the DSS (Document Security Store) — the mechanism that enables long-term validation decades after the signing certificate has expired.
+
+|2024
+|**eIDAS 2.0** (EU 2024/1183) enacted
+|The EU adopted the revised eIDAS regulation, which introduced the **European Digital Identity (EUDI) Wallet** — a smartphone-based identity wallet that every EU member state must offer to its citizens by 2026.
+The EUDI wallet will carry government-issued identity attestations (PID — Person Identification Data) and qualified electronic attestations of attributes (QEAA), enabling citizens to sign documents with qualified electronic signatures from their phone.
+This represents the most ambitious attempt to make QES mainstream — moving it from specialized HSM-backed signing services to consumer smartphones.
+The Architecture Reference Framework (ARF) defines the technical specifications.
+Chapter 27 covers the EUDI wallet and its impact on PDF signing.
+
+|2025–26
+|**EUDI wallet pilots & deployment**
+|EU member states are conducting large-scale pilot programs for the EUDI wallet across sectors: banking (identity verification), travel (digital travel credentials), education (diplomas), healthcare (prescriptions), and government services.
+The pilots test the wallet's signing capabilities, including PAdES-B-LTA signature creation from mobile devices, remote QSCD integration, and cross-border signature validation.
+The Cloud Signature Consortium (CSC) API — the standard interface for remote signing — is being adapted for wallet integration.
+The outcome of these pilots will determine whether QES becomes a mainstream consumer technology or remains a specialized enterprise tool.
+|===
+
+The table omits minor point releases and focuses on the events that changed what developers need to know.
+If you are working with PDF signatures today, every row in that table has left its fingerprint on the code you are writing — whether it's the byte range gap from 1999, the PAdES constraints from 2009, the trust model questions raised by DigiNotar in 2011, or the validation rewrites forced by Bochum in 2019–2021.
+
+=== Acknowledgments
+
+This book would not exist without the open-source communities that make PDF signature work accessible to everyone.
+The **Apache PDFBox** team — particularly Andreas Lehmkühler, Tilman Hausherr, and the many contributors who maintain the signing infrastructure — have built the most widely used open-source PDF library in the Java ecosystem.
+The **Legion of the Bouncy Castle** (yes, that's their actual name) gave us BouncyCastle, which provides the CMS and X.509 implementations that most Java signing code depends on, whether it knows it or not.
+
+Special acknowledgment goes to the security researchers at **Ruhr University Bochum** — Vladislav Mladenov, Christian Mainka, Karsten Meyer zu Selhausen, Martin Grothe, and Jörg Schwenk — whose systematic analysis of PDF signature validation between 2019 and 2021 exposed fundamental flaws in how every major PDF viewer handled signatures.
+Their papers — _"1 Trillion Dollar Refund: How To Spoof PDF Signatures"_ (CCS 2019), _"Shadow Attacks: Hiding and Replacing Content in Signed PDFs"_ (NDSS 2021), and several follow-ups — demonstrated that attackers could forge signatures, hide content changes behind valid signatures, and bypass validation in Adobe Acrobat, Foxit Reader, and dozens of other viewers.
+The industry patched, but the research fundamentally changed how we think about PDF signature security.
+Their work is cited throughout this book, and Chapter 24 is dedicated to a technical analysis of their attacks.
+
+What they found was this: PDF viewers did not actually verify what they claimed to verify.
+The Bochum team identified three major attack classes.
+**Universal Signature Forgery (USF)** showed that some viewers only checked whether a signature _existed_ — not whether its cryptographic value was correct.
+An attacker could craft a PDF with an empty or garbage `/Contents` value, and viewers like Adobe Acrobat DC (before the patch) would display it as "signed and valid."
+**Incremental Saving Attack (ISA)** exploited the incremental update mechanism that PDF signatures depend on: an attacker could append a new revision to a signed PDF — changing text, adding pages, replacing content entirely — and because viewers did not properly check whether the appended changes fell outside the signed byte range, the signature still showed as valid.
+**Signature Wrapping Attack (SWA)** relocated the signed content within the file so that the byte range pointed at attacker-controlled data while the original signature remained structurally present.
+The follow-up **Shadow Attacks** paper (NDSS 2021) went further: an attacker could prepare a PDF _before_ it was signed, embedding hidden content that would only become visible after signing — the signer would see one document, but the recipient would see another, and the signature would validate on both views.
+
+The team tested 22 desktop PDF viewers and 7 online validation services.
+Every single one was vulnerable to at least one attack class.
+Adobe issued CVE-2020-9592 and CVE-2020-9596 and patched Acrobat in May 2020.
+Foxit, Nitro, LibreOffice, and every other major viewer followed with their own patches.
+The research forced a fundamental rethinking of PDF signature validation — in particular, how viewers handle incremental updates after signing, how byte range coverage is verified, and how the relationship between the CMS signature and the actual document bytes is validated.
+Before Bochum, most viewers treated signature validation as a checkbox.
+After Bochum, it became a security-critical code path that required adversarial thinking.
+
+The **European Telecommunications Standards Institute (ETSI)** deserves credit for the PAdES standards that brought PDF signatures into the regulated world.
+Whatever one may think about the complexity of ETSI EN 319 142, it solved the real problem of making PDF signatures legally interoperable across borders.
+
+And the PDF specification itself is the product of hundreds of engineers at Adobe, ISO, and ETSI who somehow managed to build a digital signature framework into a page description language originally designed for printing.
+That it works as well as it does is a testament to their effort.
+That it has the quirks it has is a testament to the fact that three decades of backward compatibility leaves marks.
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Part I: Cryptographic Foundations
+// ══════════════════════════════════════════════════════════════════════════════
+
+= Cryptographic Foundations
+
+include::chapters/part-1-crypto/ch01-asymmetric-crypto.adoc[leveloffset=+1]
+include::chapters/part-1-crypto/ch02-hashing-signing.adoc[leveloffset=+1]
+include::chapters/part-1-crypto/ch03-x509-certificates.adoc[leveloffset=+1]
+include::chapters/part-1-crypto/ch04-certificate-chains.adoc[leveloffset=+1]
+include::chapters/part-1-crypto/ch05-key-material-formats.adoc[leveloffset=+1]
+include::chapters/part-1-crypto/ch06-cms-signed-data.adoc[leveloffset=+1]
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Part II: PDF Internals
+// ══════════════════════════════════════════════════════════════════════════════
+
+= PDF Internals
+
+include::chapters/part-2-pdf-internals/ch07-pdf-file-structure.adoc[leveloffset=+1]
+include::chapters/part-2-pdf-internals/ch08-incremental-updates.adoc[leveloffset=+1]
+include::chapters/part-2-pdf-internals/ch09-acroform.adoc[leveloffset=+1]
+include::chapters/part-2-pdf-internals/ch10-coordinate-system.adoc[leveloffset=+1]
+include::chapters/part-2-pdf-internals/ch11-font-embedding.adoc[leveloffset=+1]
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Part III: PDF Digital Signatures (the core)
+// ══════════════════════════════════════════════════════════════════════════════
+
+= PDF Digital Signatures
+
+include::chapters/part-3-pdf-signatures/ch12-signature-architecture.adoc[leveloffset=+1]
+
+include::chapters/part-3-pdf-signatures/ch13-byte-range-deep-dive.adoc[leveloffset=+1]
+include::chapters/part-3-pdf-signatures/ch14-approval-vs-certification.adoc[leveloffset=+1]
+include::chapters/part-3-pdf-signatures/ch15-visual-appearance.adoc[leveloffset=+1]
+include::chapters/part-3-pdf-signatures/ch16-signature-validation.adoc[leveloffset=+1]
+include::chapters/part-3-pdf-signatures/ch17-pades-profiles.adoc[leveloffset=+1]
+include::chapters/part-3-pdf-signatures/ch18-timestamps-ltv.adoc[leveloffset=+1]
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Part IV: eIDAS & Qualified Signatures
+// ══════════════════════════════════════════════════════════════════════════════
+
+= eIDAS & Qualified Signatures
+
+include::chapters/part-4-eidas/ch19-eidas-regulation.adoc[leveloffset=+1]
+include::chapters/part-4-eidas/ch20-qualified-certificates.adoc[leveloffset=+1]
+include::chapters/part-4-eidas/ch21-signatures-vs-seals.adoc[leveloffset=+1]
+include::chapters/part-4-eidas/ch22-remote-signing.adoc[leveloffset=+1]
+include::chapters/part-4-eidas/ch23-eu-dss-framework.adoc[leveloffset=+1]
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Part V: Security, Incidents & Outlook
+// ══════════════════════════════════════════════════════════════════════════════
+
+= Security, Incidents & Outlook
+
+include::chapters/part-5-security/ch24-shadow-attacks.adoc[leveloffset=+1]
+include::chapters/part-5-security/ch25-ca-breaches.adoc[leveloffset=+1]
+include::chapters/part-5-security/ch26-oddities.adoc[leveloffset=+1]
+include::chapters/part-5-security/ch27-eudi-wallet.adoc[leveloffset=+1]
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Part VI: Code & Implementation
+// ══════════════════════════════════════════════════════════════════════════════
+
+= Code, Tools & Implementation
+
+include::chapters/part-6-code/ch28-java-pdf-library-landscape.adoc[leveloffset=+1]
+include::chapters/part-6-code/ch29-pdfbox-signing.adoc[leveloffset=+1]
+include::chapters/part-6-code/ch30-bouncycastle-cms.adoc[leveloffset=+1]
+include::chapters/part-6-code/ch31-verification-analysis.adoc[leveloffset=+1]
+include::chapters/part-6-code/ch32-test-cases.adoc[leveloffset=+1]
+
+// ══════════════════════════════════════════════════════════════════════════════
+// Appendix
+// ══════════════════════════════════════════════════════════════════════════════
+
+include::appendix/app-a-code-listings.adoc[]
+include::appendix/app-b-asn1-reference.adoc[]
+include::appendix/app-c-glossary.adoc[]

@@ -1,0 +1,38 @@
+% Sequence diagram: RFC 3161 Timestamp Request/Response (Chapter 18)
+\documentclass[border=10pt]{standalone}
+\usepackage{pgf-umlsd}
+\usepackage{fontspec}
+\setmainfont{Noto Serif}
+\setsansfont{Noto Sans}
+\setmonofont{DejaVu Sans Mono}[Scale=0.85]
+\usepackage{xcolor}
+\definecolor{accent}{HTML}{0f3460}
+\definecolor{clientcolor}{HTML}{e3f2fd}
+\definecolor{tsacolor}{HTML}{e8f5e9}
+
+\begin{document}
+\begin{sequencediagram}
+  \newthread[clientcolor]{client}{Client}
+  \newinst[4]{tsa}{TSA Server}
+
+  \begin{call}{client}{1. Compute hash of data}{client}{hash value}
+  \end{call}
+
+  \begin{call}{client}{2. POST TimeStampRequest (algorithm + hash)}{tsa}{TimeStampResponse}
+    \begin{callself}{tsa}{3. Verify request}{}
+    \end{callself}
+    \begin{callself}{tsa}{4. Get current UTC time}{}
+    \end{callself}
+    \begin{callself}{tsa}{5. Create TSTInfo (hash, time, serial, policy)}{}
+    \end{callself}
+    \begin{callself}{tsa}{6. Sign TSTInfo with TSA key (CMS SignedData)}{}
+    \end{callself}
+  \end{call}
+
+  \begin{call}{client}{7. Verify TSA signature}{client}{}
+  \end{call}
+
+  \begin{call}{client}{8. Embed TimeStampToken in CMS/PDF}{client}{timestamped signature}
+  \end{call}
+\end{sequencediagram}
+\end{document}

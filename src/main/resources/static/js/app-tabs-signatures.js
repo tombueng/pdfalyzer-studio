@@ -32,6 +32,11 @@ PDFalyzer.SignaturesTab = (function ($, P) {
         html += '</div>';
         $c.html(html);
         bindCardInteractions($c);
+
+        // Auto-expand all cards when fewer than 10 signatures (and no saved state)
+        if (!P.state.signatureTabState && data.signatures.length < 10) {
+            $c.find('.sig-card').addClass('expanded');
+        }
         restoreTabState();
     }
 
@@ -64,6 +69,10 @@ PDFalyzer.SignaturesTab = (function ($, P) {
         if (sig.signingTime) {
             html += '<span class="sig-signing-time">' + formatTime(sig.signingTime) + '</span>';
         }
+        if (sig.pageIndex >= 0 && sig.boundingBox) {
+            html += '<button class="btn btn-outline-accent btn-sm sig-locate-btn ms-auto" data-sig-locate="' + index + '">' +
+                '<i class="fas fa-crosshairs me-1"></i>Locate in PDF</button>';
+        }
         html += '</div>';
 
         // Body
@@ -74,12 +83,6 @@ PDFalyzer.SignaturesTab = (function ($, P) {
         } else {
             html += '<div class="text-muted mb-2"><i class="fas fa-pen-nib me-1"></i>This signature field is empty and awaiting a signature.</div>';
             html += '<button class="btn btn-accent btn-sm sig-sign-btn" data-field="' + P.Utils.escapeHtml(sig.fieldName) + '"><i class="fas fa-file-signature me-1"></i>Sign this field</button>';
-        }
-
-        // Locate button (for all fields with a page)
-        if (sig.pageIndex >= 0 && sig.boundingBox) {
-            html += '<button class="btn btn-outline-accent btn-sm sig-locate-btn" data-sig-locate="' + index + '">' +
-                '<i class="fas fa-crosshairs me-1"></i>Locate in PDF</button>';
         }
 
         html += '</div></div>';
