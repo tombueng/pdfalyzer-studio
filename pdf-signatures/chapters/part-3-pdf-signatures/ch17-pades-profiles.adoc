@@ -1,0 +1,409 @@
+= PAdES Profiles (ETSI EN 319 142)
+
+[.lead]
+ISO 32000-2 defines _how_ a digital signature is embedded in a PDF.
+PAdES defines _what_ that signature must contain to be legally meaningful in Europe — and, increasingly, everywhere else.
+
+PAdES — PDF Advanced Electronic Signatures — is a set of standards published by the **European Telecommunications Standards Institute (ETSI)** that constrain PDF signatures to meet specific compliance requirements.
+A PAdES signature is always a valid ISO 32000-2 signature, but the reverse is not true.
+PAdES adds mandatory signed attributes, requires specific SubFilter values, mandates timestamp handling, and defines four progressively more complete signature profiles.
+
+Understanding PAdES is not optional if your signatures need to be validated by European government services, if your customers require eIDAS-compliant signatures, or if you want your signatures to remain verifiable for years or decades.
+Even if you're not operating in the EU, PAdES profiles have become the de facto standard for "properly structured" PDF signatures worldwide — Adobe Acrobat increasingly favors PAdES-structured signatures in its validation logic.
+
+This chapter explains each PAdES profile, what it requires, how the profiles relate to each other, and how to produce each one.
+
+== The Four PAdES Baseline Profiles
+
+PAdES defines four **baseline profiles**, each building on the previous one.
+They are formally named PAdES-B-B, PAdES-B-T, PAdES-B-LT, and PAdES-B-LTA.
+The naming follows the pattern: PAdES-B(aseline)-<level>.
+
+.PAdES Baseline Profile Summary
+[cols="2,2,6", options="header"]
+|===
+| Profile | Full Name | What It Adds
+
+| **B-B**
+| Baseline — Basic
+| The minimum PAdES signature. CMS `SignedData` with mandatory signed attributes including `ESS-signing-certificate-v2`. The signature itself — no timestamps, no revocation data.
+
+| **B-T**
+| Baseline — Timestamp
+| B-B + a **signature timestamp** from a trusted TSA. Proves when the signature was created. The timestamp is an unsigned CMS attribute (`id-aa-signatureTimeStampToken`).
+
+| **B-LT**
+| Baseline — Long-Term
+| B-T + embedded **revocation data** (OCSP responses and/or CRLs) and the full certificate chain in the PDF's **DSS** (Document Security Store) dictionary. Everything needed to validate the signature offline, without contacting any external servers.
+
+| **B-LTA**
+| Baseline — Long-Term with Archive timestamp
+| B-LT + a **document timestamp** signature that covers the entire file (including the DSS dictionary). Enables re-timestamping decades later, creating an indefinite chain of trust that outlives any individual certificate.
+
+|===
+
+=== The Progression: Why Four Levels?
+
+Each profile addresses a specific failure mode:
+
+- **B-B** fails when: the signing certificate expires (validators may warn), or when you need to prove _when_ the signature was created (there's no timestamp)
+- **B-T** fails when: the OCSP responder or CRL distribution point goes offline years later, and you can't check revocation status
+- **B-LT** fails when: the timestamp's certificate, or the signing certificate's root CA, expires or is removed from trust stores decades later
+- **B-LTA** handles all of these by providing a renewable chain of timestamps
+
+In practice:
+
+- **B-B** is sufficient for short-lived documents that will be validated within the signing certificate's validity period (typically 1-3 years)
+- **B-T** is the minimum for any document with legal significance — you need to prove when it was signed
+- **B-LT** is required for long-term archival (10+ years) where you can't assume external services will remain available
+- **B-LTA** is the gold standard for documents that must be verifiable indefinitely — government records, notarized documents, regulatory filings
+
+== PAdES-B-B: The Baseline Signature
+
+=== Requirements
+
+A PAdES-B-B signature must include:
+
+1. **SubFilter**: Must be `ETSI.CAdES.detached` (not `adbe.pkcs7.detached`)
+
+2. **Mandatory signed attributes in CMS**:
+   - `content-type` (OID 1.2.840.113549.1.9.3) — must be `id-data`
+   - `message-digest` (OID 1.2.840.113549.1.9.4) — the hash of the signed bytes
+   - `ESS-signing-certificate-v2` (OID 1.2.840.113549.1.9.16.2.47) — identifies the signing certificate by its hash, preventing certificate substitution attacks
+
+3. **Signing certificate embedded in CMS**: The signer's certificate (and ideally the full chain up to but not including the root) must be embedded in the CMS `SignedData.certificates` collection
+
+4. **Digest algorithm**: Must be SHA-256 or stronger (SHA-384, SHA-512). SHA-1 is **not** PAdES-compliant.
+
+=== The ESS-signing-certificate-v2 Attribute
+
+This attribute is the key difference between a basic ISO 32000-2 signature and a PAdES-B-B signature.
+It binds the CMS signature to a specific certificate by including a hash of the certificate in the signed attributes.
+
+Why this matters: without `ESS-signing-certificate-v2`, an attacker could theoretically substitute a different certificate into the CMS `certificates` collection — one with the same public key but different identity information.
+The CMS signature would still verify (same key), but the identity would be wrong.
+The ESS attribute prevents this by cryptographically committing to a specific certificate.
+
+[source,java]
+----
+// Creating the ESS-signing-certificate-v2 attribute with BouncyCastle
+MessageDigest certDigest = MessageDigest.getInstance("SHA-256");
+byte[] certHash = certDigest.digest(signingCertificate.getEncoded());
+
+ESSCertIDv2 essCertId = new ESSCertIDv2(
+        new AlgorithmIdentifier(NISTObjectIdentifiers.id_sha256),
+        certHash);
+
+SigningCertificateV2 signingCertV2 = new SigningCertificateV2(
+        new ESSCertIDv2[] { essCertId });
+
+// Add to signed attributes
+CMSAttributeTableGenerator signedAttrGen = new DefaultSignedAttributeTableGenerator(
+        new AttributeTable(new Hashtable<>() {{
+            put(PKCSObjectIdentifiers.id_aa_signingCertificateV2,
+                new Attribute(PKCSObjectIdentifiers.id_aa_signingCertificateV2,
+                    new DERSet(signingCertV2)));
+        }}));
+----
+
+[WARNING]
+====
+A common mistake: using `ESS-signing-certificate` (v1, OID 1.2.840.113549.1.9.16.2.12) instead of `ESS-signing-certificate-v2` (OID 1.2.840.113549.1.9.16.2.47).
+The v1 attribute uses SHA-1 for the certificate hash, which is deprecated.
+PAdES requires v2, which uses SHA-256 by default.
+
+iText 2.x (and old versions of some other libraries) produced v1 attributes.
+If you encounter a PDF with `ESS-signing-certificate` (v1), it's likely from a legacy signing implementation.
+====
+
+=== SubFilter: `ETSI.CAdES.detached` vs. `adbe.pkcs7.detached`
+
+PAdES requires the SubFilter value `ETSI.CAdES.detached`.
+This is structurally identical to `adbe.pkcs7.detached` — both produce a detached CMS signature embedded in the `/Contents` hex string.
+The difference is semantic: `ETSI.CAdES.detached` signals that the signature follows the CAdES (CMS Advanced Electronic Signatures) profile, which includes the ESS-signing-certificate-v2 attribute and other CAdES requirements.
+
+In practice, many validators accept both SubFilter values for PAdES validation.
+Adobe Acrobat treats `ETSI.CAdES.detached` and `adbe.pkcs7.detached` similarly.
+But for strict PAdES compliance — especially when dealing with EU government validators — use `ETSI.CAdES.detached`.
+
+== PAdES-B-T: Adding a Timestamp
+
+=== What B-T Adds
+
+PAdES-B-T is PAdES-B-B plus a **signature timestamp** — a timestamp token from a Trusted Timestamp Authority (TSA) that proves when the signature was created.
+
+The timestamp is embedded as an **unsigned attribute** (`id-aa-signatureTimeStampToken`, OID 1.2.840.113549.1.9.16.2.14) in the CMS `SignerInfo`.
+It's unsigned because it's applied _after_ the signature — you sign first, then request a timestamp over the signature value.
+
+=== How Timestamping Works
+
+The timestamp workflow:
+
+1. **Sign the document** — produce the CMS `SignedData` with all signed attributes (B-B level)
+2. **Hash the signature value** — compute SHA-256 over the CMS `SignerInfo.signature` bytes
+3. **Send a timestamp request** — send the hash to a TSA using RFC 3161 (HTTP POST to the TSA's URL)
+4. **Receive the timestamp response** — the TSA returns a `TimeStampToken` (which is itself a CMS `SignedData` signed by the TSA's certificate)
+5. **Embed the timestamp** — add the `TimeStampToken` as an unsigned attribute in the CMS
+
+[source,java]
+----
+// Requesting a timestamp from a TSA
+TimeStampRequestGenerator tsReqGen = new TimeStampRequestGenerator();
+tsReqGen.setCertReq(true);  // Request TSA's certificate in the response
+
+byte[] signatureHash = MessageDigest.getInstance("SHA-256")
+        .digest(signerInfo.getSignature());
+
+TimeStampRequest tsReq = tsReqGen.generate(
+        TSPAlgorithms.SHA256, signatureHash);
+
+// Send to TSA via HTTP
+byte[] tsReqBytes = tsReq.getEncoded();
+HttpURLConnection conn = (HttpURLConnection)
+        new URL(tsaUrl).openConnection();
+conn.setDoOutput(true);
+conn.setRequestMethod("POST");
+conn.setRequestProperty("Content-Type", "application/timestamp-query");
+conn.getOutputStream().write(tsReqBytes);
+
+TimeStampResponse tsResp = new TimeStampResponse(conn.getInputStream());
+tsResp.validate(tsReq);  // Verify the response matches our request
+
+TimeStampToken tsToken = tsResp.getTimeStampToken();
+----
+
+=== Choosing a TSA
+
+Choosing a TSA is a non-trivial decision.
+The TSA's certificate must be trusted by the validators that will check your signatures.
+Key considerations:
+
+- **For Adobe Acrobat**: The TSA's root must be in the AATL, or the timestamp will show a warning
+- **For EU compliance**: The TSA should be a Qualified Trust Service Provider (QTSP) listed in the EUTL
+- **For availability**: The TSA must be reachable when you sign — if the TSA is down, your signing fails (or you produce a B-B signature without a timestamp)
+- **For cost**: Some TSAs are free (FreeTSA, DigiCert's free tier), others charge per timestamp or per certificate
+
+Chapter 18 covers timestamps in depth, including TSA selection, failover strategies, and the Document Security Store.
+
+== PAdES-B-LT: Long-Term Data
+
+=== What B-LT Adds
+
+PAdES-B-LT is PAdES-B-T plus **long-term validation data** embedded directly in the PDF.
+This data ensures that the signature can be validated years from now, even if the signing certificate's CA has gone out of business, the OCSP responder has been decommissioned, and the CRL distribution points return 404.
+
+The long-term data is stored in the **DSS** (Document Security Store) dictionary, which is added to the document catalog:
+
+[source]
+----
+<< /Type /Catalog
+   /AcroForm << ... >>
+   /DSS <<
+     /Certs [30 0 R 31 0 R 32 0 R]       % Certificate chain as DER-encoded streams
+     /OCSPs [33 0 R]                       % OCSP responses as DER-encoded streams
+     /CRLs [34 0 R]                        % CRLs as DER-encoded streams
+     /VRI <<
+       /A1B2C3D4... <<                     % Hash-keyed VRI (Validation Related Info)
+         /Cert [30 0 R 31 0 R]
+         /OCSP [33 0 R]
+         /TU (D:20260308120000Z)           % Time of validation
+       >>
+     >>
+   >>
+>>
+----
+
+=== The DSS Dictionary
+
+.DSS Dictionary Keys ({iso32000-2} §12.8.4.3)
+[cols="2,2,1,2", options="header"]
+|===
+| Key | Type | Req | Spec Ref
+
+| `/Certs`
+| array of streams
+| Optional
+| §12.8.4.3
+4+| DER-encoded certificates — the full chain for every signature and timestamp in the document. Include the signer's certificate, all intermediates, and optionally the root.
+
+| `/OCSPs`
+| array of streams
+| Optional
+| §12.8.4.3
+4+| DER-encoded OCSP responses for certificate revocation checking. Each response covers a specific certificate at a specific point in time.
+
+| `/CRLs`
+| array of streams
+| Optional
+| §12.8.4.3
+4+| DER-encoded Certificate Revocation Lists. Used when OCSP is not available for a certificate.
+
+| `/VRI`
+| dictionary
+| Optional
+| §12.8.4.3
+4+| Validation Related Information — a dictionary keyed by uppercase hex SHA-1 hashes of signature values, mapping each signature to its specific validation data.
+
+|===
+
+=== Why B-LT Matters
+
+Without B-LT, validating a signature requires contacting external servers:
+
+- OCSP responder to check revocation status
+- CRL distribution point to download the revocation list
+- CA's AIA (Authority Information Access) URL to fetch intermediate certificates
+
+These servers may be unreachable years from now.
+CAs shut down, merge, change URLs, or decommission infrastructure.
+With B-LT, everything needed for validation is embedded in the PDF itself — the document is self-contained.
+
+== PAdES-B-LTA: Archival Timestamps
+
+=== What B-LTA Adds
+
+PAdES-B-LTA is PAdES-B-LT plus a **document timestamp** — a timestamp signature that covers the entire PDF file, including the DSS dictionary.
+
+This timestamp is not part of the original signature's CMS — it's a separate signature dictionary with `/SubFilter /ETSI.RFC3161`:
+
+[source]
+----
+<< /Type /Sig
+   /Filter /Adobe.PPKLite
+   /SubFilter /ETSI.RFC3161
+   /ByteRange [0 52000 84776 2100]
+   /Contents <3082...>
+>>
+----
+
+This timestamp signature covers the entire file (including the original signature, the DSS, and everything else) and proves that all of this data existed at the time the timestamp was created.
+
+=== The Archival Chain
+
+The power of B-LTA is that it creates a **renewable chain of trust**:
+
+1. The original signature (signed by the signer's certificate, valid for 1-3 years)
+2. The signature timestamp (signed by the TSA's certificate, valid for 10-20 years)
+3. The archival timestamp (signed by the TSA's certificate, covers everything)
+4. Years later: add another archival timestamp (covers the previous archival timestamp)
+5. Repeat indefinitely
+
+Each archival timestamp extends the provable lifetime of the signature.
+Even after the original signing certificate has expired, been revoked, and the CA has gone out of business — the chain of archival timestamps proves that the signature was valid at the time it was created.
+
+This is the mechanism that national archives use to preserve the legal validity of digitally signed documents for decades.
+
+=== Re-Timestamping
+
+To extend a B-LTA signature's validity:
+
+1. Fetch fresh OCSP responses / CRLs for the archival timestamp's certificate chain
+2. Add them to the DSS dictionary
+3. Apply a new archival timestamp (document timestamp) over the entire file
+
+This can be done without the original signer's involvement — it's a maintenance operation performed by the document custodian.
+
+[TIP]
+====
+**Automated re-timestamping** should be a scheduled process in any document management system that stores B-LTA signed documents.
+Before the current archival timestamp's TSA certificate expires (check the certificate's `notAfter` date), apply a new archival timestamp.
+This keeps the chain of trust alive.
+====
+
+== Profile Comparison Matrix
+
+.PAdES profile feature comparison
+[cols="3,1,1,1,1", options="header"]
+|===
+| Feature | B-B | B-T | B-LT | B-LTA
+
+| CMS with ESS-signing-certificate-v2
+| Yes
+| Yes
+| Yes
+| Yes
+
+| Signature timestamp
+| No
+| Yes
+| Yes
+| Yes
+
+| Embedded revocation data (DSS)
+| No
+| No
+| Yes
+| Yes
+
+| Embedded certificate chain (DSS)
+| No
+| No
+| Yes
+| Yes
+
+| Document timestamp (archival)
+| No
+| No
+| No
+| Yes
+
+| Offline validation
+| No
+| Partial
+| Yes
+| Yes
+
+| Validity beyond cert expiry
+| No
+| Yes (with TS)
+| Yes
+| Yes (indefinite)
+
+| EU/eIDAS suitability
+| Minimal
+| Short-term
+| Good
+| **Full compliance**
+
+| Typical use case
+| Internal docs
+| Contracts
+| Regulated docs
+| Archival
+
+|===
+
+== Migrating Between Profiles
+
+One of the elegant properties of PAdES profiles is that you can **upgrade** a signature's profile without re-signing:
+
+- **B-B → B-T**: Add a timestamp (unsigned attribute to the CMS). Requires the original file and the CMS.
+- **B-T → B-LT**: Fetch revocation data and certificates, create the DSS dictionary, add as incremental update.
+- **B-LT → B-LTA**: Add a document timestamp covering the entire file.
+
+This progression means you can sign with B-B today (fast, no TSA dependency) and upgrade to B-LTA later as a batch operation.
+EU DSS provides methods for exactly this:
+
+[source,java]
+----
+// EU DSS: Extend a B-B signature to B-LTA
+PAdESService service = new PAdESService(certificateVerifier);
+service.setTspSource(tspSource);
+
+DSSDocument extendedDoc = service.extendDocument(
+    signedDocument,
+    new PAdESSignatureParameters() {{
+        setSignatureLevel(SignatureLevel.PAdES_BASELINE_LTA);
+    }});
+----
+
+== Key Takeaways
+
+- PAdES constrains ISO 32000-2 signatures for legal and regulatory compliance — a PAdES signature is always a valid PDF signature, but not vice versa
+- **Four profiles**: B-B (basic), B-T (timestamped), B-LT (long-term data), B-LTA (archival)
+- **ESS-signing-certificate-v2** is the mandatory attribute that makes a signature PAdES-compliant — without it, you have a valid ISO 32000-2 signature but not PAdES
+- **SubFilter `ETSI.CAdES.detached`** is required for strict PAdES compliance
+- The **DSS dictionary** (B-LT and above) embeds certificates, OCSP responses, and CRLs directly in the PDF for offline validation
+- **B-LTA** provides indefinite validity through renewable archival timestamps
+- Profiles can be **upgraded** without re-signing — B-B → B-T → B-LT → B-LTA as incremental updates
+- For EU/eIDAS compliance, **B-LTA is the target** — anything less may not meet long-term archival requirements

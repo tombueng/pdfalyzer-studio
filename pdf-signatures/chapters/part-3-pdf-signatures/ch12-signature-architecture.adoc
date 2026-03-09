@@ -1,0 +1,1387 @@
+[[ch12]]
+== Signature Architecture
+ifdef::env-github[]
+:tip-caption: :bulb:
+:note-caption: :information_source:
+:important-caption: :heavy_exclamation_mark:
+:caution-caption: :fire:
+:warning-caption: :warning:
+endif::[]
+
+[abstract]
+--
+This chapter dissects the internal architecture of PDF digital signatures as specified in {iso32000-2} §12.8.
+We examine every dictionary, every key, and every byte — from the AcroForm field tree down to the raw CMS `SignedData` blob embedded in `/Contents`.
+
+But more importantly, we talk about what actually matters when you're staring at a broken signature at 2 AM, wondering why Adobe says "invalid" while your code says "fine."
+--
+
+=== Overview: What a PDF Signature Actually Is
+
+Here's the thing most people get wrong about PDF signatures: they think of them as something _attached to_ a document, like a wax seal on an envelope.
+They're not.
+
+A PDF digital signature is a set of **PDF objects embedded within the document itself**.
+The signature _is part of the document_.
+This seemingly minor architectural choice has profound consequences — it's why PDF signatures are simultaneously powerful and maddening, why they survive copy operations but break on re-saves, and why you can have a perfectly valid signature on a document that's been modified after signing (yes, really).
+
+The four pieces of a PDF signature:
+
+1. A **signature field** (`PDSignatureField`) in the AcroForm field tree — the form field that "holds" the signature
+2. A **signature dictionary** (`/Type /Sig`) — the actual cryptographic payload and metadata
+3. A **widget annotation** — the visual rectangle on a page (may be zero-size for invisible signatures)
+4. An **appearance stream** (`/AP`) — what the viewer renders in the signature rectangle
+
+[NOTE]
+====
+The signature field is a form field like any other (`/FT /Sig`).
+The signature dictionary is the _value_ of that field (`/V`).
+An unsigned field has `/V` absent or null — the field exists but has no signature value yet.
+
+Think of it like an empty checkbox on a paper form.
+The box is there, waiting to be checked.
+A document author can place signature fields in a PDF template, and signers fill them in later — each one independently, at different times, possibly on different continents.
+====
+
+[TIP]
+====
+**When you encounter a PDF with signature problems, start here.**
+Open the document in a COS-level viewer (like PDFalyzer, or even a hex editor) and check:
+
+. Does the AcroForm exist? (Some PDFs have signature fields floating without an AcroForm — instant headache.)
+. Does `/SigFlags` include bit 2 (AppendOnly)? If not, any editor can destroy all signatures with a simple save.
+. Is the `/V` entry present on the signature field? If absent, the field is unsigned.
+. Does the widget actually have a page reference? Some tools create orphaned widgets.
+
+This five-minute checklist saves hours of debugging.
+====
+
+[[ch12-field-tree]]
+=== Signature Fields in the AcroForm Tree
+
+[quote, "{iso32000-2} §12.7.4.5"]
+____
+A signature field (field type Sig) shall represent a digital signature that may or may not have a signature value.
+____
+
+Signature fields live in the document's interactive form structure:
+
+ifdef::backend-pdf,backend-docbook[]
+[latexmath]
+++++
+\begin{tikzpicture}[
+    every node/.style={font=\sffamily\small, text=white, minimum width=3.8cm, minimum height=0.9cm, align=center, rounded corners=2pt},
+    edge from parent/.style={draw=gray!50, thick, ->},
+    level 1/.style={sibling distance=4.5cm, level distance=1.8cm},
+    level 2/.style={sibling distance=4.5cm, level distance=1.8cm}
+]
+\node[fill=black!75] {trailer}
+  child { node[fill={rgb,255:red,26;green,26;blue,46}] {/Root\\(Catalog dictionary)}
+    child { node[fill={rgb,255:red,22;green,33;blue,62}] {/AcroForm}
+      child { node[fill={rgb,255:red,15;green,52;blue,96}, text width=3.6cm] {/Fields [ ... ]\\{\scriptsize Array of top-level field dictionaries}} }
+      child { node[fill={rgb,255:red,15;green,52;blue,96}, text width=3.6cm] {/SigFlags\\{\scriptsize Bit 1 = SignaturesExist\\Bit 2 = AppendOnly}} }
+      child { node[fill={rgb,255:red,15;green,52;blue,96}, text width=3.6cm] {/DR\\{\scriptsize Default resources for\\appearance streams}} }
+    }
+  };
+\end{tikzpicture}
+++++
+endif::[]
+
+ifdef::backend-html5[]
+.AcroForm field tree hierarchy
+[cols="1,1,1", options="header"]
+|===
+| Level | Object | Purpose
+| trailer | `/Root` (Catalog) | Document root
+| Catalog | `/AcroForm` | Interactive forms container
+| AcroForm | `/Fields`, `/SigFlags`, `/DR` | Field array, signature flags, default resources
+|===
+endif::[]
+
+==== The SigFlags Trap
+
+The `/SigFlags` entry is one of those things that's easy to overlook and devastating to get wrong.
+
+.SigFlags — {iso32000-2} §12.7.2, Table 225
+[cols="2,1,1,2,5", options="header"]
+|===
+| Name | Bit | Req | Spec Ref | Effect
+
+| `SignaturesExist`
+| 1
+| Required
+| §12.7.2
+| Tells the viewer "this document contains at least one signature field." Conforming readers **shall not** allow saving in a way that invalidates existing signatures.
+
+| `AppendOnly`
+| 2
+| Required
+| §12.7.4.5
+| The document **shall** be saved using incremental updates only. This is the mechanism that protects existing signatures from being destroyed by a full rewrite.
+
+|===
+
+IMPORTANT: Setting `/SigFlags` to 3 (both bits) is mandatory when a document contains signatures. If bit 2 is missing, a naive PDF editor may do a full save and destroy all signatures. Many real-world PDFs get this wrong.
+
+Here's what happens in practice: someone creates a PDF with LibreOffice, adds a signature field, signs it — and LibreOffice doesn't set bit 2.
+The document gets emailed to a colleague who opens it in some random PDF editor to add an annotation, hits save, and the editor does a full rewrite.
+Every signature is now invalid.
+The colleague has no idea what happened.
+The signer gets an angry phone call.
+
+**The fix is always the same:** if you're building a tool that creates signature fields, set `/SigFlags` to 3 the moment any field has a value.
+And if you're building a tool that edits PDFs, check for `/SigFlags` bit 2 before saving — if it's set, you _must_ use incremental save.
+If your tool doesn't support incremental save... well, you need to support it now.
+Welcome to PDF.
+
+==== Field Dictionary Structure
+
+A signature field's COS dictionary looks like this.
+Every key matters, and I'll explain why:
+
+Here is the complete COS dictionary of a typical signature field.
+In most PDFs, the field and its widget annotation are merged into a single object — the spec ({iso32000-2} §12.5.6.19) allows splitting them, but few tools bother:
+
+[source]
+----
+<<
+  /Type /Annot
+  /Subtype /Widget
+  /FT /Sig
+  /T (Signature1)
+  /V 42 0 R
+  /Rect [100 500 300 550]
+  /AP << /N 43 0 R >>
+  /P 7 0 R
+  /Lock <<
+    /Type /SigFieldLock
+    /Action /All
+  >>
+  /SV <<
+    /Type /SV
+    /Filter /Adobe.PPKLite
+    /SubFilter [/adbe.pkcs7.detached /ETSI.CAdES.detached]
+    /DigestMethod [/SHA256 /SHA384 /SHA512]
+    /Reasons [(Approved)(Reviewed)]
+    /MDP << /P 2 >>
+  >>
+>>
+----
+
+The keys fall into three groups: annotation/widget keys (how it looks and where it lives), signature field keys (what it is and what it points to), and sub-dictionaries that constrain signing behavior.
+
+.Annotation/Widget Keys — {iso32000-2} §12.5.6.19
+[cols="2,2,1,2,5", options="header"]
+|===
+| Key | Type | Req | Spec Ref | Description
+
+| `/Type`
+| name
+| Optional
+| §12.5.6
+| Always `/Annot` for the merged field+widget.
+
+| `/Subtype`
+| name
+| Required
+| §12.5.6
+| Always `/Widget` — this is a widget annotation.
+
+| `/Rect`
+| rectangle
+| Required
+| §12.5.6
+| Widget rectangle in page coordinates: `[llx lly urx ury]`. If `[0 0 0 0]`, the signature is invisible.
+
+| `/P`
+| reference
+| Optional
+| §12.5.6
+| Page reference — which page this widget is on. Some poorly generated PDFs omit this, and then viewers have to guess. Don't be that tool.
+
+| `/AP`
+| dictionary
+| Optional
+| §12.5.6.19
+| Appearance stream dictionary. `/N` is the normal appearance — what the viewer draws. Without this, many viewers show a generic placeholder. Adobe is particularly opinionated about appearances.
+
+|===
+
+.Signature Field Keys — {iso32000-2} §12.7.5.5
+[cols="2,2,1,3", options="header"]
+|===
+| Key | Type | Req | Spec Ref
+
+| `/FT`
+| name
+| Required
+| §12.7.4.1
+4+| Field type — `/Sig` marks this as a signature field. Non-negotiable. If you see `/FT /Tx` on something that's supposed to be a signature, someone made a mistake.
+
+| `/T`
+| text string
+| Required
+| §12.7.4.1
+4+| Partial field name — used to identify the field programmatically. This is how your code finds "the signature field called Signature1."
+
+| `/V`
+| reference
+| Optional
+| §12.7.5.5
+4+| Reference to the **signature dictionary** (`/Type /Sig`) — the cryptographic payload. If absent, the field is unsigned. When present, this is the key entry that connects the form field to the actual signature. The signature dictionary is detailed in <<ch12-sig-dict>>.
+
+|===
+
+The remaining two keys — `/Lock` and `/SV` — are sub-dictionaries that deserve their own tables.
+
+.Lock Dictionary (`/Type /SigFieldLock`) — {iso32000-2} §12.7.5.5, Table 237
+[cols="2,2,1,3", options="header"]
+|===
+| Key | Type | Req | Spec Ref
+
+| `/Type`
+| name
+| Optional
+| §12.7.5.5
+4+| Always `/SigFieldLock`.
+
+| `/Action`
+| name
+| Required
+| §12.7.5.5, Table 237
+4+| What to lock after signing: `/All` (lock everything), `/Include` (lock fields listed in `/Fields`), or `/Exclude` (lock everything _except_ fields listed in `/Fields`). This is how approval signatures can lock specific fields — see <<ch14>>.
+
+| `/Fields`
+| array
+| Conditional
+| §12.7.5.5, Table 237
+4+| Array of field names to include or exclude from locking. Required when `/Action` is `/Include` or `/Exclude`.
+
+|===
+
+==== Seed Value Dictionary (`/SV`): The Unsung Hero
+
+[quote, "{iso32000-2} §12.7.5.5"]
+____
+The seed value dictionary provides constraint information that shall be used at the time the signature is applied.
+____
+
+The seed value dictionary is one of the most powerful and underused features in the entire PDF signature specification.
+Most people don't even know it exists, which is a shame, because it solves a problem that plagues every organization deploying PDF signatures at scale: **how do you ensure signers use the right algorithm, the right format, and the right handler?**
+
+.Seed Value Dictionary (`/Type /SV`) — {iso32000-2} §12.7.5.5, Table 238
+[cols="2,2,1,3", options="header"]
+|===
+| Key | Type | Req | Spec Ref
+
+| `/Filter`
+| name
+| Optional
+| §12.7.5.5, Table 238
+4+| Required signature handler (e.g., `/Adobe.PPKLite`). Use this to ensure your documents work with specific software.
+
+| `/SubFilter`
+| array of names
+| Optional
+| §12.7.5.5, Table 238
+4+| Acceptable signature formats. Set this to `[/ETSI.CAdES.detached]` if you need PAdES compliance. The signer's software **must** use one of these formats.
+
+| `/DigestMethod`
+| array of names
+| Optional
+| §12.7.5.5, Table 238
+4+| Acceptable hash algorithms. Set this to `[/SHA256 /SHA384 /SHA512]` — and for the love of all that is holy, **do not include `/SHA1`**. It's 2026. SHA-1 has been broken since 2017.
+
+| `/Reasons`
+| array of strings
+| Optional
+| §12.7.5.5, Table 238
+4+| Pre-defined reason strings the signer must choose from. Great for audit trails — instead of "asdf" in the reason field, signers pick from "Approved", "Reviewed", "Authorized".
+
+| `/LegalAttestation`
+| array of strings
+| Optional
+| §12.7.5.5, Table 238
+4+| Legal attestation strings — rarely used, but available if you need legal boilerplate attached to the signature.
+
+| `/Ff`
+| integer
+| Optional
+| §12.7.5.5, Table 238
+4+| Flags indicating which seed values are **required** (vs. recommended). If bit 1 is set on a constraint, it's mandatory — the signer's software must enforce it, not just suggest it.
+
+|===
+
+The `/MDP` and `/TimeStamp` entries are sub-dictionaries with their own structure:
+
+.Seed Value MDP Dictionary (`/MDP`) — {iso32000-2} §12.7.5.5
+[cols="2,2,1,2,5", options="header"]
+|===
+| Key | Type | Req | Spec Ref | Description
+
+| `/P`
+| integer
+| Required
+| §12.7.5.5
+| The DocMDP permission level this signature must enforce: 1 (no changes), 2 (form fills + signatures), 3 (form fills + signatures + annotations). This is how a template author says "whoever signs this field must also lock the document."
+
+|===
+
+.Seed Value TimeStamp Dictionary (`/TimeStamp`) — {iso32000-2} §12.7.5.5
+[cols="2,2,1,2,5", options="header"]
+|===
+| Key | Type | Req | Spec Ref | Description
+
+| `/URL`
+| ASCII string
+| Required
+| §12.7.5.5
+| URL of the RFC 3161 timestamp server.
+
+| `/Ff`
+| integer
+| Optional
+| §12.7.5.5
+| If bit 1 is set, timestamping is required (not just recommended). If you need PAdES-B-T, set this. The signer's software will contact the TSA automatically.
+
+|===
+
+[TIP]
+====
+**Practical advice for template authors:**
+
+If you're creating PDF templates that others will sign, use seed values aggressively.
+Don't trust signers to pick the right options — they won't.
+A financial services company once sent us PDFs where half the signatures used SHA-1 because some signers had old software and nobody constrained the algorithm.
+Those signatures were technically valid but would fail compliance audits.
+
+Set `/DigestMethod` to `[/SHA256]`, set `/SubFilter` to `[/ETSI.CAdES.detached]`, and set the `/Ff` flags to make them mandatory.
+Your future self will thank you.
+====
+
+[[ch12-sig-dict]]
+=== The Signature Dictionary (`/Type /Sig`)
+
+The signature dictionary is the heart of a PDF digital signature.
+It's referenced from the field's `/V` entry, and it's where the real action is.
+Everything else — the field, the widget, the appearance — is just scaffolding.
+This dictionary is where the cryptographic proof lives.
+
+Here is the complete structure of a typical signature dictionary — every key you'll encounter in production:
+
+[source]
+----
+<<
+  /Type /Sig
+  /Filter /Adobe.PPKLite
+  /SubFilter /ETSI.CAdES.detached
+  /ByteRange [0 15000 15500 34500]
+  /Contents <308206A7...00000000>
+  /M (D:20260306120000+00'00')
+  /Name (John Doe)
+  /Location (Vienna, Austria)
+  /Reason (Approved)
+  /ContactInfo (john@example.com)
+  /Reference [
+    <<
+      /Type /SigRef
+      /TransformMethod /DocMDP
+      /TransformParams <<
+        /Type /TransformParams
+        /P 2
+        /V /1.2
+      >>
+      /DigestMethod /SHA256
+    >>
+  ]
+  /Prop_Build <<
+    /App << /Name /PDFalyzer >>
+    /Filter << /Name /Adobe.PPKLite >>
+  >>
+>>
+----
+
+The table below dissects each key.
+The core cryptographic keys come first, then metadata, then sub-dictionaries.
+
+==== Core Signature Keys
+
+These five keys define the cryptographic signature itself.
+Get any of them wrong and the signature is broken.
+
+.Core keys of the Signature Dictionary (`/Type /Sig`) — {iso32000-2} §12.8.1, Table 255
+[cols="2,1,1,3", options="header"]
+|===
+| Key | Type | Req | Spec Ref
+
+| `/Type`
+| name
+| Optional
+| §12.8.1
+4+| Always `/Sig` when present. Identifies this dictionary as a signature value. Optional per the spec, but always include it — defensive parsers rely on it.
+
+| `/Filter`
+| name
+| Required
+| §12.8.1, Table 255
+4+| The signature handler name. In theory, this identifies which software can process the signature. In practice, it's always `/Adobe.PPKLite`. Always. Even when the signing software has nothing to do with Adobe. The name stuck because Adobe defined the original signature spec in 1999 and everyone just... went with it.
+
+| `/SubFilter`
+| name
+| Required
+| §12.8.1, Table 255
+4+| The actual encoding format of the signature value. _This_ is the key that determines how `/Contents` is structured — see <<ch12-subfilter>> for the full history and current recommendation.
+
+| `/ByteRange`
+| array
+| Required
+| §12.8.1, Table 255
+4+| Four integers `[offset1 length1 offset2 length2]` defining which bytes of the file are signed. The gap between the two ranges is where `/Contents` lives. The most important array in the entire dictionary — a deep dive is in <<ch13>>.
+
+| `/Contents`
+| string
+| Required
+| §12.8.1, Table 255
+4+| Hex-encoded CMS `SignedData` blob ({rfc5652} §5), padded with zeros. This is the actual cryptographic signature. Everything else in this dictionary is metadata. This is the payload. See <<ch12-contents>>.
+
+|===
+
+==== Metadata Keys
+
+These keys carry informational data about the signing event.
+They are part of the signed bytes and cannot be changed after signing — but they are set by whoever controls the signing process, **not verified against any external authority**.
+
+.Metadata keys of the Signature Dictionary — {iso32000-2} §12.8.1, Table 255
+[cols="2,2,1,2,5", options="header"]
+|===
+| Key | Type | Req | Spec Ref | Description
+
+| `/M`
+| date string
+| Optional
+| §12.8.1
+| Signing time in PDF date format. **Do not trust this.** It's the signer's local clock. Use the CMS timestamp attribute for authoritative time.
+
+| `/Name`
+| text string
+| Optional
+| §12.8.1
+| Signer's name. **Do not trust this either.** It's free text. The authoritative name is in the X.509 certificate inside `/Contents`.
+
+| `/Location`
+| text string
+| Optional
+| §12.8.1
+| Claimed signing location. Informational, unverified.
+
+| `/Reason`
+| text string
+| Optional
+| §12.8.1
+| Claimed signing reason (e.g., "Approved", "Reviewed"). Informational, unverified.
+
+| `/ContactInfo`
+| text string
+| Optional
+| §12.8.1
+| Contact info. Informational, optional, you see the pattern.
+
+|===
+
+WARNING: The `/M`, `/Name`, `/Location`, `/Reason`, and `/ContactInfo` fields are **unauthenticated metadata**. Yes, they're part of the signed bytes. Yes, they can't be changed after signing. But they're set _before_ signing, by whoever controls the signing process. If a malicious signer puts "Barack Obama" in the `/Name` field and signs with a self-signed certificate, the signature will be structurally valid. **The only trustworthy identity information is the X.509 certificate in `/Contents`.** Never display `/Name` to users as if it were verified identity. This mistake is shockingly common in PDF viewer implementations.
+
+==== Signature Reference Dictionary (`/Reference`)
+
+The `/Reference` entry is an array of **signature reference dictionaries** (`/Type /SigRef`) that define transform methods — rules about what can and cannot change after signing.
+This is the mechanism behind certification signatures and field-level locking (covered in depth in <<ch14>>).
+
+.Signature Reference Dictionary (`/Type /SigRef`) — {iso32000-2} §12.8.1, Table 256
+[cols="2,2,1,3", options="header"]
+|===
+| Key | Type | Req | Spec Ref
+
+| `/Type`
+| name
+| Optional
+| §12.8.1, Table 256
+4+| Always `/SigRef`.
+
+| `/TransformMethod`
+| name
+| Required
+| §12.8.1, Table 256
+4+| The transform method: `/DocMDP` (document modification detection and prevention), `/FieldMDP` (field-level locking), or `/UR` (usage rights — deprecated in PDF 2.0). DocMDP is by far the most common. See <<ch14>>.
+
+| `/TransformParams`
+| dictionary
+| Optional
+| §12.8.1, Table 256
+4+| Parameters for the transform method. For DocMDP, this contains `/P` (permission level: 1 = no changes, 2 = form fills + signatures, 3 = form fills + signatures + annotations) and `/V` (version).
+
+| `/DigestMethod`
+| name
+| Required
+| §12.8.1, Table 256
+4+| Hash algorithm for this reference (e.g., `/SHA256`). Must match the algorithm used in the CMS structure.
+
+|===
+
+==== Build Properties Dictionary (`/Prop_Build`)
+
+The `/Prop_Build` dictionary identifies the software that created the signature.
+It's optional and purely informational — but surprisingly useful for debugging.
+
+.Build Properties Dictionary — {iso32000-2} §12.8.1, Table 258
+[cols="2,2,1,2,5", options="header"]
+|===
+| Key | Type | Req | Spec Ref | Description
+
+| `/App`
+| dictionary
+| Optional
+| §12.8.1
+| Application that created the signature. Contains `/Name` (e.g., `/PDFalyzer`, `/AdobeAcrobatDC`).
+
+| `/Filter`
+| dictionary
+| Optional
+| §12.8.1
+| Signature handler info. Contains `/Name` (e.g., `/Adobe.PPKLite`).
+
+| `/PubSec`
+| dictionary
+| Optional
+| §12.8.1
+| Public security handler info. Rarely populated.
+
+|===
+
+[TIP]
+====
+**The `/Prop_Build` dictionary is your friend when debugging.**
+
+When a signature doesn't validate, the first thing I check is `/Prop_Build`.
+It tells you which software created the signature.
+If it says `/iText` with a version from 2015, you know you might be dealing with an old CMS structure.
+If it says `/Adobe Acrobat` and the signature is invalid, something is genuinely wrong because Adobe's own tool should produce signatures that Adobe validates.
+If `/Prop_Build` is missing entirely, the signing software was lazy — which tells you something about the quality of the rest of the signature, too.
+====
+
+[[ch12-subfilter]]
+==== SubFilter Values: A Brief History of Getting It Right
+
+The `/SubFilter` value determines how the `/Contents` bytes are structured.
+Getting this right is the difference between "signature works everywhere" and "signature works in Adobe but nowhere else" (or vice versa).
+
+The history of SubFilter values is essentially the history of PDF signatures trying — and sometimes failing — to keep up with cryptographic best practices:
+
+The first two SubFilter values are deprecated — they use SHA-1, which has been broken for collision resistance since the SHAttered attack of February 2017.
+You will encounter them in legacy documents, but you should never use them for new signatures.
+
+.Deprecated SubFilter Values (do not use for new signatures)
+[cols="2,2,1,3", options="header"]
+|===
+| SubFilter | Standard | Req | Spec Ref
+
+| `/adbe.x509.rsa_sha1`
+| PDF 1.3+
+| Deprecated
+| {iso32000-2} §12.8.3.2
+4+| **Do not use.** Raw RSA signature with the certificate in a separate `/Cert` key instead of inside `/Contents`. No CMS wrapper. SHA-1 only. This was PDF's first attempt at digital signatures in 1999. It made sense at the time. It doesn't anymore.
+
+| `/adbe.pkcs7.sha1`
+| PDF 1.3+
+| Deprecated
+| {iso32000-2} §12.8.3.4
+4+| **Do not use.** CMS `SignedData` where the SHA-1 digest of the byte range is _encapsulated_ in the CMS. This is the worst of both worlds: SHA-1 (broken) and encapsulated content (unnecessary complexity). Nobody misses this format.
+
+|===
+
+The following three values are the current standard.
+For new signatures, use `/ETSI.CAdES.detached` unless you have a specific reason not to.
+
+.Current SubFilter Values
+[cols="2,2,1,3", options="header"]
+|===
+| SubFilter | Standard | Req | Spec Ref
+
+| `/adbe.pkcs7.detached`
+| PDF 1.3+
+| Current
+| {iso32000-2} §12.8.3.3
+4+| CMS `SignedData` with detached content. The workhorse format — widely supported since PDF 1.3. The signed bytes are the PDF byte range, not embedded in CMS. If you need maximum compatibility with older software, this is your format.
+
+| `/ETSI.CAdES.detached`
+| PDF 2.0 / PAdES
+| Modern
+| {etsi-pades} §5.1
+4+| CMS `SignedData` with mandatory CAdES signed attributes, specifically the `signing-certificate-v2` attribute. Required for PAdES-B-B and higher. **This is the modern standard. Use this.** The CMS structure is identical to `/adbe.pkcs7.detached` at the container level — the difference is one signed attribute (~50 bytes).
+
+| `/ETSI.RFC3161`
+| PDF 2.0 / PAdES
+| Modern
+| {etsi-pades} §5.4
+4+| RFC 3161 timestamp token — not a signature, but a document-level timestamp. Used for PAdES-B-T and long-term archival. You'll encounter these when dealing with LTV (Long-Term Validation).
+
+|===
+
+ifdef::backend-pdf,backend-docbook[]
+[latexmath]
+++++
+\begin{tikzpicture}[
+    every node/.style={font=\sffamily\footnotesize, align=center, rounded corners=2pt, minimum height=0.7cm},
+    box/.style={draw=gray!40, fill=gray!15, text=black, minimum width=3.2cm},
+    deprecated/.style={draw=red!40, fill=red!15, text=red!80!black, minimum width=3.2cm},
+    modern/.style={draw=green!40, fill=green!15, text=green!30!black, minimum width=3.2cm},
+    desc/.style={font=\sffamily\scriptsize, text=gray!70!black},
+    arr/.style={->, thick, gray!50}
+]
+% Root
+\node[box, minimum width=2.5cm] (root) at (0,0) {/SubFilter};
+
+% Deprecated
+\node[deprecated] (x509) at (-5,-1.5) {/adbe.x509.rsa\_sha1};
+\node[deprecated] (sha1) at (-5,-2.8) {/adbe.pkcs7.sha1};
+
+% Current
+\node[box] (pkcs7) at (0,-1.5) {/adbe.pkcs7.detached};
+\node[desc] at (0,-2.3) {CMS SignedData, detached\\Wide compatibility (PDF 1.3+)};
+
+% Modern
+\node[modern] (cades) at (5,-1.5) {/ETSI.CAdES.detached};
+\node[desc] at (5,-2.3) {CMS + CAdES attributes\\PAdES-B-B+ (PDF 2.0)};
+
+\node[modern] (rfc) at (5,-3.5) {/ETSI.RFC3161};
+\node[desc] at (5,-4.3) {RFC 3161 timestamp token\\Document timestamps / LTV};
+
+% Arrows
+\draw[arr] (root) -- (x509);
+\draw[arr] (root) -- (pkcs7);
+\draw[arr] (root) -- (cades);
+\draw[arr] (root) -- (sha1);
+\draw[arr] (root) -- (rfc);
+
+% Legend
+\node[deprecated, minimum width=1.8cm] at (-5,-4.5) {\scriptsize Deprecated};
+\node[modern, minimum width=1.8cm] at (-2.5,-4.5) {\scriptsize Modern/PAdES};
+\end{tikzpicture}
+++++
+endif::[]
+
+ifdef::backend-html5[]
+.SubFilter value hierarchy (deprecated values in red, PAdES-compliant in green)
+[cols="2,1,4", options="header"]
+|===
+| SubFilter | Status | Format
+| `/adbe.x509.rsa_sha1` | Deprecated | Raw RSA, SHA-1 only
+| `/adbe.pkcs7.sha1` | Deprecated | CMS with encapsulated SHA-1 digest
+| `/adbe.pkcs7.detached` | Current | CMS SignedData, detached (PDF 1.3+)
+| `/ETSI.CAdES.detached` | Modern | CMS + CAdES attributes (PAdES-B-B+)
+| `/ETSI.RFC3161` | Modern | RFC 3161 timestamp token (LTV)
+|===
+endif::[]
+
+CAUTION: Here's a trap that catches people all the time: Adobe Acrobat and most viewers accept _all_ SubFilter values for backward compatibility. Your signature will "work" in Acrobat regardless of which SubFilter you use. But **only** `/ETSI.CAdES.detached` is valid for PAdES-compliant signatures under eIDAS. If you need legal standing in the EU — and increasingly, that's everyone — this is the only acceptable value. Don't let "it works in Acrobat" lull you into using `/adbe.pkcs7.detached` for new signatures. Acrobat is not the arbiter of legal validity; the eIDAS regulation is.
+
+[TIP]
+====
+**The compatibility question everyone asks:**
+
+"Can I use `/ETSI.CAdES.detached` if my users have old PDF readers?"
+
+Yes. The CMS structure is identical to `/adbe.pkcs7.detached` at the container level.
+Old readers that don't understand the SubFilter name will typically fall back to parsing the `/Contents` as generic CMS/PKCS#7 — and it will work.
+The difference is one signed attribute (`signing-certificate-v2`), which old readers simply ignore.
+
+The only scenario where it breaks: truly ancient software (pre-2010) that strictly checks the SubFilter name against a hardcoded whitelist and rejects unknown values.
+If your users are running PDF readers from 2008, they have bigger problems than SubFilter compatibility.
+====
+
+[[ch12-contents]]
+=== The `/Contents` Value: CMS SignedData
+
+The `/Contents` entry is a **hex-encoded byte string** containing a DER-encoded CMS `SignedData` structure ({rfc5652} §5).
+
+This is where the actual cryptographic signature lives.
+Everything else in the signature dictionary is metadata.
+This is the payload.
+
+==== Why Hex-Encoded?
+
+PDF strings can be literal `(...)` or hex `<...>`. The hex form is used because CMS blobs contain arbitrary binary data (DER-encoded ASN.1), and literal strings would need extensive escaping for bytes like `\(`, `\)`, `\\`. Hex encoding doubles the size but is safe and unambiguous.
+
+A typical `/Contents` value looks like `<308206A7...several thousand hex characters...0000000000>`. The leading bytes (`3082...`) are the DER-encoded ASN.1 SEQUENCE tag, and the trailing zeros are padding. Which brings us to one of the more elegant hacks in the PDF specification:
+
+==== Pre-allocation: The Chicken-and-Egg Problem
+
+Here's the fundamental problem with PDF signatures:
+
+. The signature covers the file's bytes (including the signature dictionary itself)
+. But the signature dictionary must contain the CMS blob
+. But the CMS blob can only be computed _after_ you know which bytes to sign
+. But you can't know which bytes to sign until the dictionary is written
+
+The solution is a trick that every PDF signing implementation uses: **pre-allocate** a large enough `/Contents` value filled with zeros, write the file, _then_ overwrite the zeros with the actual CMS bytes:
+
+ifdef::backend-pdf,backend-docbook[]
+[latexmath]
+++++
+\begin{tikzpicture}
+  \footnotesize\sffamily
+  % /Contents label
+  \node[anchor=east, text=gray] at (-0.1, 0.4) {\texttt{/Contents <}};
+  % CMS block
+  \fill[green!30!black] (0,0) rectangle (6,0.8);
+  \node[text=white, font=\sffamily\footnotesize] at (3,0.4) {\texttt{30820A1F...actual CMS bytes...}};
+  % Padding block
+  \fill[red!30!black] (6,0) rectangle (9.5,0.8);
+  \node[text=white, font=\sffamily\footnotesize] at (7.75,0.4) {\texttt{000000000000}};
+  % Closing bracket
+  \node[anchor=west, text=gray] at (9.6, 0.4) {\texttt{>}};
+  % Labels below
+  \node[text=green!50!black, font=\sffamily\scriptsize, anchor=north] at (3,-0.1) {Actual CMS SignedData (DER-encoded)};
+  \node[text=red!50!black, font=\sffamily\scriptsize, anchor=north] at (7.75,-0.1) {Zero padding (unused)};
+  % Braces
+  \draw[decorate, decoration={brace, amplitude=4pt, mirror}, green!50!black] (0,-0.05) -- (6,-0.05);
+  \draw[decorate, decoration={brace, amplitude=4pt, mirror}, red!50!black] (6,-0.05) -- (9.5,-0.05);
+\end{tikzpicture}
+++++
+endif::[]
+
+ifdef::backend-html5[]
+./Contents hex string layout: CMS data followed by zero padding
+[cols="1,3,2,1"]
+|===
+| `/Contents <` | `30820A1F...actual CMS bytes...` (green) | `0000000000000000` (red, unused) | `>`
+|===
+endif::[]
+
+[IMPORTANT]
+====
+The pre-allocated size must be estimated accurately, and this is where things go wrong in the real world:
+
+* **Too small** — the CMS blob doesn't fit — signing fails. You'll get an exception from PDFBox and no output file. This is the most common "my signing suddenly broke" bug, usually triggered by adding a certificate chain or a timestamp that makes the CMS blob bigger than expected.
+* **Too large** — wasted bytes, but the signature is valid. A few KB of zeros at the end of the file never hurt anyone.
+
+**Always err on the side of too large.** Here are sensible defaults:
+
+[cols="3,2,3", options="header"]
+|===
+| Scenario | Hex Size | Bytes
+| Basic signature (no chain, no timestamp) | `0x2500` (PDFBox default) | ~9 KB
+| Signature with certificate chain | `0x4000` | ~16 KB
+| PAdES-B-T (with RFC 3161 timestamp) | `0x6000` | ~24 KB
+| PAdES-B-LT (embedded OCSP + CRLs) | `0x18000` | ~96 KB
+| PAdES-B-LTA (archival, large CRL) | `0x28000` | ~160 KB
+|===
+
+I've seen production systems fail because someone used the PDFBox default (`0x2500`) for PAdES-B-T signatures.
+The first 500 signatures worked fine because the TSA responses were small.
+Then the TSA renewed its certificate with a longer chain, the responses grew by 2 KB, and every signing operation started failing on a Friday afternoon.
+Set it to `0x6000` minimum and forget about it.
+====
+
+==== CMS SignedData: The Cryptographic Core
+
+The CMS blob inside `/Contents` follows {rfc5652} §5. If you've worked with S/MIME email signatures or code signing, this structure will look familiar — it's the same `SignedData` format used across the entire PKI ecosystem:
+
+[source,asn1]
+----
+SignedData ::= SEQUENCE {
+    version            CMSVersion,              -- <1>
+    digestAlgorithms   DigestAlgorithmIdentifiers,  -- <2>
+    encapContentInfo   EncapsulatedContentInfo,     -- <3>
+    certificates   [0] IMPLICIT CertificateSet OPTIONAL, -- <4>
+    crls           [1] IMPLICIT RevocationInfoChoices OPTIONAL, -- <5>
+    signerInfos        SignerInfos              -- <6>
+}
+----
+<1> Version: 1 for basic CMS, 3 if attribute certificates are present
+<2> Set of digest algorithms used (typically just `{SHA-256}`)
+<3> Content type: `id-data` (1.2.840.113549.1.7.1) with **absent** content — this is what "detached" means. The signed data (the PDF byte range) is not inside the CMS structure. It's outside, in the PDF file itself.
+<4> Certificates — the signer's certificate and optionally the full chain (intermediates, possibly root). **Always include the full chain.** I know it makes the blob bigger. I know storage is a concern. Do it anyway. A signature without a chain is a signature that can only be validated by someone who already has all your certificates. That's almost nobody.
+<5> CRLs — rarely embedded here in the modern PAdES world. In PAdES-B-LT and later, revocation data goes in the DSS dictionary instead.
+<6> Signer information — the actual signature value and signed attributes. This is where the cryptography lives.
+
+===== SignerInfo: Where the Cryptography Lives
+
+[source,asn1]
+----
+SignerInfo ::= SEQUENCE {
+    version                  CMSVersion,
+    sid                      SignerIdentifier,    -- <1>
+    digestAlgorithm          DigestAlgorithmIdentifier, -- <2>
+    signedAttrs          [0] IMPLICIT SignedAttributes OPTIONAL, -- <3>
+    signatureAlgorithm       SignatureAlgorithmIdentifier, -- <4>
+    signature                SignatureValue,      -- <5>
+    unsignedAttrs        [1] IMPLICIT UnsignedAttributes OPTIONAL -- <6>
+}
+----
+<1> Identifies the signer's certificate — either by issuer DN + serial number, or by subject key identifier. Both work. Issuer+serial is more traditional; subject key identifier is more robust when certificates are reissued.
+<2> Hash algorithm used to digest the PDF byte range. SHA-256 is the minimum acceptable. SHA-384 or SHA-512 if you're paranoid or work in defense.
+<3> **Signed attributes** — authenticated metadata. See the critical attributes table below. These are _signed_, meaning any modification invalidates the signature.
+<4> Signature algorithm (e.g., SHA256withRSA, SHA256withECDSA). Note: the _signature_ is computed over the DER-encoded signed attributes, not directly over the PDF bytes. This is a CMS subtlety that trips up many implementers.
+<5> The actual cryptographic signature bytes.
+<6> **Unsigned attributes** — unauthenticated extensions. Timestamps go here.
+
+===== The Signed Attributes That Matter
+
+The first two attributes are required by CMS whenever signed attributes are present.
+The remaining attributes add PAdES compliance and defense-in-depth.
+
+.Required CMS Signed Attributes — {rfc5652} §11
+[cols="3,2,1,3", options="header"]
+|===
+| Attribute | OID | Req | Spec Ref
+
+| `content-type`
+| 1.2.840.113549.1.9.3
+| Required
+| {rfc5652} §11.1
+4+| Must be `id-data` (1.2.840.113549.1.7.1). Required by CMS when signed attributes are present. Forgetting this is a classic implementation bug — the signature appears valid in some tools but fails in others.
+
+| `message-digest`
+| 1.2.840.113549.1.9.4
+| Required
+| {rfc5652} §11.2
+4+| SHA-256 hash of the PDF byte range. This is what's actually verified during validation. If this hash doesn't match the file bytes, the signature is invalid. Full stop.
+
+|===
+
+.PAdES/CAdES Signed Attributes
+[cols="3,2,1,3", options="header"]
+|===
+| Attribute | OID | Req | Spec Ref
+
+| `signing-certificate-v2`
+| 1.2.840.113549.1.9.16.2.47
+| Required (PAdES)
+| RFC 5035 §3
+4+| Hash of the signer's certificate (SHA-256). **Required for PAdES / CAdES.** This single attribute prevents certificate substitution attacks — an attacker can't swap in a different certificate without breaking the signature. It's ~50 bytes. There is no reason not to include it.
+
+| `signing-time`
+| 1.2.840.113549.1.9.5
+| Optional
+| {rfc5652} §11.3
+4+| Claimed signing time. Not authoritative — it's whatever the signer's clock said. For authoritative time, you need a timestamp (see unsigned attributes). Optional, but almost everyone includes it.
+
+| `algorithm-protection`
+| 1.2.840.113549.1.9.52
+| Recommended
+| RFC 6211
+4+| Protects against algorithm substitution attacks by binding the digest and signature algorithms into the signed attributes. Good hygiene to include.
+
+|===
+
+[IMPORTANT]
+====
+**The `signing-certificate-v2` attribute is what makes the difference between `/adbe.pkcs7.detached` and `/ETSI.CAdES.detached`.**
+
+Without it: plain CMS (PKCS#7) — vulnerable to certificate substitution attacks.
+With it: CAdES — the signer's certificate is bound to the signature by hash.
+
+This single attribute is the gateway to PAdES compliance.
+It's about 50 bytes in the CMS structure.
+There is no reason not to include it, even if you're using `/adbe.pkcs7.detached` as your SubFilter.
+
+Certificate substitution attacks are not theoretical.
+In 2019, researchers at Ruhr University Bochum demonstrated practical attacks against multiple PDF viewers that exploited the absence of certificate binding.
+The fix was trivially simple: check `signing-certificate-v2`.
+Several major viewers had to be patched.
+====
+
+===== Unsigned Attributes: The Afterthought That Became Essential
+
+.Unsigned Attributes — {rfc5652} §11
+[cols="3,2,1,3", options="header"]
+|===
+| Attribute | OID | Req | Spec Ref
+
+| `signature-time-stamp`
+| 1.2.840.113549.1.9.16.2.14
+| Required (PAdES-B-T)
+| {rfc3161}, {etsi-pades} §5.3
+4+| RFC 3161 timestamp token over the signature value. Provides authoritative proof of signing time from a trusted TSA. This is the only way to prove _when_ a signature was made. The timestamp token has its own signature from the TSA, making it self-authenticating — which is why it's safe as an unsigned attribute.
+
+| `certificate-values`
+| 1.2.840.113549.1.9.16.2.23
+| Optional
+| RFC 5126 §5.6.1
+4+| Full certificate chain values. Used in CAdES-X-Long. In the PAdES world, these typically go in the DSS dictionary instead (see <<ch18>>).
+
+| `revocation-values`
+| 1.2.840.113549.1.9.16.2.24
+| Optional
+| RFC 5126 §5.6.1
+4+| OCSP responses and CRLs. Used in CAdES-X-Long. In PAdES, these go in the DSS dictionary instead.
+
+|===
+
+The timestamp attribute deserves special attention.
+Unsigned attributes are, by definition, not protected by the signature — they can be added after signing without invalidating anything.
+This is _by design_.
+A timestamp proves that the signature existed at a certain time, and it's intentionally added after the signature is created (because you need the signature value to timestamp it).
+
+This is also why you should never put anything security-critical in unsigned attributes that isn't self-authenticating (like a timestamp token, which has its own signature from the TSA).
+
+[[ch12-signing-process]]
+=== The Signing Process: Step by Step
+
+The process of creating a PDF digital signature is intricate because the signature must cover bytes that include the signature dictionary itself — a chicken-and-egg problem solved by the `/Contents` pre-allocation we discussed above.
+
+Here's the full sequence, and understanding it is essential for debugging:
+
+ifdef::backend-pdf,backend-docbook[]
+[latexmath]
+++++
+\begin{tikzpicture}[
+    every node/.style={font=\sffamily\footnotesize},
+    actor/.style={draw=gray!60, fill=gray!10, minimum width=2.2cm, minimum height=0.7cm, rounded corners=2pt, align=center, font=\sffamily\footnotesize\bfseries},
+    msg/.style={->, thick, gray!60},
+    ret/.style={->, thick, dashed, gray!40},
+    step/.style={font=\sffamily\scriptsize, text=black, align=left, anchor=west}
+]
+% Actors
+\node[actor] (app) at (0,0) {Signing\\Application};
+\node[actor] (pdf) at (4.5,0) {PDF File};
+\node[actor] (cms) at (9,0) {CMS /\\BouncyCastle};
+\node[actor] (hsm) at (13,0) {Key Material\\(HSM / File)};
+
+% Lifelines
+\draw[gray!30] (0,-0.5) -- (0,-11.5);
+\draw[gray!30] (4.5,-0.5) -- (4.5,-11.5);
+\draw[gray!30] (9,-0.5) -- (9,-11.5);
+\draw[gray!30] (13,-0.5) -- (13,-11.5);
+
+% Messages
+\draw[msg] (0,-1.2) -- node[step, above, midway] {1. Create signature field} (4.5,-1.2);
+\draw[msg] (0,-2.2) -- node[step, above, midway] {2. Build sig dict (placeholders)} (4.5,-2.2);
+\draw[msg] (0,-3.2) -- node[step, above, midway] {3. Incremental save} (4.5,-3.2);
+\draw[msg] (0,-4.2) -- node[step, above, midway] {4. Compute byte offsets} (4.5,-4.2);
+\draw[msg] (0,-5.2) -- node[step, above, midway] {5. Read signed bytes} (4.5,-5.2);
+\draw[msg] (0,-6.2) -- node[step, above, midway] {6. Hash (SHA-256)} (9,-6.2);
+\draw[msg] (9,-7.2) -- node[step, above, midway] {7. Sign hash} (13,-7.2);
+\draw[ret] (13,-8.0) -- node[step, above, midway] {8. Signature value} (9,-8.0);
+\draw[ret] (9,-8.8) -- node[step, above, midway] {9. CMS SignedData blob} (0,-8.8);
+\draw[msg] (0,-9.8) -- node[step, above, midway] {10. Write CMS into /Contents} (4.5,-9.8);
+\end{tikzpicture}
+++++
+endif::[]
+
+ifdef::backend-html5[]
+.Signing process sequence (10 steps)
+[cols="1,2,2,6", options="header"]
+|===
+| Step | From | To | Action
+| 1–5 | App | PDF File | Create field, build sig dict, incremental save, compute byte offsets, read signed bytes
+| 6 | App | CMS/BC | Hash signed bytes (SHA-256)
+| 7–8 | CMS/BC | Key Material | Sign hash with private key, return signature value
+| 9 | CMS/BC | App | Build CMS SignedData blob
+| 10 | App | PDF File | Write CMS into /Contents (exact byte replacement)
+|===
+endif::[]
+
+==== Step-by-Step Detail
+
+[cols="1,10", options="header"]
+|===
+| Step | Detail
+
+| **1**
+| **Create or locate the signature field.** If the document already has an unsigned field (`/FT /Sig` with no `/V`), use it. Otherwise, create a new field in the AcroForm `/Fields` array with a widget annotation on the desired page. _Practical note:_ if the document was prepared by someone else (a template), always prefer using existing unsigned fields. Creating new fields in a document that already has signatures is technically possible via incremental save, but it makes some validators nervous.
+
+| **2**
+| **Build the signature dictionary** with placeholder values. `/ByteRange` is set to `[0 0 0 0]` (will be overwritten). `/Contents` is filled with `00` bytes at the estimated maximum size. All other keys (`/Filter`, `/SubFilter`, `/M`, `/Name`, `/Reason`, `/Reference`) are set to their final values _now_ — they become part of the signed bytes and can't change later.
+
+| **3**
+| **Write the PDF using incremental save.** The new objects (signature dict, updated field, updated xref) are appended after the existing `%%EOF`. This is critical — a full rewrite would invalidate any existing signatures. _This is non-negotiable._ Even if the document has no prior signatures, use incremental save. It's the only safe habit.
+
+| **4**
+| **Compute actual byte offsets.** After writing, the exact byte positions of the `/Contents` hex string are known. Update `/ByteRange` to `[0, contentsStart, contentsEnd, fileLength - contentsEnd]`. The two segments cover everything _except_ the `/Contents` value itself.
+
+| **5**
+| **Read the signed bytes.** Concatenate `file[0 .. contentsStart-1]` and `file[contentsEnd .. fileLength-1]`. These are the exact bytes the signature covers — everything except the `/Contents` hex value. _Debug tip:_ if you suspect byte range issues, dump these bytes to a file and hash them manually. Compare with the `message-digest` attribute in the CMS.
+
+| **6**
+| **Hash the signed bytes.** Compute SHA-256 (or SHA-384/512) over the concatenated byte ranges. This hash becomes the `message-digest` signed attribute in the CMS structure.
+
+| **7–8**
+| **Sign the hash.** The private key (RSA or ECDSA) signs the DER-encoded signed attributes (which include the hash). This may happen locally or via a remote HSM/signing service. In the remote case, only the hash leaves your system — the private key never does. More on remote signing in <<ch22>>.
+
+| **9**
+| **Build the CMS `SignedData` structure.** Include: digest algorithm, signer certificate, certificate chain, signed attributes (content-type, message-digest, signing-certificate-v2), signature value. DER-encode the result.
+
+| **10**
+| **Write CMS bytes into `/Contents`.** Hex-encode the DER bytes and write them at the exact byte offset of the `/Contents` value in the file. Remaining space is left as `00` padding. No other bytes in the file are modified.
+|===
+
+CAUTION: Step 10 is a **raw byte write** — not a PDF object update. The file is opened as a random-access binary stream, the cursor is positioned at the `/Contents` hex string's start offset, and the hex chars are overwritten in place. If the CMS blob is larger than the pre-allocated space, signing fails. If even a single byte is written at the wrong offset, the signature is invalid and the PDF may be corrupted. This is why you don't implement PDF signing from scratch — you use PDFBox or a similar library that handles the byte-level bookkeeping for you.
+
+[[ch12-incremental]]
+=== Incremental Save: The Foundation of Multi-Signature
+
+Every signature operation uses **incremental save** ({iso32000-2} §7.5.6).
+The original file bytes are never modified — new objects are appended after the existing `%%EOF`.
+
+This is the mechanism that makes multiple independent signatures possible.
+Without incremental save, adding a second signature would modify the bytes covered by the first signature, invalidating it.
+With incremental save, the first signature's bytes remain untouched — the second signature's data is simply appended at the end.
+
+ifdef::backend-pdf,backend-docbook[]
+[latexmath]
+++++
+\begin{tikzpicture}
+  \sffamily\footnotesize
+  % Original body
+  \fill[{rgb,255:red,26;green,26;blue,46}] (0,0) rectangle (12,1.6);
+  \node[text=white, font=\sffamily\footnotesize\bfseries, anchor=west] at (0.3,1.15) {Original PDF body};
+  \node[text=gray!60, font=\sffamily\scriptsize, anchor=west] at (0.3,0.55) {objects, xref, trailer, \%\%EOF};
+  \node[text=gray!40, font=\sffamily\scriptsize, anchor=east] at (11.7,1.15) {Bytes 0 .. N};
+
+  % Incremental update 1
+  \fill[{rgb,255:red,15;green,52;blue,96}] (0,-0.15) rectangle (12,- 1.75);
+  \node[text=white, font=\sffamily\footnotesize\bfseries, anchor=west] at (0.3,-0.6) {Incremental update \#1 (1st signature)};
+  \node[text=gray!60, font=\sffamily\scriptsize, anchor=west] at (0.3,-1.2) {new sig dict, updated field, new xref, trailer, \%\%EOF};
+  \node[text=gray!40, font=\sffamily\scriptsize, anchor=east] at (11.7,-0.6) {Bytes N+1 .. M};
+
+  % Incremental update 2
+  \fill[{rgb,255:red,83;green,52;blue,131}] (0,-1.9) rectangle (12,-3.5);
+  \node[text=white, font=\sffamily\footnotesize\bfseries, anchor=west] at (0.3,-2.35) {Incremental update \#2 (2nd signature)};
+  \node[text=gray!60, font=\sffamily\scriptsize, anchor=west] at (0.3,-2.95) {new sig dict, updated field, new xref, trailer, \%\%EOF};
+  \node[text=gray!40, font=\sffamily\scriptsize, anchor=east] at (11.7,-2.35) {Bytes M+1 .. P};
+
+  % Byte range brackets on right
+  \draw[decorate, decoration={brace, amplitude=5pt}, orange!70] (12.2,1.6) -- (12.2,-1.75)
+    node[midway, right=6pt, font=\sffamily\scriptsize, text=orange!70, align=left] {Sig 1\\ByteRange};
+  \draw[decorate, decoration={brace, amplitude=5pt}, cyan!70] (13.5,1.6) -- (13.5,-3.5)
+    node[midway, right=6pt, font=\sffamily\scriptsize, text=cyan!70, align=left] {Sig 2\\ByteRange};
+\end{tikzpicture}
+++++
+endif::[]
+
+ifdef::backend-html5[]
+.Incremental update structure with byte range coverage
+[cols="4,2,2", options="header"]
+|===
+| Section | Byte Range | Covered By
+| Original PDF body (objects, xref, trailer, %%EOF) | 0 .. N | Sig 1, Sig 2
+| Incremental update #1 — 1st signature | N+1 .. M | Sig 1, Sig 2
+| Incremental update #2 — 2nd signature | M+1 .. P | Sig 2 only
+|===
+endif::[]
+
+Each signature's `/ByteRange` covers everything up to and including its own incremental update — but **not** the updates that come after:
+
+* Signature 1's byte range: `[0, ..., ..., M]` — covers original + update #1
+* Signature 2's byte range: `[0, ..., ..., P]` — covers original + update #1 + update #2
+
+This is why Signature 1 remains valid after Signature 2 is added: Signature 2's bytes are **appended after** the range that Signature 1 covers.
+From Signature 1's perspective, those bytes are "trailing" — present in the file but outside the signed range.
+
+[TIP]
+====
+**"The file has been modified since signing" — don't panic.**
+
+This is the single most common false alarm in PDF signature validation.
+A validator detects trailing bytes after a signature's byte range and flags it as "modified."
+But in the vast majority of cases, those trailing bytes are simply a later incremental update — another signature, a form fill, or an annotation.
+
+**What to check:**
+
+. Is the trailing data a valid incremental update? (Look for xref table + trailer + %%EOF.)
+. Does it correspond to an expected operation? (Another signature, a form field being filled.)
+. Did the byte range change? (The original signature's bytes at their original offsets should be byte-for-byte identical.)
+
+If the answers are yes, yes, and no — the signature is fine.
+The "modification" is just the normal operation of PDF's append-only architecture.
+
+**When to actually worry:**
+
+* Trailing bytes that aren't a valid incremental update — raw data appended to the file
+* An incremental update that modifies objects covered by an existing signature in unexpected ways (e.g., page content changes)
+* Multiple %%EOF markers where the trailing section isn't a proper PDF update
+====
+
+[[ch12-widget]]
+=== Widget Annotations and Page Placement
+
+Every signature field has an associated widget annotation ({iso32000-2} §12.5.6.19) that defines its visual presence on a page.
+
+==== The `/Rect` Coordinate System
+
+The widget's `/Rect` array specifies `[llx, lly, urx, ury]` in **default user space** coordinates:
+
+ifdef::backend-pdf,backend-docbook[]
+[latexmath]
+++++
+\begin{tikzpicture}
+  \sffamily\footnotesize
+  % The /Rect line
+  \node[anchor=west, font=\ttfamily\footnotesize] (rect) at (0,0) {/Rect [100~~500~~300~~550]};
+  % Annotations
+  \draw[->, gray!60] (0.9,-0.5) -- (0.9,-0.15) node[below=5pt, font=\sffamily\scriptsize, text=gray!70, align=center] {lower-left\\(x=100, y=500)};
+  \draw[->, gray!60] (3.3,-0.5) -- (3.3,-0.15) node[below=5pt, font=\sffamily\scriptsize, text=gray!70, align=center] {upper-right\\(x=300, y=550)};
+\end{tikzpicture}
+++++
+endif::[]
+
+ifdef::backend-html5[]
+`/Rect [100 500 300 550]` — where `[100, 500]` is the lower-left corner and `[300, 550]` is the upper-right corner.
+endif::[]
+
+[IMPORTANT]
+====
+PDF coordinates have **origin at lower-left** with Y increasing upward.
+This is the opposite of screen coordinates (origin top-left, Y increasing downward).
+This will bite you.
+It bites everyone.
+You will write the conversion wrong the first time.
+Here it is, so you can copy it:
+
+[source,javascript]
+----
+// viewport = page.getViewport({ scale: scale })
+var left = bbox[0] * scale;                              // <1>
+var top  = viewport.height - (bbox[1] + bbox[3]) * scale; // <2>
+var width = bbox[2] * scale;                             // <3>
+var height = bbox[3] * scale;                            // <4>
+----
+<1> X translates directly (both coordinate systems have X increasing rightward)
+<2> Y must be flipped: PDF Y=0 is bottom, screen Y=0 is top. Note the `bbox[1] + bbox[3]` — that's lower-left-Y plus height, giving the top edge in PDF space, which maps to the top edge in screen space.
+<3> Width scales linearly
+<4> Height scales linearly
+
+Where `bbox` is `[lowerLeftX, lowerLeftY, width, height]` as extracted by PDFBox's `PDRectangle`.
+Note that PDFBox gives you `[x, y, width, height]` while the raw PDF `/Rect` is `[llx, lly, urx, ury]` — PDFBox does the conversion for you. Don't convert twice.
+====
+
+==== Invisible Signatures
+
+A signature can be **invisible** — having no visual appearance on the page:
+
+* **Zero-size rect:** `/Rect [0 0 0 0]` — the widget exists but has no area
+* **No widget at all:** The field has no annotation entry (valid per spec, but some viewers complain)
+
+Invisible signatures are common for:
+
+* Certification signatures — the document author certifies the document without cluttering the layout
+* Machine-generated signatures — automated workflows where nobody's looking at the PDF
+* Counter-signatures — additional approval signatures in complex chains where visual space is limited
+
+[TIP]
+====
+**Should your signature be visible or invisible?**
+
+For approval signatures intended for human signers: make them visible.
+Users expect to _see_ their signature on the page.
+A visible signature provides a visual anchor — "I signed here" — and helps in audit scenarios.
+
+For certification signatures and automated workflows: invisible is usually fine.
+The certification status is shown in the viewer's signature panel, not on the page.
+
+For machine-to-machine: always invisible.
+No human is looking at the page.
+Adding a visual appearance just wastes space and processing time.
+
+One exception: if you're in a regulated industry where auditors review printed copies of signed PDFs (yes, this still happens in 2026), visible signatures are essential because auditors can't check digital signatures on paper.
+In that case, include the signer's name, the signing time, and ideally a note like "Digitally signed — verify electronically."
+====
+
+[[ch12-pdfsigflags]]
+=== AcroForm `/SigFlags`: Document-Level Signature Metadata
+
+[quote, "{iso32000-2} §12.7.2, Table 225"]
+____
+If the document contains signature fields, the AcroForm dictionary shall include a SigFlags entry.
+____
+
+.SigFlags Bit Values — {iso32000-2} §12.7.2, Table 225
+[cols="2,1,1,3", options="header"]
+|===
+| Name | Bit | Req | Spec Ref
+
+| `SignaturesExist`
+| 1 (value 1)
+| Required
+| §12.7.2, Table 225
+4+| At least one signature field has a value. Readers should present signature-specific UI (e.g., the blue bar at the top of Adobe Acrobat). Must be set whenever any signature field contains a `/V` entry.
+
+| `AppendOnly`
+| 2 (value 2)
+| Required
+| §12.7.2, Table 225
+4+| The document **shall** only be saved incrementally. A conforming reader that allows editing **must not** do a full save — it must append. This is the single most important flag for signature preservation. Without it, a naive editor may do a full rewrite and destroy every signature.
+
+|===
+
+In practice, both bits should be set (`/SigFlags 3`) whenever the document contains any signed signature field.
+This was already discussed above, but it bears repeating: if you get this wrong, signatures will be destroyed by innocent save operations, and the blame will be on your tool.
+
+[[ch12-pdfbox-api]]
+=== PDFBox API Mapping
+
+For those of you who skipped here — I don't blame you, this is the section with the code — here's how the spec concepts map to PDFBox 3.x classes:
+
+[cols="3,4,3", options="header"]
+|===
+| PDF Concept | PDFBox Class | Key Methods
+
+| Signature field
+| `PDSignatureField`
+| `getSignature()`, `getWidgets()`, `getPartialName()`
+
+| Signature dictionary
+| `PDSignature`
+| `getByteRange()`, `getContents(byte[])`, `getSubFilter()`, `getName()`, `getSignDate()`
+
+| AcroForm
+| `PDAcroForm`
+| `getFields()`, `getFieldTree()`, `setSignaturesExist()`, `setAppendOnly()`
+
+| Widget annotation
+| `PDAnnotationWidget`
+| `getRectangle()`, `getPage()`, `getNormalAppearanceStream()`
+
+| Appearance stream
+| `PDFormXObject`
+| `getStream()`, `getBBox()`, `getResources()`
+
+| Adding a signature
+| `PDDocument`
+| `addSignature(PDSignature, SignatureInterface, SignatureOptions)`
+
+| Incremental save
+| `PDDocument`
+| `saveIncremental(OutputStream)`
+|===
+
+==== Minimal Signing Code (Key Lines)
+
+The essential PDFBox signing code in ~20 lines.
+This is the skeleton — the full, production-ready version is in Appendix A, but these are the lines that matter:
+
+[source,java]
+----
+PDDocument doc = Loader.loadPDF(pdfBytes);                 // <1>
+PDAcroForm acroForm = doc.getDocumentCatalog().getAcroForm();
+
+PDSignature signature = new PDSignature();
+signature.setFilter(PDSignature.FILTER_ADOBE_PPKLITE);         // <2>
+signature.setSubFilter(PDSignature.SUBFILTER_ETSI_CADES_DETACHED); // <3>
+signature.setName("John Doe");
+signature.setSignDate(Calendar.getInstance());
+
+SignatureOptions options = new SignatureOptions();
+options.setPreferredSignatureSize(0x6000);                     // <4>
+options.setVisualSignature(appearanceStream);                  // <5>
+
+doc.addSignature(signature, signingInterface, options);        // <6>
+doc.saveIncremental(outputStream);                             // <7>
+----
+<1> Always load from bytes. Don't create a new `PDDocument()` and try to `saveIncremental()` — PDFBox 3.x will throw `IllegalStateException: document was not loaded from a file or a stream`. Yes, this error message has confused every single person who's ever encountered it.
+<2> Filter is always `Adobe.PPKLite` for interoperability. Don't be creative here.
+<3> SubFilter: use `ETSI.CAdES.detached` for PAdES compliance. See the earlier section for why.
+<4> Pre-allocate 24KB for the CMS blob. **Not** the PDFBox default of 9KB. See the pre-allocation table above.
+<5> Visual appearance — set this to `null` for invisible signatures. Or provide an `InputStream` of a pre-built appearance.
+<6> Register the signature and the `SignatureInterface`. The interface's `sign()` method will be called during `saveIncremental()`.
+<7> **Incremental save.** There is no other option. Do not call `save()` on a document you're signing.
+
+==== The `SignatureInterface`: Your Extension Point
+
+[source,java]
+----
+public interface SignatureInterface {
+    byte[] sign(InputStream content) throws IOException; // <1>
+}
+----
+<1> Called by PDFBox during `saveIncremental()`. The `InputStream` provides the concatenated byte ranges — this is the data you need to hash and sign. Your implementation builds the CMS `SignedData` blob and returns the DER-encoded bytes.
+
+This is the **only thing you need to implement**.
+PDFBox handles the PDF structure, the byte range calculation, the incremental save, the widget creation, the appearance stream embedding.
+You handle the cryptography.
+
+[TIP]
+====
+**Keep your `SignatureInterface` implementation stateless and testable.**
+
+Don't put PDF logic in there.
+Don't reference the `PDDocument`.
+Your `sign()` method receives an `InputStream` of bytes and returns CMS bytes.
+That's it.
+This makes it trivially testable — pass in any byte stream, check that the output is valid CMS.
+It also makes it easy to swap between local signing (BouncyCastle) and remote signing (HSM, cloud) without touching any PDF code.
+====
+
+[[ch12-common-mistakes]]
+=== Common Mistakes and How to Avoid Them
+
+After years of working with PDF signatures, the same problems come up over and over.
+Here's the hit list:
+
+[cols="1,4,5", options="header"]
+|===
+| # | Mistake | Fix
+
+| 1
+| **Trusting `/Name` for signer identity.** Many systems display the `/Name` field from the signature dictionary as if it's the verified signer name. It's not. It's free-text set by whoever controls the signing process.
+| Always extract the signer's identity from the X.509 certificate in the CMS structure. Display the certificate's Subject CN (or the full Subject DN for enterprise contexts).
+
+| 2
+| **Using `PDDocument.save()` instead of `saveIncremental()`.** Full save rewrites the entire file, destroying all existing signatures.
+| Always use `saveIncremental()`. Make it a code review checklist item: "Does this code path call `save()` on a signed document? Reject."
+
+| 3
+| **Pre-allocating too little space for `/Contents`.** Works fine in testing with simple certificates, breaks in production when chains get longer or timestamps are added.
+| Use `0x6000` (24KB) minimum. For PAdES-B-LT, use `0x18000` (96KB). Test with your actual TSA and certificate chain, not with test certificates.
+
+| 4
+| **Forgetting `signing-certificate-v2` in the CMS attributes.** Technically valid as PKCS#7, but not PAdES-compliant and vulnerable to certificate substitution.
+| Use BouncyCastle's `JcaSignerInfoGeneratorBuilder` with the correct `DigestCalculatorProvider`. It adds the attribute automatically when configured correctly. See the code in Appendix A.
+
+| 5
+| **Not including the certificate chain.** A signature with just the signer's certificate can't be validated by anyone who doesn't already have the issuer certificates.
+| Always include the full chain (signer + intermediates). You can omit the root CA — validators typically have their own trust stores. But include everything else.
+
+| 6
+| **Creating a fresh `PDDocument` and calling `saveIncremental()`.** PDFBox 3.x requires the document to have been loaded from bytes.
+| Create a blank PDF, save it to bytes, load it back, then sign. See the test code in this chapter.
+
+| 7
+| **Setting `/SigFlags` to 1 instead of 3.** Bit 1 alone means "signatures exist" but doesn't enforce append-only saving.
+| Always set `/SigFlags` to 3. No exceptions.
+
+| 8
+| **Modifying the PDF between adding the signature and calling `saveIncremental()`.** Any change to the document graph between `addSignature()` and `saveIncremental()` may change byte offsets, breaking the signature.
+| Set up everything before calling `addSignature()`. Once you've added the signature, the very next call should be `saveIncremental()`. Nothing in between.
+|===
+
+[[ch12-key-points]]
+=== Key Points
+
+[sidebar]
+****
+* A PDF signature = signature field + signature dictionary + widget + appearance stream — all embedded in the document
+* The signature dictionary's `/Contents` holds a CMS `SignedData` blob (hex-encoded, zero-padded)
+* `/ByteRange` defines exactly which file bytes are signed — everything except `/Contents` itself
+* `/SubFilter` determines the signature format: use `/ETSI.CAdES.detached` for PAdES compliance — there's no good reason not to
+* The `signing-certificate-v2` attribute is what distinguishes CAdES from plain PKCS#7 — and what prevents certificate substitution attacks
+* All signatures use incremental save — original bytes are never modified, ever
+* `/SigFlags` must be set to 3 (SignaturesExist + AppendOnly) to protect existing signatures — getting this wrong destroys other people's signatures
+* Seed value dictionaries (`/SV`) can constrain how a field is signed — use them in templates to prevent signer mistakes
+* Widget `/Rect` uses PDF coordinates (origin lower-left, Y up) — you will get the conversion wrong the first time, and that's OK
+* PDFBox's `SignatureInterface.sign(InputStream)` is the single extension point for all signing logic — keep it clean, stateless, and testable
+* When in doubt, pre-allocate more space for `/Contents` — wasted bytes are cheap, failed signatures are expensive
+* "The file has been modified since signing" is usually not a problem — it's usually just a later incremental update
+****
+
+[[ch12-spec-refs]]
+=== Specification References
+
+[bibliography]
+* [[[iso32000-2]]] {iso32000-2}, _Document management — Portable document format — Part 2: PDF 2.0_, §12.8 (Digital Signatures), §12.7 (Interactive Forms), §7.5.6 (Incremental Updates)
+* [[[rfc5652]]] {rfc5652}, _Cryptographic Message Syntax (CMS)_, §5 (Signed-data Content Type), §11.1 (Content Type), §11.2 (Message Digest)
+* [[[rfc5035]]] RFC 5035, _Enhanced Security Services (ESS) Update: Adding CertID Algorithm Agility_, §3 (signing-certificate-v2)
+* [[[rfc6211]]] RFC 6211, _Cryptographic Message Syntax (CMS) Algorithm Identifier Protection Attribute_
+* [[[etsi-pades]]] {etsi-pades}, _Electronic Signatures and Infrastructures (ESI); PAdES digital signatures_, §5.1 (PAdES-CMS), §5.4 (Document timestamps)
+* [[[adobe-digsig]]] Adobe Systems, _PDF Reference, sixth edition_ (2006), §8.7 (Digital Signatures) — historical reference for the original `/adbe.pkcs7.detached` and `/adbe.x509.rsa_sha1` formats
+* [[[pdf-insecurity]]] Mladenov, Mainka, Kampmann, Somorovsky, Schwenk, _1 Trillion Dollar Refund: How To Spoof PDF Signatures_ and subsequent papers, Ruhr University Bochum, 2019–2021 — comprehensive attack taxonomy on PDF signature validation; required reading for anyone implementing signature verification

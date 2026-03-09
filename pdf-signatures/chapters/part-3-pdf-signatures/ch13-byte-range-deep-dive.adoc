@@ -1,0 +1,685 @@
+= Byte Range Deep Dive
+
+[.lead]
+The byte range is where PDF signatures live or die.
+Everything in Chapter 12 — the `/Sig` dictionary, the `/SubFilter`, the certificate chain, the CMS structure — all of it is meaningless if the byte range is wrong.
+A single off-by-one error in the `/ByteRange` array, and the signature is cryptographically invalid.
+A subtle gap in coverage, and an attacker can inject content that the signature appears to endorse.
+
+This chapter takes the byte range apart byte by byte.
+We will trace exactly which bytes are signed, where the gap is, why the gap exists, what lives in the gap, and what goes wrong when any of these assumptions are violated.
+We will look at hex dumps of real PDFs, visualize the byte range geometry, walk through multi-signature scenarios, and examine the exact attacks that exploit byte range weaknesses.
+
+If Chapter 12 taught you _what_ a byte range is, this chapter teaches you _how_ it actually works in the raw file — and how to verify that it works correctly.
+
+== The Byte Range Model
+
+=== What the Spec Says
+
+{iso32000-2} §12.8.1 defines the `/ByteRange` array as:
+
+[quote]
+An array of pairs of integers (starting byte offset, length in bytes) that shall describe the exact byte range for the digest computation. Multiple discontiguous byte ranges shall be used to describe a digest that does not include the signature value itself.
+
+In practice, every PDF signature uses exactly **one pair of byte ranges** — two segments — with a gap between them.
+The gap contains the `/Contents` value (the hex-encoded CMS signature).
+The two segments cover everything _else_ in the file.
+
+The `/ByteRange` array always has exactly four integers:
+
+[source]
+----
+/ByteRange [offset1 length1 offset2 length2]
+----
+
+Where:
+
+- `offset1` = 0 (always — the signed region starts at the first byte of the file)
+- `length1` = number of bytes from the start of the file to the opening `<` of the `/Contents` hex string
+- `offset2` = byte offset immediately after the closing `>` of the `/Contents` hex string
+- `length2` = number of bytes from `offset2` to the end of the file
+
+The math is simple:
+
+- **Signed bytes** = `[0, length1)` + `[offset2, offset2 + length2)`
+- **Unsigned gap** = `[length1, offset2)` — this contains only the `/Contents` hex string value
+- **Total file size** = `offset2 + length2`
+
+=== Visualizing the Byte Range
+
+To make this concrete, let's look at a real signed PDF.
+Suppose we have a signed file of 45,000 bytes with a 32KB (32,768 hex characters = 16,384 bytes) reserved `/Contents` value:
+
+[source]
+----
+File layout (not to scale):
+
+Byte 0                                                     Byte 44,999
+|================================================================|
+|  PDF header, objects, pages,    |  /Contents  |  xref, trailer |
+|  /Sig dictionary (up to the    |  hex string |  %%EOF         |
+|  opening < of /Contents)       |  (the gap)  |                |
+|================================|=============|================|
+|<---- length1 = 14,000 -------->|<-- gap  --->|<-- length2 -->|
+|                                 |  = 16,408   |   = 14,592    |
+|                                 |             |                |
+|  SIGNED (segment 1)            |  NOT SIGNED |  SIGNED (seg 2)|
+|================================|=============|================|
+
+/ByteRange [0 14000 30408 14592]
+----
+
+The gap is slightly larger than 16,384 bytes because it includes the `<` and `>` delimiters that bracket the hex string, plus the `/Contents ` key prefix.
+The exact gap size depends on how PDFBox (or whatever library produced the file) serializes the signature dictionary.
+
+=== Why the Gap Exists: The Chicken-and-Egg Problem
+
+The gap exists because of a fundamental bootstrapping problem:
+
+1. To **compute the signature**, you need to hash the bytes of the file
+2. To **write the file**, you need to include the signature (inside `/Contents`)
+3. But the signature is _part of_ the file — so how can you hash a file that doesn't exist yet?
+
+The solution: **exclude the signature value from the hash**.
+The `/Contents` hex string is the one part of the file that is _not_ covered by the signature.
+Everything else — the PDF header, all objects, the signature dictionary itself (including `/ByteRange`, `/Filter`, `/SubFilter`, and all other keys), the cross-reference table, and the trailer — is signed.
+
+This means the signing process works like this:
+
+1. Write the entire PDF file, including the `/Sig` dictionary, but leave the `/Contents` value as a placeholder (all zeros)
+2. Record the byte offsets of where the placeholder starts and ends
+3. Compute the hash over everything _except_ the placeholder: `hash = SHA256(segment1 || segment2)`
+4. Construct the CMS `SignedData` using this hash
+5. Hex-encode the CMS bytes and write them into the placeholder space
+6. If the CMS is shorter than the reserved space (it almost always is), pad the remainder with zeros
+
+This is why PDFBox's `SignatureInterface.sign(InputStream)` receives an `InputStream` — that stream contains the concatenation of segment 1 and segment 2 (the bytes _outside_ the gap), ready to be hashed.
+
+[IMPORTANT]
+====
+The `/ByteRange` array itself is part of the signed region.
+This is critical for security: if an attacker could modify the `/ByteRange` after signing, they could redirect the signature to cover different content.
+The byte range is committed before the hash is computed, and any change to it invalidates the signature.
+====
+
+== The Gap in Detail
+
+=== What's Actually in the Gap
+
+Let's look at a hex dump of the gap region.
+In a properly signed PDF, the gap contains exactly one thing: the hex-encoded CMS `SignedData`, padded with zeros:
+
+[source]
+----
+Byte 14000:  3C                                           -- opening '<'
+Byte 14001:  30 38 30 36 30 39 ...                        -- CMS bytes (hex-encoded)
+             ...
+             ... (several KB of hex characters)
+             ...
+Byte 28500:  30 30 30 30 30 30 30 30 30 30 30 30 ...     -- zero padding ("000000...")
+             ...
+Byte 30407:  3E                                           -- closing '>'
+----
+
+The hex encoding doubles the size: a 4,096-byte CMS signature becomes 8,192 hex characters.
+The reserved space is typically 16KB (32,768 hex characters = 16,384 bytes of actual CMS capacity), which is enough for most PAdES-B-B signatures.
+
+[WARNING]
+====
+**PAdES-B-LTA signatures are much larger** than PAdES-B-B.
+A B-LTA signature includes:
+
+- The CMS `SignedData` itself (~2–4 KB)
+- The signing certificate and full chain (~2–5 KB)
+- The timestamp token from the TSA (~2–4 KB)
+- OCSP responses for each certificate in the chain (~1–3 KB each)
+- CRL data if OCSP is not available (~5–50 KB)
+
+A B-LTA signature can easily reach 20–30 KB, which requires 40–60 KB of hex-encoded space.
+If you're producing B-LTA signatures, reserve at least **64 KB** for `/Contents`:
+
+[source,java]
+----
+// PDFBox: set signature content size (in bytes, before hex encoding)
+SignatureOptions options = new SignatureOptions();
+options.setPreferredSignatureSize(65536); // 64 KB
+doc.addSignature(signature, signingInterface, options);
+----
+
+If the CMS exceeds the reserved space, PDFBox throws an `IOException` — the signing fails silently in the sense that no file is produced.
+This is the #1 cause of "signing worked in development but fails in production" — development certificates have short chains and no timestamps, production certificates have full chains, OCSP responses, and timestamps that exceed the default buffer.
+====
+
+=== The Zero-Padding Question
+
+The zero padding at the end of the `/Contents` hex string is not part of the CMS.
+It's just filler — the hex string `00` decodes to a null byte, and CMS parsers stop reading at the end of the DER-encoded ASN.1 structure, ignoring trailing zeros.
+
+Some validators are stricter than others about this padding:
+
+- **Adobe Acrobat**: Ignores trailing zero padding — works fine
+- **LibreOffice**: Ignores trailing zeros — works fine
+- **Some custom validators**: May compute the hash of the entire `/Contents` hex string (including padding) and fail because the hash doesn't match what the signer computed over just the CMS bytes.
+  This is a bug in the validator, not in the signed PDF.
+
+[TIP]
+====
+When writing validation code, always parse the `/Contents` hex string as DER and stop at the end of the ASN.1 structure.
+Do not hash the raw hex string — decode it to binary, find the end of the DER sequence (the total length indicated in the ASN.1 header), and ignore everything after that.
+====
+
+== Incremental Saves and the Byte Range
+
+=== How Signing Creates an Incremental Update
+
+When PDFBox signs a PDF, it performs an **incremental save** — it appends new data to the end of the existing file rather than rewriting the entire file.
+This is not optional for signing; it is how signing must work.
+
+An incrementally saved PDF looks like this:
+
+.PDF file before and after signing — incremental update appends new objects without modifying the original file
+image::pdf/byterange-incremental.pdf[align="center",pdfwidth=100%]
+
+The "new objects" include the signature dictionary (or modifications to an existing signature field), any new annotation objects for the visual appearance, and updated AcroForm entries.
+The "new xref" is a cross-reference section that records the locations of these new objects, and the "new trailer" points to the new xref.
+
+The entire appended region — including the new `%%EOF` — is covered by the byte range of the signature.
+The byte range starts at byte 0 (the original file's header) and extends to the end of the appended data, with only the `/Contents` gap excluded.
+
+This means:
+
+- The signature covers the **original file** in its entirety
+- The signature covers the **new objects** added during signing (the signature dictionary, appearances, etc.)
+- The signature covers the **new cross-reference table** and **new trailer**
+- The only thing not covered is the CMS signature value itself
+
+=== What Happens After Signing: The Trailing Bytes Problem
+
+Here is one of the most security-critical aspects of byte range handling: **what happens to bytes that appear after the signed region?**
+
+Consider this scenario:
+
+.Byte range coverage — the signature covers two segments with a gap for `/Contents`
+image::pdf/byterange-single.pdf[align="center",pdfwidth=100%]
+
+If `offset2 + length2` equals the total file size, the signature covers everything — good.
+
+But what if someone appends data _after_ the signed region?
+
+.Trailing bytes after the signed region — the Incremental Saving Attack surface
+image::pdf/byterange-trailing.pdf[align="center",pdfwidth=100%]
+
+The byte range still validates — the hash over the signed segments hasn't changed.
+But the file now contains unsigned data at the end.
+If this unsigned data is a valid incremental update (with its own xref, trailer, and `%%EOF`), a PDF viewer might load it and display the _attacker's_ content while showing the original signature as valid.
+
+This is exactly the **Incremental Saving Attack (ISA)** that the Bochum team demonstrated in 2019 (Chapter 24).
+The attack works because PDF viewers before the patches would happily load incremental updates appended after the signed byte range, display the new content, and still report the signature as valid — because the signed bytes hadn't been modified.
+
+[CAUTION]
+====
+**The trailing bytes check is the most critical validation step.**
+
+When verifying a PDF signature, you **must** verify that:
+
+[source]
+----
+offset2 + length2 == actual file size
+----
+
+If the file is larger than the signed region, something was appended after signing.
+This doesn't necessarily mean the file was tampered with — a second legitimate signature would also append data — but it means you must validate the second revision's signature independently.
+
+If there is unsigned trailing data that is _not_ a valid subsequent signature revision, the document has been modified after signing and the signature should be treated as covering only the original content.
+
+Chapter 24 provides the full attack taxonomy and defense code.
+====
+
+=== Multi-Signature Scenarios
+
+Enterprise PDF workflows often involve multiple signatures — a document might be signed by the author, countersigned by a manager, and certified by a compliance officer.
+Each signature creates its own incremental update.
+
+The byte range geometry for a multiply-signed PDF looks like this:
+
+.Multi-signature byte range nesting — each subsequent signature covers everything except its own gap
+image::pdf/byterange-multi.pdf[align="center",pdfwidth=100%]
+
+Each signature covers everything before its own gap (including previous signatures' gaps — the hex bytes of `/Contents1` and `/Contents2` are part of the signed data for signatures 2 and 3).
+This nesting means:
+
+- **Signature 1** covers the original PDF + the objects and xref added during the first signing
+- **Signature 2** covers everything that signature 1 covers PLUS the objects added during the second signing.
+  This means signature 2 implicitly endorses signature 1's existence (though not necessarily its validity)
+- **Signature 3** covers everything, providing the broadest coverage
+
+[IMPORTANT]
+====
+Each signature is a snapshot of the document at the time it was applied.
+Signature 1 saw the document in state S1.
+Signature 2 saw it in state S2 (which includes signature 1).
+If you need to know what the document looked like when signature 1 was applied, you must extract revision 1 by truncating the file at the end of signature 1's byte range — everything after that was added later.
+
+PDFBox provides this capability:
+
+[source,java]
+----
+// Extract the revision that a specific signature covers
+PDDocument doc = Loader.loadPDF(signedFile);
+List<PDSignature> signatures = doc.getSignatureDictionaries();
+for (PDSignature sig : signatures) {
+    int[] byteRange = sig.getByteRange();
+    int revisionEnd = byteRange[2] + byteRange[3];
+
+    // Extract this revision
+    byte[] revision = new byte[revisionEnd];
+    try (InputStream is = new FileInputStream(signedFile)) {
+        is.readNBytes(revision, 0, revisionEnd);
+    }
+    // 'revision' is now the PDF as it existed when this signature was applied
+}
+----
+====
+
+=== Permission-Based Restrictions: What Can Change After Signing?
+
+Not all changes after signing are attacks.
+The PDF specification defines three **modification detection and prevention (MDP)** permission levels that control what changes are allowed after a certification signature:
+
+.DocMDP Permission Levels ({iso32000-2} §12.8.2.2.2)
+[cols="1,2,1,4", options="header"]
+|===
+| Level | Name | Req | Description
+
+| P=1
+| No changes
+| Optional
+| No changes whatsoever are allowed. Any modification — including filling form fields or adding annotations — invalidates the signature. This is the most restrictive level.
+
+| P=2
+| Form filling + signing
+| Default
+| Users may fill form fields and apply additional signatures. Other changes (adding pages, modifying text, changing form field definitions) invalidate the signature. This is the most common level for government forms.
+
+| P=3
+| Form filling + signing + annotations
+| Optional
+| Users may fill form fields, sign, and add annotations (comments, highlights, stamps). This is the most permissive level while still detecting unauthorized modifications.
+|===
+
+When validating a signature with MDP restrictions, you must check not only whether the byte range is intact, but also whether the _content_ of subsequent incremental updates falls within the allowed permissions.
+This is where validation gets complex — you need to compare the PDF objects in the signed revision against the current revision and determine whether the differences are permitted.
+
+Adobe Acrobat does this analysis automatically and shows warnings like "The document has been altered since the signature was applied, but the changes are permitted."
+Building this analysis yourself requires understanding of the PDF object model at a level covered in Chapters 7 and 8.
+
+== Size Estimation: How Much Space to Reserve
+
+=== The Problem
+
+Before you can sign a PDF, you must write it to disk with a placeholder for `/Contents`.
+The placeholder must be large enough to hold the final CMS signature.
+If it's too small, the signing fails.
+If it's too large, you waste space (and the file contains kilobytes of zero padding).
+
+The challenge: the exact CMS size depends on:
+
+- **The signing certificate** — larger key sizes (RSA-4096 vs RSA-2048) produce larger signatures
+- **The certificate chain** — more intermediates = more bytes
+- **The signed attributes** — PAdES requires ESS-signing-certificate-v2, content-type, message-digest; more attributes = more bytes
+- **Timestamps** — a TSA response is itself a CMS `SignedData`, typically 2–4 KB
+- **OCSP responses** — each certificate in the chain may have a 1–3 KB OCSP response
+- **CRL data** — if a certificate's revocation information is provided via CRL instead of OCSP, CRLs can be 5–500 KB depending on the CA's revocation volume
+
+You won't know the exact sizes until you've fetched the timestamp and revocation data — but you need to commit the space _before_ computing the hash.
+
+=== Estimation Strategies
+
+**Strategy 1: Fixed generous buffer (simple, recommended)**
+
+Reserve a fixed buffer that's large enough for worst-case scenarios:
+
+[source,java]
+----
+// Signature size estimates by PAdES profile
+int estimatedSize;
+switch (profile) {
+    case B_B:   estimatedSize = 16384;  break; // 16 KB — basic CMS, no timestamp
+    case B_T:   estimatedSize = 32768;  break; // 32 KB — CMS + timestamp token
+    case B_LT:  estimatedSize = 65536;  break; // 64 KB — CMS + timestamp + OCSP/CRL
+    case B_LTA: estimatedSize = 131072; break; // 128 KB — CMS + timestamp + OCSP/CRL + archival TS
+}
+SignatureOptions options = new SignatureOptions();
+options.setPreferredSignatureSize(estimatedSize);
+----
+
+This wastes some space (a B-B signature typically needs only 4–8 KB of the 16 KB reserved), but the waste is negligible compared to the content of a typical PDF.
+A 100 KB PDF with 16 KB of zero padding in `/Contents` is 116 KB — nobody cares.
+
+**Strategy 2: Pre-compute exact size (complex, rarely necessary)**
+
+If you're generating millions of signed PDFs per day and storage costs matter, you can:
+
+1. Fetch the timestamp and revocation data _before_ creating the placeholder
+2. Compute the CMS size exactly
+3. Reserve only the exact space needed (plus a small safety margin)
+
+This is significantly more complex because you need to construct a "dry run" CMS to measure it, and the timestamp/OCSP data might change between the dry run and the actual signing.
+In practice, this optimization is almost never worth the complexity.
+
+[TIP]
+====
+**Just use 64 KB (65536 bytes) as your default.**
+It's enough for PAdES-B-LT in the vast majority of cases, it wastes a trivial amount of space, and it eliminates the entire class of "signature too large for reserved space" failures.
+Only reduce it if you have a specific reason (embedded systems with extreme storage constraints) and only increase it if you're producing B-LTA signatures with CRLs from large CAs.
+====
+
+=== What Happens When the Estimate Is Wrong
+
+If the CMS signature is **smaller** than the reserved space: no problem.
+The remaining space is filled with zero bytes.
+All conforming validators ignore the padding.
+
+If the CMS signature is **larger** than the reserved space: **the signing fails**.
+PDFBox throws an `IOException` with a message like:
+
+[source]
+----
+IOException: Can't write signature, not enough space
+----
+
+When this happens:
+
+1. The output file is corrupted (partial write) — discard it
+2. Increase `SignatureOptions.setPreferredSignatureSize()` and retry
+3. To debug: log the actual CMS size from your `SignatureInterface.sign()` method and compare it to the reserved size
+
+[source,java]
+----
+@Override
+public byte[] sign(InputStream content) throws IOException {
+    byte[] cmsBytes = createCMSSignature(content);
+    log.info("CMS signature size: {} bytes (reserved: {} bytes)",
+             cmsBytes.length, reservedSize);
+    return cmsBytes;
+}
+----
+
+== Byte Range Verification: How to Check It
+
+=== The Verification Algorithm
+
+When validating a signature, the byte range verification follows these steps:
+
+1. **Read the `/ByteRange` array** from the signature dictionary: `[offset1, length1, offset2, length2]`
+2. **Verify structural sanity**:
+   - `offset1` must be 0
+   - `length1` must be positive
+   - `offset2` must equal `length1` + gap size (where gap size = the length of the `/Contents` hex string including delimiters)
+   - `length2` must be positive
+   - `offset2 + length2` should equal the file size (or the size of the revision, for multi-signature documents)
+3. **Verify the gap contains only `/Contents`**: the bytes in `[length1, offset2)` should be a hex string containing the CMS signature value
+4. **Extract the signed bytes**: concatenate `[0, length1)` and `[offset2, offset2 + length2)`
+5. **Compute the hash**: `hash = SHA-256(signed_bytes)` (or whatever digest algorithm the CMS specifies)
+6. **Verify the CMS**: parse the CMS `SignedData` from `/Contents`, extract the signed `messageDigest` attribute, and compare it to the hash you just computed.
+   If they match, and the CMS cryptographic verification passes, the byte range is intact.
+
+=== Implementation in Java
+
+[source,java]
+----
+/**
+ * Verifies the byte range integrity of a PDF signature.
+ * Returns true if the byte range covers the expected regions
+ * and the hash matches the CMS digest.
+ */
+public boolean verifyByteRange(byte[] pdfBytes, PDSignature signature)
+        throws IOException, CMSException {
+    int[] byteRange = signature.getByteRange();
+
+    // Step 1: Structural checks
+    if (byteRange.length != 4) {
+        log.error("ByteRange must have exactly 4 elements, got {}", byteRange.length);
+        return false;
+    }
+
+    int offset1 = byteRange[0];
+    int length1 = byteRange[1];
+    int offset2 = byteRange[2];
+    int length2 = byteRange[3];
+
+    if (offset1 != 0) {
+        log.error("ByteRange offset1 must be 0, got {}", offset1);
+        return false;
+    }
+
+    // Step 2: Check coverage
+    int signedEnd = offset2 + length2;
+    if (signedEnd != pdfBytes.length) {
+        log.warn("ByteRange ends at {} but file size is {} — " +
+                 "{} trailing bytes are unsigned",
+                 signedEnd, pdfBytes.length, pdfBytes.length - signedEnd);
+        // This is a WARNING, not necessarily an error —
+        // subsequent signatures would extend the file
+    }
+
+    // Step 3: Extract and hash signed bytes
+    MessageDigest digest = MessageDigest.getInstance("SHA-256");
+    digest.update(pdfBytes, offset1, length1);       // segment 1
+    digest.update(pdfBytes, offset2, length2);        // segment 2
+    byte[] computedHash = digest.digest();
+
+    // Step 4: Parse CMS and compare
+    byte[] cmsBytes = signature.getContents();
+    CMSSignedData cmsData = new CMSSignedData(cmsBytes);
+    SignerInformation signer = cmsData.getSignerInfos()
+            .getSigners().iterator().next();
+
+    // Extract the messageDigest from signed attributes
+    Attribute digestAttr = signer.getSignedAttributes()
+            .get(CMSAttributes.messageDigest);
+    byte[] cmsDigest = ASN1OctetString.getInstance(
+            digestAttr.getAttrValues().getObjectAt(0)).getOctets();
+
+    boolean hashMatch = MessageDigest.isEqual(computedHash, cmsDigest);
+    if (!hashMatch) {
+        log.error("Hash mismatch: computed={} vs CMS={}",
+                  Hex.toHexString(computedHash), Hex.toHexString(cmsDigest));
+    }
+    return hashMatch;
+}
+----
+
+[WARNING]
+====
+The code above verifies that the **hash** matches — it does not verify the **CMS signature** (the RSA/ECDSA computation over the signed attributes).
+Full verification requires both:
+
+1. Byte range hash matches CMS `messageDigest` attribute (shown above)
+2. CMS signature over `signedAttrs` verifies with the signer's certificate
+
+Chapter 31 provides complete verification code that covers both steps plus certificate chain validation.
+====
+
+== Hex Dump Walkthrough: A Real Signed PDF
+
+Let's trace the byte range through an actual signed PDF, byte by byte.
+This is the kind of analysis you do when debugging — you open a hex editor (or use `xxd`, `hexdump`, or QPDF) and look at the raw bytes.
+
+=== Finding the Signature Dictionary
+
+First, locate the signature dictionary in the file.
+With QPDF:
+
+[source,bash]
+----
+qpdf --show-object=15 signed-document.pdf
+----
+
+(Where object 15 is the signature dictionary — find it by tracing from the AcroForm → Fields → [signature field] → /V.)
+
+Output:
+
+[source]
+----
+15 0 obj
+<<
+  /ByteRange [0 14231 47007 1849]
+  /ContactInfo ()
+  /Contents <3082...0000>
+  /Filter /Adobe.PPKLite
+  /Location ()
+  /M (D:20260308120000+01'00')
+  /Name (Test Signer)
+  /Reason ()
+  /SubFilter /adbe.pkcs7.detached
+  /Type /Sig
+>>
+endobj
+----
+
+Now we know:
+
+- **Segment 1**: bytes `[0, 14231)` — 14,231 bytes from file start
+- **Gap**: bytes `[14231, 47007)` — 32,776 bytes containing `/Contents`
+- **Segment 2**: bytes `[47007, 48856)` — 1,849 bytes at file end
+- **Total file size**: 47,007 + 1,849 = 48,856 bytes
+
+=== Examining the Gap Boundaries
+
+Let's look at the bytes right around the gap:
+
+[source,bash]
+----
+xxd -s 14220 -l 30 signed-document.pdf
+----
+
+Output:
+
+[source]
+----
+0000378c: 2f43 6f6e 7465 6e74 7320 3c30 3830 3230  /Contents <08020
+0000379c: 3036 3032 3031 3030 3330 3832 3032 3032  060201003082020
+----
+
+We can see `/Contents <` at offset ~14,223.
+The `<` delimiter is at the byte just before the hex string begins.
+The `/ByteRange` says segment 1 ends at offset 14,231 — which is the `<` character.
+Actually, the exact offset of `<` depends on how PDFBox serializes the dictionary.
+
+Now the end of the gap:
+
+[source,bash]
+----
+xxd -s 47000 -l 20 signed-document.pdf
+----
+
+Output:
+
+[source]
+----
+0000b798: 3030 3030 3030 3030 3e0a 2f46 696c 7465  00000000>./Filte
+----
+
+The `>` delimiter is at byte 47,007 (approximately), followed by a newline and the next dictionary key.
+Segment 2 starts immediately after the `>`.
+
+=== Verifying No Trailing Bytes
+
+[source,bash]
+----
+wc -c signed-document.pdf
+# Output: 48856 signed-document.pdf
+----
+
+Byte range says: offset2 + length2 = 47,007 + 1,849 = 48,856.
+File size = 48,856.
+They match — no trailing unsigned bytes.
+The signature covers the entire file (minus the gap).
+
+== Common Byte Range Problems
+
+=== Problem 1: Trailing Bytes After Signed Region
+
+**Symptom**: Signature validates cryptographically, but the file contains content not covered by the signature.
+
+**Cause**: Something was appended to the file after signing — possibly a legitimate incremental update (second signature, form fill), or possibly an Incremental Saving Attack.
+
+**Detection**:
+[source,java]
+----
+int signedEnd = byteRange[2] + byteRange[3];
+int fileSize = pdfBytes.length;
+if (signedEnd < fileSize) {
+    int trailingBytes = fileSize - signedEnd;
+    log.warn("{} bytes of unsigned data after signed region", trailingBytes);
+    // Analyze the trailing data to determine if it's a legitimate revision
+}
+----
+
+**Resolution**: Parse the trailing data.
+If it contains a valid cross-reference section and trailer pointing to a subsequent signature, it's likely a legitimate multi-signature document.
+If it contains modified objects (changed page content, replaced fonts, new pages), it may be an attack.
+Chapter 24 provides detailed analysis code.
+
+=== Problem 2: `/Contents` Size Exceeded
+
+**Symptom**: `IOException: Can't write signature, not enough space` during signing.
+
+**Cause**: The CMS `SignedData` (after hex encoding) exceeds the reserved `/Contents` space.
+
+**Fix**: Increase `SignatureOptions.setPreferredSignatureSize()`.
+See the size estimation section above for recommended values by PAdES profile.
+
+=== Problem 3: ByteRange Doesn't Start at Zero
+
+**Symptom**: Validator reports "invalid byte range" or "signature does not cover document header."
+
+**Cause**: Extremely rare — would indicate a buggy signing library.
+The spec requires that the signed region start at byte 0 to cover the PDF header.
+
+**Resolution**: This is unfixable after the fact — the PDF must be re-signed.
+
+=== Problem 4: Gap Contains More Than Just `/Contents`
+
+**Symptom**: Validator reports "unexpected data in signature gap" or hash mismatch.
+
+**Cause**: The bytes between the two signed segments should contain _only_ the `/Contents` hex string.
+If any other data exists in this gap — for example, if a tool inserted extra whitespace or a stray dictionary key — the byte range geometry is broken.
+
+**Detection**: Parse the gap region and verify it matches the pattern `<[0-9A-Fa-f]+>` with optional zero padding.
+
+=== Problem 5: Hash Algorithm Mismatch
+
+**Symptom**: Computed hash doesn't match CMS `messageDigest` attribute, even though the byte range looks correct.
+
+**Cause**: You're hashing with a different algorithm than the one specified in the CMS.
+The CMS `SignerInfo.digestAlgorithm` tells you which algorithm was used — it might be SHA-256, SHA-384, SHA-512, or (for legacy documents) SHA-1.
+
+**Fix**: Always read the digest algorithm from the CMS before computing the hash:
+
+[source,java]
+----
+SignerInformation signer = cmsData.getSignerInfos().getSigners().iterator().next();
+String digestAlgOid = signer.getDigestAlgOID();
+// Map OID to algorithm name
+String algName = switch (digestAlgOid) {
+    case "2.16.840.1.101.3.4.2.1" -> "SHA-256";
+    case "2.16.840.1.101.3.4.2.2" -> "SHA-384";
+    case "2.16.840.1.101.3.4.2.3" -> "SHA-512";
+    case "1.3.14.3.2.26"          -> "SHA-1";   // deprecated
+    default -> throw new IllegalArgumentException("Unknown digest OID: " + digestAlgOid);
+};
+MessageDigest digest = MessageDigest.getInstance(algName);
+----
+
+== Key Takeaways
+
+- The byte range divides a signed PDF into exactly **two signed segments** with **one unsigned gap** between them
+- The gap contains only the hex-encoded CMS signature value (the `/Contents` string) — nothing else
+- `offset2 + length2` must equal the file size; any trailing bytes are unsigned and potentially malicious
+- Each signature in a multi-signature document covers all previous signatures, creating a nested coverage model
+- Always reserve generous space for `/Contents` — 64 KB is a safe default for most PAdES profiles
+- The `/ByteRange` array itself is signed — it cannot be modified after signing without detection
+- Byte range verification is the **first step** of signature validation — if it fails, there is no need to check the CMS
+- The Incremental Saving Attack (ISA) exploits the trailing bytes problem; the trailing bytes check is your primary defense

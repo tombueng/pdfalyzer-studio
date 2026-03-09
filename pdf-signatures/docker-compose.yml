@@ -1,0 +1,19 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# PDF Digital Signatures — Book Build
+#
+# Usage:
+#   docker compose run book pdf     # Build PDF
+#   docker compose run book html    # Build HTML (with pre-rendered SVG diagrams)
+#   docker compose run book svg     # Export TikZ diagrams to SVG only
+#   docker compose run book all     # Build everything
+#
+# Output goes to ./target/book/
+# ═══════════════════════════════════════════════════════════════════════════════
+services:
+  book:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    volumes:
+      - .:/book
+    working_dir: /book

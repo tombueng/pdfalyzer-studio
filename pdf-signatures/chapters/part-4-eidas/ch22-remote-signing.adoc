@@ -1,0 +1,1123 @@
+= Remote Signing
+
+[.lead]
+For the first two decades of digital signatures, the assumption was simple: the private key lives with the signer.
+A smart card in a wallet, a PKCS#12 file on a laptop, a USB token plugged into a desktop.
+The signer has physical custody of their key material, they authenticate locally (enter a PIN, type a password), and the signing happens on their device.
+
+That model is dead — or at least, it is dying.
+
+In the remote signing model, the private key never leaves a server-side Hardware Security Module (HSM).
+The signer authenticates remotely — via OAuth 2.0, via SMS OTP, via biometric verification on their phone — and the server performs the cryptographic signing operation on their behalf.
+The signer never touches the key, never downloads it, never even knows the key's technical parameters.
+They authorize a signing operation, and the server produces the signature.
+
+This chapter covers the architecture of remote signing: why it exists, how the CSC API standardizes it, how HSMs and Signature Activation Modules work together, what the SCAL levels mean for sole control, and how to integrate with remote signing services in practice.
+If your application needs to produce qualified electronic signatures (QES) at scale — for thousands of users who do not have smart cards and do not want USB tokens — remote signing is how you get there.
+
+== Why Remote Signing Won
+
+=== The Smart Card Problem
+
+The traditional QES model required every signer to have:
+
+1. A qualified certificate issued by a QTSP
+2. A Qualified Signature Creation Device (QSCD) — a certified smart card or USB token
+3. A card reader connected to their computer
+4. Driver software for the card reader and the QSCD
+5. Middleware that bridges the QSCD to the signing application (typically PKCS#11 or Microsoft CNG)
+
+This worked in tightly controlled enterprise environments — banks, government agencies, regulated industries where IT departments could provision hardware to every employee.
+It failed completely for consumer scenarios, mobile scenarios, and any context where "plug in a USB device and install a driver" is not feasible.
+
+The practical failure modes were numerous:
+
+- **Driver hell**: Smart card drivers are notoriously platform-dependent. A card that works on Windows 10 may not work on Windows 11 without a driver update. macOS support is inconsistent. Linux support depends on the specific combination of card, reader, and PKCS#11 module.
+- **Mobile impossibility**: Smartphones have no USB-A ports, no smart card readers, and limited support for external cryptographic hardware. The NFC-based smart card reading that some phones support is slow and unreliable.
+- **Certificate lifecycle**: Qualified certificates typically expire after 1-3 years. Renewal requires physically visiting a Registration Authority (for identity verification) and provisioning a new certificate onto the QSCD. Users forget, certificates expire, signing fails.
+- **Cost**: A qualified certificate costs 50-300 EUR per year. A smart card costs 20-50 EUR. A card reader costs 15-40 EUR. For an organization with 10,000 employees, the hardware cost alone is significant — before you account for help desk tickets from users who cannot get their cards to work.
+
+=== The Remote Alternative
+
+Remote signing eliminates every one of these problems:
+
+- **No hardware**: The signer needs only a web browser or a mobile app. No drivers, no readers, no tokens.
+- **Mobile-native**: Authentication happens through the phone itself — push notifications, biometric confirmation, SMS OTP. The signing experience on a smartphone is identical to the desktop experience.
+- **Managed lifecycle**: The QTSP manages the key lifecycle entirely. Certificate issuance, renewal, and revocation happen server-side. The signer never handles key material.
+- **Lower per-user cost**: While the QTSP charges per signature or per subscription, the elimination of hardware provisioning and support often makes remote signing cheaper at scale.
+
+[NOTE]
+====
+Remote signing does not lower the _security_ bar — it moves the security boundary.
+Instead of trusting the signer's device to protect the key (which, for a password-protected PKCS#12 on a laptop, is a dubious proposition), you trust the QTSP's HSM infrastructure and authentication system.
+For most threat models, a professionally managed HSM with multi-factor authentication provides stronger key protection than a smart card with a four-digit PIN that the user wrote on a sticky note.
+====
+
+=== eIDAS and Remote QSCDs
+
+The {eidas-reg} does not require physical possession of a QSCD — it requires sole control (Article 26(c)) and that the device meet the requirements of Annex II.
+An HSM operated by a QTSP, where the signer's key partition is accessible only through strong multi-factor authentication tied to the specific signing operation, satisfies both requirements.
+
+The European Committee for Standardization (CEN) formalized this in **EN 419 241**, which defines requirements for trustworthy systems supporting server signing:
+
+- **EN 419 241-1**: General requirements for server signing
+- **EN 419 241-2**: Protection profile for QSCDs for server signing
+
+These standards, combined with the SCAL framework (discussed below), provide the certification path for remote QSCDs.
+By 2024, remote signing had become the dominant model for QES in practice — more qualified signatures are produced via remote HSMs than via local smart cards.
+
+== The Hash-Signing Model
+
+=== Why Send the Hash, Not the Document
+
+Remote signing uses a **hash-signing model**: the client computes the hash of the data to be signed and sends only the hash to the server.
+The server applies the private key to the hash (RSA-PSS, ECDSA, etc.) and returns the raw signature value.
+The client then embeds the signature value into the CMS structure and the PDF.
+
+This design has three critical advantages:
+
+1. **Privacy**: The document content never leaves the client. The server sees only a 32-byte (SHA-256) or 64-byte (SHA-512) hash. It cannot reconstruct the document from the hash. For sensitive documents — medical records, legal contracts, financial statements — this is essential.
+
+2. **Bandwidth**: Sending a 32-byte hash is dramatically faster than sending a 50 MB PDF over a network connection. For mobile clients on cellular networks, the difference matters.
+
+3. **Separation of concerns**: The client handles PDF parsing, byte range computation, CMS structure building, and timestamp embedding. The server handles key management, access control, and the raw cryptographic operation. Neither needs to understand the other's domain.
+
+=== The Flow Step by Step
+
+.Remote signing flow — client and server responsibilities
+image::pdf/seq-remote-signing.pdf[align="center",pdfwidth=100%]
+
+Steps 1-3 and 11-14 happen entirely on the client.
+Only steps 4, 6, and the server-side steps 5-10 involve the remote server.
+The document never crosses the network.
+
+[IMPORTANT]
+====
+The "hash" sent to the server in step 6 is not the hash of the document bytes.
+It is the hash of the **DER-encoded signed attributes** of the CMS SignerInfo.
+The signed attributes include the `messageDigest` attribute, which itself contains the hash of the document bytes.
+This two-level hashing is standard CMS behavior (defined in {rfc5652} Section 5.4) and is easy to get wrong.
+
+If you hash the document bytes and send that to the remote server, the resulting signature will not verify — because CMS validators expect the signature to be over the signed attributes, not the raw data.
+====
+
+== The CSC API (Cloud Signature Consortium)
+
+=== What the CSC Is
+
+The **Cloud Signature Consortium (CSC)** is an industry body that developed an open standard API for remote signing.
+Before the CSC API, every remote signing provider had its own proprietary API — different authentication flows, different request/response formats, different error codes.
+Integrating with Swisscom AIS required completely different code than integrating with DigiCert, which required completely different code than integrating with InfoCert.
+
+The CSC API v2.0 (the current version, published in 2019 and updated since) standardizes:
+
+- **Authentication**: OAuth 2.0 with specific grant types
+- **Credential discovery**: listing available signing credentials for a user
+- **Signature activation**: the mechanism by which the signer authorizes a specific signing operation
+- **Hash signing**: the actual cryptographic operation
+
+The API is RESTful, uses JSON for request and response bodies, and is designed to be consumed by web and mobile clients.
+
+=== API Endpoints
+
+The CSC API defines the following core endpoints:
+
+.CSC API v2.0 Core Endpoints
+[cols="3,2,5", options="header"]
+|===
+| Endpoint | Method | Purpose
+
+| `/auth/login`
+| POST
+| Authenticate the user with the remote signing service. Returns an OAuth 2.0 access token.
+
+| `/auth/revoke`
+| POST
+| Revoke an active access token.
+
+| `/credentials/list`
+| POST
+| List the signing credentials available to the authenticated user. Returns credential IDs, certificate chains, key algorithms, and SCAL levels.
+
+| `/credentials/info`
+| POST
+| Get detailed information about a specific credential, including the certificate chain and supported algorithms.
+
+| `/credentials/authorize`
+| POST
+| Authorize a specific credential for signing. For SCAL2 credentials, this triggers explicit user authentication (OTP, biometric) and returns a Signature Activation Data (SAD) token.
+
+| `/credentials/sendOTP`
+| POST
+| Send a one-time password to the user (SMS, email) as part of SCAL2 authorization.
+
+| `/signatures/signHash`
+| POST
+| Sign one or more hashes using a previously authorized credential. Returns the raw signature values.
+
+| `/signatures/timestamp`
+| POST
+| Request an RFC 3161 timestamp. Some providers expose timestamping through the CSC API as well.
+
+|===
+
+=== Authentication: OAuth 2.0
+
+The CSC API uses OAuth 2.0 for authentication.
+The specific grant type depends on the deployment scenario:
+
+- **Authorization Code Grant**: For web applications where the user authenticates in a browser. The signing application redirects the user to the QTSP's authorization server, the user logs in, and the application receives an authorization code that it exchanges for an access token.
+- **Client Credentials Grant**: For server-to-server scenarios where a system (not a human) needs to sign. The application authenticates with its own client ID and secret.
+- **Resource Owner Password Grant**: For scenarios where the application collects the user's credentials directly. Discouraged by OAuth 2.0 best practices but still supported by some providers.
+
+[source,java]
+----
+/**
+ * Authenticates with a CSC-compliant remote signing service.
+ * Returns an OAuth 2.0 access token for subsequent API calls.
+ */
+public String authenticate(String cscBaseUrl, String username,
+        String password) throws IOException {
+
+    String loginUrl = cscBaseUrl + "/auth/login";
+    String requestBody = """
+            {
+                "remoteUser": "%s",
+                "remoteSecret": "%s"
+            }
+            """.formatted(username, password);
+
+    HttpURLConnection conn = (HttpURLConnection)
+            new URL(loginUrl).openConnection();
+    conn.setDoOutput(true);
+    conn.setRequestMethod("POST");
+    conn.setRequestProperty("Content-Type", "application/json");
+    conn.setConnectTimeout(10000);
+    conn.setReadTimeout(30000);
+
+    try (OutputStream out = conn.getOutputStream()) {
+        out.write(requestBody.getBytes(StandardCharsets.UTF_8));
+    }
+
+    if (conn.getResponseCode() != 200) {
+        throw new IOException("CSC auth/login failed: HTTP " +
+                conn.getResponseCode());
+    }
+
+    // Parse JSON response — extract access_token
+    String responseJson;
+    try (InputStream in = conn.getInputStream()) {
+        responseJson = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+    }
+
+    // In production, use a proper JSON parser (Jackson, Gson)
+    // This is simplified for illustration
+    log.info("CSC authentication successful for user: {}", username);
+    return extractJsonField(responseJson, "access_token");
+}
+----
+
+=== Credential Discovery
+
+Once authenticated, the client can discover what signing credentials are available:
+
+[source,java]
+----
+/**
+ * Lists the signing credentials available to the authenticated user.
+ * Returns credential IDs that can be used for signing.
+ */
+public List<CscCredential> listCredentials(String cscBaseUrl,
+        String accessToken) throws IOException {
+
+    String url = cscBaseUrl + "/credentials/list";
+    String requestBody = """
+            {
+                "maxResults": 100
+            }
+            """;
+
+    HttpURLConnection conn = (HttpURLConnection)
+            new URL(url).openConnection();
+    conn.setDoOutput(true);
+    conn.setRequestMethod("POST");
+    conn.setRequestProperty("Content-Type", "application/json");
+    conn.setRequestProperty("Authorization", "Bearer " + accessToken);
+
+    try (OutputStream out = conn.getOutputStream()) {
+        out.write(requestBody.getBytes(StandardCharsets.UTF_8));
+    }
+
+    String responseJson;
+    try (InputStream in = conn.getInputStream()) {
+        responseJson = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+    }
+
+    // Response contains:
+    // {
+    //   "credentialIDs": ["cred-001", "cred-002"],
+    //   "credentialInfos": [
+    //     {
+    //       "credentialID": "cred-001",
+    //       "key": { "algo": ["1.2.840.113549.1.1.11"], "len": 2048 },
+    //       "cert": { "certificates": ["MIIC...", "MIID..."] },
+    //       "SCAL": "2",
+    //       "description": "Qualified certificate for John Doe"
+    //     }
+    //   ]
+    // }
+
+    log.info("CSC credentials/list returned credentials for user");
+    return parseCscCredentials(responseJson);
+}
+----
+
+The credential response includes the full certificate chain (Base64-encoded), which the client needs to build the CMS structure _before_ requesting the hash signature.
+This is a critical detail: the client must know the signer's certificate at CMS construction time (for the ESS-signing-certificate-v2 attribute), not just at signing time.
+
+=== Credential Authorization and SAD
+
+For SCAL2 credentials (see below), the client must explicitly authorize the credential before signing.
+This triggers an additional authentication step — the QTSP sends an OTP to the signer, or the signer confirms via a mobile app, or biometric verification occurs.
+
+The result of successful authorization is a **Signature Activation Data (SAD)** token — an opaque string that the client presents with the signing request to prove that the signer authorized this specific operation.
+
+[source,java]
+----
+/**
+ * Authorizes a credential for signing (SCAL2).
+ * Triggers user authentication (OTP, biometric, etc.).
+ * Returns a SAD token valid for a limited time and number of signatures.
+ */
+public String authorizeCredential(String cscBaseUrl, String accessToken,
+        String credentialId, int numSignatures) throws IOException {
+
+    // Step 1: Trigger OTP delivery
+    String sendOtpUrl = cscBaseUrl + "/credentials/sendOTP";
+    String otpRequestBody = """
+            {
+                "credentialID": "%s"
+            }
+            """.formatted(credentialId);
+
+    HttpURLConnection otpConn = (HttpURLConnection)
+            new URL(sendOtpUrl).openConnection();
+    otpConn.setDoOutput(true);
+    otpConn.setRequestMethod("POST");
+    otpConn.setRequestProperty("Content-Type", "application/json");
+    otpConn.setRequestProperty("Authorization", "Bearer " + accessToken);
+    try (OutputStream out = otpConn.getOutputStream()) {
+        out.write(otpRequestBody.getBytes(StandardCharsets.UTF_8));
+    }
+
+    log.info("OTP sent for credential: {}", credentialId);
+
+    // Step 2: Collect OTP from user (your UI must handle this)
+    String otp = collectOtpFromUser();
+
+    // Step 3: Authorize the credential with the OTP
+    String authUrl = cscBaseUrl + "/credentials/authorize";
+    String authRequestBody = """
+            {
+                "credentialID": "%s",
+                "numSignatures": %d,
+                "OTP": "%s"
+            }
+            """.formatted(credentialId, numSignatures, otp);
+
+    HttpURLConnection authConn = (HttpURLConnection)
+            new URL(authUrl).openConnection();
+    authConn.setDoOutput(true);
+    authConn.setRequestMethod("POST");
+    authConn.setRequestProperty("Content-Type", "application/json");
+    authConn.setRequestProperty("Authorization", "Bearer " + accessToken);
+    try (OutputStream out = authConn.getOutputStream()) {
+        out.write(authRequestBody.getBytes(StandardCharsets.UTF_8));
+    }
+
+    String responseJson;
+    try (InputStream in = authConn.getInputStream()) {
+        responseJson = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+    }
+
+    // Response: { "SAD": "eyJhbGciOiJSUzI1NiIs..." }
+    String sad = extractJsonField(responseJson, "SAD");
+    log.info("Credential authorized, SAD obtained for {} signatures",
+            numSignatures);
+    return sad;
+}
+----
+
+[WARNING]
+====
+The SAD token has a limited lifetime (typically 5-10 minutes) and a limited number of uses (specified in `numSignatures`).
+If you request authorization for 1 signature, the SAD can only be used once.
+If you need to sign multiple documents in a batch, request a higher `numSignatures` value — but be aware that some QTSPs limit the maximum.
+
+If the SAD expires before you use it, you must re-authorize.
+Design your signing flow so that SAD acquisition happens immediately before hash signing, not minutes before.
+====
+
+=== Hash Signing
+
+The core operation — sending a hash and receiving a signature:
+
+[source,java]
+----
+/**
+ * Signs one or more hashes using a CSC-compliant remote signing service.
+ * Returns raw signature values (one per hash).
+ */
+public List<byte[]> signHashes(String cscBaseUrl, String accessToken,
+        String credentialId, String sad,
+        List<byte[]> hashes) throws IOException {
+
+    String signUrl = cscBaseUrl + "/signatures/signHash";
+
+    // Convert hashes to Base64 for JSON transport
+    List<String> hashesBase64 = new ArrayList<>();
+    for (byte[] hash : hashes) {
+        hashesBase64.add(Base64.getEncoder().encodeToString(hash));
+    }
+
+    // Build JSON array of hashes
+    StringBuilder hashArray = new StringBuilder("[");
+    for (int i = 0; i < hashesBase64.size(); i++) {
+        if (i > 0) hashArray.append(",");
+        hashArray.append("\"").append(hashesBase64.get(i)).append("\"");
+    }
+    hashArray.append("]");
+
+    String requestBody = """
+            {
+                "credentialID": "%s",
+                "SAD": "%s",
+                "hashes": %s,
+                "hashAlgo": "2.16.840.1.101.3.4.2.1",
+                "signAlgo": "1.2.840.113549.1.1.11"
+            }
+            """.formatted(credentialId, sad, hashArray.toString());
+
+    HttpURLConnection conn = (HttpURLConnection)
+            new URL(signUrl).openConnection();
+    conn.setDoOutput(true);
+    conn.setRequestMethod("POST");
+    conn.setRequestProperty("Content-Type", "application/json");
+    conn.setRequestProperty("Authorization", "Bearer " + accessToken);
+
+    try (OutputStream out = conn.getOutputStream()) {
+        out.write(requestBody.getBytes(StandardCharsets.UTF_8));
+    }
+
+    String responseJson;
+    try (InputStream in = conn.getInputStream()) {
+        responseJson = new String(in.readAllBytes(), StandardCharsets.UTF_8);
+    }
+
+    // Response: { "signatures": ["MEUCIQD...", "MEQCIBD..."] }
+    List<byte[]> signatures = parseSignatureValues(responseJson);
+    log.info("CSC signHash returned {} signature values", signatures.size());
+    return signatures;
+}
+----
+
+The OIDs in the request body specify the algorithms:
+
+.Common algorithm OIDs for CSC signHash
+[cols="3,3,3", options="header"]
+|===
+| OID | Algorithm | Notes
+
+| `2.16.840.1.101.3.4.2.1`
+| SHA-256
+| Hash algorithm. The hash you send must use this algorithm.
+
+| `2.16.840.1.101.3.4.2.2`
+| SHA-384
+| Stronger hash alternative.
+
+| `1.2.840.113549.1.1.11`
+| SHA256withRSA (PKCS#1 v1.5)
+| RSA signature with SHA-256. The server applies PKCS#1 v1.5 padding.
+
+| `1.2.840.113549.1.1.10`
+| RSASSA-PSS
+| RSA-PSS signature. Preferred over PKCS#1 v1.5 for new deployments.
+
+| `1.2.840.10045.4.3.2`
+| SHA256withECDSA
+| ECDSA signature with SHA-256. Shorter signatures, equivalent security.
+
+|===
+
+== SCAL: Sole Control Assurance Levels
+
+=== The Problem SCAL Solves
+
+The {eidas-reg} Article 26(c) requires that an advanced electronic signature be "created using electronic signature creation data that the signatory can, with a high level of confidence, use under his sole control."
+
+For local signing with a smart card, sole control is straightforward: the signer physically possesses the card and knows the PIN.
+For remote signing, sole control is more nuanced.
+The key lives in a server-side HSM.
+Multiple users' keys may reside in the same physical HSM.
+The QTSP's system administrators have physical access to the HSM.
+How do you prove that the signer — and only the signer — authorized a specific signing operation?
+
+The **SCAL** (Sole Control Assurance Level) framework, defined in CEN EN 419 241-1, provides two levels of assurance:
+
+=== SCAL1: Server-Side Sole Control
+
+In SCAL1, the remote signing server ensures sole control through its own authentication and authorization mechanisms, but there is no explicit per-signature authorization from the user beyond the initial session authentication.
+
+Characteristics:
+- The signer authenticates to the service (username + password, possibly with MFA)
+- Once authenticated, the service can sign on the signer's behalf for the duration of the session
+- The service's access control mechanisms prevent unauthorized use
+- There is no additional user interaction for each signing operation
+
+SCAL1 is suitable for:
+- **Advanced electronic signatures (AdES)**: The sole control requirement of Article 26(c) can be met if the authentication is sufficiently strong
+- **Automated signing workflows**: Where a human authorizes a batch of signatures upfront
+- **Internal enterprise signing**: Where the trust model accepts session-level authorization
+
+SCAL1 is _not_ suitable for QES, because the sole control assurance is not strong enough — the server could theoretically sign without the user's knowledge during an active session.
+
+=== SCAL2: Explicit Per-Signature Authorization
+
+In SCAL2, every signing operation requires explicit authorization from the signer, independent of session authentication.
+The authorization is linked to the specific data being signed.
+
+Characteristics:
+- The signer authenticates to the service (session-level)
+- For each signing operation, the signer must provide additional authorization: OTP, biometric confirmation, mobile app push approval
+- The authorization produces a SAD (Signature Activation Data) token that is bound to the specific credential and limited in scope (time, number of signatures)
+- The HSM will not perform the signing operation without a valid SAD
+
+SCAL2 is required for:
+- **Qualified electronic signatures (QES)**: The per-signature authorization satisfies Article 26(c) with a high level of confidence
+- **Any scenario where you need to prove that the signer actively authorized each specific signature**
+
+.SCAL1 vs. SCAL2 Comparison
+[cols="3,3,3", options="header"]
+|===
+| Aspect | SCAL1 | SCAL2
+
+| Authentication
+| Session-level (login once)
+| Session-level + per-signature authorization
+
+| User interaction per signature
+| None after login
+| Required (OTP, biometric, push)
+
+| SAD token
+| Not required
+| Required for each signing operation
+
+| Suitable for QES
+| No
+| Yes
+
+| Suitable for AdES
+| Yes
+| Yes
+
+| Batch signing
+| Easy (sign N documents in a loop)
+| Possible but requires batch SAD (N signatures authorized at once)
+
+| eIDAS Article 26(c) assurance
+| Moderate
+| High
+
+|===
+
+[IMPORTANT]
+====
+The distinction between SCAL1 and SCAL2 is not merely theoretical — it determines whether the resulting signature can be a QES.
+If your application needs to produce qualified electronic signatures via remote signing, you _must_ implement a SCAL2 flow.
+A SCAL1 flow, no matter how strong the session authentication, will not produce a QES because it lacks per-signature authorization.
+
+This is the single most common mistake in remote signing integrations: assuming that a strong login (username + password + TOTP) is sufficient for QES.
+It is not.
+The authentication must be linked to the signing operation, not just the session.
+====
+
+== HSM and SAM Architecture
+
+=== The HSM (Hardware Security Module)
+
+The HSM is the physical device that stores private keys and performs cryptographic operations.
+In a remote signing deployment, the HSM is typically:
+
+- **FIPS 140-2 Level 3** or **Level 4** certified (US standard)
+- **Common Criteria EAL4+** certified (international standard)
+- Deployed in a physically secured data center with access logging, video surveillance, and multi-person access controls
+- Connected to the signing server via a high-speed internal network (never directly exposed to the internet)
+
+Popular HSMs for remote signing:
+- **Thales Luna Network HSM**: Widely used in European QTSPs. Supports PKCS#11, JCE (Java Cryptography Extension), and Microsoft CNG. Available in various throughput tiers.
+- **Utimaco SecurityServer**: German manufacturer, popular with European banks and government agencies. Strong PKCS#11 support.
+- **Entrust nShield Connect**: Used by large enterprises and some QTSPs. Offers a proprietary "Security World" key management architecture alongside standard PKCS#11.
+- **AWS CloudHSM / Azure Dedicated HSM**: Cloud-hosted HSMs. Convenient for cloud-native architectures, but may not meet all QSCD certification requirements (check the specific certification status).
+
+=== The SAM (Signature Activation Module)
+
+The SAM sits between the remote signing API and the HSM.
+Its job is to enforce sole control:
+
+1. **Receive the signing request** with the signer's credentials and SAD
+2. **Verify the SAD** — check that it is valid, not expired, bound to the correct credential, and that the number of allowed signatures has not been exhausted
+3. **Authorize the HSM operation** — unlock the signer's key partition in the HSM for exactly one (or N) signing operations
+4. **Return the signature value** to the API layer
+
+The SAM is the component that makes SCAL2 possible.
+Without a SAM, the signing server could theoretically use any key in the HSM at any time.
+The SAM ensures that keys are only activated when the legitimate signer has provided explicit, verifiable authorization.
+
+[source]
+----
+Architecture of a Remote Signing Service
+
+                         ┌─────────────────────┐
+    Internet             │   Load Balancer /    │
+    ─────────────────────│   API Gateway        │
+                         └──────────┬───────────┘
+                                    │
+                         ┌──────────┴───────────┐
+                         │   CSC API Server      │
+                         │   (REST endpoints)    │
+                         │   OAuth 2.0 token     │
+                         │   validation          │
+                         └──────────┬───────────┘
+                                    │
+                         ┌──────────┴───────────┐
+                         │   Signature           │
+                         │   Activation Module   │
+                         │   (SAM)               │
+                         │   • SAD validation    │
+                         │   • SCAL enforcement  │
+                         │   • Audit logging     │
+                         └──────────┬───────────┘
+                                    │ PKCS#11
+                         ┌──────────┴───────────┐
+                         │   Hardware Security   │
+                         │   Module (HSM)        │
+                         │   • Key storage       │
+                         │   • Crypto operations │
+                         │   • Tamper-evident    │
+                         └──────────────────────┘
+----
+
+=== PKCS#11: The HSM Interface
+
+PKCS#11 (also called Cryptoki) is the standard API for communicating with HSMs and smart cards.
+It is a C-based API with Java bindings available through the JCE `SunPKCS11` provider or through dedicated libraries.
+
+In a remote signing server, the PKCS#11 flow for signing looks like this:
+
+[source,java]
+----
+/**
+ * Signs a hash using an HSM via PKCS#11.
+ * This runs on the remote signing server, NOT on the client.
+ */
+public byte[] signWithHsm(byte[] hash, String keyAlias,
+        char[] keyPin) throws Exception {
+
+    // 1. Load the PKCS#11 provider
+    //    (configured once at server startup, not per request)
+    Provider pkcs11Provider = Security.getProvider("SunPKCS11");
+
+    // 2. Load the keystore from the HSM
+    KeyStore ks = KeyStore.getInstance("PKCS11", pkcs11Provider);
+    ks.load(null, keyPin);
+
+    // 3. Retrieve the private key
+    PrivateKey privateKey = (PrivateKey) ks.getKey(keyAlias, keyPin);
+    if (privateKey == null) {
+        throw new IllegalStateException(
+                "Key not found in HSM: " + keyAlias);
+    }
+
+    // 4. Sign the hash
+    //    Note: for RSA, Signature.sign() expects the raw data, not a
+    //    pre-computed hash. Use "NONEwithRSA" to sign a raw hash, or
+    //    use "SHA256withRSA" and pass the original data.
+    Signature sig = Signature.getInstance("SHA256withRSA", pkcs11Provider);
+    sig.initSign(privateKey);
+    sig.update(hash);
+    byte[] signatureValue = sig.sign();
+
+    log.info("HSM signing completed: key={}, sigLen={}",
+            keyAlias, signatureValue.length);
+    return signatureValue;
+}
+----
+
+[TIP]
+====
+The JCE `SunPKCS11` provider requires a configuration that specifies the PKCS#11 library path, slot number, and other HSM-specific parameters.
+This configuration is typically loaded from a file or a dynamic `InputStream`:
+
+[source]
+----
+# pkcs11.cfg
+name = MyHSM
+library = /opt/hsm/lib/libCryptoki2_64.so
+slot = 0
+----
+
+Different HSM vendors provide different PKCS#11 shared libraries (`.so` on Linux, `.dll` on Windows).
+The library path is the most common source of "HSM not found" errors in deployments.
+====
+
+=== Key Lifecycle in an HSM
+
+Private keys in an HSM follow a strict lifecycle:
+
+1. **Generation**: The key pair is generated _inside_ the HSM. The private key never exists outside the HSM's tamper-resistant boundary. This is a fundamental requirement for QSCD certification.
+2. **Activation**: The key is associated with a certificate (issued by the QTSP's CA) and made available for signing. For SCAL2, activation for each signing operation requires a valid SAD.
+3. **Use**: The HSM performs signing operations using the key. Each use is logged for audit purposes.
+4. **Suspension**: The key can be temporarily suspended (e.g., if the signer reports a compromised authentication factor). The certificate is not revoked, but signing is disabled.
+5. **Revocation**: The key is permanently disabled, and the associated certificate is revoked. The key material may be destroyed or archived depending on the QTSP's policy.
+
+[NOTE]
+====
+For QSCD certification under EN 419 241-2, the HSM must guarantee that private keys are generated internally and can never be extracted — not even by the QTSP's own administrators.
+This is what "the key never leaves the HSM" means in practice.
+The HSM must be designed so that there is no API, no debug mode, no firmware backdoor that could extract key material.
+Physical attacks (opening the HSM casing) must trigger key destruction.
+====
+
+== Vendor Landscape
+
+=== Major Remote Signing Providers
+
+The remote signing market is dominated by a handful of European QTSPs, each offering CSC-compliant APIs with varying degrees of completeness:
+
+.Remote Signing Provider Comparison
+[cols="2,2,2,2,2", options="header"]
+|===
+| Provider | Headquarters | CSC API | SCAL Levels | Notable Features
+
+| Swisscom AIS
+| Switzerland
+| v2.0
+| SCAL1, SCAL2
+| Integrated with Swiss law (ZertES). Strong mobile authentication via Mobile ID. High throughput for batch signing.
+
+| DigiCert + QuoVadis
+| US / Switzerland
+| v2.0
+| SCAL1, SCAL2
+| Global presence. QuoVadis (acquired by DigiCert) provides the EU-qualified certificates. AATL-listed roots.
+
+| InfoCert
+| Italy
+| v2.0
+| SCAL1, SCAL2
+| Largest QTSP in Europe by volume. SPID integration for Italian digital identity. Strong in Italian government sector.
+
+| Namirial
+| Italy
+| v2.0
+| SCAL1, SCAL2
+| Focus on document workflow integration. Offers both remote signing and a full document management platform.
+
+| ZealID
+| Lithuania
+| v2.0
+| SCAL2
+| Mobile-first approach. Signing via smartphone app with biometric authentication. Popular in Baltic states.
+
+| D-Trust (Bundesdruckerei)
+| Germany
+| v2.0
+| SCAL1, SCAL2
+| German Federal Printing Office subsidiary. Strong in German government and healthcare sectors.
+
+|===
+
+=== The Ascertia/ADSS Pattern
+
+A notable infrastructure pattern in the CSC ecosystem is the widespread use of **Ascertia ADSS Server** as the underlying platform.
+Many QTSPs — especially regional and government-affiliated providers — do not build their own CSC API implementation.
+Instead, they deploy Ascertia's ADSS (Automated Digital Signature Server), which exposes the CSC API through a consistent base path:
+
+[source]
+----
+https://<provider-domain>/adss/service/ras/csc/v1/
+----
+
+This creates a recognizable fingerprint.
+If you encounter a CSC endpoint with `/adss/service/ras/` in the URL, you are almost certainly talking to an Ascertia deployment, regardless of the provider's branding.
+The practical consequence: the CSC behavior, error formats, and quirks will be identical across all Ascertia-based providers, even though they are operated by different organizations in different countries.
+
+Common variations include:
+
+- `\https://signinghub.ascertia.com/adss/service/ras/csc/v1/` (Ascertia's own hosted service)
+- `\https://ras.<provider>.com/adss/service/ras/csc/v1/` (white-labeled deployments)
+- `\https://sign.<provider>.com/adss/service/ras/csc/v1/` (government integrations)
+
+This pattern matters for integration testing: if you have tested against one Ascertia-based provider, you have effectively tested against all of them.
+Conversely, if you encounter an Ascertia-specific bug, expect it to appear at every provider using the same platform.
+
+=== Sandbox and Test Endpoints
+
+Most CSC providers offer sandbox environments for development and integration testing.
+These sandboxes are invaluable — they let you develop and test the entire signing flow without purchasing production credentials or risking real certificates.
+
+.CSC Provider Sandbox and Test Endpoints
+[cols="2,3,2", options="header"]
+|===
+| Provider | Sandbox URL | Notes
+
+| SSL.com eSigner
+| `\https://cs-try.ssl.com/csc/v0`
+| Free sandbox with demo credentials. Publicly documented test accounts available. Good starting point for CSC integration.
+
+| DigiCert DTM
+| `\https://demo.one.digicert.com/documentmanager/csc/v1`
+| Demo environment for Document Trust Manager. Requires DigiCert partnership account.
+
+| ZealiD
+| `\https://hermes-dev.zealid.com/api/v3.0/csc/v1`
+| Development endpoint. Mobile-first — requires ZealiD test app.
+
+| itsme
+| `\https://sign.e2e.itsme.services/csc/v1`
+| End-to-end test environment. Belgian Mobile ID integration testing.
+
+|===
+
+[TIP]
+====
+**Start with SSL.com's sandbox.**
+It is the most accessible CSC test environment — no partnership agreements, no special hardware, publicly documented demo credentials.
+Build your integration against their sandbox first, then adapt for your production provider.
+The CSC API surface is standardized enough that switching providers later requires only URL and credential changes, not code changes.
+====
+
+=== National eID and CSC Integration
+
+Several European countries have integrated their national electronic identity systems with CSC-compatible remote signing.
+This means citizens can use their existing government-issued digital identity to create qualified electronic signatures without obtaining separate signing credentials.
+
+.National eID systems with CSC-compatible remote signing
+[cols="2,3,3", options="header"]
+|===
+| Country | eID System | CSC Integration
+
+| Italy
+| SPID (Public Digital Identity System)
+| InfoCert and Namirial both offer SPID-authenticated remote signing. Citizens use their existing SPID identity to access signing credentials hosted by the QTSP.
+
+| Norway
+| BankID
+| BankID provides remote signing through bank-operated infrastructure. High adoption rate (~4.5 million active users).
+
+| Austria
+| Handy-Signatur / ID Austria
+| PrimeSign (Cryptas) infrastructure. Mobile phone-based signing via the national eID system.
+
+| Estonia
+| eID Easy
+| Integrates with the Estonian national ID card and Mobile-ID systems for remote signing.
+
+| Switzerland
+| SwissID / Mobile ID
+| Swisscom Trust Services. Qualified under Swiss law (ZertES) rather than eIDAS, but cross-recognized.
+
+| Spain
+| DNIe / FNMT
+| FNMT (Fábrica Nacional de Moneda y Timbre) provides remote signing tied to the national certificate infrastructure.
+
+|===
+
+For integrators, the key implication is authentication: when the CSC provider is backed by a national eID system, the OAuth 2.0 flow typically redirects through the national identity provider (OpenID Connect federation).
+Your application's authentication UI must support this redirect — it is not a simple username/password flow.
+
+=== CSC Endpoint Discovery
+
+Because the CSC specification requires a public `/info` endpoint that responds without authentication, CSC servers can be discovered by probing for known URL patterns:
+
+[source]
+----
+GET /csc/v2/info   → Most CSC v2 providers
+GET /csc/v1/info   → Legacy CSC v1 providers
+GET /adss/service/ras/csc/v1/info   → Ascertia ADSS deployments
+----
+
+A successful response returns the service capabilities:
+
+[source,json]
+----
+{
+  "specs": "CSC API v2",
+  "name": "Remote Signing Service",
+  "authType": ["oauth2"],
+  "methods": ["credentials/list", "credentials/info",
+              "credentials/authorize", "signatures/signHash"]
+}
+----
+
+This discovery mechanism is useful for integration testing (verifying that a provider's endpoint is reachable and responsive) and for building provider registries.
+The `/info` endpoint also reveals which CSC API methods the provider supports — not all providers implement the full specification.
+
+=== Choosing a Provider
+
+When selecting a remote signing provider, consider:
+
+1. **Trusted list presence**: The provider must be a QTSP listed in the EUTL of the member state where they are supervised. Verify this at the EU's official Trusted List Browser.
+2. **AATL listing**: If your signed PDFs will be opened in Adobe Acrobat, the provider's root certificate should be in the Adobe Approved Trust List (AATL). Without AATL listing, Acrobat will show a warning even for EU-qualified signatures.
+3. **Geographic coverage**: Some providers issue certificates qualified in one member state; others have qualified status in multiple states. For cross-border use, mutual recognition under eIDAS Article 25(3) applies, but AATL listing is a separate concern.
+4. **API completeness**: Not all providers implement the full CSC API. Some support only SCAL1, some have proprietary extensions, some are still on CSC v1.x. Request the provider's API documentation and test against their sandbox environment.
+5. **Authentication options**: SCAL2 requires per-signature authorization. Providers offer different mechanisms: SMS OTP, mobile app push, biometric (fingerprint/face), hardware token. Choose based on your users' capabilities.
+6. **Pricing model**: Per-signature pricing (typically 0.10-2.00 EUR per signature), per-certificate pricing (annual fee per signer), or volume-based tiers. Calculate your total cost based on expected signing volume.
+7. **SLA and availability**: For production signing, you need a provider with a published SLA. Remote signing is a synchronous operation in most workflows — if the provider is down, your users cannot sign.
+
+[WARNING]
+====
+Do not assume that all CSC API implementations are interchangeable.
+The CSC specification leaves room for provider-specific behavior in areas like:
+
+- OTP delivery mechanisms (some providers trigger OTP automatically, others require an explicit `/credentials/sendOTP` call)
+- SAD token format and lifetime
+- Batch signing limits (how many hashes can be signed with a single SAD)
+- Error response formats and error codes
+
+Always develop and test against the specific provider's sandbox before going to production.
+The CSC specification is a standard, but implementations have edges.
+====
+
+== Complete Integration Example
+
+The following example shows a complete remote signing flow — from PDF preparation through CSC API calls to final PDF assembly:
+
+[source,java]
+----
+/**
+ * Signs a PDF using a CSC-compliant remote signing service.
+ * Produces a PAdES-B-T compliant signature.
+ */
+public byte[] signPdfRemotely(byte[] pdfBytes, String cscBaseUrl,
+        String accessToken, String credentialId,
+        String tsaUrl) throws Exception {
+
+    // --- Phase 1: Prepare the PDF and CMS structure ---
+
+    // 1a. Get the signer's certificate from the CSC service
+    CscCredentialInfo credInfo = getCredentialInfo(
+            cscBaseUrl, accessToken, credentialId);
+    X509Certificate signerCert = credInfo.getCertificateChain().get(0);
+    List<X509Certificate> certChain = credInfo.getCertificateChain();
+
+    // 1b. Load the PDF and prepare the signature dictionary
+    PDDocument doc = Loader.loadPDF(pdfBytes);
+    PDSignature pdSignature = new PDSignature();
+    pdSignature.setFilter(PDSignature.FILTER_ADOBE_PPKLITE);
+    pdSignature.setSubFilter(
+            COSName.getPDFName("ETSI.CAdES.detached"));
+    pdSignature.setSignDate(Calendar.getInstance());
+
+    // 1c. Register our SignatureInterface
+    // (PDFBox calls this to get the CMS bytes)
+    RemoteSignatureInterface sigInterface =
+            new RemoteSignatureInterface(
+                    cscBaseUrl, accessToken, credentialId,
+                    signerCert, certChain, tsaUrl);
+
+    doc.addSignature(pdSignature, sigInterface);
+
+    // 1d. Save incrementally — this triggers sigInterface.sign()
+    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+    doc.saveIncremental(baos);
+    doc.close();
+
+    log.info("PDF signed remotely: resultSize={} bytes", baos.size());
+    return baos.toByteArray();
+}
+
+/**
+ * PDFBox SignatureInterface implementation for remote signing.
+ * Called by PDFBox during saveIncremental() with the byte range content.
+ */
+public class RemoteSignatureInterface
+        implements SignatureInterface {
+
+    private final String cscBaseUrl;
+    private final String accessToken;
+    private final String credentialId;
+    private final X509Certificate signerCert;
+    private final List<X509Certificate> certChain;
+    private final String tsaUrl;
+
+    // Constructor omitted for brevity
+
+    @Override
+    public byte[] sign(InputStream content) throws IOException {
+        try {
+            // 2a. Read the byte range content (the data to be signed)
+            byte[] contentBytes = content.readAllBytes();
+
+            // 2b. Build the CMS signed attributes
+            CMSSignedDataGenerator gen = new CMSSignedDataGenerator();
+
+            // Add certificates to the CMS
+            List<X509CertificateHolder> certHolders = new ArrayList<>();
+            for (X509Certificate cert : certChain) {
+                certHolders.add(new JcaX509CertificateHolder(cert));
+            }
+            gen.addCertificates(
+                    new CollectionStore<>(certHolders));
+
+            // 2c. Compute the message digest of the content
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] contentHash = md.digest(contentBytes);
+
+            // 2d. Build signed attributes manually
+            ASN1EncodableVector signedAttrs =
+                    new ASN1EncodableVector();
+
+            // content-type attribute
+            signedAttrs.add(new Attribute(
+                    CMSAttributes.contentType,
+                    new DERSet(CMSObjectIdentifiers.data)));
+
+            // message-digest attribute
+            signedAttrs.add(new Attribute(
+                    CMSAttributes.messageDigest,
+                    new DERSet(new DEROctetString(contentHash))));
+
+            // ESS-signing-certificate-v2 attribute
+            byte[] certHash = MessageDigest.getInstance("SHA-256")
+                    .digest(signerCert.getEncoded());
+            ESSCertIDv2 essCertId = new ESSCertIDv2(
+                    new AlgorithmIdentifier(
+                            NISTObjectIdentifiers.id_sha256),
+                    certHash);
+            SigningCertificateV2 sigCertV2 =
+                    new SigningCertificateV2(
+                            new ESSCertIDv2[]{essCertId});
+            signedAttrs.add(new Attribute(
+                    PKCSObjectIdentifiers
+                            .id_aa_signingCertificateV2,
+                    new DERSet(sigCertV2)));
+
+            // 2e. DER-encode the signed attributes
+            DERSet signedAttrSet = new DERSet(signedAttrs);
+            byte[] signedAttrBytes = signedAttrSet.getEncoded();
+
+            // 2f. Hash the signed attributes — THIS is what we
+            //     send to the remote signing server
+            byte[] signedAttrHash = MessageDigest
+                    .getInstance("SHA-256")
+                    .digest(signedAttrBytes);
+
+            // --- Phase 2: Remote signing via CSC API ---
+
+            // 3a. Authorize the credential (SCAL2)
+            String sad = authorizeCredential(
+                    cscBaseUrl, accessToken, credentialId, 1);
+
+            // 3b. Sign the hash remotely
+            List<byte[]> signatures = signHashes(
+                    cscBaseUrl, accessToken, credentialId, sad,
+                    List.of(signedAttrHash));
+            byte[] signatureValue = signatures.get(0);
+
+            // --- Phase 3: Assemble the CMS and add timestamp ---
+
+            // 4a. Build the complete CMS SignedData manually
+            //     (embedding the remote signature value)
+            byte[] cmsBytes = assembleCmsSignedData(
+                    signedAttrSet, signatureValue,
+                    certChain, signerCert);
+
+            // 4b. Request a timestamp (for PAdES-B-T)
+            if (tsaUrl != null) {
+                cmsBytes = addSignatureTimestamp(
+                        cmsBytes, signatureValue, tsaUrl);
+            }
+
+            return cmsBytes;
+
+        } catch (Exception e) {
+            throw new IOException("Remote signing failed", e);
+        }
+    }
+}
+----
+
+[CAUTION]
+====
+The code above is a simplified illustration of the remote signing flow.
+A production implementation must also handle:
+
+- **Error recovery**: What happens if the CSC API call fails after SAD authorization? The SAD may be consumed. You may need to re-authorize.
+- **Timeout handling**: Network calls to the CSC API and TSA can fail. Implement timeouts and retries.
+- **Content size estimation**: PDFBox's `addSignature` requires you to pre-estimate the size of the `/Contents` value. If you underestimate, the CMS will not fit. Set `SignatureOptions.setPreferredSignatureSize()` generously (e.g., 16384 bytes).
+- **Thread safety**: If multiple users sign concurrently, your CSC API client must handle concurrent requests correctly. Use separate HTTP connections per request.
+
+For production remote signing with {pdfbox-version}, consider using the EU DSS framework (Chapter 23), which provides a complete, tested implementation of the remote signing flow with CSC API support.
+====
+
+== Security Considerations
+
+=== Transport Security
+
+All communication with the CSC API must use TLS 1.2 or later.
+The access token is a bearer token — anyone who intercepts it can use it to sign.
+In production:
+
+- Pin the CSC API server's TLS certificate (or at least its root CA) to prevent man-in-the-middle attacks
+- Use short-lived access tokens (minutes, not hours)
+- Transmit tokens only in the `Authorization` header, never in query parameters or request bodies
+- Log all API calls for audit purposes, but never log access tokens or SAD values
+
+=== Hash Manipulation
+
+The remote signing server signs whatever hash you send it.
+It does not — and cannot — verify that the hash corresponds to any particular document.
+This means: if an attacker compromises the client application, they can send arbitrary hashes to the server and obtain valid signatures over arbitrary data.
+
+Mitigations:
+- **SCAL2 authorization**: The signer must actively authorize each signing operation, limiting the window for automated abuse
+- **Audit logging**: Every signing operation is logged on the server, creating a forensic trail
+- **Rate limiting**: Unusual signing patterns (hundreds of signatures per minute from a single user) should trigger alerts
+- **Document description in SAD**: Some CSC implementations allow including a document description in the authorization request, which the signer can verify before approving
+
+=== Key Compromise
+
+If an HSM is compromised, all keys stored in it are compromised.
+This is the catastrophic failure mode of remote signing — a single breach affects all users.
+
+HSM-level mitigations:
+- Physical security (data center access controls, tamper detection)
+- Multi-person key ceremony for HSM initialization
+- Regular firmware updates
+- Separate HSMs for different security levels (production vs. test)
+- Geographic redundancy with key replication
+
+Operational mitigations:
+- Certificate revocation within minutes of detection
+- Automatic alerts for anomalous signing patterns
+- Regular penetration testing of the signing infrastructure
+- Insurance against breach liability (some QTSPs carry specific cyber insurance)
+
+== Key Takeaways
+
+- **Remote signing** moves the private key from the signer's device to a server-side HSM operated by a QTSP — the signer authenticates remotely, the server signs
+- The **hash-signing model** preserves document confidentiality: only a 32-byte hash crosses the network, never the document content
+- The **CSC API v2.0** standardizes remote signing: OAuth 2.0 authentication, credential discovery, signature activation, hash signing
+- **SCAL1** provides session-level sole control (suitable for AdES); **SCAL2** provides per-signature authorization (required for QES)
+- The **SAD token** is the proof that the signer authorized a specific signing operation — it has limited lifetime and use count
+- **HSMs** store keys and perform cryptographic operations; **SAMs** enforce sole control and verify SAD tokens
+- PKCS#11 is the standard interface between the signing server and the HSM — vendor-specific libraries are the most common deployment issue
+- Major providers (Swisscom AIS, DigiCert/QuoVadis, InfoCert, Namirial, ZealID, D-Trust) all offer CSC-compliant APIs with varying degrees of completeness
+- **Always test against the specific provider's sandbox** — CSC API implementations have provider-specific behaviors
+- Many providers run **Ascertia ADSS** as their CSC platform — if you've tested one ADSS deployment, the behavior will be identical across all of them
+- **National eID integration** (SPID, BankID, SwissID) routes authentication through the national identity provider via OpenID Connect — not a simple username/password flow
+- The CSC `/info` endpoint enables **endpoint discovery** — it responds without authentication and reveals the provider's capabilities and supported methods
+- For production PDF signing via remote services, consider the EU DSS framework (Chapter 23), which provides tested CSC API integration

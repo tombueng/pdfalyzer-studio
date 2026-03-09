@@ -7,11 +7,14 @@ import java.security.KeyPairGenerator;
 import java.security.KeyStore;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
+import java.security.spec.ECGenParameterSpec;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 import org.bouncycastle.asn1.x500.X500Name;
 import org.bouncycastle.asn1.x500.X500NameBuilder;
@@ -19,9 +22,7 @@ import org.bouncycastle.asn1.x500.style.BCStyle;
 import org.bouncycastle.asn1.x509.BasicConstraints;
 import org.bouncycastle.asn1.x509.Extension;
 import org.bouncycastle.asn1.x509.KeyUsage;
-import org.bouncycastle.asn1.x509.SubjectKeyIdentifier;
 import org.bouncycastle.cert.X509CertificateHolder;
-import org.bouncycastle.cert.X509v3CertificateBuilder;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
 import org.bouncycastle.cert.jcajce.JcaX509ExtensionUtils;
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
@@ -44,12 +45,32 @@ public class SelfSignedCertService {
     private final SessionService sessionService;
     private final CertificateService certificateService;
 
+    private static final Map<Integer, String> EC_CURVE_NAMES = Map.of(
+            256, "secp256r1",
+            384, "secp384r1",
+            521, "secp521r1"
+    );
+
+    private static final Set<Integer> VALID_RSA_SIZES = Set.of(2048, 3072, 4096, 8192);
+    private static final Set<Integer> VALID_EC_SIZES = Set.of(256, 384, 521);
+
+    private static final Set<String> VALID_RSA_SIG_ALGOS = Set.of(
+            "SHA256withRSA", "SHA384withRSA", "SHA512withRSA",
+            "SHA256withRSAandMGF1", "SHA384withRSAandMGF1", "SHA512withRSAandMGF1"
+    );
+
+    private static final Set<String> VALID_EC_SIG_ALGOS = Set.of(
+            "SHA256withECDSA", "SHA384withECDSA", "SHA512withECDSA"
+    );
+
+
     public KeyMaterialUploadResult generateAndStore(String sessionId, SelfSignedCertRequest request) {
         try {
             PdfSession session = sessionService.getSession(sessionId);
             KeyPair keyPair = generateKeyPair(request);
+            String sigAlgo = resolveSignatureAlgorithm(request, keyPair);
             X500Name subject = buildSubject(request);
-            X509Certificate cert = buildCertificate(keyPair, subject, request.getValidityDays());
+            X509Certificate cert = buildCertificate(keyPair, subject, request.getValidityDays(), sigAlgo);
 
             String keyId = java.util.UUID.randomUUID().toString();
             List<X509Certificate> chain = new ArrayList<>();
@@ -65,7 +86,7 @@ public class SelfSignedCertService {
                     .build();
 
             session.getSigningKeyMaterials().put(keyId, material);
-            log.info("Generated self-signed cert {} for session {}: {}", keyId, sessionId, subject);
+            log.info("Generated self-signed cert {} for session {}: {} [{}]", keyId, sessionId, subject, sigAlgo);
             return certificateService.buildResult(material);
         } catch (Exception e) {
             throw new IllegalArgumentException("Failed to generate self-signed certificate: " + e.getMessage(), e);
@@ -98,18 +119,52 @@ public class SelfSignedCertService {
         String algo = request.getKeyAlgorithm() != null ? request.getKeyAlgorithm().toUpperCase() : "RSA";
         int size = request.getKeySize() > 0 ? request.getKeySize() : 2048;
 
-        if ("EC".equals(algo)) {
-            if (size <= 0) size = 256;
-            KeyPairGenerator kpg = KeyPairGenerator.getInstance("EC", "BC");
-            kpg.initialize(size, new SecureRandom());
-            return kpg.generateKeyPair();
+        switch (algo) {
+            case "EC" -> {
+                if (!VALID_EC_SIZES.contains(size)) size = 256;
+                String curveName = EC_CURVE_NAMES.get(size);
+                KeyPairGenerator kpg = KeyPairGenerator.getInstance("EC", "BC");
+                kpg.initialize(new ECGenParameterSpec(curveName), new SecureRandom());
+                return kpg.generateKeyPair();
+            }
+            case "ED25519" -> {
+                KeyPairGenerator kpg = KeyPairGenerator.getInstance("Ed25519", "BC");
+                return kpg.generateKeyPair();
+            }
+            case "ED448" -> {
+                KeyPairGenerator kpg = KeyPairGenerator.getInstance("Ed448", "BC");
+                return kpg.generateKeyPair();
+            }
+            default -> {
+                if (!VALID_RSA_SIZES.contains(size)) size = 2048;
+                KeyPairGenerator kpg = KeyPairGenerator.getInstance("RSA", "BC");
+                kpg.initialize(size, new SecureRandom());
+                return kpg.generateKeyPair();
+            }
+        }
+    }
+
+    private String resolveSignatureAlgorithm(SelfSignedCertRequest request, KeyPair keyPair) {
+        String requested = request.getSignatureAlgorithm();
+        String keyAlgo = keyPair.getPrivate().getAlgorithm();
+
+        if ("Ed25519".equalsIgnoreCase(keyAlgo)) return "Ed25519";
+        if ("Ed448".equalsIgnoreCase(keyAlgo)) return "Ed448";
+
+        if ("EC".equalsIgnoreCase(keyAlgo) || "ECDSA".equalsIgnoreCase(keyAlgo)) {
+            if (requested != null && VALID_EC_SIG_ALGOS.contains(requested)) return requested;
+            int size = request.getKeySize() > 0 ? request.getKeySize() : 256;
+            if (size >= 521) return "SHA512withECDSA";
+            if (size >= 384) return "SHA384withECDSA";
+            return "SHA256withECDSA";
         }
 
-        // Default: RSA
-        if (size < 2048) size = 2048;
-        KeyPairGenerator kpg = KeyPairGenerator.getInstance("RSA", "BC");
-        kpg.initialize(size, new SecureRandom());
-        return kpg.generateKeyPair();
+        // RSA
+        if (requested != null && VALID_RSA_SIG_ALGOS.contains(requested)) return requested;
+        int rsaSize = request.getKeySize() > 0 ? request.getKeySize() : 2048;
+        if (rsaSize >= 4096) return "SHA512withRSA";
+        if (rsaSize >= 3072) return "SHA384withRSA";
+        return "SHA256withRSA";
     }
 
     private X500Name buildSubject(SelfSignedCertRequest request) {
@@ -129,19 +184,16 @@ public class SelfSignedCertService {
         return builder.build();
     }
 
-    private X509Certificate buildCertificate(KeyPair keyPair, X500Name subject, int validityDays) throws Exception {
+    private X509Certificate buildCertificate(KeyPair keyPair, X500Name subject, int validityDays, String sigAlgo) throws Exception {
         if (validityDays <= 0) validityDays = 365;
         Instant now = Instant.now();
         Date notBefore = Date.from(now);
         Date notAfter = Date.from(now.plus(validityDays, ChronoUnit.DAYS));
         BigInteger serial = new BigInteger(128, new SecureRandom());
 
-        String sigAlgo = keyPair.getPrivate().getAlgorithm().equals("EC") ? "SHA256withECDSA" : "SHA256withRSA";
-
         JcaX509v3CertificateBuilder certBuilder = new JcaX509v3CertificateBuilder(
                 subject, serial, notBefore, notAfter, subject, keyPair.getPublic());
 
-        // Extensions
         JcaX509ExtensionUtils extUtils = new JcaX509ExtensionUtils();
         certBuilder.addExtension(Extension.subjectKeyIdentifier, false,
                 extUtils.createSubjectKeyIdentifier(keyPair.getPublic()));

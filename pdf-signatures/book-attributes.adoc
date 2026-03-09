@@ -1,0 +1,36 @@
+// Book-wide attributes — shared across all chapters
+:author: PDFalyzer Studio Contributors
+:revdate: 2026-03-06
+:revnumber: 0.1.0-SNAPSHOT
+:lang: en
+
+// Standards references (use as {iso32000-2} etc.)
+:iso32000-2: ISO 32000-2:2020
+:iso32000-1: ISO 32000-1:2008
+:etsi-pades: ETSI EN 319 142-1 V1.1.1 (2016-04)
+:etsi-cades: ETSI EN 319 122-1 V1.1.1 (2016-04)
+:etsi-tsl: ETSI TS 119 612 V2.1.1 (2015-07)
+:rfc5652: RFC 5652 — Cryptographic Message Syntax (CMS)
+:rfc5280: RFC 5280 — Internet X.509 PKI Certificate and CRL Profile
+:rfc3161: RFC 3161 — Internet X.509 PKI Time-Stamp Protocol (TSP)
+:rfc6960: RFC 6960 — Online Certificate Status Protocol (OCSP)
+:eidas-reg: Regulation (EU) No 910/2014 (eIDAS)
+:eidas2-reg: Regulation (EU) 2024/1183 (eIDAS 2.0)
+
+// Software versions used in examples
+:pdfbox-version: 3.0.0
+:bc-version: 1.80
+:java-version: 21
+
+// Formatting
+:experimental:
+:icons: font
+:source-highlighter: rouge
+:rouge-style: monokai
+:toc: left
+:toclevels: 3
+:sectnums:
+:sectnumlevels: 4
+:imagesdir: diagrams
+:sourcedir: src/main/java
+:testdir: src/test/java

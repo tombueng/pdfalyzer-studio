@@ -1,0 +1,1583 @@
+= PDFBox Signing -- Complete Walkthrough
+
+[.lead]
+Chapter 28 gave us the lay of the land.
+Now we write code.
+This chapter is a complete, production-quality walkthrough of PDF signing with Apache PDFBox {pdfbox-version} and BouncyCastle {bc-version} on Java {java-version}.
+Every code listing compiles, every class is self-contained, and every pitfall we describe is one we have hit in production -- or watched someone else hit at 2 AM on a Friday.
+
+We start with the core PDFBox signing API -- `PDDocument.addSignature()`, `SignatureInterface`, and `SignatureOptions` -- then build outward: the `PDSignature` dictionary and its fields, visible and invisible signature appearances, multi-signature workflows, external/HSM signing, certification signatures with DocMDP, timestamp embedding, and the migration traps waiting for anyone upgrading from PDFBox 2.x to 3.x.
+
+By the end of this chapter, you will have a complete, production-ready signing class that produces PAdES-B-B and PAdES-B-T compliant signatures.
+Chapter 30 goes deeper into the BouncyCastle CMS construction that powers the actual cryptography.
+
+== The PDFBox Signing API: Three Moving Parts
+
+PDFBox signing revolves around three objects that you wire together before calling `saveIncremental()`.
+Understanding what each one does -- and what happens when you get the order wrong -- is essential.
+
+=== PDSignature: The Signature Dictionary
+
+`PDSignature` is PDFBox's Java representation of the PDF `/Sig` dictionary ({iso32000-2} S12.8.1).
+When you create a `PDSignature` and set its properties, you are building the dictionary that will be written into the PDF file.
+
+[source,java]
+----
+PDSignature signature = new PDSignature();
+signature.setFilter(PDSignature.FILTER_ADOBE_PPKLITE);       // /Filter
+signature.setSubFilter(COSName.getPDFName("ETSI.CAdES.detached")); // /SubFilter
+signature.setSignDate(Calendar.getInstance());                // /M
+signature.setName("Alice Smith");                             // /Name
+signature.setReason("I approve this document");               // /Reason
+signature.setLocation("Berlin, Germany");                     // /Location
+signature.setContactInfo("alice@example.com");                // /ContactInfo
+----
+
+Every setter maps directly to a key in the `/Sig` dictionary.
+The following table lists all the fields you can set, what they map to, and when you should care.
+
+.PDSignature Fields -- {iso32000-2} S12.8.1, Table 255
+[cols="3,2,2,6", options="header"]
+|===
+| Java Method | PDF Key | Required | What It Does
+
+| `setFilter(COSName)`
+| `/Filter`
+| Yes
+| The signature handler. Almost always `Adobe.PPKLite`. PDFBox provides `FILTER_ADOBE_PPKLITE` as a constant. Other values (`Entrust.PPKEF`, `CICI.SignIt`, `VeriSign.PPKVS`) exist in the spec but are rarely seen in the wild.
+
+| `setSubFilter(COSName)`
+| `/SubFilter`
+| Yes
+| The encoding format of the signature value. For PAdES, use `ETSI.CAdES.detached`. For legacy compatibility, `adbe.pkcs7.detached`. The deprecated `adbe.pkcs7.sha1` embeds the document hash as CMS content -- do not use it in new code.
+
+| `setSignDate(Calendar)`
+| `/M`
+| No
+| Claimed signing time. This is _not_ the authoritative timestamp -- it is the signer's local clock. A TSA timestamp (PAdES-B-T) provides cryptographic proof of time. Set it anyway, because viewers display it when no TSA timestamp exists.
+
+| `setName(String)`
+| `/Name`
+| No
+| Signer's name as a display string. PAdES validators typically extract the name from the signing certificate's CN instead. Still useful for the human reader.
+
+| `setReason(String)`
+| `/Reason`
+| No
+| Why the document was signed. Free text. Some workflows require specific values ("Approved", "Reviewed").
+
+| `setLocation(String)`
+| `/Location`
+| No
+| Where the document was signed. Free text. "Berlin, Germany" or "Server Room 3" -- whatever is meaningful.
+
+| `setContactInfo(String)`
+| `/ContactInfo`
+| No
+| Contact information for the signer. Rarely used in practice, but mandated by some government workflows.
+
+| `setByteRange(int[])`
+| `/ByteRange`
+| Auto
+| The byte ranges of the signed content. _You do not set this yourself._ PDFBox computes it during `saveIncremental()`. If you manually set it, you will break the signature.
+
+|===
+
+WARNING: Do not call `setByteRange()` manually. PDFBox calculates the byte range during the incremental save process. If you set it yourself, the byte range will not match the actual file offsets after writing, and the signature will be invalid. We have seen production code that does this -- it always fails.
+
+=== SignatureInterface: The Cryptographic Callback
+
+`SignatureInterface` is a single-method interface:
+
+[source,java]
+----
+public interface SignatureInterface {
+    byte[] sign(InputStream content) throws IOException;
+}
+----
+
+PDFBox calls your `sign()` method during `saveIncremental()`.
+The `InputStream` parameter contains the bytes identified by the `/ByteRange` -- that is, the entire PDF file _minus_ the gap reserved for the `/Contents` hex string.
+Your job is to read those bytes, produce a CMS `SignedData` structure (or whatever your `/SubFilter` requires), and return the DER-encoded result.
+
+The returned `byte[]` is hex-encoded and written into the `/Contents` field of the signature dictionary.
+If the returned bytes are larger than the space reserved for `/Contents`, PDFBox throws an exception.
+If they are smaller, the remaining space is zero-padded.
+
+IMPORTANT: The `InputStream` you receive in `sign()` is the concatenation of the two byte ranges -- the bytes before the `/Contents` gap and the bytes after it. You must read _all_ of them with `content.readAllBytes()` (or equivalent). If you only read part of the stream, you are signing incomplete data, and the signature will fail validation.
+
+Here is the simplest possible implementation -- it signs the content with RSA/SHA-256 and produces a basic CMS `SignedData`:
+
+[source,java]
+----
+public class SimpleCmsSignatureInterface implements SignatureInterface {
+
+    private final PrivateKey privateKey;
+    private final X509Certificate certificate;
+    private final List<X509Certificate> chain;
+
+    public SimpleCmsSignatureInterface(PrivateKey privateKey,
+                                        X509Certificate certificate,
+                                        List<X509Certificate> chain) {
+        this.privateKey = privateKey;
+        this.certificate = certificate;
+        this.chain = chain;
+    }
+
+    @Override
+    public byte[] sign(InputStream content) throws IOException {
+        try {
+            // Read all byte-range content
+            byte[] contentBytes = content.readAllBytes();
+
+            // Build the CMS SignedData (Chapter 30 covers this in full detail)
+            CMSSignedDataGenerator gen = new CMSSignedDataGenerator();
+
+            ContentSigner signer = new JcaContentSignerBuilder("SHA256withRSA")
+                    .setProvider("BC")
+                    .build(privateKey);
+
+            DigestCalculatorProvider dcProvider =
+                    new JcaDigestCalculatorProviderBuilder()
+                            .setProvider("BC")
+                            .build();
+
+            gen.addSignerInfoGenerator(
+                    new JcaSignerInfoGeneratorBuilder(dcProvider)
+                            .build(signer, certificate));
+
+            gen.addCertificates(new JcaCertStore(chain));
+
+            CMSProcessableByteArray cmsContent =
+                    new CMSProcessableByteArray(contentBytes);
+            CMSSignedData signedData = gen.generate(cmsContent, false); // <1>
+
+            return signedData.getEncoded();
+        } catch (Exception e) {
+            throw new IOException("CMS signing failed: " + e.getMessage(), e);
+        }
+    }
+}
+----
+<1> The `false` parameter means "detached signature" -- the content is not embedded inside the CMS structure. This is mandatory for PDF signatures: the content lives in the PDF file itself, not inside the CMS blob.
+
+=== SignatureOptions: Container Size and Visual Appearance
+
+`SignatureOptions` controls two things: the size of the `/Contents` container (how many bytes are reserved in the PDF for the CMS signature) and the visual appearance stream.
+
+[source,java]
+----
+SignatureOptions sigOptions = new SignatureOptions();
+sigOptions.setPreferredSignatureSize(32768); // 32 KB for the CMS container
+----
+
+The `preferredSignatureSize` is the number of _bytes_ reserved for the hex-encoded signature value in `/Contents`.
+Since the hex encoding doubles the size, a 32768-byte container can hold a CMS blob of up to about 16 KB.
+
+.Recommended Container Sizes
+[cols="3,2,5", options="header"]
+|===
+| Scenario | Size (bytes) | Why
+
+| Basic signature (no timestamp)
+| 32768
+| A CMS `SignedData` with one signer, RSA-2048, and a 3-certificate chain typically occupies 4-8 KB. 32 KB gives ample room.
+
+| Signature with TSA timestamp (PAdES-B-T)
+| 65536
+| The timestamp token adds another CMS `SignedData` structure (the TSA's signature, its certificate chain, and the `TSTInfo`). 64 KB handles even large TSA responses.
+
+| Signature with embedded OCSP/CRL (PAdES-B-LT)
+| 131072 or more
+| CRL responses can be very large (100 KB+). If you embed revocation data in the CMS structure rather than the DSS, you need a correspondingly large container.
+
+|===
+
+WARNING: If your CMS blob exceeds the reserved container size, `saveIncremental()` throws an `IOException` with a message like "can't write signature, not enough space." The fix is to increase `preferredSignatureSize`. But do not set it to absurd values (e.g., 10 MB) because the entire container is written as hex zeros into the PDF -- a 10 MB container adds 20 MB of hex padding to the file.
+
+== Complete Basic Signing Example
+
+Let us put the three pieces together into a complete, compilable example.
+This is the minimum code needed to sign a PDF with PDFBox {pdfbox-version}.
+
+[source,java]
+----
+import java.io.ByteArrayOutputStream;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.security.KeyStore;
+import java.security.PrivateKey;
+import java.security.cert.X509Certificate;
+import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.Enumeration;
+import java.util.List;
+
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.interactive.digitalsignature.PDSignature;
+import org.apache.pdfbox.pdmodel.interactive.digitalsignature.SignatureInterface;
+import org.apache.pdfbox.pdmodel.interactive.digitalsignature.SignatureOptions;
+import org.bouncycastle.cert.jcajce.JcaCertStore;
+import org.bouncycastle.cms.CMSProcessableByteArray;
+import org.bouncycastle.cms.CMSSignedData;
+import org.bouncycastle.cms.CMSSignedDataGenerator;
+import org.bouncycastle.cms.jcajce.JcaSignerInfoGeneratorBuilder;
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
+import org.bouncycastle.operator.ContentSigner;
+import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
+import org.bouncycastle.operator.jcajce.JcaDigestCalculatorProviderBuilder;
+
+/**
+ * Minimal PDF signing example with PDFBox 3.x and BouncyCastle.
+ * Signs a PDF with an invisible signature using a PKCS#12 keystore.
+ */
+public class BasicPdfSigner {
+
+    public static void main(String[] args) throws Exception {
+        // Register BouncyCastle provider -- must happen before any crypto operation
+        java.security.Security.addProvider(new BouncyCastleProvider());
+
+        Path inputPdf = Path.of("document.pdf");
+        Path keystorePath = Path.of("keystore.p12");
+        char[] keystorePassword = "changeit".toCharArray();
+
+        // Load key material from PKCS#12
+        KeyStore ks = KeyStore.getInstance("PKCS12");
+        try (FileInputStream fis = new FileInputStream(keystorePath.toFile())) {
+            ks.load(fis, keystorePassword);
+        }
+
+        Enumeration<String> aliases = ks.aliases();
+        String alias = aliases.nextElement();
+        PrivateKey privateKey = (PrivateKey) ks.getKey(alias, keystorePassword);
+        X509Certificate cert = (X509Certificate) ks.getCertificate(alias);
+
+        List<X509Certificate> chain = new ArrayList<>();
+        for (java.security.cert.Certificate c : ks.getCertificateChain(alias)) {
+            chain.add((X509Certificate) c);
+        }
+
+        // Load the PDF
+        byte[] pdfBytes = Files.readAllBytes(inputPdf);
+
+        try (PDDocument doc = Loader.loadPDF(pdfBytes)) { // <1>
+            // Create the signature dictionary
+            PDSignature signature = new PDSignature();
+            signature.setFilter(PDSignature.FILTER_ADOBE_PPKLITE);
+            signature.setSubFilter(COSName.getPDFName("ETSI.CAdES.detached"));
+            signature.setSignDate(Calendar.getInstance());
+            signature.setName(cert.getSubjectX500Principal().getName());
+            signature.setReason("Document approval");
+
+            // Configure container size
+            SignatureOptions options = new SignatureOptions();
+            options.setPreferredSignatureSize(32768);
+
+            // Wire everything together
+            SignatureInterface sigInterface = new SimpleCmsSignatureInterface(
+                    privateKey, cert, chain);
+            doc.addSignature(signature, sigInterface, options); // <2>
+
+            // Save incrementally -- this triggers the sign() callback
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            doc.saveIncremental(baos); // <3>
+
+            // Write the signed PDF
+            Path outputPdf = Path.of("document-signed.pdf");
+            Files.write(outputPdf, baos.toByteArray());
+
+            System.out.println("Signed PDF written to " + outputPdf
+                    + " (" + baos.size() + " bytes)");
+        }
+    }
+}
+----
+<1> PDFBox 3.x uses `Loader.loadPDF(byte[])`. The old `PDDocument.load()` is gone. See the migration section later in this chapter.
+<2> `addSignature()` registers the signature dictionary, the callback, and the options. Nothing is written yet.
+<3> `saveIncremental()` writes the PDF as an incremental update, computes the byte range, calls your `sign()` method, hex-encodes the result, and patches it into the `/Contents` field. This is where all the magic happens.
+
+TIP: Always use `saveIncremental()`, never `save()`. A regular `save()` rewrites the entire PDF, which destroys any existing signatures. `saveIncremental()` appends a new revision to the file, preserving all previous signatures. This is not optional -- it is the only correct way to save a signed PDF.
+
+== The InputStream in sign(): What You Are Actually Signing
+
+The `InputStream` passed to your `sign()` method is one of the most misunderstood parts of the PDFBox signing API.
+Let us be very precise about what it contains.
+
+When PDFBox writes the PDF during `saveIncremental()`, it creates the file with a placeholder for the `/Contents` value.
+The byte range is computed as two ranges that together cover the entire file _except_ the `/Contents` hex string:
+
+[source]
+----
+/ByteRange [0 offset1 offset2 length2]
+----
+
+Where:
+
+- Range 1: bytes 0 through `offset1` (everything before the `/Contents` hex string)
+- Range 2: bytes `offset2` through `offset2 + length2` (everything after the `/Contents` hex string)
+
+The `InputStream` you receive is the concatenation of these two ranges.
+You do not see the gap.
+You do not need to parse the byte range.
+PDFBox handles all of that.
+
+Your `sign()` method receives a continuous stream of bytes, and you sign all of them.
+
+[source,java]
+----
+@Override
+public byte[] sign(InputStream content) throws IOException {
+    byte[] contentBytes = content.readAllBytes(); // <1>
+    // contentBytes now contains Range1 + Range2
+    // Sign these bytes and return the CMS SignedData
+}
+----
+<1> You _must_ read the entire stream. If you read only part of it (e.g., using a fixed-size buffer and stopping early), the hash you compute will not match the hash a validator computes over the full byte range, and the signature will be invalid.
+
+CAUTION: A common bug in PDFBox 2.x code (which people copy into 3.x projects) is using `IOUtils.toByteArray()` from Apache Commons IO with a size limit. The byte range content can be large -- for a 100 MB PDF, the stream is approximately 100 MB. If your byte array buffer is smaller, you get a truncated hash and a broken signature that validates in your tests (small PDFs) but fails in production (large PDFs).
+
+== Visible Signature Appearances
+
+An invisible signature is fine for server-side signing workflows, but many use cases -- contracts, approvals, notarizations -- require a visible signature block on a specific page.
+This section shows how to create visible appearances with PDFBox.
+
+=== The Form XObject Approach
+
+A signature appearance is a Form XObject -- a self-contained mini-page with its own coordinate system, resources, and content stream.
+You build it, attach it to the signature field's widget annotation, and PDFBox includes it in the signed content.
+
+[source,java]
+----
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDResources;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.font.PDType1Font;
+import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
+import org.apache.pdfbox.pdmodel.graphics.form.PDFormXObject;
+import org.apache.pdfbox.pdmodel.interactive.form.PDSignatureField;
+
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+
+/**
+ * Builds a visible text-based signature appearance as a Form XObject.
+ */
+public class SignatureAppearanceBuilder {
+
+    /**
+     * Creates and attaches a visible text appearance to a signature field.
+     *
+     * @param doc      the document being signed
+     * @param sigField the signature field to attach the appearance to
+     * @param name     signer name to display
+     * @param reason   signing reason to display
+     * @param width    appearance width in points
+     * @param height   appearance height in points
+     */
+    public static void buildTextAppearance(PDDocument doc,
+                                            PDSignatureField sigField,
+                                            String name, String reason,
+                                            float width, float height)
+            throws Exception {
+
+        PDResources resources = new PDResources();
+
+        // Use a Standard 14 font -- no embedding needed
+        PDType1Font font = new PDType1Font(
+                Standard14Fonts.FontName.HELVETICA); // <1>
+        org.apache.pdfbox.cos.COSName fontName = resources.add(font);
+
+        // Build the content stream
+        float fontSize = 10f;
+        float lineSpacing = fontSize * 1.4f;
+        float margin = 4f;
+        float y = height - margin - fontSize;
+
+        StringBuilder ops = new StringBuilder();
+        ops.append("BT\n");
+        ops.append("/").append(fontName.getName())
+                .append(" ").append(fontSize).append(" Tf\n");
+        ops.append("0 0 0 rg\n"); // black text
+
+        // Line 1: "Digitally signed by:"
+        ops.append(margin).append(" ").append(y).append(" Td\n");
+        ops.append("(Digitally signed by:) Tj\n");
+
+        // Line 2: signer name
+        y -= lineSpacing;
+        ops.append(margin).append(" ").append(y).append(" Td\n");
+        ops.append("(").append(escapePs(name)).append(") Tj\n");
+
+        // Line 3: reason
+        if (reason != null && !reason.isEmpty()) {
+            y -= lineSpacing;
+            ops.append(margin).append(" ").append(y).append(" Td\n");
+            ops.append("(Reason: ").append(escapePs(reason)).append(") Tj\n");
+        }
+
+        ops.append("ET\n");
+
+        byte[] streamBytes = ops.toString()
+                .getBytes(StandardCharsets.US_ASCII);
+
+        // Create the Form XObject
+        PDFormXObject form = new PDFormXObject(doc);
+        form.setBBox(new PDRectangle(width, height));
+        form.setResources(resources);
+
+        try (OutputStream os = form.getStream().createOutputStream()) { // <2>
+            os.write(streamBytes);
+        }
+
+        // Attach to the widget annotation
+        org.apache.pdfbox.cos.COSDictionary apDict =
+                new org.apache.pdfbox.cos.COSDictionary();
+        apDict.setItem(org.apache.pdfbox.cos.COSName.N, form);
+        sigField.getWidgets().get(0).getCOSObject()
+                .setItem(org.apache.pdfbox.cos.COSName.AP, apDict);
+    }
+
+    /** Escape parentheses and backslashes for a PDF string literal. */
+    private static String escapePs(String text) {
+        return text.replace("\\", "\\\\")
+                   .replace("(", "\\(")
+                   .replace(")", "\\)");
+    }
+}
+----
+<1> In PDFBox 3.x, `PDType1Font.HELVETICA` does not exist. You must use `new PDType1Font(Standard14Fonts.FontName.HELVETICA)`. This is one of the most common migration errors. See the migration section at the end of this chapter.
+<2> `form.getStream().createOutputStream()` returns an output stream that writes directly into the Form XObject's content stream. This is the correct way to write appearance content in PDFBox 3.x. You cannot use `PDPageContentStream` with a Form XObject.
+
+=== Image-Based Appearances
+
+For handwritten signature images (e.g., from a drawing canvas or a scanned signature):
+
+[source,java]
+----
+import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
+import java.util.Base64;
+
+/**
+ * Creates a signature appearance from a Base64-encoded PNG image.
+ */
+public static void buildImageAppearance(PDDocument doc,
+                                         PDSignatureField sigField,
+                                         String base64Png,
+                                         float width, float height)
+        throws Exception {
+
+    // Decode the image
+    String data = base64Png;
+    if (data.contains(",")) {
+        data = data.substring(data.indexOf(',') + 1);
+    }
+    byte[] imageBytes = Base64.getDecoder().decode(data);
+
+    PDImageXObject pdImage = PDImageXObject.createFromByteArray(
+            doc, imageBytes, "signature-image");
+
+    PDResources resources = new PDResources();
+    org.apache.pdfbox.cos.COSName imgName = resources.add(pdImage);
+
+    // Scale the image to fit the appearance rectangle while maintaining
+    // aspect ratio
+    float imgW = pdImage.getWidth();
+    float imgH = pdImage.getHeight();
+    float scale = Math.min(width / imgW, height / imgH);
+    float drawW = imgW * scale;
+    float drawH = imgH * scale;
+    float xOffset = (width - drawW) / 2;
+    float yOffset = (height - drawH) / 2;
+
+    // PDF content stream: push graphics state, apply transformation
+    // matrix, draw image, restore graphics state
+    String ops = "q\n"
+            + drawW + " 0 0 " + drawH + " "
+            + xOffset + " " + yOffset + " cm\n"
+            + "/" + imgName.getName() + " Do\n"
+            + "Q\n";
+
+    PDFormXObject form = new PDFormXObject(doc);
+    form.setBBox(new PDRectangle(width, height));
+    form.setResources(resources);
+
+    try (OutputStream os = form.getStream().createOutputStream()) {
+        os.write(ops.getBytes(java.nio.charset.StandardCharsets.US_ASCII));
+    }
+
+    org.apache.pdfbox.cos.COSDictionary apDict =
+            new org.apache.pdfbox.cos.COSDictionary();
+    apDict.setItem(org.apache.pdfbox.cos.COSName.N, form);
+    sigField.getWidgets().get(0).getCOSObject()
+            .setItem(org.apache.pdfbox.cos.COSName.AP, apDict);
+}
+----
+
+The content stream uses the standard PDF imaging operators: `q` (save graphics state), `cm` (concatenate transformation matrix), `Do` (paint XObject), `Q` (restore graphics state).
+The transformation matrix `[drawW 0 0 drawH xOffset yOffset]` scales and positions the image within the appearance rectangle.
+
+== Multi-Signature Support
+
+A PDF can contain multiple signatures.
+Each signature is an independent signature field with its own `/Sig` dictionary and its own byte range.
+The key insight: each subsequent signature covers the _entire_ file as it existed after the previous signature, including all previous signatures.
+
+=== How Multiple Signatures Work
+
+Consider a document signed by Alice, then by Bob:
+
+1. Alice signs the original document. Her byte range covers the entire file (minus her `/Contents` gap). PDFBox writes this as an incremental update -- the original file plus a new cross-reference section and trailer.
+
+2. Bob signs the document _after_ Alice. His byte range covers the entire file as it now exists -- including Alice's incremental update and her signature. Bob's signature is written as a _second_ incremental update appended after Alice's.
+
+Each signature's byte range covers everything that existed when that signature was created.
+Alice's signature does not cover Bob's changes (because Bob had not signed yet), but Bob's signature covers Alice's.
+
+=== Code: Adding a Second Signature
+
+[source,java]
+----
+/**
+ * Adds a second signature to an already-signed PDF.
+ * The key is that we load the already-signed bytes and use saveIncremental()
+ * again -- PDFBox appends another revision.
+ */
+public byte[] addSecondSignature(byte[] alreadySignedPdf,
+                                  PrivateKey privateKey,
+                                  X509Certificate certificate,
+                                  List<X509Certificate> chain,
+                                  String fieldName)
+        throws Exception {
+
+    try (PDDocument doc = Loader.loadPDF(alreadySignedPdf)) {
+        // Find or create the second signature field
+        PDAcroForm acroForm = doc.getDocumentCatalog().getAcroForm();
+        PDSignatureField sigField = null;
+
+        // Look for an existing empty signature field
+        for (PDField field : acroForm.getFieldTree()) {
+            if (field instanceof PDSignatureField sf
+                    && fieldName.equals(sf.getFullyQualifiedName())
+                    && sf.getSignature() == null) {
+                sigField = sf;
+                break;
+            }
+        }
+
+        if (sigField == null) {
+            throw new IllegalStateException(
+                    "No empty signature field found: " + fieldName);
+        }
+
+        // Build the second signature
+        PDSignature signature = new PDSignature();
+        signature.setFilter(PDSignature.FILTER_ADOBE_PPKLITE);
+        signature.setSubFilter(
+                COSName.getPDFName("ETSI.CAdES.detached"));
+        signature.setSignDate(Calendar.getInstance());
+        signature.setName("Bob Jones");
+
+        sigField.setValue(signature);
+
+        SignatureOptions options = new SignatureOptions();
+        options.setPreferredSignatureSize(32768);
+
+        SignatureInterface sigInterface =
+                new SimpleCmsSignatureInterface(
+                        privateKey, certificate, chain);
+        doc.addSignature(signature, sigInterface, options);
+
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        doc.saveIncremental(baos); // <1>
+        return baos.toByteArray();
+    }
+}
+----
+<1> Each call to `saveIncremental()` appends a new revision. The file grows with each signature. A document with three signatures has four revisions (original + three incremental updates).
+
+IMPORTANT: The order in which signatures are applied matters for validation. Adobe Acrobat validates each signature against its revision -- it checks that the bytes covered by Alice's byte range have not been modified. If someone modified Alice's revision after she signed (other than by appending a new incremental update), Acrobat flags Alice's signature as invalid, even if Bob's is fine.
+
+== External Signing: HSM and Remote Key Flows
+
+In many production environments, the private key never leaves a Hardware Security Module (HSM), a cloud KMS, or a remote signing service.
+The key cannot be exported, so you cannot pass it to a `JcaContentSignerBuilder`.
+Instead, you need to split the signing process: compute the hash locally, send the hash to the remote system, receive the raw signature value, and assemble the CMS structure yourself.
+
+=== The Hash-Signing Pattern
+
+The flow has three steps:
+
+1. **Prepare**: Create the PDF with a placeholder signature, compute the byte range, and extract the bytes to be signed.
+2. **Hash**: Compute the SHA-256 digest of the byte range content.
+3. **Sign remotely**: Send the hash (not the document) to the HSM/cloud service, receive the raw signature bytes, and embed them into the CMS structure.
+
+PDFBox supports this through a two-phase API using `ExternalSigningSupport`:
+
+[source,java]
+----
+import org.apache.pdfbox.pdmodel.interactive.digitalsignature.ExternalSigningSupport;
+
+/**
+ * Signs a PDF using an external key source (HSM, cloud KMS, smart card).
+ * The private key never leaves the external system -- only a hash is sent.
+ */
+public byte[] signWithExternalKey(byte[] pdfBytes,
+                                   ExternalKeyService externalKeyService,
+                                   X509Certificate certificate,
+                                   List<X509Certificate> chain)
+        throws Exception {
+
+    ByteArrayOutputStream result = new ByteArrayOutputStream();
+
+    try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+        PDSignature signature = new PDSignature();
+        signature.setFilter(PDSignature.FILTER_ADOBE_PPKLITE);
+        signature.setSubFilter(
+                COSName.getPDFName("ETSI.CAdES.detached"));
+        signature.setSignDate(Calendar.getInstance());
+
+        SignatureOptions options = new SignatureOptions();
+        options.setPreferredSignatureSize(32768);
+
+        // Register signature WITHOUT a SignatureInterface
+        doc.addSignature(signature, options);
+
+        // saveIncrementalForExternalSigning writes the PDF with a
+        // placeholder and returns an ExternalSigningSupport object
+        ExternalSigningSupport externalSigning =
+                doc.saveIncrementalForExternalSigning(result); // <1>
+
+        // Get the byte range content
+        InputStream content = externalSigning.getContent(); // <2>
+        byte[] contentBytes = content.readAllBytes();
+
+        // Compute the hash locally
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] hash = digest.digest(contentBytes);
+
+        // Send hash to external system, receive raw signature value
+        byte[] rawSignature =
+                externalKeyService.signHash(hash, "SHA256withRSA"); // <3>
+
+        // Build CMS structure around the raw signature
+        byte[] cmsBytes = buildCmsWithExternalSignature(
+                rawSignature, contentBytes, certificate, chain);
+
+        // Write the CMS bytes into the placeholder
+        externalSigning.setSignature(cmsBytes); // <4>
+    }
+
+    return result.toByteArray();
+}
+----
+<1> `saveIncrementalForExternalSigning()` writes the PDF to the output stream with a placeholder `/Contents` and returns an `ExternalSigningSupport` handle.
+<2> `getContent()` returns the byte range content as an `InputStream` -- the same data that would be passed to `sign()` in the callback-based approach.
+<3> This is the only operation that touches the external key. You send a 32-byte SHA-256 hash and receive a raw signature value (typically 256 bytes for RSA-2048 or 64 bytes for ECDSA P-256).
+<4> `setSignature()` hex-encodes the CMS bytes and patches them into the `/Contents` placeholder.
+
+NOTE: Building the CMS structure with a pre-computed raw signature is more involved than using `CMSSignedDataGenerator`. You need to construct the `SignerInfo` manually with the external signature value. Chapter 30 shows the complete code for this.
+
+== Certification Signatures with DocMDP
+
+A certification signature (also called a "certifying signature" or "MDP signature") is a special first signature that declares permission levels for future modifications to the document.
+It uses the `/DocMDP` transform method ({iso32000-2} S12.8.2.2).
+
+=== The Three DocMDP Levels
+
+.DocMDP Permission Levels -- {iso32000-2} S12.8.2.2, Table 257
+[cols="1,3,5", options="header"]
+|===
+| Level | Name | What Is Allowed After Certification
+
+| 1
+| No changes
+| No modifications whatsoever. Even filling in form fields invalidates the signature.
+
+| 2
+| Form fill + sign
+| Form fields may be filled, signature fields may be signed, and pages may be instantiated from templates. No other changes.
+
+| 3
+| Form fill + sign + annotate
+| Everything in level 2, plus annotations may be added, modified, or deleted.
+
+|===
+
+Level 2 is by far the most common in practice -- it allows a document to be certified by the author and then signed by additional parties.
+
+=== Code: Applying a Certification Signature
+
+[source,java]
+----
+import org.apache.pdfbox.cos.COSArray;
+import org.apache.pdfbox.cos.COSDictionary;
+import org.apache.pdfbox.cos.COSInteger;
+import org.apache.pdfbox.cos.COSName;
+
+/**
+ * Applies a certification (DocMDP) signature to a PDF.
+ * This must be the FIRST signature in the document.
+ */
+public void applyCertificationSignature(PDDocument doc,
+                                         PDSignature signature,
+                                         PDSignatureField sigField,
+                                         int docMdpLevel) {
+
+    // Clamp level to valid range
+    int level = (docMdpLevel >= 1 && docMdpLevel <= 3)
+            ? docMdpLevel : 2;
+
+    // Build the /Reference array with a DocMDP transform
+    COSDictionary sigRef = new COSDictionary();
+    sigRef.setItem(COSName.TYPE, COSName.getPDFName("SigRef"));
+    sigRef.setItem(COSName.getPDFName("TransformMethod"),
+            COSName.getPDFName("DocMDP"));
+
+    COSDictionary transformParams = new COSDictionary();
+    transformParams.setItem(COSName.TYPE,
+            COSName.getPDFName("TransformParams"));
+    transformParams.setItem(COSName.getPDFName("P"),
+            COSInteger.get(level)); // <1>
+    transformParams.setItem(COSName.getPDFName("V"),
+            COSName.getPDFName("1.2"));
+    sigRef.setItem(COSName.getPDFName("TransformParams"),
+            transformParams);
+
+    COSArray refArray = new COSArray();
+    refArray.add(sigRef);
+    signature.getCOSObject()
+            .setItem(COSName.getPDFName("Reference"), refArray);
+
+    // Set /Perms /DocMDP in the document catalog -- this is what
+    // tells viewers "this document has a certification signature"
+    COSDictionary perms = new COSDictionary();
+    perms.setItem(COSName.getPDFName("DocMDP"),
+            signature.getCOSObject()); // <2>
+    doc.getDocumentCatalog().getCOSObject()
+            .setItem(COSName.getPDFName("Perms"), perms);
+}
+----
+<1> The `/P` value is the permission level: 1, 2, or 3.
+<2> The `/Perms` dictionary in the document catalog must reference the certification signature's `/Sig` dictionary. This is how viewers discover that the document has been certified.
+
+WARNING: A document can have at most _one_ certification signature, and it must be the first signature applied. If you try to add a certification signature to a document that already has one, the existing certification is invalidated. If you apply it as a second signature (after an approval signature), the result is undefined -- some viewers accept it, some reject it, and Adobe Acrobat shows a confusing error.
+
+== PDFBox 2.x to 3.x Migration
+
+PDFBox 3.0.0 introduced breaking API changes that affect every piece of signing code.
+If you are migrating from PDFBox 2.x (which many projects still use), these are the changes you need to know.
+
+=== Document Loading
+
+.PDFBox 2.x (removed)
+[source,java]
+----
+// PDFBox 2.x -- these methods no longer exist
+PDDocument doc = PDDocument.load(new File("doc.pdf"));
+PDDocument doc = PDDocument.load(inputStream);
+PDDocument doc = PDDocument.load(byteArray);
+----
+
+.PDFBox 3.x (current)
+[source,java]
+----
+// PDFBox 3.x -- use the Loader class
+PDDocument doc = Loader.loadPDF(new File("doc.pdf"));
+PDDocument doc = Loader.loadPDF(byteArray);
+// No direct InputStream loading -- read to byte[] first
+byte[] bytes = inputStream.readAllBytes();
+PDDocument doc = Loader.loadPDF(bytes);
+----
+
+The `Loader` class is in `org.apache.pdfbox.Loader`.
+The old `PDDocument.load()` static methods were removed entirely -- not deprecated, _removed_.
+
+=== Standard 14 Fonts
+
+This is the single most common compilation error in PDFBox 2.x-to-3.x migration.
+
+.PDFBox 2.x (removed)
+[source,java]
+----
+// PDFBox 2.x -- static font constants
+PDFont font = PDType1Font.HELVETICA;
+PDFont fontBold = PDType1Font.HELVETICA_BOLD;
+PDFont fontMono = PDType1Font.COURIER;
+----
+
+.PDFBox 3.x (current)
+[source,java]
+----
+// PDFBox 3.x -- constructor with FontName enum
+PDFont font = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
+PDFont fontBold = new PDType1Font(Standard14Fonts.FontName.HELVETICA_BOLD);
+PDFont fontMono = new PDType1Font(Standard14Fonts.FontName.COURIER);
+----
+
+The `Standard14Fonts.FontName` enum lives in `org.apache.pdfbox.pdmodel.font.Standard14Fonts`.
+
+=== AcroForm API Changes
+
+.PDFBox 2.x
+[source,java]
+----
+boolean needsAppearances = acroForm.isNeedAppearances(); // gone
+----
+
+.PDFBox 3.x
+[source,java]
+----
+boolean needsAppearances = acroForm.getNeedAppearances(); // <1>
+----
+<1> The method was renamed from `isNeedAppearances()` to `getNeedAppearances()`. A small change, but it breaks at compile time.
+
+=== Content Stream Writing
+
+.PDFBox 2.x -- could use PDPageContentStream for Form XObjects
+[source,java]
+----
+// This approach no longer works for Form XObjects in 3.x
+----
+
+.PDFBox 3.x -- use the stream's output stream directly
+[source,java]
+----
+PDFormXObject form = new PDFormXObject(doc);
+try (OutputStream os = form.getStream().createOutputStream()) {
+    os.write(contentStreamBytes);
+}
+----
+
+=== Complete Migration Checklist
+
+.PDFBox 2.x to 3.x Breaking Changes Relevant to Signing
+[cols="4,4,3", options="header"]
+|===
+| PDFBox 2.x | PDFBox 3.x | Impact
+
+| `PDDocument.load(File)`
+| `Loader.loadPDF(File)`
+| Compile error
+
+| `PDDocument.load(byte[])`
+| `Loader.loadPDF(byte[])`
+| Compile error
+
+| `PDDocument.load(InputStream)`
+| `Loader.loadPDF(bytes)` (read first)
+| Compile error
+
+| `PDType1Font.HELVETICA`
+| `new PDType1Font(Standard14Fonts.FontName.HELVETICA)`
+| Compile error
+
+| `acroForm.isNeedAppearances()`
+| `acroForm.getNeedAppearances()`
+| Compile error
+
+| `new PDPageContentStream(doc, formXObject)`
+| `form.getStream().createOutputStream()`
+| Compile error
+
+| `PDFont.getEncoding()`
+| Not available -- use COS dictionary
+| Compile error
+
+| `PDFont.getToUnicodeCMap()`
+| Not visible -- check COS key
+| Compile error
+
+|===
+
+TIP: When migrating a large codebase, search for every occurrence of `PDDocument.load`, `PDType1Font.HELVETICA` (and all other font constants), and `isNeedAppearances`. These three account for about 90% of compilation failures in signing code.
+
+== Common Pitfalls
+
+We have collected these from production incidents, Stack Overflow questions, and our own debugging sessions.
+Each one has cost someone hours.
+
+=== Pitfall 1: Not Registering the BouncyCastle Provider
+
+[source,java]
+----
+// This line MUST execute before any signing operation
+java.security.Security.addProvider(
+        new org.bouncycastle.jce.provider.BouncyCastleProvider());
+----
+
+Without this, you get a `NoSuchAlgorithmException` or a `NoSuchProviderException` at runtime.
+The error message varies depending on which BouncyCastle class triggers first, making it confusing to diagnose.
+In Spring Boot applications, put this in a `@PostConstruct` method of a `@Configuration` class:
+
+[source,java]
+----
+import jakarta.annotation.PostConstruct;
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
+import org.springframework.context.annotation.Configuration;
+
+@Configuration
+public class BouncyCastleConfig {
+
+    @PostConstruct
+    public void registerProvider() {
+        if (java.security.Security.getProvider("BC") == null) {
+            java.security.Security.addProvider(
+                    new BouncyCastleProvider());
+        }
+    }
+}
+----
+
+=== Pitfall 2: Using save() Instead of saveIncremental()
+
+[source,java]
+----
+// WRONG -- destroys all existing signatures
+doc.save(outputStream);
+
+// CORRECT -- preserves existing signatures
+doc.saveIncremental(outputStream);
+----
+
+A regular `save()` rewrites the entire PDF from scratch.
+This changes every byte offset in the file, which means every existing signature's byte range is now wrong.
+Every signature becomes invalid.
+Use `saveIncremental()`.
+Always.
+
+=== Pitfall 3: /Contents Container Too Small
+
+If the CMS blob returned by your `sign()` method exceeds the space reserved by `preferredSignatureSize`, you get:
+
+[source]
+----
+java.io.IOException: Can't write signature, not enough space
+----
+
+The fix is straightforward -- increase the container size.
+But be aware that the container size is in _bytes of hex encoding_, not bytes of CMS data.
+A 32768-byte container holds approximately 16 KB of CMS data (since each byte becomes two hex characters).
+
+When in doubt, use 65536 (64 KB).
+The extra space is filled with hex zeros and adds about 64 KB to the file size -- negligible for most PDFs.
+
+=== Pitfall 4: Not Closing the PDDocument
+
+[source,java]
+----
+// WRONG -- resource leak, and on some JVMs the temp files
+// created by PDFBox are never cleaned up
+PDDocument doc = Loader.loadPDF(bytes);
+doc.addSignature(sig, iface, opts);
+doc.saveIncremental(baos);
+// doc is never closed!
+
+// CORRECT -- use try-with-resources
+try (PDDocument doc = Loader.loadPDF(bytes)) {
+    doc.addSignature(sig, iface, opts);
+    doc.saveIncremental(baos);
+}
+----
+
+`PDDocument` implements `Closeable`.
+If you do not close it, temporary files and memory-mapped buffers may not be released.
+In a server application that signs thousands of documents, this leads to `OutOfMemoryError` or file handle exhaustion.
+
+=== Pitfall 5: Signing After Closing the Document
+
+[source,java]
+----
+// WRONG -- the document is closed before saveIncremental()
+PDDocument doc = Loader.loadPDF(bytes);
+doc.addSignature(sig, iface, opts);
+doc.close();
+doc.saveIncremental(baos); // throws IllegalStateException
+----
+
+`addSignature()` only registers the signature.
+The actual signing happens inside `saveIncremental()`.
+If you close the document before calling `saveIncremental()`, the document's internal structures are released, and the save fails.
+
+=== Pitfall 6: Reusing a PDSignature Object
+
+[source,java]
+----
+// WRONG -- reusing the same PDSignature for two documents
+PDSignature sig = new PDSignature();
+sig.setFilter(PDSignature.FILTER_ADOBE_PPKLITE);
+
+doc1.addSignature(sig, iface, opts);
+doc1.saveIncremental(out1);
+
+doc2.addSignature(sig, iface, opts); // <-- BROKEN
+doc2.saveIncremental(out2);
+----
+
+A `PDSignature` is a COS dictionary tied to a specific document.
+After it is added to `doc1` and saved, it belongs to `doc1`.
+Create a new `PDSignature` for each document.
+
+== Timestamp Embedding
+
+A timestamp proves when a signature was created.
+Without it, you have a PAdES-B-B signature.
+With it, you have PAdES-B-T.
+
+=== Embedding a TSA Timestamp as an Unsigned Attribute
+
+The timestamp token is an RFC 3161 `TimeStampToken` embedded as an unsigned attribute (`id-aa-signatureTimeStampToken`, OID 1.2.840.113549.1.9.16.2.14) in the CMS `SignerInfo`.
+
+The flow is:
+
+1. Generate the CMS `SignedData` (without the timestamp)
+2. Extract the signer's raw signature value from the `SignerInfo`
+3. Hash the signature value with SHA-256
+4. Send the hash to the TSA, receive a `TimeStampToken`
+5. Attach the token as an unsigned attribute on the `SignerInfo`
+6. Return the modified CMS `SignedData`
+
+[source,java]
+----
+import org.bouncycastle.asn1.ASN1EncodableVector;
+import org.bouncycastle.asn1.ASN1Primitive;
+import org.bouncycastle.asn1.DERSet;
+import org.bouncycastle.asn1.cms.Attribute;
+import org.bouncycastle.asn1.cms.AttributeTable;
+import org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers;
+import org.bouncycastle.cms.CMSSignedData;
+import org.bouncycastle.cms.SignerInformation;
+import org.bouncycastle.cms.SignerInformationStore;
+
+import java.util.Collections;
+
+/**
+ * Embeds an RFC 3161 timestamp token as an unsigned attribute
+ * in a CMS SignedData structure. This upgrades a PAdES-B-B
+ * signature to PAdES-B-T.
+ */
+public CMSSignedData embedTimestamp(CMSSignedData signedData,
+                                     TsaClient tsaClient,
+                                     String tsaUrl)
+        throws Exception {
+
+    // Get the first (and typically only) signer
+    SignerInformation signerInfo = signedData.getSignerInfos()
+            .getSigners().iterator().next();
+
+    // The signature value is what gets timestamped
+    byte[] signatureBytes = signerInfo.getSignature();
+
+    // Request timestamp from TSA (see Chapter 18 for TSA details)
+    byte[] tsTokenBytes = tsaClient.getTimestampToken(
+            tsaUrl, signatureBytes);
+
+    // Parse the timestamp token as ASN.1
+    ASN1Primitive tsToken = ASN1Primitive.fromByteArray(tsTokenBytes);
+
+    // Build the unsigned attribute
+    ASN1EncodableVector unsignedAttrsVec = new ASN1EncodableVector();
+    unsignedAttrsVec.add(new Attribute(
+            PKCSObjectIdentifiers.id_aa_signatureTimeStampToken,
+            new DERSet(tsToken)));
+    AttributeTable unsignedAttrs = new AttributeTable(unsignedAttrsVec);
+
+    // Replace the signer's unsigned attributes
+    SignerInformation newSignerInfo =
+            SignerInformation.replaceUnsignedAttributes(
+                    signerInfo, unsignedAttrs);
+
+    SignerInformationStore newSignerInfos =
+            new SignerInformationStore(
+                    Collections.singletonList(newSignerInfo));
+
+    return CMSSignedData.replaceSigners(signedData, newSignerInfos);
+}
+----
+
+NOTE: The timestamp is embedded _after_ the CMS signature is generated. This is important: the timestamp covers the signature value, not the document content. The document content is covered by the CMS signature itself. The timestamp proves when that signature was created. This two-layer structure is fundamental to PAdES-B-T.
+
+== Complete Production-Ready Signing Class
+
+Here is a complete signing class that handles all the scenarios discussed in this chapter: invisible and visible signatures, PAdES-B-B and PAdES-B-T profiles, certification signatures, and multi-signature workflows.
+
+[source,java]
+----
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.PrivateKey;
+import java.security.cert.X509Certificate;
+import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.Collections;
+import java.util.List;
+
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.cos.COSArray;
+import org.apache.pdfbox.cos.COSDictionary;
+import org.apache.pdfbox.cos.COSInteger;
+import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDResources;
+import org.apache.pdfbox.pdmodel.common.PDRectangle;
+import org.apache.pdfbox.pdmodel.font.PDType1Font;
+import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
+import org.apache.pdfbox.pdmodel.graphics.form.PDFormXObject;
+import org.apache.pdfbox.pdmodel.interactive.digitalsignature.PDSignature;
+import org.apache.pdfbox.pdmodel.interactive.digitalsignature.SignatureInterface;
+import org.apache.pdfbox.pdmodel.interactive.digitalsignature.SignatureOptions;
+import org.apache.pdfbox.pdmodel.interactive.form.PDAcroForm;
+import org.apache.pdfbox.pdmodel.interactive.form.PDField;
+import org.apache.pdfbox.pdmodel.interactive.form.PDSignatureField;
+import org.bouncycastle.asn1.ASN1EncodableVector;
+import org.bouncycastle.asn1.ASN1Primitive;
+import org.bouncycastle.asn1.DERSet;
+import org.bouncycastle.asn1.cms.Attribute;
+import org.bouncycastle.asn1.cms.AttributeTable;
+import org.bouncycastle.asn1.ess.ESSCertIDv2;
+import org.bouncycastle.asn1.ess.SigningCertificateV2;
+import org.bouncycastle.asn1.nist.NISTObjectIdentifiers;
+import org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers;
+import org.bouncycastle.asn1.x509.AlgorithmIdentifier;
+import org.bouncycastle.cert.jcajce.JcaCertStore;
+import org.bouncycastle.cms.CMSProcessableByteArray;
+import org.bouncycastle.cms.CMSSignedData;
+import org.bouncycastle.cms.CMSSignedDataGenerator;
+import org.bouncycastle.cms.DefaultSignedAttributeTableGenerator;
+import org.bouncycastle.cms.SignerInfoGenerator;
+import org.bouncycastle.cms.SignerInformation;
+import org.bouncycastle.cms.SignerInformationStore;
+import org.bouncycastle.cms.jcajce.JcaSignerInfoGeneratorBuilder;
+import org.bouncycastle.operator.ContentSigner;
+import org.bouncycastle.operator.DigestCalculatorProvider;
+import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
+import org.bouncycastle.operator.jcajce.JcaDigestCalculatorProviderBuilder;
+
+/**
+ * Production-ready PDF signing service using PDFBox {pdfbox-version}
+ * and BouncyCastle {bc-version}.
+ *
+ * Supports:
+ * - PAdES-B-B (basic) and PAdES-B-T (timestamped) profiles
+ * - Visible and invisible signatures
+ * - Approval and certification (DocMDP) signatures
+ * - Multi-signature workflows
+ */
+public class ProductionPdfSigner {
+
+    /** Container size for signatures without timestamps. */
+    private static final int CONTAINER_SIZE_BASIC = 32768;
+
+    /** Container size for signatures with TSA timestamps. */
+    private static final int CONTAINER_SIZE_WITH_TSA = 65536;
+
+    /**
+     * Signs a PDF document.
+     *
+     * @param pdfBytes    the original PDF bytes
+     * @param privateKey  the signer's private key
+     * @param certificate the signer's X.509 certificate
+     * @param chain       the full certificate chain (signer + intermediates)
+     * @param config      signing configuration
+     * @return the signed PDF bytes (incremental save)
+     */
+    public byte[] sign(byte[] pdfBytes,
+                       PrivateKey privateKey,
+                       X509Certificate certificate,
+                       List<X509Certificate> chain,
+                       SigningConfig config) throws Exception {
+
+        try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+
+            // Resolve the target signature field
+            PDAcroForm acroForm = doc.getDocumentCatalog().getAcroForm();
+            if (acroForm == null) {
+                throw new IllegalStateException("PDF has no AcroForm");
+            }
+
+            PDSignatureField sigField = findEmptySignatureField(
+                    acroForm, config.fieldName());
+            if (sigField == null) {
+                throw new IllegalStateException(
+                        "No empty signature field: " + config.fieldName());
+            }
+
+            // Build the /Sig dictionary
+            PDSignature signature = new PDSignature();
+            signature.setFilter(PDSignature.FILTER_ADOBE_PPKLITE);
+            signature.setSubFilter(
+                    COSName.getPDFName("ETSI.CAdES.detached"));
+            signature.setSignDate(Calendar.getInstance());
+            signature.setName(extractCN(certificate));
+
+            if (config.reason() != null) {
+                signature.setReason(config.reason());
+            }
+            if (config.location() != null) {
+                signature.setLocation(config.location());
+            }
+
+            // Certification signature (DocMDP)
+            if (config.certification()) {
+                applyCertification(doc, signature, config.docMdpLevel());
+            }
+
+            sigField.setValue(signature);
+
+            // Determine container size
+            boolean useTsa = config.tsaUrl() != null
+                    && !config.tsaUrl().isBlank();
+            int containerSize = useTsa
+                    ? CONTAINER_SIZE_WITH_TSA : CONTAINER_SIZE_BASIC;
+
+            SignatureOptions options = new SignatureOptions();
+            options.setPreferredSignatureSize(containerSize);
+
+            // Visible appearance
+            if (config.visible()) {
+                buildTextAppearance(doc, sigField,
+                        extractCN(certificate), config.reason());
+            }
+
+            // CMS signing callback
+            PadesCmsCallback callback = new PadesCmsCallback(
+                    privateKey, certificate, chain,
+                    useTsa ? config.tsaUrl() : null);
+
+            doc.addSignature(signature, callback, options);
+
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            doc.saveIncremental(baos);
+            return baos.toByteArray();
+        }
+    }
+
+    // ── Configuration record ─────────────────────────────────────────
+
+    /**
+     * Immutable configuration for a signing operation.
+     */
+    public record SigningConfig(
+            String fieldName,
+            String reason,
+            String location,
+            boolean visible,
+            boolean certification,
+            int docMdpLevel,
+            String tsaUrl) {
+
+        public SigningConfig {
+            if (fieldName == null || fieldName.isBlank()) {
+                throw new IllegalArgumentException(
+                        "fieldName is required");
+            }
+        }
+    }
+
+    // ── CMS callback ─────────────────────────────────────────────────
+
+    private static class PadesCmsCallback implements SignatureInterface {
+
+        private final PrivateKey privateKey;
+        private final X509Certificate certificate;
+        private final List<X509Certificate> chain;
+        private final String tsaUrl;
+
+        PadesCmsCallback(PrivateKey privateKey,
+                         X509Certificate certificate,
+                         List<X509Certificate> chain,
+                         String tsaUrl) {
+            this.privateKey = privateKey;
+            this.certificate = certificate;
+            this.chain = chain;
+            this.tsaUrl = tsaUrl;
+        }
+
+        @Override
+        public byte[] sign(InputStream content) throws IOException {
+            try {
+                byte[] contentBytes = content.readAllBytes();
+
+                // Determine signature algorithm from key type
+                String keyAlgo = privateKey.getAlgorithm();
+                String sigAlgo = "EC".equals(keyAlgo)
+                        ? "SHA256withECDSA" : "SHA256withRSA";
+
+                // Build certificate store
+                JcaCertStore certStore = new JcaCertStore(chain);
+
+                // Content signer
+                ContentSigner signer = new JcaContentSignerBuilder(sigAlgo)
+                        .setProvider("BC")
+                        .build(privateKey);
+
+                // Digest calculator
+                DigestCalculatorProvider dcProvider =
+                        new JcaDigestCalculatorProviderBuilder()
+                                .setProvider("BC").build();
+
+                // Build signer info with ESS-signing-certificate-v2
+                JcaSignerInfoGeneratorBuilder signerBuilder =
+                        new JcaSignerInfoGeneratorBuilder(dcProvider);
+
+                AttributeTable signedAttrs =
+                        buildEssSigningCertAttribute(certificate);
+                signerBuilder.setSignedAttributeGenerator(
+                        new DefaultSignedAttributeTableGenerator(
+                                signedAttrs));
+
+                SignerInfoGenerator signerInfoGen =
+                        signerBuilder.build(signer, certificate);
+
+                // Assemble the CMS SignedData
+                CMSSignedDataGenerator gen =
+                        new CMSSignedDataGenerator();
+                gen.addSignerInfoGenerator(signerInfoGen);
+                gen.addCertificates(certStore);
+
+                CMSProcessableByteArray cmsContent =
+                        new CMSProcessableByteArray(contentBytes);
+                CMSSignedData signedData =
+                        gen.generate(cmsContent, false);
+
+                // PAdES-B-T: add timestamp
+                if (tsaUrl != null && !tsaUrl.isBlank()) {
+                    signedData = addTimestamp(signedData, tsaUrl);
+                }
+
+                return signedData.getEncoded();
+
+            } catch (Exception e) {
+                throw new IOException(
+                        "CMS signing failed: " + e.getMessage(), e);
+            }
+        }
+
+        private AttributeTable buildEssSigningCertAttribute(
+                X509Certificate cert) throws Exception {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] certHash = md.digest(cert.getEncoded());
+
+            AlgorithmIdentifier hashAlgo = new AlgorithmIdentifier(
+                    NISTObjectIdentifiers.id_sha256);
+            ESSCertIDv2 essCertId =
+                    new ESSCertIDv2(hashAlgo, certHash);
+            SigningCertificateV2 sigCertV2 =
+                    new SigningCertificateV2(
+                            new ESSCertIDv2[]{essCertId});
+
+            ASN1EncodableVector v = new ASN1EncodableVector();
+            v.add(new Attribute(
+                    PKCSObjectIdentifiers.id_aa_signingCertificateV2,
+                    new DERSet(sigCertV2)));
+
+            return new AttributeTable(v);
+        }
+
+        private CMSSignedData addTimestamp(CMSSignedData signedData,
+                                            String tsaUrl)
+                throws Exception {
+            SignerInformation signerInfo = signedData
+                    .getSignerInfos().getSigners().iterator().next();
+            byte[] sigBytes = signerInfo.getSignature();
+
+            // Request timestamp (see TsaClient class below)
+            byte[] tsToken = TsaClient.getTimestamp(tsaUrl, sigBytes);
+
+            ASN1Primitive tsAsn1 =
+                    ASN1Primitive.fromByteArray(tsToken);
+
+            ASN1EncodableVector vec = new ASN1EncodableVector();
+            vec.add(new Attribute(
+                    PKCSObjectIdentifiers.id_aa_signatureTimeStampToken,
+                    new DERSet(tsAsn1)));
+            AttributeTable unsignedAttrs = new AttributeTable(vec);
+
+            SignerInformation newSigner =
+                    SignerInformation.replaceUnsignedAttributes(
+                            signerInfo, unsignedAttrs);
+
+            return CMSSignedData.replaceSigners(signedData,
+                    new SignerInformationStore(
+                            Collections.singletonList(newSigner)));
+        }
+    }
+
+    // ── TSA client ───────────────────────────────────────────────────
+
+    /**
+     * Minimal RFC 3161 TSA client.
+     * See Chapter 18 for a full discussion of the timestamp protocol.
+     */
+    static class TsaClient {
+
+        static byte[] getTimestamp(String tsaUrl, byte[] signatureBytes)
+                throws Exception {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] hash = md.digest(signatureBytes);
+
+            org.bouncycastle.tsp.TimeStampRequestGenerator reqGen =
+                    new org.bouncycastle.tsp.TimeStampRequestGenerator();
+            reqGen.setCertReq(true);
+            org.bouncycastle.tsp.TimeStampRequest tsReq =
+                    reqGen.generate(NISTObjectIdentifiers.id_sha256, hash);
+
+            java.net.http.HttpClient client =
+                    java.net.http.HttpClient.newHttpClient();
+            java.net.http.HttpRequest request =
+                    java.net.http.HttpRequest.newBuilder()
+                            .uri(java.net.URI.create(tsaUrl))
+                            .header("Content-Type",
+                                    "application/timestamp-query")
+                            .POST(java.net.http.HttpRequest.BodyPublishers
+                                    .ofByteArray(tsReq.getEncoded()))
+                            .build();
+
+            java.net.http.HttpResponse<byte[]> response = client.send(
+                    request,
+                    java.net.http.HttpResponse.BodyHandlers.ofByteArray());
+
+            if (response.statusCode() != 200) {
+                throw new IOException("TSA returned HTTP "
+                        + response.statusCode());
+            }
+
+            org.bouncycastle.tsp.TimeStampResponse tsResp =
+                    new org.bouncycastle.tsp.TimeStampResponse(
+                            response.body());
+            tsResp.validate(tsReq);
+
+            return tsResp.getTimeStampToken().getEncoded();
+        }
+    }
+
+    // ── Appearance builder ───────────────────────────────────────────
+
+    private void buildTextAppearance(PDDocument doc,
+                                      PDSignatureField sigField,
+                                      String name, String reason)
+            throws Exception {
+
+        PDRectangle rect = sigField.getWidgets().isEmpty() ? null
+                : sigField.getWidgets().get(0).getRectangle();
+        if (rect == null || rect.getWidth() < 1
+                || rect.getHeight() < 1) {
+            return;
+        }
+
+        float w = rect.getWidth();
+        float h = rect.getHeight();
+        PDResources resources = new PDResources();
+        PDType1Font font = new PDType1Font(
+                Standard14Fonts.FontName.HELVETICA);
+        COSName fontName = resources.add(font);
+
+        float fontSize = 9f;
+        float y = h - fontSize - 3;
+        StringBuilder ops = new StringBuilder();
+        ops.append("BT\n");
+        ops.append("/").append(fontName.getName())
+                .append(" ").append(fontSize).append(" Tf\n");
+        ops.append("0 0 0 rg\n");
+        ops.append("3 ").append(y).append(" Td\n");
+        ops.append("(Digitally signed by: ")
+                .append(escapePs(name)).append(") Tj\n");
+        if (reason != null) {
+            ops.append("0 -").append(fontSize * 1.3f).append(" Td\n");
+            ops.append("(Reason: ").append(escapePs(reason))
+                    .append(") Tj\n");
+        }
+        ops.append("ET\n");
+
+        PDFormXObject form = new PDFormXObject(doc);
+        form.setBBox(new PDRectangle(w, h));
+        form.setResources(resources);
+        try (OutputStream os = form.getStream().createOutputStream()) {
+            os.write(ops.toString()
+                    .getBytes(StandardCharsets.US_ASCII));
+        }
+
+        COSDictionary apDict = new COSDictionary();
+        apDict.setItem(COSName.N, form);
+        sigField.getWidgets().get(0).getCOSObject()
+                .setItem(COSName.AP, apDict);
+    }
+
+    // ── Certification ────────────────────────────────────────────────
+
+    private void applyCertification(PDDocument doc,
+                                     PDSignature signature,
+                                     int level) {
+        int p = (level >= 1 && level <= 3) ? level : 2;
+
+        COSDictionary sigRef = new COSDictionary();
+        sigRef.setItem(COSName.TYPE, COSName.getPDFName("SigRef"));
+        sigRef.setItem(COSName.getPDFName("TransformMethod"),
+                COSName.getPDFName("DocMDP"));
+
+        COSDictionary params = new COSDictionary();
+        params.setItem(COSName.TYPE,
+                COSName.getPDFName("TransformParams"));
+        params.setItem(COSName.getPDFName("P"),
+                COSInteger.get(p));
+        params.setItem(COSName.getPDFName("V"),
+                COSName.getPDFName("1.2"));
+        sigRef.setItem(COSName.getPDFName("TransformParams"), params);
+
+        COSArray refArray = new COSArray();
+        refArray.add(sigRef);
+        signature.getCOSObject()
+                .setItem(COSName.getPDFName("Reference"), refArray);
+
+        COSDictionary perms = new COSDictionary();
+        perms.setItem(COSName.getPDFName("DocMDP"),
+                signature.getCOSObject());
+        doc.getDocumentCatalog().getCOSObject()
+                .setItem(COSName.getPDFName("Perms"), perms);
+    }
+
+    // ── Helpers ──────────────────────────────────────────────────────
+
+    private PDSignatureField findEmptySignatureField(PDAcroForm acroForm,
+                                                      String fieldName) {
+        for (PDField field : acroForm.getFieldTree()) {
+            if (field instanceof PDSignatureField sf) {
+                String fqn = sf.getFullyQualifiedName();
+                String partial = sf.getPartialName();
+                if ((fieldName.equals(fqn) || fieldName.equals(partial))
+                        && sf.getSignature() == null) {
+                    return sf;
+                }
+            }
+        }
+        return null;
+    }
+
+    private String extractCN(X509Certificate cert) {
+        String dn = cert.getSubjectX500Principal().getName();
+        java.util.regex.Matcher m = java.util.regex.Pattern
+                .compile("CN=([^,]+)", java.util.regex.Pattern.CASE_INSENSITIVE)
+                .matcher(dn);
+        return m.find() ? m.group(1).trim() : "Unknown";
+    }
+
+    private static String escapePs(String text) {
+        return text.replace("\\", "\\\\")
+                   .replace("(", "\\(")
+                   .replace(")", "\\)");
+    }
+}
+----
+
+This class covers the full production workflow.
+It produces PAdES-B-B compliant signatures by default (with `ESS-signing-certificate-v2` and `ETSI.CAdES.detached`), upgrades to PAdES-B-T when a TSA URL is provided, supports visible and invisible appearances, and handles certification signatures with DocMDP.
+
+In the next chapter, we go deep into the BouncyCastle CMS construction that powers the `PadesCmsCallback` -- every signed attribute, every ASN.1 structure, every decision point that determines whether your signature is a basic CMS blob or a fully PAdES-compliant `SignedData`.

@@ -48,14 +48,11 @@
         P.Keyboard.init();
         P.Export.init();
         P.Zoom.init();
+
+        // Restore previous session from localStorage (page refresh, or browser extension
+        // redirect via /open/{sessionId} which sets localStorage before redirecting here).
         if (P.Upload && P.Upload.restoreSessionOnInit) {
-            P.Upload.restoreSessionOnInit().always(function (restored) {
-                if (!restored && !P.state.sessionId) {
-                    P.Upload.loadSampleOnInit();
-                }
-            });
-        } else {
-            P.Upload.loadSampleOnInit();
+            P.Upload.restoreSessionOnInit();
         }
     });
 })(jQuery);

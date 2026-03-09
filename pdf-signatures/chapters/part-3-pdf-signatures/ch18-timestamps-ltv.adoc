@@ -1,0 +1,684 @@
+= Timestamps & Long-Term Validation
+
+[.lead]
+A digital signature without a timestamp is like a contract without a date.
+You can prove _who_ signed and _what_ they signed, but not _when_.
+And in the world of digital signatures, "when" is often the most important question — because certificates expire, keys get compromised, algorithms get broken, and the difference between "signed before the certificate expired" and "signed after the certificate expired" can be the difference between a legally binding document and an invalid one.
+
+This chapter covers everything about timestamps and long-term validation (LTV): how RFC 3161 timestamps work, how they're embedded in PDF signatures, how the Document Security Store (DSS) enables offline validation, how archival timestamps create indefinite validity, and how to build a complete LTV infrastructure.
+
+== RFC 3161: The Timestamp Protocol
+
+=== What a Timestamp Proves
+
+An RFC 3161 timestamp is a cryptographic proof that a specific piece of data existed at a specific point in time.
+The proof comes from a **Trusted Timestamp Authority (TSA)** — a server operated by a trusted third party that:
+
+1. Receives a hash of the data to be timestamped
+2. Combines the hash with the current time
+3. Signs the combination with the TSA's private key
+4. Returns the signed timestamp token
+
+The timestamp token is a CMS `SignedData` structure (yes, a timestamp is itself a CMS signature) containing a `TSTInfo` (Timestamp Token Info) structure with:
+
+- The hash algorithm and hash value of the timestamped data
+- The timestamp time (UTC)
+- The TSA's name
+- A serial number (unique per timestamp)
+- An accuracy indication (how precise the time is)
+
+=== The Timestamp Request/Response Flow
+
+.RFC 3161 timestamp request/response flow
+image::pdf/seq-tsa-timestamp.pdf[align="center",pdfwidth=100%]
+
+The protocol uses HTTP POST with content type `application/timestamp-query` for the request and `application/timestamp-reply` for the response.
+The request and response are DER-encoded ASN.1 structures defined in RFC 3161.
+
+=== Implementation with BouncyCastle
+
+[source,java]
+----
+/**
+ * Requests a timestamp from a TSA for the given data.
+ * Returns the TimeStampToken that can be embedded as an unsigned CMS attribute.
+ */
+public TimeStampToken requestTimestamp(byte[] dataToTimestamp, String tsaUrl)
+        throws Exception {
+
+    // 1. Hash the data
+    MessageDigest digest = MessageDigest.getInstance("SHA-256");
+    byte[] hash = digest.digest(dataToTimestamp);
+
+    // 2. Create the timestamp request
+    TimeStampRequestGenerator reqGen = new TimeStampRequestGenerator();
+    reqGen.setCertReq(true);  // Include TSA's cert in the response
+    TimeStampRequest tsReq = reqGen.generate(TSPAlgorithms.SHA256, hash);
+
+    // 3. Send to TSA via HTTP
+    byte[] reqBytes = tsReq.getEncoded();
+    HttpURLConnection conn = (HttpURLConnection)
+            new URL(tsaUrl).openConnection();
+    conn.setDoOutput(true);
+    conn.setRequestMethod("POST");
+    conn.setRequestProperty("Content-Type", "application/timestamp-query");
+    conn.setConnectTimeout(10000);
+    conn.setReadTimeout(30000);
+
+    try (OutputStream out = conn.getOutputStream()) {
+        out.write(reqBytes);
+    }
+
+    // 4. Read the response
+    byte[] respBytes;
+    try (InputStream in = conn.getInputStream()) {
+        respBytes = in.readAllBytes();
+    }
+
+    // 5. Parse and validate the response
+    TimeStampResponse tsResp = new TimeStampResponse(respBytes);
+    tsResp.validate(tsReq);  // Verify it matches our request
+
+    if (tsResp.getStatus() != PKIStatus.GRANTED
+            && tsResp.getStatus() != PKIStatus.GRANTED_WITH_MODS) {
+        throw new TSPException("TSA rejected request: status=" +
+                tsResp.getStatus() + ", statusString=" +
+                tsResp.getStatusString());
+    }
+
+    TimeStampToken tsToken = tsResp.getTimeStampToken();
+    log.info("Timestamp obtained: time={}, serial={}, TSA={}",
+            tsToken.getTimeStampInfo().getGenTime(),
+            tsToken.getTimeStampInfo().getSerialNumber(),
+            tsToken.getTimeStampInfo().getTsa());
+
+    return tsToken;
+}
+----
+
+=== TSA Selection Criteria
+
+Choosing the right TSA is critical.
+A timestamp is only as trustworthy as the TSA that produced it.
+
+.TSA selection criteria for different use cases
+[cols="2,4", options="header"]
+|===
+| Criterion | Considerations
+
+| **Trust store compatibility**
+| For Adobe Acrobat: TSA's root must be in AATL.
+For EU compliance: TSA must be a QTSP in the EUTL.
+For general use: TSA's root should be widely trusted.
+
+| **Availability & SLA**
+| TSAs can go down.
+For production signing, use a TSA with a published SLA.
+Consider a fallback TSA if the primary is unreachable.
+
+| **Cost**
+| Free TSAs exist (FreeTSA.org, some DigiCert endpoints) but may not be suitable for production.
+Commercial TSAs charge per timestamp or per annual subscription.
+Costs range from free to several thousand euros per year.
+
+| **Accuracy**
+| TSAs report their time accuracy (e.g., ±1 second).
+For most use cases, sub-second accuracy is not critical.
+
+| **Geographic location**
+| Some regulations require the TSA to be operated within specific jurisdictions.
+EU regulations may require a TSA operated by an EU-based QTSP.
+
+| **Response time**
+| Network latency + TSA processing time.
+Free TSAs may be slower.
+For high-volume signing (thousands per minute), TSA response time matters.
+
+| **Certificate lifetime**
+| The TSA's signing certificate has an expiry date.
+Longer-lived TSA certificates mean your timestamps are verifiable for longer before re-timestamping is needed.
+
+|===
+
+[WARNING]
+====
+**Never hardcode a single TSA URL** without a fallback strategy.
+If the TSA is unreachable when your application needs to sign, the signing fails.
+At minimum, implement:
+
+1. A configurable TSA URL (not hardcoded)
+2. A reasonable timeout (10-30 seconds)
+3. A retry with backoff (the TSA may be temporarily overloaded)
+4. Optionally, a fallback TSA URL
+5. A graceful degradation path: if no TSA is available, produce a B-B signature and log a warning for later B-T upgrade
+====
+
+== TSA Health Probing
+
+=== Why You Need Probing
+
+Before your application signs a document, you need to know which TSAs are actually reachable.
+A signing operation that fails at the timestamping step — after the user has already authenticated, after the CSC API has consumed a SAD token, after the CMS signature has been computed — is one of the most frustrating failure modes in digital signing.
+You can avoid it by probing TSAs in the background.
+
+=== Building a TSA Probe
+
+A TSA probe sends a minimal RFC 3161 timestamp request — using a dummy hash, with `certReq=false` to minimize response size — and measures whether the server responds correctly:
+
+[source,java]
+----
+/**
+ * Probes a TSA server by sending a minimal timestamp request.
+ * Returns the response time in milliseconds, or -1 if the probe fails.
+ */
+public long probeTsa(String tsaUrl, int timeoutMs) {
+    try {
+        // Hash of dummy data — we don't care about the content
+        byte[] dummyHash = MessageDigest.getInstance("SHA-256")
+                .digest("tsa-probe".getBytes(StandardCharsets.UTF_8));
+
+        TimeStampRequestGenerator gen = new TimeStampRequestGenerator();
+        gen.setCertReq(false);  // Minimize response size
+        TimeStampRequest req = gen.generate(TSPAlgorithms.SHA256, dummyHash);
+
+        long start = System.nanoTime();
+
+        HttpURLConnection conn = (HttpURLConnection)
+                new URL(tsaUrl).openConnection();
+        conn.setDoOutput(true);
+        conn.setRequestMethod("POST");
+        conn.setRequestProperty("Content-Type",
+                "application/timestamp-query");
+        conn.setConnectTimeout(timeoutMs);
+        conn.setReadTimeout(timeoutMs);
+        conn.getOutputStream().write(req.getEncoded());
+
+        // Validate Content-Type — some misconfigured servers
+        // return an HTML error page with HTTP 200
+        String contentType = conn.getContentType();
+        if (contentType == null
+                || !contentType.contains("timestamp-reply")) {
+            log.warn("TSA {} returned unexpected Content-Type: {}",
+                    tsaUrl, contentType);
+            return -1;
+        }
+
+        byte[] respBytes = conn.getInputStream().readAllBytes();
+        TimeStampResponse resp = new TimeStampResponse(respBytes);
+
+        long elapsed = (System.nanoTime() - start) / 1_000_000;
+
+        if (resp.getStatus() == PKIStatus.GRANTED
+                || resp.getStatus() == PKIStatus.GRANTED_WITH_MODS) {
+            return elapsed;
+        }
+        return -1;
+    } catch (Exception e) {
+        return -1;
+    }
+}
+----
+
+[IMPORTANT]
+====
+**Content-Type validation is essential.**
+Some TSA endpoints sit behind reverse proxies or WAFs that return an HTTP 200 response with an HTML error page when the backend is down.
+Without checking `Content-Type: application/timestamp-reply`, your application might accept a garbage response and only fail later when trying to parse it as ASN.1.
+Always validate the response `Content-Type` before parsing.
+====
+
+=== Probe Strategy
+
+For production applications, run probes on a schedule:
+
+1. **At startup**: Probe all configured TSAs concurrently using a thread pool. Mark each as "online" or "offline" with its measured response time.
+2. **Periodically**: Re-probe every 5-15 minutes. TSA availability can change — maintenance windows, network issues, certificate rotations.
+3. **On failure**: If a signing operation fails at the timestamping step, immediately probe all TSAs and update their status. The failure may be transient (timeout) or permanent (certificate expired, endpoint removed).
+
+Present the probe results to the user: a green/red status indicator with response time helps them choose the fastest available TSA for their signing operation.
+
+== Caching TSA and OCSP Responses
+
+=== Why Caching Matters
+
+Timestamp and OCSP requests are network calls to external servers.
+In a high-volume signing scenario — batch signing hundreds of documents — making a fresh TSA request and OCSP lookup for every single signature is wasteful and slow.
+More importantly, it creates an availability dependency: if the TSA or OCSP responder goes down mid-batch, the entire batch fails.
+
+=== TSA Response Caching
+
+TSA responses are **not cacheable** in the traditional sense — each timestamp token contains a unique serial number and a specific timestamp, making every response unique by design.
+However, you can optimize for batch scenarios:
+
+1. **Connection pooling**: Reuse HTTP connections to the TSA server. TLS handshakes are expensive; a keep-alive connection eliminates that overhead for subsequent requests.
+2. **Pre-warming**: Establish the connection before the signing flow begins. The first request to a TSA often takes 2-5x longer than subsequent requests due to DNS resolution, TLS negotiation, and server-side session setup.
+3. **Batch authorization**: Some CSC providers and TSA operators support batch requests — signing multiple hashes or timestamping multiple values in a single API call. If your TSA supports it, prefer batch requests over individual calls.
+
+[WARNING]
+====
+**Never reuse a timestamp token across multiple signatures.**
+Each timestamp proves existence at a specific instant for a specific hash.
+Sharing a timestamp token between two signatures is technically invalid (the hash won't match) and a compliance violation.
+====
+
+=== OCSP Response Caching
+
+Unlike timestamps, OCSP responses **are cacheable** — and you should cache them aggressively.
+An OCSP response contains a `thisUpdate` and `nextUpdate` field that define a validity window.
+Within that window, the response is authoritative: the CA is asserting that the certificate's revocation status has not changed since `thisUpdate` and will not change before `nextUpdate`.
+
+[source,java]
+----
+/**
+ * OCSP response cache.
+ * Caches responses by certificate serial number, respects nextUpdate.
+ */
+private final Map<BigInteger, CachedOcspResponse> ocspCache
+        = new ConcurrentHashMap<>();
+
+public byte[] getOcspResponse(X509Certificate cert,
+        X509Certificate issuer) throws Exception {
+    BigInteger serial = cert.getSerialNumber();
+    CachedOcspResponse cached = ocspCache.get(serial);
+
+    if (cached != null && cached.isValid()) {
+        log.debug("OCSP cache hit for serial={}", serial);
+        return cached.responseBytes();
+    }
+
+    // Cache miss or expired — fetch fresh response
+    byte[] respBytes = fetchOCSPResponse(cert, issuer);
+    if (respBytes != null) {
+        OCSPResp ocspResp = new OCSPResp(respBytes);
+        BasicOCSPResp basic = (BasicOCSPResp)
+                ocspResp.getResponseObject();
+        Date nextUpdate = basic.getResponses()[0].getNextUpdate();
+
+        ocspCache.put(serial,
+                new CachedOcspResponse(respBytes, nextUpdate));
+        log.debug("OCSP cached for serial={}, valid until {}",
+                serial, nextUpdate);
+    }
+    return respBytes;
+}
+----
+
+Typical OCSP response validity windows:
+
+- **Commercial CAs**: 1-4 hours (short, to limit exposure from compromised responder)
+- **Government CAs**: 4-24 hours (longer, to reduce load on centralized infrastructure)
+- **Qualified CAs (eIDAS)**: 24 hours maximum (ETSI EN 319 411-2 requirement)
+
+For batch signing of 100 documents with the same certificate, a cached OCSP response eliminates 99 round trips to the OCSP responder.
+
+=== CRL Caching
+
+CRLs are even more cacheable than OCSP responses.
+Every CRL contains a `nextUpdate` date, and some CAs publish CRLs on fixed schedules (every 6, 12, or 24 hours).
+Cache the CRL bytes keyed by the CRL Distribution Point URL and check `nextUpdate` before re-fetching:
+
+[source,java]
+----
+/**
+ * CRL cache — caches full CRLs by distribution point URL.
+ * CRLs can be large (hundreds of KB), but they change infrequently.
+ */
+private final Map<String, CachedCrl> crlCache
+        = new ConcurrentHashMap<>();
+
+public byte[] getCrl(String crlUrl) throws Exception {
+    CachedCrl cached = crlCache.get(crlUrl);
+
+    if (cached != null && cached.nextUpdate().after(new Date())) {
+        log.debug("CRL cache hit for {}", crlUrl);
+        return cached.crlBytes();
+    }
+
+    byte[] crlBytes = downloadCrl(crlUrl);
+    CertificateFactory cf = CertificateFactory.getInstance("X.509");
+    X509CRL crl = (X509CRL) cf.generateCRL(
+            new ByteArrayInputStream(crlBytes));
+
+    crlCache.put(crlUrl,
+            new CachedCrl(crlBytes, crl.getNextUpdate()));
+    log.debug("CRL cached for {}, valid until {}",
+            crlUrl, crl.getNextUpdate());
+
+    return crlBytes;
+}
+----
+
+[TIP]
+====
+**Cache warming for DSS construction.**
+When building a DSS dictionary (for PAdES-B-LT or B-LTA), you need OCSP responses and CRLs for the signer's entire certificate chain _plus_ the TSA's certificate chain.
+A single signature can require 4-8 revocation data lookups.
+Pre-fetch and cache this data before the signing flow begins — the DSS construction should be an offline operation that reads from cache, not a live network operation.
+====
+
+== Signature Timestamps vs. Document Timestamps
+
+PDF supports two kinds of timestamps, and they serve different purposes:
+
+=== Signature Timestamps
+
+A **signature timestamp** is embedded _inside_ the CMS `SignedData` as an unsigned attribute of the `SignerInfo`.
+It timestamps the _signature value_ — proving when the signature was created.
+
+- **Where it lives**: CMS `SignerInfo.unsignedAttrs.id-aa-signatureTimeStampToken`
+- **What it timestamps**: The bytes of the `SignerInfo.signature` field
+- **PAdES level**: Required for PAdES-B-T and above
+- **Who creates it**: The signing application, immediately after computing the CMS signature
+
+=== Document Timestamps
+
+A **document timestamp** is a separate signature in the PDF — a `/Sig` dictionary with `/SubFilter /ETSI.RFC3161` — that timestamps the _entire document_.
+
+- **Where it lives**: A separate signature dictionary in the PDF, applied as an incremental update
+- **What it timestamps**: The entire PDF file (via byte range), including all previous signatures and the DSS
+- **PAdES level**: Required for PAdES-B-LTA (the archival timestamp)
+- **Who creates it**: The document management system, as a maintenance operation
+
+The key difference: a signature timestamp proves when a _specific signature_ was created.
+A document timestamp proves that the _entire document_ (including all signatures and validation data) existed at a specific time.
+
+[source]
+----
+// Signature timestamp (inside CMS)
+/Sig <<
+  /SubFilter /ETSI.CAdES.detached
+  /Contents <CMS SignedData:
+    SignerInfo:
+      signedAttrs: [contentType, messageDigest, ESS-signing-certificate-v2]
+      signature: <RSA/ECDSA signature bytes>
+      unsignedAttrs: [
+        signatureTimeStampToken: <TimeStampToken>  ← THIS
+      ]
+  >
+>>
+
+// Document timestamp (separate signature)
+/Sig <<
+  /SubFilter /ETSI.RFC3161             ← THIS
+  /ByteRange [0 ... ... ...]          ← Covers entire file
+  /Contents <TimeStampToken as CMS>
+>>
+----
+
+== The Document Security Store (DSS)
+
+=== Purpose
+
+The DSS is a dictionary in the document catalog that stores all the data needed to validate every signature in the document _offline_ — without contacting any external servers.
+
+Without a DSS, validating a signature requires:
+
+- Fetching the signer's certificate chain from the CMS and/or AIA URLs
+- Contacting OCSP responders to check revocation status
+- Downloading CRLs from distribution points
+
+All of these require network access and functioning servers.
+Years from now, these servers may not exist.
+The DSS solves this by embedding everything locally.
+
+=== Building the DSS
+
+Building a DSS requires collecting all the validation data and embedding it as an incremental update:
+
+[source,java]
+----
+/**
+ * Adds a DSS (Document Security Store) dictionary to the PDF,
+ * embedding certificates, OCSP responses, and CRLs for all signatures.
+ */
+public void addDSS(PDDocument doc, List<ValidationData> validationData)
+        throws IOException {
+
+    COSDictionary dssDictionary = new COSDictionary();
+    COSArray certsArray = new COSArray();
+    COSArray ocspsArray = new COSArray();
+    COSArray crlsArray = new COSArray();
+
+    for (ValidationData vd : validationData) {
+        // Embed certificates
+        for (byte[] certBytes : vd.getCertificateChain()) {
+            PDStream certStream = new PDStream(doc);
+            try (OutputStream os = certStream.createOutputStream()) {
+                os.write(certBytes);
+            }
+            certsArray.add(certStream.getCOSObject());
+        }
+
+        // Embed OCSP responses
+        for (byte[] ocspBytes : vd.getOcspResponses()) {
+            PDStream ocspStream = new PDStream(doc);
+            try (OutputStream os = ocspStream.createOutputStream()) {
+                os.write(ocspBytes);
+            }
+            ocspsArray.add(ocspStream.getCOSObject());
+        }
+
+        // Embed CRLs
+        for (byte[] crlBytes : vd.getCrls()) {
+            PDStream crlStream = new PDStream(doc);
+            try (OutputStream os = crlStream.createOutputStream()) {
+                os.write(crlBytes);
+            }
+            crlsArray.add(crlStream.getCOSObject());
+        }
+    }
+
+    if (certsArray.size() > 0) dssDictionary.setItem(COSName.getPDFName("Certs"), certsArray);
+    if (ocspsArray.size() > 0) dssDictionary.setItem(COSName.getPDFName("OCSPs"), ocspsArray);
+    if (crlsArray.size() > 0) dssDictionary.setItem(COSName.getPDFName("CRLs"), crlsArray);
+
+    // Add DSS to document catalog
+    doc.getDocumentCatalog().getCOSObject()
+            .setItem(COSName.getPDFName("DSS"), dssDictionary);
+}
+----
+
+=== VRI: Validation Related Information
+
+The DSS can optionally include a `/VRI` sub-dictionary that maps each signature to its specific validation data.
+The VRI keys are the uppercase hex SHA-1 hash of the signature value (the bytes in `/Contents`):
+
+[source]
+----
+/DSS <<
+  /Certs [...]
+  /OCSPs [...]
+  /VRI <<
+    /A1B2C3D4E5F6... <<        % SHA-1 hash of signature 1's /Contents
+      /Cert [30 0 R 31 0 R]    % Certs for this specific signature
+      /OCSP [33 0 R]           % OCSP for this specific signature
+      /TU (D:20260308120000Z)  % Time of validation
+    >>
+    /F6E5D4C3B2A1... <<        % SHA-1 hash of signature 2's /Contents
+      /Cert [30 0 R 32 0 R]
+      /OCSP [34 0 R]
+      /TU (D:20260309140000Z)
+    >>
+  >>
+>>
+----
+
+VRI is useful for multi-signature documents where each signature has different validation data.
+Without VRI, a validator must try all certificates and OCSP responses in the DSS against each signature to find the right match.
+With VRI, the mapping is explicit.
+
+[NOTE]
+====
+The VRI key is a SHA-1 hash — yes, SHA-1.
+This is a historical artifact from when the DSS was first specified.
+SHA-1 is used here only as a key derivation function (to generate a unique dictionary key from the signature value), not for cryptographic security.
+The security of the DSS does not depend on SHA-1 collision resistance.
+====
+
+== Fetching Revocation Data
+
+=== OCSP (Online Certificate Status Protocol)
+
+OCSP is the preferred mechanism for checking certificate revocation.
+You send a request to the CA's OCSP responder with the certificate's serial number, and it responds with "good," "revoked," or "unknown."
+
+[source,java]
+----
+/**
+ * Fetches an OCSP response for the given certificate.
+ * Returns the DER-encoded OCSP response bytes.
+ */
+public byte[] fetchOCSPResponse(X509Certificate cert,
+        X509Certificate issuer) throws Exception {
+
+    // 1. Find the OCSP responder URL from the certificate's AIA extension
+    String ocspUrl = extractOcspUrl(cert);
+    if (ocspUrl == null) {
+        log.warn("No OCSP URL in certificate AIA for: {}",
+                cert.getSubjectX500Principal());
+        return null;
+    }
+
+    // 2. Build the OCSP request
+    CertificateID certId = new CertificateID(
+            new JcaDigestCalculatorProviderBuilder().build()
+                    .get(CertificateID.HASH_SHA1),
+            new JcaX509CertificateHolder(issuer),
+            cert.getSerialNumber());
+
+    OCSPReqBuilder reqBuilder = new OCSPReqBuilder();
+    reqBuilder.addRequest(certId);
+    OCSPReq ocspReq = reqBuilder.build();
+
+    // 3. Send via HTTP
+    HttpURLConnection conn = (HttpURLConnection)
+            new URL(ocspUrl).openConnection();
+    conn.setDoOutput(true);
+    conn.setRequestMethod("POST");
+    conn.setRequestProperty("Content-Type", "application/ocsp-request");
+    conn.getOutputStream().write(ocspReq.getEncoded());
+
+    byte[] respBytes = conn.getInputStream().readAllBytes();
+
+    // 4. Validate the response
+    OCSPResp ocspResp = new OCSPResp(respBytes);
+    if (ocspResp.getStatus() != OCSPResp.SUCCESSFUL) {
+        log.error("OCSP response status: {}", ocspResp.getStatus());
+        return null;
+    }
+
+    BasicOCSPResp basicResp = (BasicOCSPResp) ocspResp.getResponseObject();
+    SingleResp singleResp = basicResp.getResponses()[0];
+
+    if (singleResp.getCertStatus() == CertificateStatus.GOOD) {
+        log.info("OCSP: certificate is GOOD (produced: {})",
+                basicResp.getProducedAt());
+        return respBytes;
+    } else {
+        log.error("OCSP: certificate status is NOT GOOD: {}",
+                singleResp.getCertStatus());
+        return null;  // Certificate is revoked or unknown
+    }
+}
+----
+
+=== CRL (Certificate Revocation List)
+
+CRLs are the fallback when OCSP is not available.
+A CRL is a signed list of all revoked certificates issued by a CA.
+
+[source,java]
+----
+/**
+ * Downloads a CRL from the certificate's CRL Distribution Point.
+ * Returns the DER-encoded CRL bytes.
+ */
+public byte[] fetchCRL(X509Certificate cert) throws Exception {
+    String crlUrl = extractCrlUrl(cert);
+    if (crlUrl == null) {
+        log.warn("No CRL URL in certificate for: {}",
+                cert.getSubjectX500Principal());
+        return null;
+    }
+
+    HttpURLConnection conn = (HttpURLConnection) new URL(crlUrl).openConnection();
+    conn.setConnectTimeout(10000);
+    conn.setReadTimeout(30000);
+
+    byte[] crlBytes = conn.getInputStream().readAllBytes();
+
+    // Validate the CRL
+    CertificateFactory cf = CertificateFactory.getInstance("X.509");
+    X509CRL crl = (X509CRL) cf.generateCRL(new ByteArrayInputStream(crlBytes));
+
+    log.info("CRL downloaded: issuer={}, entries={}, nextUpdate={}",
+            crl.getIssuerX500Principal(),
+            crl.getRevokedCertificates() != null ?
+                    crl.getRevokedCertificates().size() : 0,
+            crl.getNextUpdate());
+
+    return crlBytes;
+}
+----
+
+[WARNING]
+====
+CRLs can be **very large** — some CAs have CRLs of 500 KB or more.
+Embedding a large CRL in the DSS significantly increases the PDF file size.
+Prefer OCSP when available — OCSP responses are typically 1-3 KB.
+
+Also be aware of **delta CRLs** — some CAs publish only the changes since the last full CRL.
+If the certificate's CRL Distribution Point specifies a delta CRL, you may need both the full CRL and the delta CRL for complete validation.
+====
+
+== The Complete B-LTA Workflow
+
+Putting it all together, here's the end-to-end workflow for producing a PAdES-B-LTA signature:
+
+[source]
+----
+1. Create PAdES-B-B signature
+   └── CMS with ESS-signing-certificate-v2, SHA-256, SubFilter ETSI.CAdES.detached
+
+2. Add signature timestamp → PAdES-B-T
+   └── Request RFC 3161 timestamp over the signature value
+   └── Embed as unsigned CMS attribute
+
+3. Fetch validation data
+   └── Build certificate chain (signer → intermediates → root)
+   └── Fetch OCSP response for each certificate
+   └── Fetch CRL as fallback where OCSP unavailable
+   └── Fetch TSA's certificate chain and revocation data too
+
+4. Create DSS dictionary → PAdES-B-LT
+   └── Embed all certificates as streams
+   └── Embed all OCSP responses as streams
+   └── Embed all CRLs as streams
+   └── Optionally create VRI entries
+   └── Add DSS to document catalog as incremental update
+
+5. Add document timestamp → PAdES-B-LTA
+   └── Request RFC 3161 timestamp over the entire file (including DSS)
+   └── Apply as separate /Sig dictionary with SubFilter ETSI.RFC3161
+   └── Save as incremental update
+----
+
+Each step is an incremental update to the PDF.
+The final file contains the original document, the signature, the DSS, and the document timestamp — everything needed for indefinite validation.
+
+== Key Takeaways
+
+- **RFC 3161 timestamps** are CMS-signed proofs that data existed at a specific time — issued by Trusted Timestamp Authorities
+- **Signature timestamps** (in CMS unsigned attributes) prove when a specific signature was created
+- **Document timestamps** (separate `/Sig` with SubFilter `ETSI.RFC3161`) prove when the entire document existed — used for archival
+- The **DSS dictionary** embeds certificates, OCSP responses, and CRLs directly in the PDF for offline validation
+- **VRI entries** map specific signatures to their validation data using SHA-1 hash keys
+- **OCSP** is preferred over CRLs for revocation checking (smaller, more specific)
+- **TSA selection** matters: trust store compatibility (AATL/EUTL), availability, cost, and response time
+- **PAdES-B-LTA** is the complete package: signature + timestamp + validation data + archival timestamp
+- **Re-timestamping** extends validity indefinitely — a scheduled maintenance operation for archival documents
+- Always implement **TSA failover** — a TSA outage should not prevent signing
+- **Probe TSAs** in the background at startup and periodically — validate Content-Type headers, not just HTTP 200
+- **Cache OCSP responses** aggressively — they have explicit validity windows (`thisUpdate`/`nextUpdate`) and eliminate redundant network calls in batch scenarios
+- **Cache CRLs** by distribution point URL — CRLs change infrequently and can be very large; avoid re-downloading within the validity window
+- **TSA responses cannot be cached** — each is unique by design — but connection pooling and pre-warming significantly reduce latency

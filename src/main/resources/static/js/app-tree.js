@@ -91,13 +91,7 @@ PDFalyzer.Tree = (function ($, P) {
         var nodes = findAllByCategory(rootData, category);
         if (nodes.length === 0) {
             let iconHtml = '';
-            if (category === 'bookmarks') {
-                iconHtml = '<i class="fas fa-bookmark fa-2x mb-2 text-muted"></i><br>';
-                $container.html('<div class="text-muted text-center mt-3">' + iconHtml + 'No bookmarks found</div>');
-            } else if (category === 'attachments') {
-                iconHtml = '<i class="fas fa-paperclip fa-2x mb-2 text-muted"></i><br>';
-                $container.html('<div class="text-muted text-center mt-3">' + iconHtml + 'No attachments found</div>');
-            } else if (category === 'forms' || category === 'acroform' || category === 'field') {
+            if (category === 'forms' || category === 'acroform' || category === 'field') {
                 iconHtml = '<i class="fas fa-file fa-2x mb-2 text-muted"></i><br>';
                 $container.html('<div class="text-muted text-center mt-3">' + iconHtml + 'No forms found</div>');
             } else {

@@ -1,0 +1,822 @@
+[[ch03]]
+== X.509 Certificates
+ifdef::env-github[]
+:tip-caption: :bulb:
+:note-caption: :information_source:
+:important-caption: :heavy_exclamation_mark:
+:caution-caption: :fire:
+:warning-caption: :warning:
+endif::[]
+
+[abstract]
+--
+A digital signature proves that someone with a specific private key signed some data.
+But _who_ holds that private key?
+A public key is just a number -- a very large number, but a number with no name attached.
+
+X.509 certificates solve this problem.
+A certificate is a signed statement that binds a public key to an identity: "This public key belongs to Alice Smith at Acme Corp, and I, DigiCert, vouch for it."
+This chapter takes apart the X.509 certificate format, field by field, extension by extension, with the level of detail you need to debug real-world certificate problems in PDF signatures.
+--
+
+=== What a Certificate Is
+
+At its core, an X.509 certificate is a data structure containing three things:
+
+1. A **subject** -- the identity (person, organization, or device) that the certificate represents
+2. A **public key** -- the subject's public key, which can be used to verify signatures created with the corresponding private key
+3. A **digital signature** from a **Certificate Authority (CA)** -- a trusted third party that vouches for the binding between the subject and the public key
+
+The CA's signature is what gives the certificate its authority.
+Without it, you have a self-signed statement: "I am Alice, and here is my public key, trust me."
+With it, you have a verifiable claim backed by an entity that (presumably) verified Alice's identity before signing.
+
+The X.509 standard is defined in ITU-T Recommendation X.509 (originally from 1988, extensively revised since) and profiled for Internet use in {rfc5280}.
+When we talk about X.509 certificates in the context of PDF signatures, we mean the {rfc5280} profile -- the Internet PKI profile that every browser, every operating system, and every PDF viewer actually implements.
+
+=== ASN.1 and DER Encoding
+
+Before we look at the certificate structure, we need to talk about how certificates are encoded, because you _will_ encounter raw certificate bytes when debugging PDF signatures, and you need to understand what you're looking at.
+
+Certificates are defined using **ASN.1** (Abstract Syntax Notation One), a schema language for describing data structures.
+ASN.1 is to certificates what JSON Schema is to JSON -- it defines the structure, types, and constraints.
+But unlike JSON, ASN.1 data is encoded in a compact binary format.
+
+The encoding used for certificates is **DER** (Distinguished Encoding Rules), a subset of BER (Basic Encoding Rules) that produces exactly one encoding for any given value.
+This uniqueness property is critical: because a certificate's signature covers its DER encoding, there can be only one valid encoding -- otherwise the signature wouldn't verify.
+
+==== Tag-Length-Value
+
+DER uses a Tag-Length-Value (TLV) structure.
+Every data element consists of:
+
+* **Tag** (1 or more bytes): identifies the type (SEQUENCE, INTEGER, BIT STRING, OID, etc.)
+* **Length** (1 or more bytes): the number of bytes in the value
+* **Value** (variable): the actual data
+
+.Common ASN.1 tags in certificates
+[cols="1,2,3", options="header"]
+|===
+| Tag (hex) | ASN.1 Type | Where You'll See It
+
+| `30`
+| SEQUENCE (constructed)
+| The outermost wrapper of the certificate, and of most sub-structures (tbsCertificate, extensions, etc.)
+
+| `31`
+| SET (constructed)
+| Relative Distinguished Name components in the issuer and subject fields
+
+| `02`
+| INTEGER
+| Serial number, RSA modulus and exponent, version number
+
+| `03`
+| BIT STRING
+| The signature value, and the subject public key value
+
+| `04`
+| OCTET STRING
+| Extension values, key identifiers
+
+| `05`
+| NULL
+| Algorithm parameters (RSA with SHA-256 has NULL parameters)
+
+| `06`
+| OBJECT IDENTIFIER
+| Algorithm OIDs, extension OIDs, policy OIDs
+
+| `0C`
+| UTF8String
+| Subject and issuer name components
+
+| `13`
+| PrintableString
+| Country codes and other restricted-character fields
+
+| `17`
+| UTCTime
+| Validity dates (for dates before 2050)
+
+| `18`
+| GeneralizedTime
+| Validity dates (for dates from 2050 onward, per {rfc5280} §4.1.2.5)
+
+| `A0`
+| Context-specific [0]
+| Version number (explicit tag), extensions container
+
+| `A3`
+| Context-specific [3]
+| Extensions container in tbsCertificate
+|===
+
+TIP: When you see `30 82 03 A5` at the start of a binary blob, you're looking at a SEQUENCE with a two-byte length (the `82` means "the next 2 bytes are the length"), specifically `03 A5` = 933 bytes. This is almost certainly a certificate or a CMS structure. The `82` prefix on the length byte is the tell: `81` means one-byte length follows, `82` means two-byte length follows. Certificate structures are almost always in the `82` range (258-65535 bytes).
+
+==== PEM vs. DER
+
+You will encounter certificates in two physical formats:
+
+* **DER**: raw binary. File extensions: `.der`, `.cer`, `.crt` (ambiguous)
+* **PEM**: Base64-encoded DER wrapped in `-----BEGIN CERTIFICATE-----` / `-----END CERTIFICATE-----` headers. File extensions: `.pem`, `.crt` (ambiguous)
+
+[source]
+----
+-----BEGIN CERTIFICATE-----
+MIIFYjCCBEqgAwIBAgIQd70NbNs2+RrqIQ/E8FjTDTANBgkqhkiG9w0BAQsFAMDQ
+... (Base64-encoded DER bytes) ...
+-----END CERTIFICATE-----
+----
+
+The content between the headers is the DER encoding, Base64-encoded with line breaks every 64 characters.
+Nothing more, nothing less.
+To get the DER bytes, strip the headers and Base64-decode.
+
+WARNING: The `.crt` extension is ambiguous -- it can be either DER or PEM. If you're loading a certificate and get a parsing error, try the other format. Java's `CertificateFactory` handles both, but BouncyCastle's `PEMParser` expects PEM, and raw `X509CertificateHolder(byte[])` expects DER.
+
+=== Certificate Structure
+
+An X.509v3 certificate has three top-level fields, defined in {rfc5280} Section 4.1:
+
+[source]
+----
+Certificate ::= SEQUENCE {
+    tbsCertificate       TBSCertificate,         -- <1>
+    signatureAlgorithm   AlgorithmIdentifier,     -- <2>
+    signatureValue       BIT STRING               -- <3>
+}
+----
+<1> The "to be signed" certificate -- all the data that the CA signs
+<2> The algorithm the CA used to create the signature (must match the algorithm in tbsCertificate)
+<3> The CA's digital signature over the DER encoding of tbsCertificate
+
+The CA signs `tbsCertificate` -- the entire inner structure, DER-encoded.
+The `signatureAlgorithm` and `signatureValue` are outside the signed region (they can't be inside it -- the signature can't sign itself, just as a PDF's `/Contents` can't be part of its own byte range).
+
+==== tbsCertificate
+
+This is where all the interesting data lives:
+
+[source]
+----
+TBSCertificate ::= SEQUENCE {
+    version          [0] EXPLICIT INTEGER DEFAULT v1,  -- <1>
+    serialNumber         INTEGER,                       -- <2>
+    signature            AlgorithmIdentifier,           -- <3>
+    issuer               Name,                          -- <4>
+    validity             Validity,                      -- <5>
+    subject              Name,                          -- <6>
+    subjectPublicKeyInfo SubjectPublicKeyInfo,          -- <7>
+    issuerUniqueID   [1] IMPLICIT BIT STRING OPTIONAL,  -- <8>
+    subjectUniqueID  [2] IMPLICIT BIT STRING OPTIONAL,  -- <8>
+    extensions       [3] EXPLICIT Extensions OPTIONAL    -- <9>
+}
+----
+<1> Version: 0 = v1, 1 = v2, 2 = v3. All modern certificates are v3. If you see v1, it's either very old or self-signed for testing.
+<2> Serial number: unique within the issuing CA. Must be a positive integer, at most 20 bytes. CAs use random serial numbers to prevent hash-based attacks.
+<3> Signature algorithm: must match the outer `signatureAlgorithm` field. This redundancy is specified by {rfc5280} to prevent algorithm substitution attacks.
+<4> Issuer: the Distinguished Name (DN) of the CA that signed this certificate.
+<5> Validity: `notBefore` and `notAfter` timestamps defining the certificate's validity period.
+<6> Subject: the Distinguished Name of the entity this certificate represents.
+<7> Subject public key: the algorithm and the actual public key bytes.
+<8> Issuer/subject unique IDs: deprecated, never used in practice. Ignore them.
+<9> Extensions: the v3 extensions that make certificates actually useful. See <<ch03-extensions>> below.
+
+===== Distinguished Names
+
+The issuer and subject fields use X.500 Distinguished Names -- a hierarchical naming scheme from the 1980s that looks like this:
+
+----
+CN=Alice Smith, O=Acme Corporation, L=San Francisco, ST=California, C=US
+----
+
+Each component is a Relative Distinguished Name (RDN) identified by an OID:
+
+.Common RDN OIDs
+[cols="1,2,3", options="header"]
+|===
+| Abbreviation | OID | Meaning
+
+| CN
+| `2.5.4.3`
+| Common Name -- the certificate holder's name
+
+| O
+| `2.5.4.10`
+| Organization
+
+| OU
+| `2.5.4.11`
+| Organizational Unit (deprecated in TLS certificates since 2022, but still used in document signing certificates)
+
+| L
+| `2.5.4.7`
+| Locality (city)
+
+| ST
+| `2.5.4.8`
+| State or Province
+
+| C
+| `2.5.4.6`
+| Country (two-letter ISO 3166-1 code)
+
+| serialNumber
+| `2.5.4.5`
+| Subject serial number (not the certificate serial number -- this is a personal or organizational identifier, like a tax ID or VAT number)
+
+| E / emailAddress
+| `1.2.840.113549.1.9.1`
+| Email address (legacy; modern certificates use the Subject Alternative Name extension instead)
+|===
+
+NOTE: The DN ordering in X.509 certificates is _most specific first_ (CN before O before C), which is the opposite of LDAP directory convention (C before O before CN). This catches people off guard when comparing DNs between different tools. Java's `X509Certificate.getSubjectX500Principal().getName()` returns RFC 2253 format (CN first), while some tools show LDAP order (C first). When comparing issuer DNs for chain building, always compare the DER encoding, not the string representation.
+
+===== Validity Period
+
+[source]
+----
+Validity ::= SEQUENCE {
+    notBefore   Time,    -- certificate becomes valid
+    notAfter    Time     -- certificate expires
+}
+----
+
+{rfc5280} §4.1.2.5 specifies that dates through 2049 use UTCTime (`YYMMDDHHMMSSZ`) and dates in 2050 and beyond use GeneralizedTime (`YYYYMMDDHHMMSSZ`).
+This means every certificate issued today uses UTCTime for both `notBefore` and `notAfter` -- unless the certificate is valid until 2050 or later (some root CA certificates are).
+
+IMPORTANT: For PDF signatures, the validity period has a nuanced interpretation. A signature made while the certificate was valid remains meaningful _after_ the certificate expires -- the certificate was valid _at the time of signing_. This is why timestamps are critical: a timestamp proves that the signature existed at a specific point in time, allowing validation even after certificate expiration. Without a timestamp, a validator must decide whether to check the certificate against the current time (strict) or the claimed signing time (lenient). Different validators make different choices, which is one of the many reasons the same signature shows "valid" in one viewer and "invalid" in another.
+
+[[ch03-extensions]]
+=== Certificate Extensions
+
+Extensions are what make X.509v3 certificates useful for real-world applications.
+Without extensions, a certificate is just a name bound to a public key -- no information about what the key can be used for, whether the certificate can issue other certificates, or how to check if it's been revoked.
+
+Each extension has three components:
+
+* **OID**: identifies the extension type
+* **Critical flag**: if true, a system that doesn't understand this extension _must_ reject the certificate
+* **Value**: the extension-specific data (an OCTET STRING containing DER-encoded content)
+
+==== KeyUsage
+
+OID: `2.5.29.15` | Defined in: {rfc5280} §4.2.1.3 | Typically: **Critical**
+
+The KeyUsage extension is a bit string that specifies what the public key in this certificate may be used for.
+
+.KeyUsage bits relevant to PDF signing
+[cols="1,1,4", options="header"]
+|===
+| Bit | Name | Relevance to PDF Signing
+
+| 0
+| `digitalSignature`
+| **Required for PDF signing.** Indicates the key can be used to verify digital signatures (other than certificate and CRL signatures). This is the bit you need for signing documents.
+
+| 1
+| `nonRepudiation` (contentCommitment)
+| Indicates the key is used for signatures where the signer cannot later deny having signed. Some certificate profiles for document signing set this bit instead of or in addition to `digitalSignature`. The {rfc5280} renamed this to `contentCommitment` but the old name persists in most tools.
+
+| 5
+| `keyCertSign`
+| Indicates the key is used to verify signatures on certificates. Set on CA certificates. If this bit is set on an end-entity certificate, something is wrong.
+
+| 6
+| `cRLSign`
+| Indicates the key is used to verify signatures on CRLs. Set on CA certificates that issue CRLs.
+|===
+
+WARNING: Some document signing certificates have _only_ `nonRepudiation` (bit 1) set, without `digitalSignature` (bit 0). This is technically valid per {rfc5280}, but it causes problems: some validators check for `digitalSignature` and reject certificates that only have `nonRepudiation`. The safest approach for CAs issuing document signing certificates is to set both bits. If you're validating signatures, check for _either_ bit 0 or bit 1.
+
+==== ExtendedKeyUsage
+
+OID: `2.5.29.37` | Defined in: {rfc5280} §4.2.1.12 | Typically: **Non-critical**
+
+While KeyUsage is a coarse-grained bitmask, ExtendedKeyUsage specifies more precise purposes using OIDs.
+
+.ExtendedKeyUsage OIDs relevant to PDF signing
+[cols="3,2,4", options="header"]
+|===
+| OID | Name | Meaning
+
+| `1.3.6.1.5.5.7.3.4`
+| `id-kp-emailProtection`
+| Historically used for document signing certificates (S/MIME). Many older PDF signing certificates have this EKU.
+
+| `1.3.6.1.4.1.311.10.3.12`
+| `id-kp-documentSigning` (Microsoft)
+| Microsoft's document signing EKU. Common on certificates from CAs that target Windows environments.
+
+| `1.2.840.113583.1.1.5`
+| Adobe Authentic Documents Trust
+| Adobe-specific EKU for AATL certificates. If a certificate has this EKU and chains to an AATL root, Acrobat shows maximum trust.
+
+| `1.3.6.1.5.5.7.3.9`
+| `id-kp-OCSPSigning`
+| For OCSP responder certificates only. Not for document signing.
+|===
+
+TIP: When a PDF signature shows as "untrusted" in Adobe Acrobat but validates fine in other viewers, the first thing to check is the ExtendedKeyUsage. Acrobat is stricter about EKU than most other validators. A certificate without an explicit document signing EKU may be rejected by Acrobat even if it has `digitalSignature` in KeyUsage.
+
+==== BasicConstraints
+
+OID: `2.5.29.19` | Defined in: {rfc5280} §4.2.1.9 | Typically: **Critical**
+
+[source]
+----
+BasicConstraints ::= SEQUENCE {
+    cA                BOOLEAN DEFAULT FALSE,
+    pathLenConstraint INTEGER (0..MAX) OPTIONAL
+}
+----
+
+This extension distinguishes CA certificates from end-entity certificates:
+
+* `cA: TRUE` -- this certificate can issue other certificates
+* `cA: FALSE` (or absent) -- this is an end-entity certificate, it cannot issue other certificates
+* `pathLenConstraint` -- if present, limits how many intermediate CAs can follow this one in a chain
+
+CAUTION: If you encounter a PDF signed by a certificate with `BasicConstraints: cA=TRUE`, something is deeply wrong. CA certificates should never be used for document signing -- their private keys should be locked in HSMs and used only to sign other certificates. A document signed by a CA certificate suggests either a misconfiguration or a test setup that accidentally used the CA key for signing.
+
+==== SubjectKeyIdentifier and AuthorityKeyIdentifier
+
+**SubjectKeyIdentifier** (OID: `2.5.29.14`): a hash of the certificate's public key, used as a compact identifier.
+Typically the SHA-1 hash of the BIT STRING value of the subjectPublicKey (not the entire SubjectPublicKeyInfo structure -- just the key bytes).
+
+**AuthorityKeyIdentifier** (OID: `2.5.29.35`): identifies the CA certificate that signed this one.
+Contains the CA's SubjectKeyIdentifier (keyIdentifier), and optionally the CA's issuer name and serial number.
+
+These two extensions are the primary mechanism for chain building: follow the AuthorityKeyIdentifier from a certificate to find the CA certificate whose SubjectKeyIdentifier matches.
+
+NOTE: The SubjectKeyIdentifier is typically a 20-byte SHA-1 hash. Yes, SHA-1 -- even in 2026. This is not a security concern because the SKI is used as an identifier, not for integrity verification. There is no attack value in finding a collision for a SubjectKeyIdentifier.
+
+==== CRLDistributionPoints
+
+OID: `2.5.29.31` | Defined in: {rfc5280} §4.2.1.13
+
+Contains one or more URLs where CRLs (Certificate Revocation Lists) can be downloaded to check if this certificate has been revoked.
+
+[source]
+----
+CRLDistributionPoints ::= SEQUENCE SIZE (1..MAX) OF DistributionPoint
+
+DistributionPoint ::= SEQUENCE {
+    distributionPoint [0] DistributionPointName OPTIONAL,
+    reasons           [1] ReasonFlags OPTIONAL,
+    cRLIssuer         [2] GeneralNames OPTIONAL
+}
+----
+
+In practice, this is almost always a single HTTP URL:
+
+----
+http://crl.example.com/issuing-ca.crl
+----
+
+==== AuthorityInfoAccess
+
+OID: `1.3.6.1.5.5.7.1.1` | Defined in: {rfc5280} §4.2.2.1
+
+This extension is critical for chain building and revocation checking.
+It contains two types of access descriptions:
+
+.AuthorityInfoAccess methods
+[cols="2,3,4", options="header"]
+|===
+| Method | OID | Purpose
+
+| **OCSP**
+| `1.3.6.1.5.5.7.48.1`
+| URL of the OCSP responder for checking certificate revocation in real time. The validator sends a request with the certificate's serial number and gets back a signed response saying "good," "revoked," or "unknown."
+
+| **CA Issuers**
+| `1.3.6.1.5.5.7.48.2`
+| URL where the issuing CA's certificate can be downloaded. This is how validators fetch missing intermediate certificates during chain building. If a PDF signature doesn't embed the full chain, the validator can use this URL to find the intermediates.
+|===
+
+IMPORTANT: The "CA Issuers" access method is the safety net for incomplete certificate chains. When a signing tool embeds only the end-entity certificate in the CMS (not the full chain), the validator must fetch the intermediates. It uses the CA Issuers URL to download the next certificate up the chain, then follows _that_ certificate's CA Issuers URL, and so on until it reaches a trusted root. This works -- when you have network access. In offline validation scenarios, the chain must be complete. Always embed the full chain in your CMS signatures.
+
+=== Certificate Profiles
+
+Not all certificates are created equal.
+The purpose of a certificate is determined by its extensions, particularly KeyUsage and ExtendedKeyUsage.
+
+==== End-Entity vs. CA Certificates
+
+.End-entity vs. CA certificate comparison
+[cols="2,3,3", options="header"]
+|===
+| Property | End-Entity Certificate | CA Certificate
+
+| BasicConstraints
+| `cA: FALSE` or absent
+| `cA: TRUE`, optionally with pathLenConstraint
+
+| KeyUsage
+| `digitalSignature`, `nonRepudiation`, `keyEncipherment`, `dataEncipherment` (varies)
+| `keyCertSign`, `cRLSign`
+
+| Purpose
+| Signs documents, authenticates TLS sessions, signs email
+| Signs other certificates and CRLs
+
+| Private key location
+| Software (PKCS#12), HSM, smart card
+| HSM (always, for production CAs)
+
+| Validity period
+| 1-3 years typically
+| 10-30 years for roots, 5-10 years for intermediates
+|===
+
+==== Document Signing Certificates
+
+A certificate profile specifically for document signing typically has:
+
+* KeyUsage: `digitalSignature` and/or `nonRepudiation`
+* ExtendedKeyUsage: document signing OID (varies by CA)
+* Subject: identifies the signer (person or organization)
+* Validity: 1-3 years
+* CRL and OCSP: both present for revocation checking
+
+==== How Different CAs Structure Their Certificates
+
+Different CAs make different choices, and these choices affect interoperability:
+
+.CA certificate profile comparison
+[cols="2,3,3,3", options="header"]
+|===
+| Property | DigiCert | GlobalSign | National CAs (e.g., Austrian A-Trust)
+
+| Key algorithm
+| RSA 2048/4096 or ECC P-256/P-384
+| RSA 2048/4096 or ECC P-256/P-384
+| RSA 2048/4096 (ECC adoption varies)
+
+| Hash algorithm
+| SHA-256 or SHA-384
+| SHA-256 or SHA-384
+| SHA-256
+
+| Subject DN
+| CN = person/org name, O = organization
+| CN = person/org name, O = organization
+| CN = person name, serialNumber = national ID, C = country code
+
+| EKU
+| Adobe document signing OID + email protection
+| Adobe document signing OID
+| Varies widely -- some use EU-specific OIDs for qualified certificates
+
+| AATL membership
+| Yes (since 2012)
+| Yes
+| Varies -- many EU national CAs are on AATL
+
+| eIDAS qualified
+| Some certificate types
+| Some certificate types
+| Typically yes (this is their primary purpose)
+
+| OCSP
+| Yes, with OCSP stapling
+| Yes
+| Yes (required by eIDAS)
+
+| Certificate Transparency
+| Yes (required by Chrome/Apple)
+| Yes
+| Sometimes (not required for non-TLS certificates)
+|===
+
+TIP: When debugging why a PDF signature is trusted in one viewer but not another, the CA's AATL status is usually the answer. Adobe Acrobat trusts AATL certificates. Other viewers (macOS Preview, Okular, Firefox's built-in PDF viewer) use the OS trust store, which is different. A DigiCert document signing certificate will be trusted in Acrobat (AATL member), probably trusted in Windows (DigiCert roots are in the Windows trust store), and possibly untrusted in Firefox (which uses its own trust store). Same certificate, same signature, three different trust decisions.
+
+=== Common Certificate Problems in the Wild
+
+Years of debugging PDF signatures have revealed a pattern of recurring certificate problems.
+Here are the ones you will encounter most often:
+
+==== Missing Extensions
+
+*Symptom:* Signature validates cryptographically but shows "untrusted" or "cannot determine if the signer is who they claim to be."
+
+*Cause:* The signing certificate is missing critical extensions -- typically ExtendedKeyUsage or SubjectKeyIdentifier.
+Some legacy CAs (particularly older European government CAs) issued certificates with minimal extensions that predate the current {rfc5280} profile requirements.
+
+*Fix:* The certificate needs to be reissued with proper extensions.
+There is no workaround -- you cannot add extensions to an existing certificate without re-signing it (which means the CA must do it).
+
+==== Wrong Key Usage
+
+*Symptom:* Signature fails validation with "key usage does not permit digital signature" or similar.
+
+*Cause:* The certificate has KeyUsage set to `keyEncipherment` or `dataEncipherment` but not `digitalSignature` or `nonRepudiation`.
+This happens when someone uses a TLS server certificate (designed for key exchange) to sign a PDF document.
+
+*Fix:* Use a certificate with the correct KeyUsage for document signing.
+A TLS certificate is not a signing certificate.
+
+==== Expired Certificates
+
+*Symptom:* "Certificate has expired" warning, even though the document was signed years ago when the certificate was valid.
+
+*Cause:* The validator is checking the certificate against the _current_ time instead of the _signing_ time.
+Without a trusted timestamp, the validator has no proof of when the signature was actually created.
+
+*Fix:* Include a timestamp in the signature (see Chapter 18 on LTV).
+A timestamp from a trusted TSA proves the signature existed at a specific time, allowing validators to check the certificate's validity against that time rather than the current time.
+
+==== Self-Signed Certificates
+
+*Symptom:* "The signer's identity is unknown" or "certificate is not issued by a trusted CA."
+
+*Cause:* The signing certificate is self-signed (the issuer and subject are the same, and it signed itself).
+Self-signed certificates have no external trust anchor.
+
+*Fix:* For production use, obtain a certificate from a recognized CA.
+For internal/testing use, you can add the self-signed certificate to the viewer's trust store manually -- but this defeats the purpose of the CA trust model.
+
+NOTE: Self-signed certificates are perfectly valid for testing and development. PDFalyzer's self-signed certificate generation feature is designed exactly for this purpose. The cryptographic integrity of the signature is identical regardless of whether the certificate is self-signed or CA-issued -- the difference is purely about trust.
+
+==== Incomplete Certificate Chain
+
+*Symptom:* "Unable to build certificate chain" or "issuer certificate not found."
+
+*Cause:* The CMS signature embeds only the end-entity certificate, not the intermediate CA certificates.
+The validator cannot build a path from the end-entity to a trusted root.
+
+*Fix:* Include the full certificate chain (end-entity + all intermediates) in the CMS `certificates` field.
+Do NOT include the root CA -- the root must already be in the validator's trust store.
+
+IMPORTANT: This is one of the most common PDF signature problems. Always embed the full chain (minus the root) in your CMS signatures. The signing code in Chapter 2 already does this -- note how it includes `chain` (from the PKCS#12 key store) in the `CMSSignedDataGenerator`. If your PKCS#12 file doesn't contain the intermediates, you need to add them before signing.
+
+=== Java: Loading and Inspecting Certificates
+
+Here is how to load certificates and extract their fields using BouncyCastle {bc-version}.
+
+[source,java]
+----
+import java.io.FileInputStream;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
+import java.util.Date;
+import java.util.List;
+
+import org.bouncycastle.asn1.ASN1ObjectIdentifier;
+import org.bouncycastle.asn1.x509.AuthorityInformationAccess;
+import org.bouncycastle.asn1.x509.BasicConstraints;
+import org.bouncycastle.asn1.x509.CRLDistPoint;
+import org.bouncycastle.asn1.x509.DistributionPoint;
+import org.bouncycastle.asn1.x509.Extension;
+import org.bouncycastle.asn1.x509.GeneralName;
+import org.bouncycastle.asn1.x509.KeyUsage;
+import org.bouncycastle.cert.X509CertificateHolder;
+import org.bouncycastle.cert.jcajce.JcaX509CertificateHolder;
+
+public class CertificateInspector {
+
+    /**
+     * Load a certificate from a DER or PEM file and inspect its fields.
+     */
+    public static void inspectCertificate(String filePath) throws Exception {
+        // Load the certificate using JCA
+        CertificateFactory cf = CertificateFactory.getInstance("X.509");
+        X509Certificate javaCert;
+        try (FileInputStream fis = new FileInputStream(filePath)) {
+            javaCert = (X509Certificate) cf.generateCertificate(fis);
+        }
+
+        // Wrap in BouncyCastle holder for extension access
+        X509CertificateHolder holder = new JcaX509CertificateHolder(javaCert);
+
+        // --- Basic fields ---
+        String subject = javaCert.getSubjectX500Principal().getName();      // <1>
+        String issuer = javaCert.getIssuerX500Principal().getName();
+        String serial = javaCert.getSerialNumber().toString(16);            // <2>
+        int version = javaCert.getVersion();
+        Date notBefore = javaCert.getNotBefore();
+        Date notAfter = javaCert.getNotAfter();
+        String sigAlg = javaCert.getSigAlgName();
+        String pubKeyAlg = javaCert.getPublicKey().getAlgorithm();
+        int keySize = getKeySize(javaCert);
+
+        // --- KeyUsage ---
+        boolean[] keyUsageBits = javaCert.getKeyUsage();                    // <3>
+        if (keyUsageBits != null) {
+            boolean digitalSignature = keyUsageBits[0];
+            boolean nonRepudiation = keyUsageBits[1];
+            boolean keyEncipherment = keyUsageBits[2];
+            boolean keyCertSign = keyUsageBits[5];
+        }
+
+        // --- BasicConstraints ---
+        Extension bcExt = holder.getExtension(Extension.basicConstraints);
+        if (bcExt != null) {
+            BasicConstraints bc = BasicConstraints.getInstance(
+                    bcExt.getParsedValue());
+            boolean isCA = bc.isCA();
+            int pathLen = bc.getPathLenConstraint() != null
+                    ? bc.getPathLenConstraint().intValue() : -1;
+        }
+
+        // --- ExtendedKeyUsage ---
+        List<String> ekuOids = javaCert.getExtendedKeyUsage();              // <4>
+        if (ekuOids != null) {
+            for (String oid : ekuOids) {
+                // Map OID to human-readable name
+                String name = mapEkuOid(oid);
+            }
+        }
+
+        // --- AuthorityInfoAccess (OCSP + CA Issuers) ---
+        Extension aiaExt = holder.getExtension(Extension.authorityInfoAccess);
+        if (aiaExt != null) {
+            AuthorityInformationAccess aia = AuthorityInformationAccess
+                    .getInstance(aiaExt.getParsedValue());
+
+            // OCSP responder URLs
+            var ocspAccessDescriptions = aia.getAccessDescriptions();
+            for (var ad : ocspAccessDescriptions) {
+                if (ad.getAccessMethod().equals(
+                        new ASN1ObjectIdentifier("1.3.6.1.5.5.7.48.1"))) {
+                    String ocspUrl = ad.getAccessLocation()
+                            .getName().toString();                          // <5>
+                }
+            }
+        }
+
+        // --- CRL Distribution Points ---
+        Extension crlExt = holder.getExtension(Extension.cRLDistributionPoints);
+        if (crlExt != null) {
+            CRLDistPoint crlDistPoint = CRLDistPoint.getInstance(
+                    crlExt.getParsedValue());
+            for (DistributionPoint dp : crlDistPoint.getDistributionPoints()) {
+                // Extract URL from the distribution point
+                var dpName = dp.getDistributionPoint();
+                if (dpName != null) {
+                    var names = org.bouncycastle.asn1.x509.GeneralNames
+                            .getInstance(dpName.getName());
+                    for (GeneralName name : names.getNames()) {
+                        if (name.getTagNo() == GeneralName.uniformResourceIdentifier) {
+                            String crlUrl = name.getName().toString();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private static int getKeySize(X509Certificate cert) {
+        String algorithm = cert.getPublicKey().getAlgorithm();
+        if ("RSA".equals(algorithm)) {
+            var rsaKey = (java.security.interfaces.RSAPublicKey) cert.getPublicKey();
+            return rsaKey.getModulus().bitLength();
+        } else if ("EC".equals(algorithm)) {
+            var ecKey = (java.security.interfaces.ECPublicKey) cert.getPublicKey();
+            return ecKey.getParams().getOrder().bitLength();
+        }
+        return -1;
+    }
+
+    private static String mapEkuOid(String oid) {
+        return switch (oid) {
+            case "1.3.6.1.5.5.7.3.4" -> "emailProtection";
+            case "1.3.6.1.4.1.311.10.3.12" -> "documentSigning (Microsoft)";
+            case "1.2.840.113583.1.1.5" -> "adobeAuthenticDocumentsTrust";
+            case "1.3.6.1.5.5.7.3.1" -> "serverAuth (TLS)";
+            case "1.3.6.1.5.5.7.3.9" -> "OCSPSigning";
+            default -> "unknown (" + oid + ")";
+        };
+    }
+}
+----
+<1> Returns the subject DN in RFC 2253 format (CN first). For display, you might want to parse this into individual components.
+<2> Serial numbers are typically displayed in hexadecimal. Some CAs use very large random serial numbers (up to 20 bytes per {rfc5280}).
+<3> `getKeyUsage()` returns a boolean array where index 0 = digitalSignature, 1 = nonRepudiation, ..., 5 = keyCertSign, 6 = cRLSign. Returns null if the extension is absent.
+<4> Java's `getExtendedKeyUsage()` returns OIDs as strings. You need to map them to human-readable names yourself.
+<5> The OCSP URL is what you send revocation check requests to. This URL must be accessible from the validator's network.
+
+=== Dissecting a Real Signing Certificate
+
+Let's walk through a real document signing certificate, field by field, to see how the theory maps to practice.
+
+[source]
+----
+Certificate:
+    Data:
+        Version: 3 (0x2)
+        Serial Number:
+            0a:55:14:f1:28:1d:45:87:21:f1:27:3c:e5:b6:4f:2a
+        Signature Algorithm: sha256WithRSAEncryption
+        Issuer: C=US, O=DigiCert Inc, CN=DigiCert SHA2 Assured ID CA
+        Validity
+            Not Before: Jan 15 00:00:00 2024 GMT
+            Not After : Jan 14 23:59:59 2027 GMT
+        Subject: C=US, ST=California, L=San Francisco,
+                 O=Acme Corporation, CN=Acme Document Signing
+        Subject Public Key Info:
+            Public Key Algorithm: rsaEncryption
+                RSA Public-Key: (2048 bit)
+----
+
+Let's annotate each field:
+
+.Certificate field analysis
+[cols="2,5", options="header"]
+|===
+| Field | Analysis
+
+| Version 3
+| Expected. All modern certificates are v3 to support extensions.
+
+| Serial Number
+| 16 bytes (128 bits) of random data. DigiCert uses large random serials to prevent hash-based attacks on the serial number.
+
+| Signature Algorithm
+| `sha256WithRSAEncryption` -- SHA-256 hash with RSA signature. This is the algorithm the CA (DigiCert) used to sign this certificate.
+
+| Issuer
+| `DigiCert SHA2 Assured ID CA` -- this is an intermediate CA certificate. The "SHA2" in the name indicates it's a post-SHA-1 intermediate. You'll need to find _this_ certificate to build the chain.
+
+| Validity
+| 3-year validity (Jan 2024 to Jan 2027). Typical for document signing certificates. The signer needs to renew before Jan 14, 2027, or new signatures will be created with an expired certificate.
+
+| Subject
+| Identifies the organization (Acme Corporation) and the purpose (Document Signing). The CN often contains the signer's name or the certificate's purpose rather than a hostname.
+
+| Public Key
+| RSA 2048-bit. The minimum for document signing. Some organizations require 4096-bit, but 2048 is widely accepted and faster.
+|===
+
+The extensions would look like:
+
+[source]
+----
+X509v3 extensions:
+    X509v3 Key Usage: critical
+        Digital Signature
+    X509v3 Extended Key Usage:
+        1.2.840.113583.1.1.5
+    X509v3 Basic Constraints: critical
+        CA:FALSE
+    X509v3 Subject Key Identifier:
+        A1:B2:C3:D4:E5:F6:...
+    X509v3 Authority Key Identifier:
+        keyid:F8:7E:34:22:...
+    Authority Information Access:
+        OCSP - URI:http://ocsp.digicert.com
+        CA Issuers - URI:http://cacerts.digicert.com/DigiCertSHA2AssuredIDCA.crt
+    X509v3 CRL Distribution Points:
+        Full Name:
+          URI:http://crl3.digicert.com/sha2-assured-id-ca.crl
+          URI:http://crl4.digicert.com/sha2-assured-id-ca.crl
+----
+
+.Extension analysis
+[cols="2,5", options="header"]
+|===
+| Extension | Analysis
+
+| KeyUsage: digitalSignature
+| Correct for document signing. This certificate can create digital signatures. The `critical` flag means validators must enforce this.
+
+| ExtendedKeyUsage: 1.2.840.113583.1.1.5
+| This is the Adobe Authentic Documents Trust OID. It means this certificate is intended for PDF document signing and is likely on the AATL.
+
+| BasicConstraints: CA:FALSE
+| Correct. This is an end-entity certificate. It cannot issue other certificates.
+
+| SubjectKeyIdentifier
+| A hash of the public key. Used for chain building (other certificates reference this to identify this certificate as their issuer).
+
+| AuthorityKeyIdentifier
+| Points to the issuing CA's SubjectKeyIdentifier. Follow this to find `DigiCert SHA2 Assured ID CA`.
+
+| AIA: OCSP
+| The OCSP responder URL. Send a request here to check if this certificate has been revoked.
+
+| AIA: CA Issuers
+| The URL to download the issuing CA's certificate. If the CMS signature doesn't include the intermediate, a validator can fetch it here.
+
+| CRL Distribution Points
+| Two CRL URLs (redundancy). Download the CRL to check for revocation without OCSP.
+|===
+
+TIP: DigiCert provides two CRL URLs (crl3 and crl4) for redundancy. If one CDN is down, the other should still work. This is a best practice -- if your CA provides only one CRL URL and it becomes unreachable, validators that use CRL checking will fail to validate signatures. OCSP is the preferred revocation checking method (real-time, smaller responses), but CRL is the fallback.
+
+=== Summary
+
+X.509 certificates are the bridge between raw cryptography and trust.
+They bind a public key to an identity, and the CA's signature on that binding is what makes the trust model work -- or fail, when CAs are compromised (DigiNotar), when extensions are missing, or when the chain is incomplete.
+
+For PDF signatures:
+
+* **Every signed PDF embeds one or more X.509 certificates** in the CMS SignedData structure.
+* **The signing certificate must have `digitalSignature` or `nonRepudiation`** in KeyUsage.
+* **The full chain** (end-entity + intermediates, not the root) should be embedded in the CMS.
+* **AIA extensions** provide fallback URLs for chain building and OCSP revocation checking.
+* **Trust is viewer-dependent**: Acrobat uses AATL, browsers use their own trust stores, OS-level trust stores vary. The same certificate can be trusted in one context and untrusted in another.
+
+The next chapter follows these certificates up the chain -- from the end-entity signing certificate, through intermediates, to the root CA that anchors the entire trust hierarchy.

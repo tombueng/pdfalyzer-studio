@@ -44,7 +44,7 @@
     --warning:    var(--c-warn);
     --success:    var(--c-ok);
     --text:       var(--c-text);
-    --text-muted: color-mix(in srgb, var(--c-text) 55%, var(--c-bg));
+    --text-muted: color-mix(in srgb, var(--c-text) 68%, var(--c-bg));
     --border:     color-mix(in srgb, var(--c-card) 70%, var(--c-accent) 30%);
     --input-bg:   var(--c-input-bg);
     --title:      var(--c-title);
@@ -328,7 +328,7 @@
 /* 50 – Commodore 64 */
 [data-theme="commodore64"] {
     --c-bg:#40318d; --c-surface:#503a99; --c-card:#6850b0;
-    --c-accent:#7869c4; --c-err:#ff4444; --c-warn:#ffcc44; --c-ok:#44ff88; --c-text:#9090e4;
+    --c-accent:#a899e8; --c-err:#ff4444; --c-warn:#ffcc44; --c-ok:#44ff88; --c-text:#c8c0f0;
 }
 
 /* ══════════════════════════════════════════════════════
@@ -574,7 +574,8 @@
 /* 92 – Gameboy */
 [data-theme="gameboy"] {
     --c-bg:#0f380f; --c-surface:#306230; --c-card:#8bac0f;
-    --c-accent:#9bbc0f; --c-err:#bb2200; --c-warn:#aa8800; --c-ok:#1a7a1a; --c-text:#9bbc0f;
+    --c-accent:#d4e840; --c-err:#bb2200; --c-warn:#aa8800; --c-ok:#1a7a1a; --c-text:#d4e840;
+    --c-text-btn:#0f380f;
     --text-muted:#669944;
 }
 /* 93 – BBS Terminal */

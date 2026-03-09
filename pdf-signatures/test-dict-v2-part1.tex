@@ -1,0 +1,651 @@
+% =============================================================================
+% Dictionary Diagram Variations — Part 1 (V01–V05): Dark background variants
+% =============================================================================
+\documentclass[11pt,a4paper]{article}
+\input{test-dict-v2-preamble}
+\begin{document}
+
+% #############################################################################
+% V01: Dark terminal + colored zone boxes + right annotations (baseline)
+% #############################################################################
+\vartitle{V01 --- Dark Terminal + Zone Boxes + Right Annotations}
+{Style 2 base enhanced with Style 1 zone boxes. Colored group frames on the code, annotations right.}
+
+\begin{tikzpicture}[remember picture,
+    every node/.style={anchor=west},
+    k/.style={font=\fontsize{8}{11}\selectfont\ttfamily\bfseries, text=keycolor},
+    v/.style={font=\fontsize{8}{11}\selectfont\ttfamily, text=valcolor},
+    s/.style={font=\fontsize{8}{11}\selectfont\ttfamily, text=strcolor},
+    d/.style={font=\fontsize{8}{11}\selectfont\ttfamily, text=delimcolor},
+    cm/.style={font=\fontsize{7}{9}\selectfont\ttfamily\itshape, text=commentcolor},
+    ln/.style={font=\fontsize{6.5}{11}\selectfont\ttfamily, text=linenocolor},
+    zbox/.style={rectangle, rounded corners=3pt, draw=#1, line width=1pt, fill=#1!12},
+    anno/.style={rectangle, rounded corners=4pt, draw=#1, line width=0.9pt,
+                 fill=#1!8, text width=6.8cm, inner sep=5pt, anchor=north west,
+                 font=\fontsize{7.5}{9.5}\selectfont\sffamily},
+    badge/.style={rectangle, rounded corners=2pt, fill=#1, text=white,
+                  font=\fontsize{5.5}{6.5}\selectfont\bfseries\sffamily,
+                  inner xsep=3pt, inner ysep=1.5pt},
+    conn/.style={draw=#1, line width=1.1pt, -{Stealth[length=4pt, width=3pt]}},
+]
+
+\def\cX{1.0}
+\def\aX{9.6}
+
+% Dark background
+\fill[codebg, rounded corners=5pt] (-0.2, 0.8) rectangle (8.8, -11.2);
+
+% Header
+\node[font=\fontsize{7}{8}\selectfont\sffamily\bfseries, text=commentcolor]
+    at (0.3, 0.55) {SIGNATURE DICTIONARY};
+\node[font=\fontsize{6}{7}\selectfont\sffamily, text=commentcolor!60]
+    at (4.5, 0.55) {ISO 32000-2 Table 255};
+\draw[commentcolor!30, line width=0.4pt] (0.1, 0.32) -- (8.6, 0.32);
+
+% Opening
+\node[d] at (\cX, 0) {<<};
+
+% --- Identity group ---
+\node[k] at (\cX+\codeIndent, -1*\lh)  {/Type};
+\node[v] at (\cX+1.8, -1*\lh)          {/Sig};
+\node[k] at (\cX+\codeIndent, -2*\lh)  {/Filter};
+\node[v] at (\cX+2.2, -2*\lh)          {/Adobe.PPKLite};
+\node[k] at (\cX+\codeIndent, -3*\lh)  {/SubFilter};
+\node[v] at (\cX+2.8, -3*\lh)          {/ETSI.CAdES.detached};
+
+% Zone box: Identity
+\begin{scope}[on background layer]
+    \node[zbox=grpIdentD,
+          fit={(\cX+0.05,-0.7)(\cX+7.5,-3*\lh-0.22)}] (zI) {};
+\end{scope}
+
+% --- Crypto group ---
+\node[cm] at (\cX+\codeIndent, -4*\lh) {\% --- cryptographic payload ---};
+\node[k] at (\cX+\codeIndent, -5*\lh)  {/Contents};
+\node[s] at (\cX+2.6, -5*\lh)          {<0A3F8B...0000>};
+\node[k] at (\cX+\codeIndent, -6*\lh)  {/ByteRange};
+\node[v] at (\cX+2.8, -6*\lh)          {[0 840 3560 1200]};
+
+\begin{scope}[on background layer]
+    \node[zbox=grpCryptoD,
+          fit={(\cX+0.05,-4*\lh+0.08)(\cX+7.5,-6*\lh-0.22)}] (zC) {};
+\end{scope}
+
+% --- Metadata group ---
+\node[cm] at (\cX+\codeIndent, -7*\lh) {\% --- signer metadata ---};
+\node[k] at (\cX+\codeIndent, -8*\lh)  {/Name};
+\node[s] at (\cX+1.8, -8*\lh)          {(Alice Smith)};
+\node[k] at (\cX+\codeIndent, -9*\lh)  {/M};
+\node[s] at (\cX+1.3, -9*\lh)          {(D:20250307120000+01'00')};
+\node[k] at (\cX+\codeIndent, -10*\lh) {/Reason};
+\node[s] at (\cX+2.3, -10*\lh)         {(Approved for release)};
+\node[k] at (\cX+\codeIndent, -11*\lh) {/ContactInfo};
+\node[s] at (\cX+3.2, -11*\lh)         {(alice@example.com)};
+\node[k] at (\cX+\codeIndent, -12*\lh) {/Location};
+\node[s] at (\cX+2.5, -12*\lh)         {(Vienna, Austria)};
+
+\begin{scope}[on background layer]
+    \node[zbox=grpMetaD,
+          fit={(\cX+0.05,-7*\lh+0.08)(\cX+7.5,-12*\lh-0.22)}] (zM) {};
+\end{scope}
+
+% --- Integrity group ---
+\node[cm] at (\cX+\codeIndent, -13*\lh) {\% --- modification detection ---};
+\node[k] at (\cX+\codeIndent, -14*\lh)  {/Reference};
+\node[v] at (\cX+2.7, -14*\lh)          {[<<};
+\node[k] at (\cX+\subIndent, -15*\lh)   {/Type};
+\node[v] at (\cX+2.0, -15*\lh)          {/SigRef};
+\node[k] at (\cX+\subIndent, -16*\lh)   {/TransformMethod};
+\node[v] at (\cX+4.0, -16*\lh)          {/DocMDP};
+\node[k] at (\cX+\subIndent, -17*\lh)   {/TransformParams};
+\node[v] at (\cX+4.2, -17*\lh)          {<< /P 2 >>};
+\node[v] at (\cX+\codeIndent, -18*\lh)  {>>]};
+
+\begin{scope}[on background layer]
+    \node[zbox=grpIntegD,
+          fit={(\cX+0.05,-13*\lh+0.08)(\cX+7.5,-18*\lh-0.22)}] (zR) {};
+\end{scope}
+
+% --- Build group ---
+\node[k] at (\cX+\codeIndent, -19*\lh)  {/Prop\_Build};
+\node[v] at (\cX+3.0, -19*\lh)          {<< /App << /Name /PDFBox >> >>};
+
+\begin{scope}[on background layer]
+    \node[zbox=grpBuildD,
+          fit={(\cX+0.05,-19*\lh+0.22)(\cX+7.5,-19*\lh-0.22)}] (zB) {};
+\end{scope}
+
+% Closing
+\node[d] at (\cX, -20*\lh) {>>};
+
+% --- Annotations ---
+\node[anno=grpIdentD] (aI) at (\aX, 0.5) {
+    \textbf{\color{grpIdentD}Identity \& Format}
+    \hfill\tikz\node[badge=reqred]{REQUIRED};\\[2pt]
+    \texttt{/SubFilter} determines the CMS profile.
+    \texttt{ETSI.CAdES.detached} = PAdES.\\[1pt]
+    \textbf{Produce:} CAdES always.
+    \textbf{Consume:} all three SubFilters.
+};
+
+\node[anno=grpCryptoD] (aC) at (\aX, -1.8) {
+    \textbf{\color{grpCryptoD}Cryptographic Core}
+    \hfill\tikz\node[badge=reqred]{REQUIRED};\\[2pt]
+    \texttt{/ByteRange}: what was signed.
+    \texttt{/Contents}: the CMS proof (hex, zero-padded).\\[1pt]
+    \textbf{Check:} \texttt{len1 + len2 + hex\_len == file\_size}
+};
+
+\node[anno=grpMetaD] (aM) at (\aX, -3.8) {
+    \textbf{\color{grpMetaD}Signer Metadata}
+    \hfill\tikz\node[badge=optgreen]{OPTIONAL};\\[2pt]
+    \textbf{Not signed!} Can be forged without breaking
+    the signature. Get the real identity from the X.509
+    cert in \texttt{/Contents}.
+};
+
+\node[anno=grpIntegD] (aR) at (\aX, -5.8) {
+    \textbf{\color{grpIntegD}Modification Detection}
+    \hfill\tikz\node[badge=condpurple]{CONDITIONAL};\\[2pt]
+    DocMDP constrains post-signing changes.
+    \texttt{/P 2} = forms + sign.
+    \texttt{/P 3} = + annotations.
+    Required for certification signatures.
+};
+
+\node[anno=grpBuildD] (aB) at (\aX, -7.8) {
+    \textbf{\color{grpBuildD}Build Properties}
+    \hfill\tikz\node[badge=optgreen]{OPTIONAL};\\[2pt]
+    Which library signed it.
+    ``Oh, iText 5'' saves hours of debugging.
+};
+
+% --- Connectors ---
+\draw[conn=grpIdentD] (zI.east) -- (aI.west);
+\draw[conn=grpCryptoD] (zC.east) -- (aC.west);
+\draw[conn=grpMetaD]   (zM.east) -- (aM.west);
+\draw[conn=grpIntegD]  (zR.east) -- (aR.west);
+\draw[conn=grpBuildD]  (zB.east) -- (aB.west);
+
+\end{tikzpicture}
+
+\vfill\clearpage
+
+% #############################################################################
+% V02: Dark + zone boxes + line numbers + thicker separators
+% #############################################################################
+\vartitle{V02 --- Dark + Zone Boxes + Line Numbers}
+{Like V01 but with line numbers in left margin and horizontal separator lines between groups.}
+
+\begin{tikzpicture}[remember picture,
+    every node/.style={anchor=west},
+    k/.style={font=\fontsize{8}{11}\selectfont\ttfamily\bfseries, text=keycolor},
+    v/.style={font=\fontsize{8}{11}\selectfont\ttfamily, text=valcolor},
+    s/.style={font=\fontsize{8}{11}\selectfont\ttfamily, text=strcolor},
+    d/.style={font=\fontsize{8}{11}\selectfont\ttfamily, text=delimcolor},
+    cm/.style={font=\fontsize{7}{9}\selectfont\ttfamily\itshape, text=commentcolor},
+    ln/.style={font=\fontsize{6}{11}\selectfont\ttfamily, text=linenocolor, anchor=east},
+    zbox/.style={rectangle, rounded corners=3pt, draw=#1, line width=1pt, fill=#1!12},
+    anno/.style={rectangle, rounded corners=4pt, draw=#1, line width=0.9pt,
+                 fill=#1!8, text width=6.5cm, inner sep=5pt, anchor=north west,
+                 font=\fontsize{7.5}{9.5}\selectfont\sffamily},
+    badge/.style={rectangle, rounded corners=2pt, fill=#1, text=white,
+                  font=\fontsize{5.5}{6.5}\selectfont\bfseries\sffamily,
+                  inner xsep=3pt, inner ysep=1.5pt},
+    conn/.style={draw=#1, line width=1.1pt, -{Stealth[length=4pt, width=3pt]}},
+    groupsep/.style={draw=commentcolor!40, line width=0.5pt},
+]
+
+\def\cX{1.3}
+\def\lnX{0.6}
+\def\aX{9.8}
+\def\bgR{9.0}
+
+% Dark background
+\fill[codebg, rounded corners=5pt] (-0.2, 0.8) rectangle (\bgR, -11.0);
+
+% Line number gutter
+\fill[codebg!80!black, rounded corners=5pt] (-0.2, 0.8) rectangle (0.85, -11.0);
+\draw[commentcolor!20, line width=0.3pt] (0.85, 0.8) -- (0.85, -11.0);
+
+% Header
+\node[font=\fontsize{7}{8}\selectfont\sffamily\bfseries, text=commentcolor]
+    at (\cX, 0.55) {SIGNATURE DICTIONARY --- /Type /Sig};
+
+% Each line with line number
+\node[ln] at (\lnX, 0) {1};     \node[d] at (\cX, 0) {<<};
+
+\node[ln] at (\lnX, -1*\lh) {2};  \node[k] at (\cX+\codeIndent, -1*\lh) {/Type};
+                                    \node[v] at (\cX+1.8, -1*\lh) {/Sig};
+\node[ln] at (\lnX, -2*\lh) {3};  \node[k] at (\cX+\codeIndent, -2*\lh) {/Filter};
+                                    \node[v] at (\cX+2.2, -2*\lh) {/Adobe.PPKLite};
+\node[ln] at (\lnX, -3*\lh) {4};  \node[k] at (\cX+\codeIndent, -3*\lh) {/SubFilter};
+                                    \node[v] at (\cX+2.8, -3*\lh) {/ETSI.CAdES.detached};
+
+\begin{scope}[on background layer]
+    \node[zbox=grpIdentD, fit={(\cX,-0.7)(\cX+7.4,-3*\lh-0.22)}] (zI) {};
+\end{scope}
+
+\draw[groupsep] (0.9, -3*\lh-0.35) -- (\bgR-0.3, -3*\lh-0.35);
+
+\node[ln] at (\lnX, -4*\lh) {5};  \node[k] at (\cX+\codeIndent, -4*\lh) {/Contents};
+                                    \node[s] at (\cX+2.6, -4*\lh) {<0A3F8B...0000>};
+\node[ln] at (\lnX, -5*\lh) {6};  \node[k] at (\cX+\codeIndent, -5*\lh) {/ByteRange};
+                                    \node[v] at (\cX+2.8, -5*\lh) {[0 840 3560 1200]};
+
+\begin{scope}[on background layer]
+    \node[zbox=grpCryptoD, fit={(\cX,-4*\lh+0.22)(\cX+7.4,-5*\lh-0.22)}] (zC) {};
+\end{scope}
+
+\draw[groupsep] (0.9, -5*\lh-0.35) -- (\bgR-0.3, -5*\lh-0.35);
+
+\node[ln] at (\lnX, -6*\lh) {7};   \node[k] at (\cX+\codeIndent, -6*\lh) {/Name};
+                                     \node[s] at (\cX+1.8, -6*\lh) {(Alice Smith)};
+\node[ln] at (\lnX, -7*\lh) {8};   \node[k] at (\cX+\codeIndent, -7*\lh) {/M};
+                                     \node[s] at (\cX+1.3, -7*\lh) {(D:20250307120000+01'00')};
+\node[ln] at (\lnX, -8*\lh) {9};   \node[k] at (\cX+\codeIndent, -8*\lh) {/Reason};
+                                     \node[s] at (\cX+2.3, -8*\lh) {(Approved for release)};
+\node[ln] at (\lnX, -9*\lh) {10};  \node[k] at (\cX+\codeIndent, -9*\lh) {/ContactInfo};
+                                     \node[s] at (\cX+3.2, -9*\lh) {(alice@example.com)};
+\node[ln] at (\lnX, -10*\lh) {11}; \node[k] at (\cX+\codeIndent, -10*\lh) {/Location};
+                                     \node[s] at (\cX+2.5, -10*\lh) {(Vienna, Austria)};
+
+\begin{scope}[on background layer]
+    \node[zbox=grpMetaD, fit={(\cX,-6*\lh+0.22)(\cX+7.4,-10*\lh-0.22)}] (zM) {};
+\end{scope}
+
+\draw[groupsep] (0.9, -10*\lh-0.35) -- (\bgR-0.3, -10*\lh-0.35);
+
+\node[ln] at (\lnX, -11*\lh) {12}; \node[k] at (\cX+\codeIndent, -11*\lh) {/Reference};
+                                     \node[v] at (\cX+2.7, -11*\lh) {[<<};
+\node[ln] at (\lnX, -12*\lh) {13}; \node[k] at (\cX+\subIndent, -12*\lh) {/TransformMethod};
+                                     \node[v] at (\cX+4.0, -12*\lh) {/DocMDP};
+\node[ln] at (\lnX, -13*\lh) {14}; \node[k] at (\cX+\subIndent, -13*\lh) {/TransformParams};
+                                     \node[v] at (\cX+4.2, -13*\lh) {<< /P 2 >>};
+\node[ln] at (\lnX, -14*\lh) {15}; \node[v] at (\cX+\codeIndent, -14*\lh) {>>]};
+
+\begin{scope}[on background layer]
+    \node[zbox=grpIntegD, fit={(\cX,-11*\lh+0.22)(\cX+7.4,-14*\lh-0.22)}] (zR) {};
+\end{scope}
+
+\draw[groupsep] (0.9, -14*\lh-0.35) -- (\bgR-0.3, -14*\lh-0.35);
+
+\node[ln] at (\lnX, -15*\lh) {16}; \node[k] at (\cX+\codeIndent, -15*\lh) {/Prop\_Build};
+                                     \node[v] at (\cX+3.0, -15*\lh) {<< /App << /Name /PDFBox >> >>};
+
+\begin{scope}[on background layer]
+    \node[zbox=grpBuildD, fit={(\cX,-15*\lh+0.22)(\cX+7.4,-15*\lh-0.22)}] (zB) {};
+\end{scope}
+
+\node[ln] at (\lnX, -16*\lh) {17}; \node[d] at (\cX, -16*\lh) {>>};
+
+% --- Annotations ---
+\node[anno=grpIdentD] (aI) at (\aX, 0.5) {
+    \textbf{\color{grpIdentD}Identity \& Format}
+    \hfill\tikz\node[badge=reqred]{REQUIRED};\\[2pt]
+    \texttt{/SubFilter} = CMS profile selector.
+    Use \texttt{ETSI.CAdES.detached} for PAdES.
+};
+\node[anno=grpCryptoD] (aC) at (\aX, -1.3) {
+    \textbf{\color{grpCryptoD}Cryptographic Core}
+    \hfill\tikz\node[badge=reqred]{REQUIRED};\\[2pt]
+    The signature proof and what it covers.\\
+    \textbf{Verify:} ranges + hex = file size.
+};
+\node[anno=grpMetaD] (aM) at (\aX, -2.8) {
+    \textbf{\color{grpMetaD}Signer Metadata}
+    \hfill\tikz\node[badge=optgreen]{OPTIONAL};\\[2pt]
+    Cosmetic. Not cryptographically bound.
+    Trust the X.509 cert, not these fields.
+};
+\node[anno=grpIntegD] (aR) at (\aX, -4.2) {
+    \textbf{\color{grpIntegD}Modification Detection}
+    \hfill\tikz\node[badge=condpurple]{CONDITIONAL};\\[2pt]
+    DocMDP/FieldMDP. \texttt{/P 2} = forms only.
+};
+\node[anno=grpBuildD] (aB) at (\aX, -5.5) {
+    \textbf{\color{grpBuildD}Build Properties}
+    \hfill\tikz\node[badge=optgreen]{OPTIONAL};\\[2pt]
+    Which library signed it. Debugging gold.
+};
+
+% Connectors
+\draw[conn=grpIdentD]  (zI.east) -- (aI.west);
+\draw[conn=grpCryptoD] (zC.east) -- (aC.west);
+\draw[conn=grpMetaD]   (zM.east) -- (aM.west);
+\draw[conn=grpIntegD]  (zR.east) -- (aR.west);
+\draw[conn=grpBuildD]  (zB.east) -- (aB.west);
+
+\end{tikzpicture}
+
+\vfill\clearpage
+
+% #############################################################################
+% V03: Dark + left color bars (no full boxes) + right annotations
+% #############################################################################
+\vartitle{V03 --- Dark + Left Color Bars + Right Annotations}
+{Instead of full zone boxes, just a thick colored bar on the left margin marks each group.}
+
+\begin{tikzpicture}[remember picture,
+    every node/.style={anchor=west},
+    k/.style={font=\fontsize{8}{11}\selectfont\ttfamily\bfseries, text=keycolor},
+    v/.style={font=\fontsize{8}{11}\selectfont\ttfamily, text=valcolor},
+    s/.style={font=\fontsize{8}{11}\selectfont\ttfamily, text=strcolor},
+    d/.style={font=\fontsize{8}{11}\selectfont\ttfamily, text=delimcolor},
+    cm/.style={font=\fontsize{7}{9}\selectfont\ttfamily\itshape, text=commentcolor},
+    anno/.style={rectangle, rounded corners=4pt, draw=#1, line width=0.9pt,
+                 fill=#1!8, text width=6.5cm, inner sep=5pt, anchor=north west,
+                 font=\fontsize{7.5}{9.5}\selectfont\sffamily},
+    badge/.style={rectangle, rounded corners=2pt, fill=#1, text=white,
+                  font=\fontsize{5.5}{6.5}\selectfont\bfseries\sffamily,
+                  inner xsep=3pt, inner ysep=1.5pt},
+    conn/.style={draw=#1, line width=1.1pt, -{Stealth[length=4pt, width=3pt]}},
+]
+
+\def\cX{1.2}
+\def\barX{0.25}
+\def\aX{9.6}
+
+% Dark background
+\fill[codebg, rounded corners=5pt] (-0.1, 0.8) rectangle (8.9, -10.6);
+
+% Header
+\node[font=\fontsize{7}{8}\selectfont\sffamily\bfseries, text=commentcolor]
+    at (0.4, 0.55) {SIGNATURE DICTIONARY --- /Type /Sig};
+\draw[commentcolor!30, line width=0.4pt] (0.2, 0.32) -- (8.7, 0.32);
+
+\node[d] at (\cX, 0) {<<};
+
+% --- Identity (blue bar) ---
+\fill[grpIdentD, rounded corners=1pt] (\barX, -0.7) rectangle (\barX+0.12, -3*\lh-0.22);
+\node[k] at (\cX+\codeIndent, -1*\lh) {/Type};       \node[v] at (\cX+1.8, -1*\lh) {/Sig};
+\node[k] at (\cX+\codeIndent, -2*\lh) {/Filter};     \node[v] at (\cX+2.2, -2*\lh) {/Adobe.PPKLite};
+\node[k] at (\cX+\codeIndent, -3*\lh) {/SubFilter};  \node[v] at (\cX+2.8, -3*\lh) {/ETSI.CAdES.detached};
+\coordinate (barI) at (\barX+0.12, -2*\lh);
+
+% --- Crypto (green bar) ---
+\fill[grpCryptoD, rounded corners=1pt] (\barX, -4*\lh+0.1) rectangle (\barX+0.12, -5*\lh-0.22);
+\node[k] at (\cX+\codeIndent, -4*\lh) {/Contents};   \node[s] at (\cX+2.6, -4*\lh) {<0A3F8B...0000>};
+\node[k] at (\cX+\codeIndent, -5*\lh) {/ByteRange};  \node[v] at (\cX+2.8, -5*\lh) {[0 840 3560 1200]};
+\coordinate (barC) at (\barX+0.12, -4.5*\lh);
+
+% --- Metadata (amber bar) ---
+\fill[grpMetaD, rounded corners=1pt] (\barX, -6*\lh+0.1) rectangle (\barX+0.12, -10*\lh-0.22);
+\node[k] at (\cX+\codeIndent, -6*\lh)  {/Name};         \node[s] at (\cX+1.8, -6*\lh) {(Alice Smith)};
+\node[k] at (\cX+\codeIndent, -7*\lh)  {/M};            \node[s] at (\cX+1.3, -7*\lh) {(D:20250307120000+01'00')};
+\node[k] at (\cX+\codeIndent, -8*\lh)  {/Reason};       \node[s] at (\cX+2.3, -8*\lh) {(Approved for release)};
+\node[k] at (\cX+\codeIndent, -9*\lh)  {/ContactInfo};  \node[s] at (\cX+3.2, -9*\lh) {(alice@example.com)};
+\node[k] at (\cX+\codeIndent, -10*\lh) {/Location};     \node[s] at (\cX+2.5, -10*\lh) {(Vienna, Austria)};
+\coordinate (barM) at (\barX+0.12, -8*\lh);
+
+% --- Integrity (pink bar) ---
+\fill[grpIntegD, rounded corners=1pt] (\barX, -11*\lh+0.1) rectangle (\barX+0.12, -14*\lh-0.22);
+\node[k] at (\cX+\codeIndent, -11*\lh)  {/Reference};        \node[v] at (\cX+2.7, -11*\lh) {[<<};
+\node[k] at (\cX+\subIndent, -12*\lh)   {/TransformMethod};  \node[v] at (\cX+4.0, -12*\lh) {/DocMDP};
+\node[k] at (\cX+\subIndent, -13*\lh)   {/TransformParams};  \node[v] at (\cX+4.2, -13*\lh) {<< /P 2 >>};
+\node[v] at (\cX+\codeIndent, -14*\lh)  {>>]};
+\coordinate (barR) at (\barX+0.12, -12.5*\lh);
+
+% --- Build (purple bar) ---
+\fill[grpBuildD, rounded corners=1pt] (\barX, -15*\lh+0.1) rectangle (\barX+0.12, -15*\lh-0.22);
+\node[k] at (\cX+\codeIndent, -15*\lh) {/Prop\_Build};
+\node[v] at (\cX+3.0, -15*\lh)         {<< /App << /Name /PDFBox >> >>};
+\coordinate (barB) at (\barX+0.12, -15*\lh);
+
+\node[d] at (\cX, -16*\lh) {>>};
+
+% --- Annotations ---
+\node[anno=grpIdentD] (aI) at (\aX, 0.3) {
+    \textbf{\color{grpIdentD}Identity \& Format}
+    \hfill\tikz\node[badge=reqred]{REQUIRED};\\[2pt]
+    \texttt{/SubFilter} = CMS profile. Use CAdES for PAdES.
+};
+\node[anno=grpCryptoD] (aC) at (\aX, -1.2) {
+    \textbf{\color{grpCryptoD}Cryptographic Core}
+    \hfill\tikz\node[badge=reqred]{REQUIRED};\\[2pt]
+    Proof + coverage. Check: ranges + hex = file size.
+};
+\node[anno=grpMetaD] (aM) at (\aX, -2.5) {
+    \textbf{\color{grpMetaD}Signer Metadata}
+    \hfill\tikz\node[badge=optgreen]{OPTIONAL};\\[2pt]
+    Cosmetic, forgeable. Trust the X.509 cert.
+};
+\node[anno=grpIntegD] (aR) at (\aX, -3.8) {
+    \textbf{\color{grpIntegD}Modification Detection}
+    \hfill\tikz\node[badge=condpurple]{CONDITIONAL};\\[2pt]
+    DocMDP: \texttt{/P 2} = forms+sign only.
+};
+\node[anno=grpBuildD] (aB) at (\aX, -5.0) {
+    \textbf{\color{grpBuildD}Build Properties}
+    \hfill\tikz\node[badge=optgreen]{OPTIONAL};\\[2pt]
+    Which software signed it. Debug breadcrumb.
+};
+
+% Connectors (from bar to annotation)
+\draw[conn=grpIdentD]  (8.9, -2*\lh)     -- (aI.west);
+\draw[conn=grpCryptoD] (8.9, -4.5*\lh)   -- (aC.west);
+\draw[conn=grpMetaD]   (8.9, -8*\lh)     -- (aM.west);
+\draw[conn=grpIntegD]  (8.9, -12.5*\lh)  -- (aR.west);
+\draw[conn=grpBuildD]  (8.9, -15*\lh)    -- (aB.west);
+
+\end{tikzpicture}
+
+\vfill\clearpage
+
+% #############################################################################
+% V04: Dark + zone boxes + annotations below each group (no right panel)
+% #############################################################################
+\vartitle{V04 --- Dark + Zone Boxes + Annotations Below Each Group}
+{Full-width layout. Annotations appear directly below each group instead of on the right.}
+
+\begin{tikzpicture}[remember picture,
+    every node/.style={anchor=west},
+    k/.style={font=\fontsize{8}{11}\selectfont\ttfamily\bfseries, text=keycolor},
+    v/.style={font=\fontsize{8}{11}\selectfont\ttfamily, text=valcolor},
+    s/.style={font=\fontsize{8}{11}\selectfont\ttfamily, text=strcolor},
+    d/.style={font=\fontsize{8}{11}\selectfont\ttfamily, text=delimcolor},
+    zbox/.style={rectangle, rounded corners=3pt, draw=#1, line width=1pt, fill=#1!12},
+    inlineanno/.style={
+        rectangle, rounded corners=3pt, fill=codebg!50!black,
+        text width=15cm, inner sep=5pt, anchor=north west,
+        font=\fontsize{7.5}{9.5}\selectfont\sffamily, text=codetext!80,
+    },
+    badge/.style={rectangle, rounded corners=2pt, fill=#1, text=white,
+                  font=\fontsize{5.5}{6.5}\selectfont\bfseries\sffamily,
+                  inner xsep=3pt, inner ysep=1.5pt},
+]
+
+\def\cX{0.8}
+\def\fullW{15.6}
+
+% Dark background
+\fill[codebg, rounded corners=5pt] (-0.2, 0.6) rectangle (16.2, -17.5);
+
+% Header
+\node[font=\fontsize{8}{9}\selectfont\sffamily\bfseries, text=commentcolor]
+    at (0.3, 0.35) {SIGNATURE DICTIONARY --- /Type /Sig};
+\node[font=\fontsize{6.5}{7.5}\selectfont\sffamily, text=commentcolor!50, anchor=east]
+    at (16.0, 0.35) {ISO 32000-2 \S12.8.1, Table 255};
+\draw[commentcolor!30, line width=0.4pt] (0.1, 0.1) -- (16.0, 0.1);
+
+\node[d] at (\cX, -0.2) {<<};
+
+% --- Identity ---
+\node[k] at (\cX+\codeIndent, -1*\lh-0.2) {/Type};       \node[v] at (\cX+1.8, -1*\lh-0.2) {/Sig};
+\node[k] at (\cX+\codeIndent, -2*\lh-0.2) {/Filter};     \node[v] at (\cX+2.2, -2*\lh-0.2) {/Adobe.PPKLite};
+\node[k] at (\cX+\codeIndent, -3*\lh-0.2) {/SubFilter};  \node[v] at (\cX+2.8, -3*\lh-0.2) {/ETSI.CAdES.detached};
+
+\begin{scope}[on background layer]
+    \node[zbox=grpIdentD, fit={(\cX-0.1,-0.45)(\cX+\fullW,-3*\lh-0.45)}] {};
+\end{scope}
+
+\node[inlineanno] at (\cX+0.2, -3*\lh-0.6) {
+    \tikz\node[badge=reqred]{REQUIRED};\;
+    \textbf{\color{grpIdentD}SubFilter is king.} Determines whether CMS blob is PKCS\#7 or CAdES.
+    Always produce \texttt{ETSI.CAdES.detached}. Consume all three for backward compat.
+};
+
+% --- Crypto ---
+\node[k] at (\cX+\codeIndent, -5.2*\lh-0.2) {/Contents};   \node[s] at (\cX+2.6, -5.2*\lh-0.2) {<0A3F8B...0000>};
+\node[k] at (\cX+\codeIndent, -6.2*\lh-0.2) {/ByteRange};  \node[v] at (\cX+2.8, -6.2*\lh-0.2) {[0 840 3560 1200]};
+
+\begin{scope}[on background layer]
+    \node[zbox=grpCryptoD, fit={(\cX-0.1,-5.2*\lh+0.05)(\cX+\fullW,-6.2*\lh-0.45)}] {};
+\end{scope}
+
+\node[inlineanno] at (\cX+0.2, -6.2*\lh-0.6) {
+    \tikz\node[badge=reqred]{REQUIRED};\;
+    \textbf{\color{grpCryptoD}The proof and what it covers.}
+    \texttt{/ByteRange} = signed bytes. \texttt{/Contents} = CMS blob (hex, zero-padded).
+    \textbf{Check:} \texttt{len1 + len2 + hex\_len == file\_size}.
+};
+
+% --- Metadata ---
+\node[k] at (\cX+\codeIndent, -8.4*\lh-0.2) {/Name};         \node[s] at (\cX+1.8, -8.4*\lh-0.2) {(Alice Smith)};
+\node[k] at (\cX+\codeIndent, -9.4*\lh-0.2) {/M};            \node[s] at (\cX+1.3, -9.4*\lh-0.2) {(D:20250307120000+01'00')};
+\node[k] at (\cX+\codeIndent, -10.4*\lh-0.2) {/Reason};      \node[s] at (\cX+2.3, -10.4*\lh-0.2) {(Approved for release)};
+\node[k] at (\cX+\codeIndent, -11.4*\lh-0.2) {/Location};    \node[s] at (\cX+2.5, -11.4*\lh-0.2) {(Vienna, Austria)};
+
+\begin{scope}[on background layer]
+    \node[zbox=grpMetaD, fit={(\cX-0.1,-8.4*\lh+0.05)(\cX+\fullW,-11.4*\lh-0.45)}] {};
+\end{scope}
+
+\node[inlineanno] at (\cX+0.2, -11.4*\lh-0.6) {
+    \tikz\node[badge=optgreen]{OPTIONAL};\;
+    \textbf{\color{grpMetaD}Cosmetic only!} Not cryptographically signed. Forgeable with a hex editor.
+    Always extract the real signer identity from the X.509 certificate in the CMS blob.
+};
+
+% --- Integrity ---
+\node[k] at (\cX+\codeIndent, -13.6*\lh-0.2)  {/Reference};        \node[v] at (\cX+2.7, -13.6*\lh-0.2) {[<<};
+\node[k] at (\cX+\subIndent, -14.6*\lh-0.2)    {/TransformMethod};  \node[v] at (\cX+4.0, -14.6*\lh-0.2) {/DocMDP};
+\node[k] at (\cX+\subIndent, -15.6*\lh-0.2)    {/TransformParams};  \node[v] at (\cX+4.2, -15.6*\lh-0.2) {<< /P 2 >> >>]};
+
+\begin{scope}[on background layer]
+    \node[zbox=grpIntegD, fit={(\cX-0.1,-13.6*\lh+0.05)(\cX+\fullW,-15.6*\lh-0.45)}] {};
+\end{scope}
+
+\node[inlineanno] at (\cX+0.2, -15.6*\lh-0.6) {
+    \tikz\node[badge=condpurple]{CONDITIONAL};\;
+    \textbf{\color{grpIntegD}DocMDP:} \texttt{/P 2} = fill forms + sign. \texttt{/P 3} = also annotations.
+    Required for certification signatures only.
+};
+
+\node[d] at (\cX, -17.2) {>>};
+
+\end{tikzpicture}
+
+\vfill\clearpage
+
+% #############################################################################
+% V05: Dark + compact (2-column: code left, legend right, no arrows)
+% #############################################################################
+\vartitle{V05 --- Dark + Compact Two-Column (No Arrows)}
+{Minimal: code on the left with color bars, color-keyed legend panel on the right. No connectors needed.}
+
+\begin{tikzpicture}[remember picture,
+    every node/.style={anchor=west},
+    k/.style={font=\fontsize{8}{11}\selectfont\ttfamily\bfseries, text=keycolor},
+    v/.style={font=\fontsize{8}{11}\selectfont\ttfamily, text=valcolor},
+    s/.style={font=\fontsize{8}{11}\selectfont\ttfamily, text=strcolor},
+    d/.style={font=\fontsize{8}{11}\selectfont\ttfamily, text=delimcolor},
+    cm/.style={font=\fontsize{7}{9}\selectfont\ttfamily\itshape, text=commentcolor},
+    badge/.style={rectangle, rounded corners=2pt, fill=#1, text=white,
+                  font=\fontsize{5.5}{6.5}\selectfont\bfseries\sffamily,
+                  inner xsep=3pt, inner ysep=1.5pt},
+    legenditem/.style={
+        rectangle, rounded corners=3pt, draw=#1, line width=0.8pt,
+        fill=#1!8, text width=7cm, inner sep=5pt, anchor=north west,
+        font=\fontsize{7.5}{9.5}\selectfont\sffamily,
+    },
+]
+
+\def\cX{1.0}
+\def\barX{0.2}
+\def\legX{8.8}
+
+% Dark background (code panel only)
+\fill[codebg, rounded corners=5pt] (-0.1, 0.6) rectangle (8.2, -8.8);
+
+% Header
+\node[font=\fontsize{7}{8}\selectfont\sffamily\bfseries, text=commentcolor]
+    at (0.3, 0.35) {/Type /Sig};
+
+\node[d] at (\cX, 0) {<<};
+
+% Identity
+\fill[grpIdentD] (\barX, -0.7) rectangle (\barX+0.1, -3*\lh-0.2);
+\node[k] at (\cX+\codeIndent, -1*\lh) {/Type};       \node[v] at (\cX+1.8, -1*\lh) {/Sig};
+\node[k] at (\cX+\codeIndent, -2*\lh) {/Filter};     \node[v] at (\cX+2.2, -2*\lh) {/Adobe.PPKLite};
+\node[k] at (\cX+\codeIndent, -3*\lh) {/SubFilter};  \node[v] at (\cX+2.8, -3*\lh) {/ETSI.CAdES.detached};
+
+% Crypto
+\fill[grpCryptoD] (\barX, -4*\lh+0.1) rectangle (\barX+0.1, -5*\lh-0.2);
+\node[k] at (\cX+\codeIndent, -4*\lh) {/Contents};   \node[s] at (\cX+2.6, -4*\lh) {<0A3F8B...0000>};
+\node[k] at (\cX+\codeIndent, -5*\lh) {/ByteRange};  \node[v] at (\cX+2.8, -5*\lh) {[0 840 3560 1200]};
+
+% Metadata
+\fill[grpMetaD] (\barX, -6*\lh+0.1) rectangle (\barX+0.1, -10*\lh-0.2);
+\node[k] at (\cX+\codeIndent, -6*\lh)  {/Name};         \node[s] at (\cX+1.8, -6*\lh) {(Alice Smith)};
+\node[k] at (\cX+\codeIndent, -7*\lh)  {/M};            \node[s] at (\cX+1.3, -7*\lh) {(D:20250307...)};
+\node[k] at (\cX+\codeIndent, -8*\lh)  {/Reason};       \node[s] at (\cX+2.3, -8*\lh) {(Approved for release)};
+\node[k] at (\cX+\codeIndent, -9*\lh)  {/ContactInfo};  \node[s] at (\cX+3.2, -9*\lh) {(alice@example.com)};
+\node[k] at (\cX+\codeIndent, -10*\lh) {/Location};     \node[s] at (\cX+2.5, -10*\lh) {(Vienna, Austria)};
+
+% Integrity
+\fill[grpIntegD] (\barX, -11*\lh+0.1) rectangle (\barX+0.1, -14*\lh-0.2);
+\node[k] at (\cX+\codeIndent, -11*\lh) {/Reference};        \node[v] at (\cX+2.7, -11*\lh) {[<<};
+\node[k] at (\cX+\subIndent, -12*\lh)  {/TransformMethod};  \node[v] at (\cX+4.0, -12*\lh) {/DocMDP};
+\node[k] at (\cX+\subIndent, -13*\lh)  {/TransformParams};  \node[v] at (\cX+4.2, -13*\lh) {<< /P 2 >>};
+\node[v] at (\cX+\codeIndent, -14*\lh) {>>]};
+
+% Build
+\fill[grpBuildD] (\barX, -15*\lh+0.1) rectangle (\barX+0.1, -15*\lh-0.2);
+\node[k] at (\cX+\codeIndent, -15*\lh) {/Prop\_Build};
+\node[v] at (\cX+3.0, -15*\lh)         {<< /App << /Name /PDFBox >> >>};
+
+\node[d] at (\cX, -16*\lh) {>>};
+
+% --- Right: Legend panel ---
+\node[legenditem=grpIdentD] at (\legX, 0.3) {
+    {\large\color{grpIdentD}\rule{0.4cm}{0.4cm}}\;\textbf{Identity \& Format}
+    \hfill\tikz\node[badge=reqred]{REQUIRED};\\[3pt]
+    \texttt{/SubFilter} determines CMS profile.
+    Use \texttt{ETSI.CAdES.detached} for PAdES.
+    Handle all three SubFilters when consuming.
+};
+
+\node[legenditem=grpCryptoD] at (\legX, -1.5) {
+    {\large\color{grpCryptoD}\rule{0.4cm}{0.4cm}}\;\textbf{Cryptographic Core}
+    \hfill\tikz\node[badge=reqred]{REQUIRED};\\[3pt]
+    \texttt{/ByteRange} = what was signed.
+    \texttt{/Contents} = CMS proof (hex, zero-padded).\\
+    \textbf{Verify:} \texttt{len1 + len2 + hex = file\_size}
+};
+
+\node[legenditem=grpMetaD] at (\legX, -3.5) {
+    {\large\color{grpMetaD}\rule{0.4cm}{0.4cm}}\;\textbf{Signer Metadata}
+    \hfill\tikz\node[badge=optgreen]{OPTIONAL};\\[3pt]
+    Not cryptographically protected. Anyone can
+    forge these with a hex editor. Extract real identity
+    from X.509 cert in CMS \texttt{SignedData}.
+};
+
+\node[legenditem=grpIntegD] at (\legX, -5.5) {
+    {\large\color{grpIntegD}\rule{0.4cm}{0.4cm}}\;\textbf{Modification Detection}
+    \hfill\tikz\node[badge=condpurple]{CONDITIONAL};\\[3pt]
+    DocMDP/FieldMDP. \texttt{/P 2} = forms + sign.
+    Required for certification signatures.
+};
+
+\node[legenditem=grpBuildD] at (\legX, -7.2) {
+    {\large\color{grpBuildD}\rule{0.4cm}{0.4cm}}\;\textbf{Build Properties}
+    \hfill\tikz\node[badge=optgreen]{OPTIONAL};\\[3pt]
+    Records which library signed the document.
+    Invaluable for cross-vendor debugging.
+};
+
+\end{tikzpicture}
+
+\vfill
+\end{document}

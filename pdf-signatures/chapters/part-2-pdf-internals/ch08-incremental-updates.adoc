@@ -1,0 +1,865 @@
+[[ch08]]
+= Incremental Updates
+
+[abstract]
+--
+If there is one mechanism in the PDF specification that you _must_ understand before working with digital signatures, it is incremental updates.
+Not because they are complicated — the concept is straightforward — but because every aspect of PDF signing depends on them.
+The byte range that defines what is signed, the ability to add multiple signatures without invalidating earlier ones, the entire model of "append, never rewrite" — all of it rests on incremental updates.
+
+This chapter explains how incremental updates work at the byte level, why they exist, what goes wrong when tools ignore them, and how to inspect and debug them in real PDF files.
+When you reach Chapter 12 and we start signing documents, you will be glad you spent time here first.
+--
+
+== What Incremental Updates Are
+
+A PDF file, at its simplest, has four parts: a header (`%PDF-1.x` or `%PDF-2.0`), a body of numbered objects, a cross-reference table (or cross-reference stream) that maps object numbers to byte offsets, and a trailer that points to the root object and the cross-reference table.
+The file ends with the `%%EOF` marker.
+
+Chapter 7 covered this structure in detail.
+What Chapter 7 did not cover is what happens when you _modify_ a PDF.
+
+There are exactly two ways to save changes to a PDF file:
+
+1. **Full rewrite** — rebuild the entire file from scratch, writing a new body, a new cross-reference table, and a new trailer.
+The old file is replaced entirely.
+
+2. **Incremental update** (also called **incremental save** or **append mode**) — leave the original file untouched and _append_ new data to the end.
+The new data contains only the objects that changed (or were added), a new cross-reference section mapping those objects, and a new trailer.
+The file now has two `%%EOF` markers: the original one (buried in the middle of the file) and the new one at the end.
+
+{iso32000-2} Section 7.5.6 defines incremental updates:
+
+[quote, "{iso32000-2} Section 7.5.6"]
+____
+The updated PDF file shall contain the original data of the PDF file plus appended update data. Updates may be appended to a file multiple times. The update data added each time a file is updated shall contain only those objects that have been added or modified, along with a cross-reference section and trailer for those objects.
+____
+
+The key phrase is "the original data of the PDF file" — the original bytes are preserved, byte for byte, untouched.
+This is not a diff or a delta.
+It is raw appending.
+
+== Why Incremental Updates Exist
+
+Incremental updates solve three distinct problems, and understanding all three explains why the mechanism is designed the way it is.
+
+=== Problem 1: Performance on Large Documents
+
+A 500-page PDF with embedded fonts and high-resolution images might be 200 MB.
+If a user fills in a single form field — changing perhaps 50 bytes of actual content — a full rewrite would require reading, processing, and writing all 200 MB.
+An incremental update appends a few kilobytes.
+
+This was especially important in the 1990s when the format was designed.
+Disk I/O was slow, memory was scarce, and rewriting a large file for a minor change was unacceptable.
+Even today, incremental saves are noticeably faster for large documents.
+
+=== Problem 2: Preserving Previous State
+
+When a PDF is incrementally updated, the previous revision is still there — it is the bytes before the appended data.
+This means you can "undo" an incremental update by truncating the file at the previous `%%EOF` boundary, recovering the exact document as it existed before the change.
+
+This property is not a side effect.
+It is a design goal.
+{iso32000-2} Section 7.5.6 explicitly states that conforming readers should be able to retrieve previous revisions of a document by following the chain of `/Prev` pointers in the trailers.
+
+For workflows where audit trails matter — legal documents, contracts, government forms — this built-in version history is valuable.
+You do not need an external version control system.
+The PDF file _is_ the version history.
+
+=== Problem 3: Digital Signatures
+
+This is the reason we are here, and it deserves its own section (<<ch08-why-signatures-need-incremental>>).
+The short version: a digital signature covers a specific byte range.
+If you rewrite the file, the bytes change, and the signature becomes invalid.
+Incremental updates allow modifications _after_ signing without disturbing the signed bytes.
+
+[IMPORTANT]
+====
+Problem 3 is not optional.
+If you are building any tool that edits PDFs which may contain signatures — even if your tool has nothing to do with signing — you must support incremental saves.
+A full rewrite of a signed PDF destroys every signature in it.
+There is no workaround, no clever trick, no way to reassemble the pieces.
+The signed bytes are gone.
+====
+
+== Anatomy of an Incremental Update
+
+Let us walk through exactly what gets appended during an incremental update.
+Suppose we start with a simple PDF containing three objects: a catalog (object 1), a page (object 2), and a page content stream (object 3).
+
+=== The Original File
+
+[source]
+----
+%PDF-1.7
+1 0 obj                         <1>
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+
+2 0 obj
+<< /Type /Page /Contents 3 0 R /MediaBox [0 0 612 792] >>
+endobj
+
+3 0 obj
+<< /Length 44 >>
+stream
+BT /F1 12 Tf 100 700 Td (Hello) Tj ET
+endstream
+endobj
+
+xref                            <2>
+0 4
+0000000000 65535 f
+0000000009 00000 n
+0000000066 00000 n
+0000000148 00000 n
+
+trailer                         <3>
+<< /Size 4 /Root 1 0 R >>
+
+startxref                       <4>
+252
+%%EOF                           <5>
+----
+<1> Three objects in the body
+<2> Cross-reference table mapping object numbers to byte offsets
+<3> Trailer with `/Size` (total object count) and `/Root` (catalog reference)
+<4> `startxref` gives the byte offset of the xref table
+<5> End-of-file marker
+
+Nothing surprising here.
+This is the standard PDF structure from Chapter 7.
+Let us say this file is 350 bytes long.
+
+=== Appending an Incremental Update
+
+Now suppose we want to change the text on the page from "Hello" to "Hello World".
+We need a new version of object 3.
+Instead of rewriting the entire file, we append:
+
+[source]
+----
+3 0 obj                         <1>
+<< /Length 50 >>
+stream
+BT /F1 12 Tf 100 700 Td (Hello World) Tj ET
+endstream
+endobj
+
+xref                            <2>
+0 1
+0000000000 65535 f
+3 1                             <3>
+0000000351 00000 n
+
+trailer                         <4>
+<< /Size 4 /Root 1 0 R /Prev 252 >>
+
+startxref                       <5>
+460
+%%EOF                           <6>
+----
+<1> The new version of object 3, with updated content
+<2> A new cross-reference section — but only for changed objects
+<3> The xref entry for object 3 now points to byte offset 351 (the start of the new object 3)
+<4> The new trailer includes a `/Prev` key pointing to the _previous_ xref table (at byte 252)
+<5> `startxref` points to the new xref section
+<6> A second `%%EOF` marker
+
+The file now contains _two_ copies of object 3: the original at byte offset 148 and the new one at byte offset 351.
+The original cross-reference table (at byte 252) still points to the old version.
+The new cross-reference section (at byte 460) points to the new version.
+
+A conforming reader starts from the end of the file, finds the last `startxref`, reads the new xref section, and sees that object 3 is at byte 351.
+For objects 1 and 2, the new xref section has no entries — so the reader follows the `/Prev` pointer to the previous xref table and finds them there.
+
+The result: the reader sees the updated document.
+But the old bytes are still present, untouched, in the first 350 bytes of the file.
+
+=== The `/Prev` Chain
+
+The `/Prev` key in each trailer forms a linked list of cross-reference sections, ordered from newest to oldest.
+A reader reconstructing the full object map starts with the newest xref section, then walks the `/Prev` chain, adding entries for any object numbers it has not yet seen.
+The first entry wins — newer revisions override older ones.
+
+For a PDF that has been incrementally updated three times, the chain looks like this:
+
+[source]
+----
+%%EOF  (revision 3 — current)
+  startxref -> xref_3
+  trailer_3: /Prev -> xref_2
+
+%%EOF  (revision 2)
+  startxref -> xref_2
+  trailer_2: /Prev -> xref_1
+
+%%EOF  (revision 1 — original)
+  startxref -> xref_1
+  trailer_1: (no /Prev — this is the first revision)
+----
+
+Each revision's trailer may also update the `/Root` reference if the catalog object was modified.
+In practice, the `/Root` often stays the same — the catalog object number does not change, but the catalog _object_ might be replaced with a new version that references new page trees or updated AcroForm dictionaries.
+
+[TIP]
+====
+**Counting `%%EOF` markers tells you the number of revisions.**
+A freshly created PDF has one `%%EOF`.
+After one incremental save, it has two.
+After _n_ incremental saves, it has _n_ + 1... unless some tool has done a full rewrite at some point, collapsing all revisions back to one.
+A signed PDF with two signatures typically has three `%%EOF` markers: the original document, the first signature, and the second signature.
+====
+
+== How Objects Are Overridden
+
+The override mechanism is simple: same object number, new xref entry.
+
+When a conforming reader encounters object `3 0` in both the new xref section and a previous one, it uses the entry from the newest section.
+The old object still exists in the file — it occupies bytes, it can be found by parsing — but it is logically superseded.
+
+This has important implications:
+
+- **No object is ever deleted.** You can add an xref entry marking an object as "free" (generation number incremented, next free object pointer updated), but the bytes of the old object remain in the file.
+Deleting content from a PDF does not remove it from the file — it merely hides it behind a newer xref section.
+
+- **Object numbers are stable.** Object 3 is always object 3, whether you are looking at revision 1 or revision 5.
+The _content_ of object 3 may differ across revisions, but the number does not change.
+This is critical for signatures because the `/ByteRange` and cross-reference tables use byte offsets and object numbers as their addressing scheme.
+
+- **Generation numbers exist but are rarely used.** The spec allows incrementing the generation number when an object is freed and reused, but in practice, most tools reuse generation 0 for everything.
+Do not write code that assumes generation numbers will be non-zero — you will almost never see them in the wild.
+
+WARNING: Some tools claim to "optimize" PDFs by removing unused objects and rebuilding the xref table. This is a full rewrite. If the PDF contains signatures, every signature is destroyed. Tools that do this include some versions of Ghostscript's `pdfwrite` device, QPDF's `--linearize` option (when not combined with `--preserve-unreferenced-objects`), and various online "PDF optimizer" services. If you are processing signed PDFs in an automated pipeline, test your tools carefully.
+
+== Cross-Reference Streams and Incremental Updates
+
+PDF 1.5 introduced cross-reference streams as an alternative to the traditional ASCII cross-reference table.
+Instead of a plaintext table, the cross-reference data is stored as a compressed binary stream object.
+The trailer dictionary is merged into the stream dictionary — there is no separate `trailer` keyword.
+
+Incremental updates work identically with cross-reference streams.
+The appended data contains a new cross-reference stream object with entries for modified objects, and the stream dictionary includes a `/Prev` key pointing to the previous cross-reference stream's byte offset.
+
+[source]
+----
+15 0 obj                                    <1>
+<< /Type /XRef
+   /Size 16
+   /W [1 3 1]                              <2>
+   /Root 1 0 R
+   /Prev 8432                              <3>
+   /Filter /FlateDecode
+   /Length 87 >>
+stream
+...compressed binary xref data...
+endstream
+endobj
+
+startxref
+9150                                        <4>
+%%EOF
+----
+<1> The cross-reference stream is itself a PDF object (object 15 in this case)
+<2> `/W` defines the width of each field in the binary data: 1 byte for type, 3 bytes for offset, 1 byte for generation
+<3> `/Prev` points to the previous cross-reference stream, just as in the classic trailer
+<4> `startxref` points to this stream object
+
+The `/Prev` chain works exactly the same way.
+A reader walks the chain, building the complete object map from newest to oldest, using the first entry encountered for each object number.
+
+[NOTE]
+====
+A PDF file can mix classic xref tables and cross-reference streams across revisions.
+The original file might use a classic table, and an incremental update might append a cross-reference stream (or vice versa).
+A conforming reader must handle both.
+PDFBox handles this transparently — `Loader.loadPDF()` follows the `/Prev` chain regardless of whether each link is a table or a stream.
+====
+
+[[ch08-why-signatures-need-incremental]]
+== Why Incremental Updates Are Critical for Signatures
+
+This is the most important section in this chapter.
+Everything else — the performance benefits, the revision history, the object override mechanics — is useful context.
+But for digital signatures, incremental updates are not a convenience.
+They are a _requirement_.
+
+=== The Fundamental Constraint
+
+A PDF digital signature covers a specific byte range (see Chapter 13 for the complete deep dive).
+The `/ByteRange` array in the signature dictionary specifies exactly which bytes in the file are hashed and signed.
+For the signature to remain valid, those bytes must not change.
+Not a single one.
+
+If you do a full rewrite of a signed PDF — reorganizing objects, recomputing byte offsets, rebuilding the cross-reference table — the bytes at the signed offsets will be different.
+The hash will not match.
+The signature is dead.
+
+An incremental update avoids this problem by _not touching the original bytes_.
+The signed region (which covers everything from the start of the file through the `/Contents` gap and out to the `%%EOF` of the revision that was signed) remains intact.
+New content is appended _after_ the signed region.
+
+=== Signing Is an Incremental Update
+
+When PDFBox (or any compliant library) signs a PDF, it performs an incremental update.
+The signing operation appends:
+
+- A new or updated signature field object (with the `/V` reference pointing to the signature dictionary)
+- The signature dictionary object itself (containing `/ByteRange`, `/Contents`, `/Filter`, `/SubFilter`, and the rest)
+- An updated AcroForm dictionary (with the new field added to `/Fields` and `/SigFlags` set)
+- A new cross-reference section mapping these new/updated objects
+- A new trailer with `/Prev` pointing to the previous revision
+- A new `%%EOF`
+
+The signature's byte range covers everything from byte 0 to the end of this new `%%EOF` — _including_ the bytes of all previous revisions.
+The signature literally covers the entire file, minus the gap where the CMS blob sits.
+
+=== Multiple Signatures
+
+Now consider what happens when a second person signs the same PDF.
+The second signature is another incremental update, appended after the first.
+The second signature's byte range starts at byte 0 and extends to the end of _its_ `%%EOF` — which means it covers the first signature's bytes too.
+
+The first signature's byte range covers bytes up to the first signature's `%%EOF`.
+The second signature's appended data falls _after_ that range.
+As far as the first signature is concerned, those bytes do not exist — they are outside the range it covers, and that is fine.
+
+This is how multiple signatures coexist:
+
+[source]
+----
+|  Original document          |  Revision 1 (%%EOF)
+|  + First signature append   |  Revision 2 (%%EOF)
+|  + Second signature append  |  Revision 3 (%%EOF)
+
+First signature's byte range:  [0 .. end of revision 2]   (minus its /Contents gap)
+Second signature's byte range: [0 .. end of revision 3]   (minus its /Contents gap)
+----
+
+The first signature validates against revisions 1 and 2.
+The second signature validates against revisions 1, 2, and 3.
+Neither signature invalidates the other.
+
+[IMPORTANT]
+====
+This only works because each signature is appended incrementally.
+If the second signer's tool did a full rewrite instead of an incremental save, the first signature's bytes would be destroyed, and both signatures would be invalid.
+This is why `/SigFlags` bit 2 (AppendOnly) exists — it tells editors "you must use incremental save, or you will break things."
+====
+
+=== Form Filling After Signing
+
+The same principle applies to form filling after a certification signature with `/DocMDP` permission level 2 (which allows form filling and signing but no other changes).
+When a user fills in a form field, the PDF viewer should save the change as an incremental update.
+The filled field value is a new object appended to the file, and the certification signature remains valid because its byte range is untouched.
+
+If the viewer does a full save instead, the certification signature breaks.
+The viewer has just violated the signer's explicit instruction (via `/DocMDP`) that the document should only be modified incrementally.
+
+== What Goes Wrong: Flattening and Full Rewrites
+
+Now that we understand why incremental updates matter, let us catalog the ways they get destroyed.
+
+=== The Flattening Problem
+
+"Flattening" a PDF typically means merging all incremental updates into a single revision — rewriting the file with one body, one cross-reference table, one trailer, and one `%%EOF`.
+Some tools call this "optimizing," "linearizing," "compressing," or just "saving."
+
+The result is a smaller, cleaner file.
+It is also a file in which every digital signature is invalid.
+
+Common tools that flatten by default or by option:
+
+- **Ghostscript** (`gs -sDEVICE=pdfwrite`) — always does a full rewrite; there is no incremental mode
+- **QPDF** with `--linearize` — reorganizes the file for progressive loading, destroying incremental history
+- **Some online PDF tools** — "compress PDF" or "optimize PDF" services typically do a full rewrite
+- **LibreOffice** (depending on version and configuration) — older versions did not always use incremental save, even when `/SigFlags` bit 2 was set
+- **Adobe Acrobat** "Save As" vs "Save" — "Save" uses incremental update; "Save As" does a full rewrite (destroying signatures unless the user re-signs)
+
+WARNING: If you are building an automated PDF processing pipeline and signed PDFs will pass through it, you must audit every tool in the pipeline to ensure it uses incremental saves (or does not modify the file at all). A single non-incremental save anywhere in the pipeline will invalidate every signature. This is the number one cause of "signatures were valid when I sent the PDF but invalid when the recipient opened it."
+
+=== The "Save" vs "Save As" Trap
+
+Adobe Acrobat's behavior is the one most users encounter:
+
+- **File > Save** performs an incremental update. Signatures are preserved.
+- **File > Save As** writes a new file from scratch. Every signature in the document is destroyed.
+
+Acrobat shows a warning dialog when you attempt Save As on a signed document, but many users click through warnings without reading them.
+Other PDF editors may not even warn.
+
+TIP: When training users who work with signed PDFs, the single most important instruction is: "Never use Save As. Always use Save." This one piece of advice prevents more signature breakage than any amount of technical configuration.
+
+== Extracting a Specific Revision
+
+Because incremental updates are purely additive — new bytes appended after the previous `%%EOF` — extracting a previous revision is trivial: truncate the file at the appropriate `%%EOF` boundary.
+
+If a PDF has three `%%EOF` markers (three revisions), you can extract:
+
+- **Revision 1**: all bytes from the start of the file up to and including the first `%%EOF`
+- **Revision 2**: all bytes from the start up to and including the second `%%EOF`
+- **Revision 3**: the entire file (up to and including the third `%%EOF`)
+
+This is not a diff extraction — each "revision" is a complete, self-contained PDF file that a reader can open and render.
+Revision 1 is the original document.
+Revision 2 is the original plus the first set of changes.
+And so on.
+
+=== Extracting with PDFBox
+
+PDFBox does not provide a built-in "extract revision N" method, but the approach is straightforward: find the _N_-th `%%EOF` marker and copy bytes from 0 to that position.
+
+[source,java]
+----
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Extracts individual revisions from a PDF with incremental updates.
+ * Each revision is a complete, valid PDF file.
+ */
+public class RevisionExtractor {
+
+    private static final byte[] EOF_MARKER = "%%EOF".getBytes(StandardCharsets.US_ASCII);
+
+    /**
+     * Find byte offsets of all %%EOF markers in the PDF.
+     */
+    public static List<Integer> findEofOffsets(byte[] pdfBytes) {
+        List<Integer> offsets = new ArrayList<>();
+        for (int i = 0; i <= pdfBytes.length - EOF_MARKER.length; i++) {
+            boolean match = true;
+            for (int j = 0; j < EOF_MARKER.length; j++) {
+                if (pdfBytes[i + j] != EOF_MARKER[j]) {
+                    match = false;
+                    break;
+                }
+            }
+            if (match) {
+                // Include the newline after %%EOF if present
+                int end = i + EOF_MARKER.length;
+                if (end < pdfBytes.length && pdfBytes[end] == '\r') end++;
+                if (end < pdfBytes.length && pdfBytes[end] == '\n') end++;
+                offsets.add(end);
+            }
+        }
+        return offsets;
+    }
+
+    /**
+     * Extract revision N (1-based) as a complete PDF byte array.
+     */
+    public static byte[] extractRevision(byte[] pdfBytes, int revision) {
+        List<Integer> eofOffsets = findEofOffsets(pdfBytes);
+        if (revision < 1 || revision > eofOffsets.size()) {
+            throw new IllegalArgumentException(
+                "Revision " + revision + " out of range. "
+                + "File has " + eofOffsets.size() + " revisions.");
+        }
+        int endOffset = eofOffsets.get(revision - 1);
+        byte[] result = new byte[endOffset];
+        System.arraycopy(pdfBytes, 0, result, 0, endOffset);
+        return result;
+    }
+}
+----
+
+[NOTE]
+====
+This approach works for classic incremental updates.
+It does _not_ handle linearized PDFs correctly (see <<ch08-linearized>>), because linearized files have a `%%EOF` at the end of the first part that is not a revision boundary.
+For production code, you should also handle the case where `%%EOF` appears inside a stream object (rare but technically possible in pathological files).
+====
+
+=== Extracting with QPDF
+
+QPDF provides a more robust approach from the command line:
+
+[source,bash]
+----
+# Show all cross-reference sections and their offsets
+qpdf --show-xref input.pdf
+
+# Extract a specific page range (not exactly revision extraction,
+# but useful for isolating content)
+qpdf input.pdf --pages . 1-5 -- output.pdf
+----
+
+QPDF does not have a built-in "extract revision N" command, but `--show-xref` gives you all the information you need to determine the `%%EOF` boundaries manually.
+
+== How PDFBox Handles Incremental Saves
+
+PDFBox {pdfbox-version} provides two distinct save methods, and choosing the wrong one is a common source of signature breakage.
+
+=== `doc.save()` — Full Rewrite
+
+The standard `save()` method writes the entire document from scratch:
+
+[source,java]
+----
+try (PDDocument doc = Loader.loadPDF(inputBytes)) {
+    // Make changes...
+    doc.save(outputStream);  // Full rewrite — destroys signatures!
+}
+----
+
+This produces a clean, single-revision PDF.
+All incremental update history is lost.
+All signatures are invalid.
+
+Use `save()` only when:
+
+- The document has no signatures and you do not need to preserve revision history
+- You are creating a new document from scratch
+- You explicitly want to flatten the file (and accept the consequences)
+
+=== `doc.saveIncremental()` — Append Mode
+
+The `saveIncremental()` method appends only the changed objects:
+
+[source,java]
+----
+try (PDDocument doc = Loader.loadPDF(inputBytes)) {
+    // Make changes...
+    doc.saveIncremental(outputStream);  // Appends — preserves signatures
+}
+----
+
+This is what you must use when the document contains signatures.
+PDFBox tracks which objects have been modified (via the COSUpdateInfo mechanism) and writes only those objects, plus a new cross-reference section and trailer, to the output.
+
+IMPORTANT: `saveIncremental()` requires that the document was loaded from a stream or byte array — PDFBox needs the original bytes to copy them to the output before appending. If you loaded the document from a `File` and then try to write incrementally to a different output stream, the original bytes are read from the file. If you try to overwrite the same file, you will corrupt it. Always load from bytes and write to a new output.
+
+=== The `saveIncremental()` and Signing Workflow
+
+When signing a PDF, you do not call `saveIncremental()` directly.
+Instead, you use the signing API:
+
+[source,java]
+----
+try (PDDocument doc = Loader.loadPDF(inputBytes)) {
+    PDSignature signature = new PDSignature();
+    signature.setFilter(PDSignature.FILTER_ADOBE_PPKLITE);
+    signature.setSubFilter(PDSignature.SUBFILTER_ADBE_PKCS7_DETACHED);
+    signature.setSignDate(Calendar.getInstance());
+
+    SignatureOptions options = new SignatureOptions();
+    options.setPreferredSignatureSize(16384);  // Reserve 16KB for CMS
+
+    doc.addSignature(signature, signingInterface, options);
+
+    ByteArrayOutputStream baos = new ByteArrayOutputStream();
+    doc.saveIncremental(baos);  // <1>
+    byte[] signedPdf = baos.toByteArray();
+}
+----
+<1> `saveIncremental()` here does three things: writes the original bytes, appends the new objects (including the signature dictionary with a placeholder `/Contents`), computes the hash over the byte ranges, calls your `SignatureInterface.sign()` method to get the CMS bytes, and writes them into the placeholder.
+
+The signing operation is _always_ an incremental save.
+PDFBox enforces this — there is no `doc.save()` variant that supports signing, because signing with a full rewrite is logically impossible (the signed byte range would cover a file that no longer exists).
+
+== Multiple `%%EOF` Markers: What They Mean
+
+Every `%%EOF` marker in a PDF represents the end of a revision.
+Counting them tells you the document's history:
+
+- **1 `%%EOF`**: A single-revision PDF.
+Never been incrementally updated.
+Either freshly created, or previously incrementally updated but later flattened by a full rewrite.
+
+- **2 `%%EOF`**: One incremental update after the original.
+Common for a single signature, a single form fill, or a single annotation addition.
+
+- **3 `%%EOF`**: Two incremental updates.
+Common for a document with two signatures, or one signature plus a subsequent form fill.
+
+- **N `%%EOF`**: N-1 incremental updates after the original.
+Documents that have been through complex workflows (multiple signers, multiple form fill rounds, annotation rounds) can have many revisions.
+
+TIP: A quick way to count revisions in a PDF is: `grep -c '%%EOF' document.pdf`. This works for most files, but be aware that `%%EOF` could theoretically appear inside a stream object (unlikely in practice). For reliable counting, parse the `/Prev` chain instead.
+
+=== What Revision Counts Tell You About a Signed PDF
+
+For signature validation, the revision count carries diagnostic information:
+
+- A signed PDF with exactly 2 `%%EOF` markers is the simplest case: original document + one signature.
+The signature covers everything in revision 1 and 2.
+
+- A signed PDF with 3 `%%EOF` markers might mean: original + signature + post-signature modification (form fill, annotation, second signature).
+The first signature covers revisions 1-2.
+Whatever is in revision 3 was added after signing — whether it is permissible depends on the `/TransformMethod` and `/DocMDP` settings.
+
+- A signed PDF with only 1 `%%EOF` is suspicious.
+Either the signature was created during the initial save (some tools do this), or the file was flattened after signing (which means the signature is almost certainly invalid, even if the bytes were carefully reconstructed — see the discussion in Chapter 24 about the Incremental Saving Attack).
+
+== Tracing the Revision History
+
+To reconstruct the complete revision history of a PDF, you walk the `/Prev` chain from the newest trailer back to the oldest:
+
+[source,java]
+----
+import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.cos.COSDictionary;
+import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.pdmodel.PDDocument;
+
+import java.util.ArrayList;
+import java.util.List;
+
+/**
+ * Traces the /Prev chain to enumerate all cross-reference sections.
+ */
+public class RevisionTracer {
+
+    public static List<Long> traceXrefOffsets(byte[] pdfBytes) throws Exception {
+        List<Long> offsets = new ArrayList<>();
+        try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+            COSDictionary trailer = doc.getDocument().getTrailer();
+            // The last startxref value
+            long currentOffset = doc.getDocument().getStartXref();
+            offsets.add(currentOffset);
+
+            // Walk the /Prev chain
+            while (trailer.containsKey(COSName.PREV)) {
+                long prev = trailer.getLong(COSName.PREV);
+                offsets.add(prev);
+                // Note: to get the previous trailer, we would need to
+                // parse the xref section at the /Prev offset.
+                // PDFBox's internal parser does this, but the API
+                // does not expose individual revision trailers directly.
+                break; // Simplified — full implementation needs xref parsing
+            }
+        }
+        return offsets;
+    }
+}
+----
+
+[NOTE]
+====
+PDFBox's public API does not expose a convenient "iterate over all revisions" method.
+The internal `COSParser` follows the `/Prev` chain during loading, but the individual revision trailers are not directly accessible after parsing.
+For production revision analysis, consider using QPDF's `--show-xref` output (see <<ch08-debugging>>) or writing a custom parser that reads the raw bytes and follows the `/Prev` pointers manually.
+====
+
+[[ch08-linearized]]
+== Linearized PDFs and Incremental Updates
+
+Linearized PDFs (sometimes called "optimized for fast web view") have a special structure designed for progressive loading over HTTP.
+A linearized PDF reorganizes its objects so that the first page can be displayed before the entire file has been downloaded.
+
+The linearization adds a **linearization dictionary** (object 1, typically) and restructures the file into two parts separated by an internal `%%EOF` — but this internal `%%EOF` is _not_ a revision boundary.
+It is part of the linearization structure.
+
+This creates a compatibility problem with incremental updates:
+
+- A linearized PDF already has an unusual structure with cross-reference data at both the beginning and end of the file.
+- An incremental update appends data after the final `%%EOF`, which is fine for non-linearized PDFs but technically invalidates the linearization (because the linearization dictionary's `/L` key records the total file length, which is now wrong).
+- Some viewers re-linearize on save, which is a full rewrite, which destroys signatures.
+
+{iso32000-2} Section 7.5.6 states:
+
+[quote]
+____
+If an incremental update is made to a linearized PDF file, the result is a valid non-linearized PDF file.
+____
+
+In other words, an incremental update on a linearized PDF destroys the linearization but produces a valid PDF.
+This is acceptable — the file simply loses its "fast web view" optimization.
+
+CAUTION: If your workflow requires both linearization and digital signatures, you must linearize _before_ signing, not after. Linearizing after signing is a full rewrite that destroys signatures. Signing after linearizing produces a valid signed PDF that is no longer linearized. There is no way to have a linearized, signed PDF that remains linearized after signing — the incremental update required by signing inherently breaks the linearization structure.
+
+[[ch08-isa]]
+== The Incremental Saving Attack
+
+The incremental update mechanism that makes PDF signatures possible is also the mechanism that attackers have exploited to _bypass_ those signatures.
+
+The **Incremental Saving Attack (ISA)**, described by the Ruhr University Bochum team in their CCS 2019 paper, works as follows:
+
+1. The attacker starts with a legitimately signed PDF
+2. The attacker appends a new incremental update to the file — adding, modifying, or replacing objects (pages, text, images, form field values)
+3. The attacker does _not_ touch the signed bytes; the incremental update is appended after the signed region
+4. The attacker presents the modified file to a PDF viewer
+5. The viewer reads the file from the end, uses the newest cross-reference section, and renders the attacker's content
+6. The viewer validates the signature by checking the original byte range — which is untouched — and reports "Signature is valid"
+
+The signature _is_ valid — over the bytes it covers.
+But the viewer is displaying content from _outside_ the signed byte range.
+The user sees a green checkmark and attacker-controlled content.
+
+[CAUTION]
+====
+The defense against ISA is conceptually simple but difficult to implement correctly: a viewer must detect that content has been appended after the signed revision and warn the user.
+Specifically, the viewer must check whether the byte range of the last signature covers the entire file.
+If the file extends beyond the end of the signed byte range, there are unsigned changes.
+
+Whether those changes are permissible (e.g., a subsequent signature, an allowed form fill under DocMDP level 2) or malicious requires deeper analysis of what the appended objects actually do — which is where the complexity lies.
+
+Chapter 24 covers the ISA and its variants in complete technical detail, including the specific techniques attackers used to bypass even the "unsigned content detected" warnings that some viewers implemented as an initial defense.
+====
+
+[[ch08-debugging]]
+== Debugging Incremental Updates
+
+When something goes wrong with a signed PDF — the signature shows as invalid, a form field value disappeared, a viewer crashes — the first thing to check is the incremental update structure.
+
+=== QPDF: Your Best Friend
+
+QPDF is an indispensable tool for PDF debugging.
+For incremental update analysis, the key commands are:
+
+[source,bash]
+----
+# Show all cross-reference entries with their types and offsets
+qpdf --show-xref signed-document.pdf
+
+# Show the structure of the file (objects, streams, references)
+qpdf --show-object=trailer signed-document.pdf
+
+# Check the file for structural errors
+qpdf --check signed-document.pdf
+
+# Show a specific object
+qpdf --show-object=42,0 signed-document.pdf
+----
+
+The `--show-xref` output is particularly valuable.
+It shows every object number, its byte offset, and which cross-reference section it belongs to.
+From this output, you can determine:
+
+- How many cross-reference sections exist (i.e., how many revisions)
+- Which objects were added or modified in each revision
+- Whether the xref entries are consistent (offsets point to actual objects)
+
+=== Comparing Revisions
+
+To understand what changed between revisions, extract each revision (by truncating at `%%EOF` boundaries as described earlier) and compare them:
+
+[source,bash]
+----
+# Extract revision 1 (original document)
+# Suppose the first %%EOF is at byte 45230
+head -c 45230 signed-document.pdf > revision1.pdf
+
+# Extract revision 2 (after first signature)
+# Suppose the second %%EOF is at byte 67890
+head -c 67890 signed-document.pdf > revision2.pdf
+
+# Compare the objects in each revision
+qpdf --show-xref revision1.pdf > xref1.txt
+qpdf --show-xref revision2.pdf > xref2.txt
+diff xref1.txt xref2.txt
+----
+
+The diff will show you exactly which objects were added or modified in the incremental update.
+For a signature, you should see the signature dictionary object, the updated AcroForm, and possibly an updated catalog or page annotation list.
+
+=== Hex-Level Inspection
+
+For the most stubborn problems, there is no substitute for looking at the raw bytes.
+Open the PDF in a hex editor and search for `%%EOF`.
+Each occurrence marks a revision boundary.
+The bytes between two consecutive `%%EOF` markers (plus the preceding `startxref` and trailer) constitute one incremental update.
+
+[TIP]
+====
+**A debugging checklist for incremental update problems:**
+
+1. Count `%%EOF` markers — does the number match the expected number of revisions?
+2. Check each trailer's `/Prev` value — does the chain form a consistent linked list?
+3. Verify that `startxref` in each revision points to a valid xref section
+4. For signed PDFs: does the byte range of each signature end at a `%%EOF` boundary?
+5. Are there any bytes after the last `%%EOF`? (There should not be — trailing garbage can confuse some parsers.)
+6. Open each extracted revision independently — does it render correctly?
+7. Compare the object sets across revisions — do the changes make sense for the expected workflow?
+====
+
+== Real-World Scenarios
+
+The theory of incremental updates is clean.
+The practice is messy.
+Here are the scenarios you will encounter most often.
+
+=== Scenario 1: Single Signature
+
+The simplest case.
+A document is created, then signed.
+The file has two revisions (two `%%EOF` markers).
+The signature's byte range covers the entire file.
+No complications.
+
+=== Scenario 2: Two Approval Signatures
+
+Alice signs first, then Bob.
+The file has three revisions: original, Alice's signature, Bob's signature.
+Alice's byte range covers revisions 1-2.
+Bob's byte range covers revisions 1-3.
+When validating Alice's signature, a viewer should check the byte range of Alice's signature and warn if changes between revision 2 and 3 go beyond what Alice's `/TransformMethod` permits (typically, adding more signatures is allowed).
+
+=== Scenario 3: Certification + Approval
+
+The document author applies a certification signature with `/DocMDP` permission level 2 (form fill and sign allowed).
+Later, a user fills form fields and applies an approval signature.
+The file has three or four revisions (original, certification, form fill, approval — or the form fill and approval might be in the same incremental update).
+The certification signature permits the form fill and the additional signature.
+A viewer must verify that the changes in the later revisions are within the scope of the DocMDP permissions.
+
+=== Scenario 4: Annotations After Signing
+
+A user adds a sticky note annotation to a signed PDF.
+If the editor saves incrementally, a new revision is appended with the annotation object and an updated page annotations array.
+The original signature's byte range is untouched.
+Whether the annotation is _allowed_ depends on the signature's `/TransformMethod`:
+
+- DocMDP level 1 (no changes allowed): the annotation violates the permissions.
+A conforming viewer should warn that the document has been modified in a way that exceeds the signer's permissions.
+- DocMDP level 2 (form fill and sign only): annotations are not form filling, so this is a violation.
+- DocMDP level 3 (annotations, form filling, and signing allowed): the annotation is permitted.
+
+The incremental update itself is structurally fine in all three cases.
+The question is whether the _content_ of the update is semantically permissible.
+This distinction — structural validity vs. semantic permissibility — is at the heart of the Incremental Saving Attack (Chapter 24).
+
+=== Scenario 5: The Flattened Disaster
+
+A signed PDF passes through an automated document management system that "optimizes" PDFs for storage.
+The optimization tool does a full rewrite.
+The output PDF has one `%%EOF`, no `/Prev` chain, and the signature dictionary's byte range references offsets that no longer correspond to the correct content.
+The signature is permanently invalid.
+The signed bytes are gone.
+
+There is no recovery.
+The original file must be retrieved from backup (if it exists) or the document must be re-signed.
+
+IMPORTANT: This scenario is _extremely_ common in enterprise environments. Document management systems, email gateways, PDF/A conversion tools, and print spoolers all potentially rewrite PDFs. If your organization processes signed PDFs, audit your entire document pipeline for non-incremental saves. Every tool that touches a signed PDF must either leave it completely unmodified or use incremental saves exclusively.
+
+=== Scenario 6: The Double-Linearization Trap
+
+A document is created with linearization enabled (for fast web view), signed, and then processed by a tool that re-linearizes it.
+The re-linearization is a full rewrite.
+The signature is destroyed.
+
+The fix: disable linearization in any tool that processes signed PDFs, or ensure that no post-signing processing step involves linearization.
+
+== Summary
+
+Incremental updates are the mechanism that makes PDF digital signatures possible.
+Without them, signing a PDF would require that the document never be modified again — no additional signatures, no form filling, no annotations, nothing.
+With them, a signed PDF can evolve through a controlled sequence of revisions, each one adding new content without disturbing the bytes that previous signatures cover.
+
+The rules are simple:
+
+- A signed PDF must be saved incrementally. Always.
+- The byte range of each signature covers a specific set of revisions.
+- New content is appended after the signed byte range.
+- The `/Prev` chain in the trailers links all revisions together.
+- Extracting a specific revision means truncating at the appropriate `%%EOF` boundary.
+- A full rewrite destroys all incremental history and all signatures.
+- Linearization and incremental updates are incompatible after the first incremental save.
+
+The next chapter (Chapter 9) examines AcroForm fields — the form infrastructure that signature fields are built on.
+Chapter 12 will bring incremental updates and signature architecture together, and Chapter 13 will dissect the byte range in complete detail.
+If the byte range is where signatures live or die, incremental updates are the ground they stand on.

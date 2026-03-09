@@ -1,0 +1,477 @@
+= Signature Validation
+
+[.lead]
+Signing a PDF is the easy part.
+Validating a signed PDF — correctly, securely, and in a way that matches what other validators produce — is where the real complexity lives.
+A signature can fail validation for dozens of reasons, and the error messages from different viewers are often vague or contradictory.
+Adobe says "valid."
+LibreOffice says "signature cannot be verified."
+Your custom validator throws a `CMSException`.
+Which one is right?
+
+This chapter walks through the complete validation process, from the first byte range check to the final certificate chain verification.
+We cover what each validation step checks, what can go wrong at each step, how different viewers handle each step, and how to debug validation failures systematically.
+
+== The Five Steps of Signature Validation
+
+Signature validation is not a single check — it is a pipeline of five independent verifications, each of which must pass.
+A failure at any step means the signature is invalid (or at least questionable), regardless of whether the other steps pass.
+
+=== Step 1: Structural Integrity (Byte Range)
+
+**Question answered**: "Does the signature cover the expected bytes of the file?"
+
+**What to check**:
+
+1. The `/ByteRange` array has exactly 4 elements: `[offset1 length1 offset2 length2]`
+2. `offset1` is 0 (signature covers from the start of the file)
+3. `offset2 + length2` equals the file size (or revision size for multi-signature documents)
+4. The gap `[length1, offset2)` contains only the `/Contents` hex string
+5. No trailing unsigned bytes exist after the signed region (unless they are a subsequent legitimate revision)
+
+**Common failures**:
+
+- Trailing bytes after the signed region — possible Incremental Saving Attack (Chapter 24)
+- ByteRange doesn't start at 0 — broken signing implementation
+- Gap contains unexpected data — corrupted or manually edited PDF
+
+Chapter 13 covers this step in exhaustive detail.
+
+=== Step 2: Hash Verification (Digest Match)
+
+**Question answered**: "Does the hash of the signed bytes match what the CMS claims was signed?"
+
+**What to check**:
+
+1. Read the digest algorithm from the CMS `SignerInfo.digestAlgorithm`
+2. Compute the hash over the byte range segments: `hash = algo(segment1 || segment2)`
+3. Extract the `messageDigest` attribute from the CMS `signedAttrs`
+4. Compare the computed hash to the CMS-provided hash
+
+**Common failures**:
+
+- Hash algorithm mismatch — you computed SHA-256 but the CMS used SHA-384
+- Byte range computation error — you read the wrong bytes
+- Modified file — someone changed the file after signing
+
+[source,java]
+----
+// Step 2: Compute and compare hash
+String digestAlgOid = signerInfo.getDigestAlgOID();
+String algName = mapOidToAlgorithm(digestAlgOid);
+MessageDigest digest = MessageDigest.getInstance(algName);
+
+int[] byteRange = signature.getByteRange();
+digest.update(pdfBytes, byteRange[0], byteRange[1]);
+digest.update(pdfBytes, byteRange[2], byteRange[3]);
+byte[] computedHash = digest.digest();
+
+Attribute digestAttr = signerInfo.getSignedAttributes()
+        .get(CMSAttributes.messageDigest);
+byte[] claimedHash = ASN1OctetString.getInstance(
+        digestAttr.getAttrValues().getObjectAt(0)).getOctets();
+
+if (!MessageDigest.isEqual(computedHash, claimedHash)) {
+    log.error("Hash mismatch — document was modified after signing");
+    return ValidationResult.HASH_MISMATCH;
+}
+----
+
+=== Step 3: Cryptographic Verification (CMS Signature)
+
+**Question answered**: "Was the CMS `SignedData` actually created by the claimed signer's private key?"
+
+**What to check**:
+
+1. Extract the signer's certificate from the CMS `SignedData.certificates` collection
+2. Verify that the `SignerInfo.signatureAlgorithm` matches the certificate's key type (RSA cert with RSA signature, ECDSA cert with ECDSA signature)
+3. Verify the signature over the `signedAttrs` using the signer's public key
+4. Verify that the signed attributes include the required fields: `contentType`, `messageDigest`, and (for PAdES) `ESS-signing-certificate-v2`
+
+**Common failures**:
+
+- Wrong certificate used for verification — the CMS contains multiple certificates, and you picked an intermediate instead of the signer
+- Algorithm mismatch — rare, but can happen with misconfigured BouncyCastle providers
+- Missing `ESS-signing-certificate-v2` — not a cryptographic failure, but a PAdES compliance failure
+
+[source,java]
+----
+// Step 3: CMS cryptographic verification
+CMSSignedData cmsData = new CMSSignedData(
+        new CMSProcessableByteArray(signedBytes), signature.getContents());
+
+SignerInformationStore signerStore = cmsData.getSignerInfos();
+SignerInformation signerInfo = signerStore.getSigners().iterator().next();
+
+// Find the signer's certificate
+X509CertificateHolder signerCert = findSignerCertificate(
+        cmsData.getCertificates(), signerInfo.getSID());
+
+// Verify the CMS signature
+boolean cmsValid = signerInfo.verify(
+        new JcaSimpleSignerInfoVerifierBuilder()
+                .setProvider("BC")
+                .build(signerCert));
+
+if (!cmsValid) {
+    log.error("CMS signature verification failed — " +
+              "signature was not created by the claimed certificate");
+    return ValidationResult.CMS_INVALID;
+}
+----
+
+=== Step 4: Certificate Chain Validation
+
+**Question answered**: "Is the signer's certificate trustworthy? Was it valid at the time of signing?"
+
+**What to check**:
+
+1. Build the certificate chain from the signer's certificate up to a trusted root
+2. Verify each certificate's signature (each cert is signed by its issuer)
+3. Check validity periods — was each certificate valid at the signing time?
+4. Check revocation status — was any certificate revoked at or before the signing time?
+5. Check key usage — does the signer's certificate allow digital signatures (`digitalSignature` or `nonRepudiation` key usage)?
+6. Check basic constraints — are intermediate certificates properly marked as CA certificates?
+
+**Common failures**:
+
+- **Self-signed certificate**: The signer's certificate is not issued by a recognized CA.
+  This is technically valid (the CMS signature will verify) but the certificate is not trusted.
+  Most viewers show "signature is valid but the identity of the signer could not be verified."
+- **Expired certificate**: The certificate was valid when the signature was created, but has since expired.
+  With timestamps, this is not a problem (the timestamp proves the signature was created before expiration).
+  Without timestamps, viewers may warn about an expired certificate.
+- **Revoked certificate**: A certificate in the chain was revoked (compromised, or the CA issued it in error).
+  Revocation checking requires OCSP or CRL lookup — which may fail if the revocation servers are unreachable.
+- **Missing intermediate**: The CMS doesn't include all intermediate certificates, and the validator can't build the chain.
+  This is the most common real-world certificate chain failure.
+- **Not in trust store**: The root certificate is not in the validator's trust store.
+  Different validators have different trust stores — Adobe uses AATL, operating systems use their own, and EU validators use the EUTL.
+
+=== Step 5: Trust Evaluation
+
+**Question answered**: "Do I trust the entity that signed this document?"
+
+This is the most subjective step, and it's where validators diverge the most.
+Trust evaluation is not a purely technical question — it depends on context:
+
+**Adobe Acrobat trust model**:
+Acrobat trusts certificates that chain to a root in the **Adobe Approved Trust List (AATL)**.
+If the certificate chains to an AATL root, Acrobat shows a green checkmark.
+If not — even if the certificate is perfectly valid, issued by a reputable CA, and chains to a root in the operating system's trust store — Acrobat shows a yellow warning: "At least one signature has problems."
+
+This is one of the most frustrating aspects of PDF signature validation for developers.
+Your signature is cryptographically valid, the certificate is issued by a recognized CA, the certificate is not expired or revoked — but Acrobat shows a warning because the CA is not on Adobe's list.
+Getting on the AATL requires the CA to apply to Adobe and pay fees.
+
+**EU validation model**:
+EU validators (like the DSS demonstration webapp, or validators used by EU government services) trust certificates that chain to a root in the **EU Trusted List (EUTL)**.
+The EUTL is the authoritative registry of Qualified Trust Service Providers.
+A signature is a "qualified electronic signature" — with the legal weight of a handwritten signature under eIDAS — only if the certificate chains to an EUTL-listed QTSP.
+
+**Operating system trust model**:
+Some applications (like LibreOffice) use the operating system's certificate store for trust evaluation.
+This means the set of trusted roots varies by OS and by the user's system configuration.
+
+**Custom trust model**:
+Your application can define its own trust store — a specific set of root certificates that you trust for your use case.
+This is common in enterprise environments where the signing certificates are issued by an internal CA.
+
+[TIP]
+====
+**When debugging trust failures, ask three questions:**
+
+1. What trust store is the validator using? (AATL, EUTL, OS store, custom)
+2. Is the signer's root certificate in that trust store?
+3. Are all intermediates available? (Either embedded in the CMS or fetchable via the certificate's Authority Information Access extension)
+
+The answer to question 1 determines everything else.
+A signature can be "valid" in one validator and "untrusted" in another, purely because of trust store differences.
+====
+
+== Validation Differences Across Viewers
+
+One of the most confusing aspects of PDF signature validation is that different viewers produce different results for the same PDF.
+This is not a bug — it's a consequence of the five-step validation model, where each viewer makes different choices at each step.
+
+.Validation behavior comparison across major PDF viewers
+[cols="2,1,1,1,1,1", options="header"]
+|===
+| Check | Acrobat | Foxit | LibreOffice | PDFBox | EU DSS
+
+| Byte range trailing bytes
+| Warns
+| Warns
+| Partial
+| Manual
+| Warns
+
+| Hash verification
+| Yes
+| Yes
+| Yes
+| Manual
+| Yes
+
+| CMS signature
+| Yes
+| Yes
+| Yes
+| Manual
+| Yes
+
+| Certificate chain
+| AATL
+| Mixed
+| OS store
+| Manual
+| EUTL
+
+| Revocation (OCSP)
+| Yes
+| Yes
+| Limited
+| Manual
+| Yes
+
+| Revocation (CRL)
+| Yes
+| Yes
+| Yes
+| Manual
+| Yes
+
+| MDP enforcement
+| Full
+| Mostly
+| Partial
+| None
+| Full
+
+| Timestamp verification
+| Yes
+| Yes
+| Partial
+| Manual
+| Yes
+
+| PAdES compliance
+| Partial
+| Partial
+| No
+| Manual
+| Full
+
+|===
+
+"Manual" for PDFBox means the library provides the primitives (signature extraction, byte range access, CMS parsing) but does not perform the validation automatically — you must write the validation logic yourself.
+This is by design: PDFBox is a PDF library, not a validation service.
+
+EU DSS provides the most complete automated validation, including ETSI-compliant validation reports.
+
+== Debugging Validation Failures
+
+=== The Systematic Approach
+
+When a signature fails validation, resist the urge to guess.
+Instead, walk through the five steps systematically:
+
+**Step 1: Is the byte range intact?**
+
+[source,bash]
+----
+# Check byte range with QPDF
+qpdf --show-object=<sig-obj-number> document.pdf
+# Look at /ByteRange — does offset2 + length2 == file size?
+wc -c document.pdf
+----
+
+**Step 2: Does the hash match?**
+
+[source,java]
+----
+// Compute the hash yourself and compare to the CMS messageDigest
+// (Code in Chapter 13)
+----
+
+**Step 3: Does the CMS verify?**
+
+[source,bash]
+----
+# Extract /Contents, decode hex, verify with OpenSSL
+openssl cms -inform DER -in signature.der -verify \
+    -content signed-bytes.bin -noverify -out /dev/null
+# -noverify skips certificate verification — tests only the CMS math
+----
+
+**Step 4: Is the certificate chain valid?**
+
+[source,bash]
+----
+# Extract the signer's certificate and verify the chain
+openssl cms -inform DER -in signature.der -noout -cmsout -print | \
+    grep -A 5 "cert:"
+openssl verify -CAfile trusted-roots.pem signer-cert.pem
+----
+
+**Step 5: Is the certificate trusted?**
+
+Check the signer's root against the relevant trust store (AATL list, EUTL, OS store).
+
+=== Common Error Messages and Their Meaning
+
+.PDF signature error messages decoded
+[cols="3,2,4", options="header"]
+|===
+| Error Message (Viewer) | Step | What It Actually Means
+
+| "Signature is INVALID" (Acrobat)
+| 2 or 3
+| Hash mismatch or CMS verification failure. The document was modified after signing, or the CMS is malformed.
+
+| "At least one signature has problems" (Acrobat)
+| 5
+| The certificate does not chain to an AATL root. The signature may be cryptographically perfect — Acrobat just doesn't trust the CA.
+
+| "Document has been altered or corrupted since the Signature was applied" (Acrobat)
+| 1 or MDP
+| Either the byte range doesn't cover the full file (trailing bytes), or modifications after signing exceed the MDP permissions.
+
+| "Signature is valid, but the identity of the signer could not be verified" (Acrobat)
+| 4 or 5
+| CMS is valid, but the certificate chain is incomplete or the root is not trusted.
+
+| "The signature cannot be verified" (LibreOffice)
+| 3, 4, or 5
+| Generic error — LibreOffice doesn't distinguish well between CMS failure and trust failure. Check the signature details panel.
+
+| `CMSException: message-digest attribute value does not match calculated value` (BouncyCastle)
+| 2
+| Hash mismatch. The bytes you passed to the verifier don't match what was signed.
+
+| `CertPathValidatorException: validity check failed` (Java)
+| 4
+| A certificate in the chain has expired.
+
+| `CertPathValidatorException: no valid CRL found` (Java)
+| 4
+| Revocation checking failed because the CRL distribution point is unreachable or the CRL is not cached.
+|===
+
+== Timestamp Verification
+
+=== Why Timestamps Matter for Validation
+
+A digital signature proves that a specific certificate holder signed specific bytes.
+But it doesn't prove _when_ the signing happened.
+Without a timestamp, you can only say "the signature was created sometime before now."
+
+This matters because certificates expire and can be revoked.
+If a certificate was valid on March 1 but expired on March 31, and you validate the signature on April 15:
+
+- **Without timestamp**: The certificate is expired. Some validators will flag the signature as questionable.
+- **With timestamp**: The timestamp proves the signature was created on March 1, when the certificate was valid. The signature remains valid despite the certificate's expiration.
+
+=== Verifying the Timestamp
+
+A signature timestamp is embedded as an unsigned attribute (`id-aa-signatureTimeStampToken`, OID 1.2.840.113549.1.9.16.2.14) in the CMS `SignerInfo`:
+
+[source,java]
+----
+// Extract and verify the signature timestamp
+AttributeTable unsignedAttrs = signerInfo.getUnsignedAttributes();
+if (unsignedAttrs != null) {
+    Attribute tsAttr = unsignedAttrs.get(
+            PKCSObjectIdentifiers.id_aa_signatureTimeStampToken);
+    if (tsAttr != null) {
+        CMSSignedData tsToken = new CMSSignedData(
+                tsAttr.getAttrValues().getObjectAt(0).toASN1Primitive().getEncoded());
+
+        // Verify the timestamp's CMS signature
+        SignerInformation tsSigner = tsToken.getSignerInfos()
+                .getSigners().iterator().next();
+        X509CertificateHolder tsCert = findSignerCertificate(
+                tsToken.getCertificates(), tsSigner.getSID());
+
+        boolean tsValid = tsSigner.verify(
+                new JcaSimpleSignerInfoVerifierBuilder()
+                        .setProvider("BC").build(tsCert));
+
+        if (tsValid) {
+            // Extract the timestamp time
+            TimeStampToken tst = new TimeStampToken(tsToken);
+            Date signingTime = tst.getTimeStampInfo().getGenTime();
+            log.info("Signature was timestamped at: {}", signingTime);
+
+            // Verify that the timestamp covers the signature value
+            byte[] tsDigest = tst.getTimeStampInfo()
+                    .getMessageImprintDigest();
+            // This digest should match the hash of the signature value
+        }
+    }
+}
+----
+
+=== Timestamp Chain of Trust
+
+The timestamp itself is a CMS signature — signed by the TSA's certificate.
+This certificate has its own chain and trust requirements:
+
+1. The TSA certificate must have the `id-kp-timeStamping` extended key usage (OID 1.3.6.1.5.5.7.3.8)
+2. The TSA certificate chain must be valid at the time of verification
+3. The TSA's root must be in your trust store
+
+If the TSA's certificate has also expired by the time you validate (years later), you need **long-term validation (LTV)** — which is the subject of Chapter 18.
+
+== Building a Complete Validation Pipeline
+
+=== Architecture
+
+A production validation pipeline typically follows this structure:
+
+[source]
+----
+Input: PDF file
+  │
+  ├─→ Step 1: Extract all signatures
+  │     └─→ For each signature:
+  │           ├─→ Step 2: Byte range check
+  │           ├─→ Step 3: Hash verification
+  │           ├─→ Step 4: CMS verification
+  │           ├─→ Step 5: Certificate chain
+  │           ├─→ Step 6: Revocation check
+  │           ├─→ Step 7: Timestamp verification (if present)
+  │           ├─→ Step 8: MDP compliance (if certification sig)
+  │           └─→ Step 9: Trust evaluation
+  │
+  └─→ Output: Validation report
+        ├─→ Per-signature results
+        ├─→ Overall document status
+        └─→ Detailed diagnostics
+----
+
+Chapter 31 provides a complete Java implementation of this pipeline.
+
+=== When to Use EU DSS Instead
+
+If you need to produce **ETSI-compliant validation reports** (ETSI TS 119 102-2) — for example, because you're building a validation service for a government or regulated industry — use the EU DSS framework (Chapter 23) instead of building the pipeline yourself.
+EU DSS handles all validation steps, produces standards-compliant reports, and has been tested against the full range of PAdES profiles and edge cases.
+
+Building your own pipeline is appropriate when:
+
+- You need custom trust evaluation logic
+- You need to validate signatures in a specific context (e.g., your own application's signing workflow)
+- You want to understand every step of the validation process (which is the point of this book)
+- You're building a specialized tool (forensic analysis, security research)
+
+== Key Takeaways
+
+- Signature validation is a **five-step pipeline**: byte range → hash → CMS → certificate chain → trust
+- Each step is independent — a failure at any step means the signature is invalid or questionable
+- **Different viewers produce different results** because they use different trust stores and enforce different rules
+- Adobe Acrobat uses **AATL** for trust; EU validators use **EUTL**; LibreOffice uses the **OS trust store**
+- The most common real-world failure is **trust evaluation** — the signature is cryptographically perfect but the root CA isn't in the validator's trust store
+- **Timestamps** prove when a signature was created — essential for handling expired certificates and building long-term validation
+- **Debug systematically**: walk through the five steps in order, using QPDF, OpenSSL, and BouncyCastle to isolate the failure
+- **EU DSS** provides the most complete automated validation with ETSI-compliant reports
+- PDFBox provides the **primitives** for validation but does not automate the pipeline — you build it yourself

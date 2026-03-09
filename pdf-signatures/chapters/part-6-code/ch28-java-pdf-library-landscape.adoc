@@ -1,0 +1,912 @@
+= The Java PDF Library Landscape
+
+[.lead]
+Before we write a single line of signing code, we need to talk about the tools we're using — where they came from, why they exist, and what baggage they carry.
+If you've ever wondered why there are three different "iText" libraries on Maven Central, why PDFBox's API changed so dramatically between version 2 and version 3, or why a library from the year 2000 with known bugs is still running in Fortune 500 production systems — this chapter is for you.
+
+The Java PDF ecosystem is not just a collection of libraries.
+It is a story of open-source idealism, licensing betrayal (depending on who you ask), corporate acquisitions, community forks, and the kind of technical debt that accumulates when enterprises build critical infrastructure on a dependency and then the rules change.
+Understanding this history is not optional background reading — it directly affects the code you write, the signatures you produce, and the compatibility problems you will encounter.
+
+== The iText Saga: From PhD Project to Corporate Licensing Drama
+
+=== Bruno Lowagie and the Birth of iText (2000–2009)
+
+The story of Java PDF processing begins, for practical purposes, with Bruno Lowagie.
+In 2000, Lowagie — a Belgian mathematician working at a printing company — needed to generate PDF documents from Java.
+The options at the time were essentially nonexistent.
+Adobe had published the PDF specification, but the only tools that could create PDFs were Adobe's own products (Acrobat, Distiller) and a handful of expensive commercial libraries.
+There was nothing usable in the open-source Java world.
+
+So Lowagie wrote his own library.
+He called it **iText**, released it under the **Mozilla Public License (MPL)** and later the **GNU Lesser General Public License (LGPL)**, and published it on SourceForge — the GitHub of its era.
+The LGPL license was critically important: it allowed companies to use iText in proprietary software without open-sourcing their own code, as long as they didn't modify the iText library itself.
+This is the license model that made iText ubiquitous.
+
+The timing was perfect.
+Java was exploding in enterprise environments.
+J2EE application servers were the dominant architecture.
+Companies needed to generate invoices, reports, contracts, and forms as PDFs — millions of them per day, in automated workflows.
+iText was free, it worked, and its API was straightforward:
+
+[source,java]
+----
+// iText 2.x — the classic API that a generation of Java developers learned
+Document document = new Document();
+PdfWriter.getInstance(document, new FileOutputStream("output.pdf"));
+document.open();
+document.add(new Paragraph("Hello, PDF"));
+document.close();
+----
+
+This simplicity was revolutionary.
+You didn't need to understand PDF internals.
+You didn't need to manipulate dictionaries or worry about cross-reference tables.
+You told iText what you wanted on the page, and it produced a valid PDF.
+The library handled fonts, images, tables, forms, encryption, and — crucially for our purposes — **digital signatures**.
+
+By the mid-2000s, iText was everywhere.
+It was embedded in JBoss, Alfresco, Jasper Reports, BIRT, and hundreds of other Java projects.
+Large banks, insurance companies, government agencies, and healthcare organizations had built their document generation pipelines on iText.
+The Maven coordinates `com.lowagie:itext` were among the most downloaded artifacts in the Java ecosystem.
+
+=== The LGPL-to-AGPL Switch: The Day the Rules Changed (2009)
+
+On December 1, 2009, Bruno Lowagie changed the license of iText from **LGPL** to **AGPL** (GNU Affero General Public License), starting with version **5.0.0**.
+
+This was, depending on your perspective, either a reasonable business decision or an act of betrayal against the community that had made iText successful.
+Both perspectives have merit, and understanding the controversy matters because its consequences are still playing out in production systems today.
+
+**What AGPL means in practice:**
+The AGPL is like the GPL, but with one additional requirement: if you use an AGPL-licensed library in software that users interact with over a network (which includes web applications, SaaS products, and API services), you must release the _entire source code_ of your application under the AGPL.
+Not just your modifications to iText — your entire application.
+
+For the thousands of companies using iText in their proprietary Java backends — generating invoices, processing insurance claims, signing contracts — this was devastating.
+They had exactly three options:
+
+1. **Open-source their entire application** under AGPL — unthinkable for most enterprises
+2. **Buy a commercial license** from iText Group NV (the company Lowagie founded to monetize iText) — expensive, typically €5,000–€50,000+ per year depending on deployment scale
+3. **Stay on iText 2.1.7** — the last LGPL-licensed version, released in 2009 — forever
+
+Most chose option 3.
+
+**Why Lowagie made the switch:**
+Lowagie's stated reasons were straightforward: he had spent nearly a decade maintaining a complex library for free, while companies worth billions used it to generate revenue without contributing back.
+He wanted to build a business.
+The AGPL created a forcing function: use iText for free in open-source projects, or pay for a commercial license.
+This is a perfectly legitimate business model — MongoDB, Elasticsearch, and Redis would later make similar moves (though with different licenses).
+
+**Why the community was angry:**
+The anger wasn't about the business model itself — it was about the trust violation.
+Enterprise architects had chosen iText _because_ of its LGPL license.
+They had written it into procurement documents, gotten legal approval, and built systems that depended on it.
+The license change felt like a bait-and-switch: attract an enormous user base with a permissive license, then change the terms once everyone is locked in.
+
+The fact that existing versions remained LGPL was cold comfort.
+iText 2.1.7 was already showing its age in 2009.
+By 2012, it had known bugs in font handling, incomplete PDF 1.7 support, and no support for the newer CMS structures that PAdES was beginning to require.
+But upgrading to iText 5.x meant either paying or going AGPL.
+
+[TIP]
+====
+If you encounter a PDF signed by a Java application that uses `com.lowagie.text.pdf.PdfSignatureAppearance` in its imports — that's iText 2.x.
+The class was renamed to `com.itextpdf.text.pdf.PdfSignatureAppearance` in iText 5.x (note the package change from `com.lowagie` to `com.itextpdf`).
+The package name tells you which era of iText produced the signature.
+====
+
+=== The CMS Structure Problem: Why Old iText Signatures Look Different
+
+Here's where the licensing drama directly impacts signature compatibility.
+
+iText 2.x (the LGPL version that much of the world is still using) produces CMS `SignedData` structures that are technically valid per {rfc5652}, but differ from what modern validators expect in several ways:
+
+**Encapsulated vs. Detached content:**
+Early iText versions could produce CMS signatures with _encapsulated_ content — meaning the signed hash was embedded inside the `SignedData` structure's `encapContentInfo` field rather than being referenced externally via the PDF byte range.
+This was not wrong per the CMS spec, but it created problems:
+
+- Modern PAdES validators expect detached signatures (SubFilter `adbe.pkcs7.detached` or `ETSI.CAdES.detached`), where the signed content is the byte range in the PDF itself — not a copy inside the CMS
+- Some validators would see encapsulated content and assume the signature was standalone (not bound to the PDF), failing validation even though the cryptographic math was correct
+- The double-hash problem: if the signed bytes in the CMS didn't match what a byte-range-aware validator computed from the PDF file, the signature appeared invalid
+
+**Missing signed attributes:**
+iText 2.x did not always include the `ESS-signing-certificate-v2` attribute that PAdES requires.
+Without this attribute, the signature is valid per ISO 32000-2 but _not_ PAdES-compliant — which means it fails validation in any system that enforces PAdES profiles (including EU government validation services and Adobe Acrobat in its stricter validation modes).
+
+**SHA-1 default:**
+iText 2.1.7 defaulted to SHA-1 for the message digest.
+SHA-1 was already theoretically weakened by 2009 (Wang and Yu's collision attacks were published in 2005), and it was definitively broken in 2017 when the SHAttered attack produced actual colliding files.
+PDFs signed with iText 2.x before SHA-256 became the norm carry SHA-1 digests, which modern validators increasingly flag or reject.
+
+[WARNING]
+====
+If your organization has a corpus of PDFs signed between 2005 and 2015 by Java applications, there is a significant chance they were signed with iText 2.x using SHA-1 and potentially using encapsulated (not detached) CMS content.
+These signatures may fail validation in modern tools.
+
+To verify: extract the CMS SignedData from the `/Contents` entry and check:
+
+1. Is `encapContentInfo.eContentType` set with actual content? (encapsulated — old style)
+2. Is the digest algorithm SHA-1 (`OID 1.3.14.3.2.26`)? (deprecated)
+3. Is the `ESS-signing-certificate-v2` attribute present in `signedAttrs`? (missing = not PAdES-compliant)
+
+Chapter 31 provides code to perform all three checks.
+====
+
+=== iText 5.x, 7.x, and 8.x: The Commercial Evolution
+
+After the AGPL switch, iText evolved rapidly — but behind a paywall for commercial use.
+
+**iText 5.x (2009–2016):** Maintained the original API design but added PDF 2.0 features, improved CMS handling, and better PAdES support.
+The package name changed from `com.lowagie` to `com.itextpdf`.
+If you see both package prefixes in the same project's classpath — and this happens more often than you'd think — you're looking at a project that tried to use both the old LGPL version and the new AGPL version simultaneously, which is a recipe for classloading nightmares.
+
+**iText 7.x (2016–2023):** A complete rewrite with a modular architecture.
+The API was entirely different from iText 5.x — migration was not trivial.
+iText 7 introduced separate modules for core PDF operations, forms, signing, and other features.
+The signing module (`itext7-sign`) included comprehensive PAdES support, including B-LTA profiles with embedded timestamps and revocation data.
+The commercial license became the primary offering, with AGPL remaining for open-source projects.
+
+**iText 8.x (2023–present):** The current generation, continuing the modular architecture with added support for PDF 2.0 features, improved accessibility tagging, and enhanced signing capabilities.
+iText Group NV (now iText Software, headquartered in Ghent, Belgium, with offices in the US and Singapore) is a substantial commercial entity with paying enterprise customers worldwide.
+
+The commercial iText is, by all accounts, a high-quality library.
+Its signing implementation is mature, well-tested, and PAdES-compliant.
+But at commercial license prices that can reach tens of thousands of euros per year for enterprise deployments, it is not an option for every project — which is why the open-source alternatives exist.
+
+=== The IBM Connection
+
+IBM's involvement with iText is a lesser-known but important part of the story.
+In the early 2000s, IBM was one of the largest users of iText — embedding it in several of their enterprise products, including **IBM Content Manager**, **IBM Filenet**, and various WebSphere-based document processing systems.
+
+IBM contributed patches and improvements back to the project during the LGPL era, which was entirely within the LGPL's collaborative spirit.
+However, when the license changed to AGPL, IBM — like most large enterprises — was unwilling to either open-source their proprietary products or pay iText's commercial licensing fees for a dependency that had previously been free.
+
+This created an awkward situation: IBM's products contained iText 2.x code, their customers expected continued PDF functionality, and the upgrade path required either legal procurement (commercial iText license) or engineering investment (migrate to a different library).
+IBM's response, like most enterprises in this position, was a combination of staying on old versions and gradually migrating new development to Apache PDFBox — which was, by then, becoming mature enough for production use.
+
+The IBM story is representative of what happened across the industry: hundreds of enterprises had iText deeply embedded in their systems, and the license change created a slow-motion migration that, in many cases, is still incomplete in 2026.
+
+== OpenPDF: The Community Fork That Refuses to Die
+
+=== The Fork (2016)
+
+When it became clear that iText 5.x was permanently AGPL for commercial use, and that iText 2.1.7 was accruing unfixed bugs and missing modern features, a group of developers forked iText 2.1.7 under the name **OpenPDF** (initially called **LibrePDF**).
+
+The fork was hosted on GitHub under the `LibrePDF/OpenPDF` repository, and it was explicitly positioned as the LGPL-licensed continuation of the original iText codebase.
+The initial stated goals were modest: fix bugs, add basic modern features (SHA-256 support, better font handling), and keep the library usable for projects that needed LGPL licensing.
+
+=== What OpenPDF Is (and Isn't)
+
+OpenPDF today (version 2.0.x, as of 2026) is a capable PDF generation library that maintains API compatibility with iText 2.x while adding features that the original 2.1.7 never had:
+
+- **SHA-256/384/512 message digests** for signing (critical — SHA-1 is no longer acceptable)
+- **AES-256 encryption** support
+- **Improved font handling**, including better CJK support and TrueType subsetting
+- **Bug fixes** for dozens of issues that were never patched in iText 2.1.7
+
+However, OpenPDF also carries significant limitations:
+
+- It is built on the iText 2.x architecture, which was designed for PDF 1.7 and earlier
+- **No PDF 2.0 support** — cross-reference streams, tagged PDF improvements, and other 2.0 features are absent
+- **Limited PAdES support** — basic PAdES-B-B signatures are possible, but B-LT and B-LTA profiles (which require DSS dictionary construction and archival timestamps) are not natively supported
+- **No built-in LTV (Long-Term Validation)** — you'll need to construct the DSS dictionary yourself
+- The contributor community is small — a handful of maintainers, not the large team that iText Group NV employs
+- **Documentation is sparse** — the iText 2.x book (Lowagie's "iText in Action") is the closest thing to comprehensive documentation, and it describes an API from 2008
+
+[NOTE]
+====
+OpenPDF lives at `com.github.librepdf:openpdf` on Maven Central.
+Do not confuse it with `com.lowagie:itext` (the original iText 2.1.7) or `com.itextpdf:itextpdf` (the AGPL iText 5.x).
+All three exist on Maven Central.
+All three have different licenses, different capabilities, and different bugs.
+Getting the wrong one in your dependency tree is a common source of confusion — and potential legal liability.
+====
+
+=== Should You Use OpenPDF?
+
+For **PDF generation** (creating invoices, reports, forms) where you need an LGPL-licensed library and don't require PDF 2.0 features: OpenPDF is a reasonable choice.
+
+For **digital signatures**: OpenPDF can produce basic CMS signatures, but for PAdES compliance, long-term validation, and the kind of robust signing infrastructure this book teaches, **PDFBox is the better choice**.
+PDFBox's signing API is more actively maintained, better tested against the Bochum attack scenarios, and has a larger community contributing security fixes.
+
+That said — if you have an existing codebase built on iText 2.x that you cannot easily migrate, OpenPDF is the path of least resistance for getting off the unmaintained 2.1.7 version while keeping your existing API calls intact.
+
+== Apache PDFBox: The Open-Source Standard
+
+=== Origin Story: Ben Litchfield and the Apache Incubation
+
+Apache PDFBox started as **PDFBox** — a standalone project created by **Ben Litchfield** in 2002.
+Litchfield, working as a Java developer, needed to _read_ existing PDF documents — not just create them (which was iText's primary strength at the time).
+He needed to extract text, parse structures, and manipulate the low-level PDF object model.
+iText was designed as a PDF _writer_; PDFBox was designed as a PDF _reader_ that could also write.
+
+This fundamental design difference — reader-first vs. writer-first — is still visible in the APIs today:
+
+- **iText/OpenPDF** excels at high-level document construction: "add a paragraph here, put a table there, generate the PDF"
+- **PDFBox** excels at low-level document manipulation: "give me the COS dictionary for object 42, let me modify the annotation rectangle, show me the raw font encoding"
+
+For digital signature work, PDFBox's reader-first architecture is a significant advantage.
+Signing a PDF requires understanding the existing document structure, computing byte ranges, parsing existing signatures, and manipulating specific dictionaries — all tasks where low-level access is essential.
+
+In 2008, PDFBox entered the **Apache Software Foundation** incubator process, and in 2009 it graduated as a top-level Apache project under the **Apache License 2.0** — one of the most permissive open-source licenses available.
+Unlike iText's LGPL→AGPL journey, PDFBox has been Apache-licensed since inception and will remain so.
+This licensing certainty is one of the reasons enterprises migrated to PDFBox.
+
+=== PDFBox 2.x: The Workhorse (2016–2023)
+
+PDFBox 2.0 was the version that brought PDFBox into mainstream production use.
+It featured:
+
+- A complete COS (Carousel Object System) model for low-level PDF manipulation
+- Text extraction with position information
+- PDF rendering (via `PDFRenderer`)
+- AcroForm support (creating, filling, and flattening forms)
+- Digital signature support via `PDDocument.addSignature()`
+- Font handling (Type1, TrueType, CID fonts, subsetting)
+
+The signing API in PDFBox 2.x was functional but had rough edges.
+The `SignatureInterface` required you to provide a `sign(InputStream)` method that received the bytes to sign and returned the CMS `SignedData` as a byte array.
+The actual CMS construction was your responsibility — typically using BouncyCastle (we'll discuss this later).
+PDFBox handled the PDF-specific parts: creating the signature dictionary, computing the byte range, reserving space for `/Contents`, and performing the incremental save.
+
+[source,java]
+----
+// PDFBox 2.x signing pattern
+PDDocument doc = PDDocument.load(inputFile);
+PDSignature signature = new PDSignature();
+signature.setFilter(PDSignature.FILTER_ADOBE_PPKLITE);
+signature.setSubFilter(PDSignature.SUBFILTER_ADBE_PKCS7_DETACHED);
+signature.setName("Signer Name");
+signature.setSignDate(Calendar.getInstance());
+
+doc.addSignature(signature, new SignatureInterface() {
+    @Override
+    public byte[] sign(InputStream content) throws IOException {
+        // Your BouncyCastle CMS construction goes here
+        return createCMSSignature(content, certificate, privateKey);
+    }
+});
+
+doc.saveIncremental(outputStream);
+doc.close();
+----
+
+This separation of concerns — PDFBox handles the PDF, you handle the cryptography — is elegant in theory but demanding in practice.
+Getting the CMS structure right for PAdES compliance requires deep knowledge of signed attributes, certificate embedding, and timestamp handling.
+Chapters 29 and 30 provide the complete implementation.
+
+=== PDFBox 3.x: The Breaking Change (2024)
+
+PDFBox 3.0 was released in 2024 as a major version bump with **breaking API changes**.
+The migration was significant enough to catch many projects off guard:
+
+[WARNING]
+====
+PDFBox 3.x is **not** a drop-in replacement for 2.x.
+If you're upgrading, budget significant development time.
+The changes are pervasive and affect every area of the API.
+====
+
+The most impactful changes for signing:
+
+**Loading documents:**
+[source,java]
+----
+// PDFBox 2.x
+PDDocument doc = PDDocument.load(new File("document.pdf"));
+PDDocument doc = PDDocument.load(byteArray);
+
+// PDFBox 3.x — PDDocument.load() is GONE
+PDDocument doc = Loader.loadPDF(new File("document.pdf"));
+PDDocument doc = Loader.loadPDF(byteArray);
+----
+
+**Font construction:**
+[source,java]
+----
+// PDFBox 2.x
+PDType1Font font = PDType1Font.HELVETICA;
+
+// PDFBox 3.x — static font constants are GONE
+PDType1Font font = new PDType1Font(Standard14Fonts.FontName.HELVETICA);
+----
+
+**AcroForm API:**
+[source,java]
+----
+// PDFBox 2.x
+boolean needsAppearances = acroForm.isNeedAppearances();
+
+// PDFBox 3.x — method renamed
+boolean needsAppearances = acroForm.getNeedAppearances();
+----
+
+**Font encoding access:**
+[source,java]
+----
+// PDFBox 2.x
+Encoding encoding = font.getEncoding(); // Worked for most font types
+
+// PDFBox 3.x — getEncoding() removed from PDFont interface
+// Must access encoding through COS dictionary directly
+COSDictionary fontDict = font.getCOSObject();
+COSBase encoding = fontDict.getDictionaryObject(COSName.ENCODING);
+----
+
+**Content streams:**
+[source,java]
+----
+// PDFBox 2.x — could write to form XObjects with PDPageContentStream
+PDPageContentStream cs = new PDPageContentStream(doc, formXObject, ...);
+
+// PDFBox 3.x — PDPageContentStream is for pages ONLY
+// For form XObjects, write raw PDF operators via the stream's output
+OutputStream os = formXObject.getStream().createOutputStream();
+----
+
+The signing API itself (`PDDocument.addSignature()`, `SignatureInterface`, `PDSignature`) remained structurally similar, but the surrounding changes — especially in document loading, font handling, and content stream creation — mean that any signing code that also creates visual signature appearances needs substantial rework.
+
+[TIP]
+====
+**Migration strategy:** Don't try to upgrade PDFBox in-place.
+Create a new branch, update the dependency, let the compiler tell you every break, and fix them systematically.
+The PDFBox team maintains a https://pdfbox.apache.org/3.0/migration.html[migration guide] that covers the major changes, but the edge cases (especially around font encoding and content stream APIs) will require reading the 3.x Javadoc carefully.
+====
+
+=== The PDFBox Signing Infrastructure: What's Under the Hood
+
+PDFBox's signing implementation is one of the most impressive pieces of open-source PDF engineering.
+It's worth understanding the high-level architecture, because when something goes wrong during signing — and it will — you need to know where to look.
+
+The signing process in PDFBox involves these internal steps:
+
+1. **Signature dictionary creation**: PDFBox creates the `/Sig` dictionary with the properties you set (`/Filter`, `/SubFilter`, `/Name`, `/M`, etc.)
+2. **Space estimation**: PDFBox needs to know how much space to reserve for the `/Contents` hex string _before_ the signature is computed — because the signature covers the bytes outside the `/Contents` gap, and the file must be written before the signature can be calculated.
+   The default is 16KB (32,768 hex characters), but PAdES-B-LTA signatures with embedded timestamps and revocation data can easily exceed this.
+3. **Byte range computation**: PDFBox calculates the `/ByteRange` array — the two regions of the file that the signature covers (everything before and after the `/Contents` value)
+4. **Incremental save**: The modified PDF is written as an incremental update — appended to the original file, preserving previous revisions
+5. **Signing callback**: PDFBox passes the byte range data (as an `InputStream`) to your `SignatureInterface.sign()` implementation
+6. **Signature injection**: The returned CMS bytes are hex-encoded and written into the reserved `/Contents` space
+
+If the CMS signature is larger than the reserved space, the signing fails.
+If it's smaller (which is normal), the remaining space is filled with zeros — the zero-padding that you see in the hex dump of any signed PDF's `/Contents` entry.
+
+This architecture means that **PDFBox does not construct the CMS signature itself**.
+It provides the bytes to sign, and you provide the signature.
+This is both a strength (maximum flexibility — you can use any CMS library, any algorithm, any certificate) and a burden (you must get the CMS right yourself).
+That's why the next chapter is dedicated entirely to BouncyCastle CMS construction.
+
+== The Legion of the Bouncy Castle
+
+=== Why BouncyCastle Exists
+
+Java has a built-in cryptographic provider — the `SunJSSE` and `SunJCE` providers that ship with every JDK.
+So why does almost every Java PDF signing project use BouncyCastle instead?
+
+Three reasons:
+
+1. **CMS support**: The JDK's built-in providers do not include a CMS (`SignedData`) implementation.
+   They provide the raw cryptographic primitives (RSA, ECDSA, SHA-256, etc.), but not the higher-level CMS container format that PDF signatures require.
+   BouncyCastle's `bcpkix` module provides `CMSSignedDataGenerator`, `CMSSignedData`, and all the ASN.1 infrastructure needed to construct and parse CMS structures.
+
+2. **Algorithm breadth**: BouncyCastle supports algorithms that the JDK providers don't — including EdDSA (Ed25519, Ed448), GOST, SM2, and various other national or emerging algorithms.
+   While PDF signatures currently use RSA and ECDSA almost exclusively, the ability to work with less common algorithms is valuable for government and specialized applications.
+
+3. **ASN.1 library**: BouncyCastle's ASN.1 library (`bcutil` and `bcprov`) is the de facto standard for Java ASN.1 encoding/decoding.
+   When you need to parse a certificate, construct a signed attribute, or decode an OCSP response, BouncyCastle's ASN.1 classes are what you use.
+
+=== The BouncyCastle Ecosystem
+
+BouncyCastle is not a single JAR — it's a family of related libraries:
+
+.BouncyCastle modules relevant to PDF signing
+[cols="2,1,5", options="header"]
+|===
+| Module | Maven Artifact | Purpose
+
+| **Provider**
+| `bcprov-jdk18on`
+| Core cryptographic provider: symmetric/asymmetric ciphers, hashes, key generation, random number generation. Register via `Security.addProvider(new BouncyCastleProvider())`
+
+| **PKIX/CMS/EAC**
+| `bcpkix-jdk18on`
+| CMS `SignedData` construction/parsing, PKCS#10 certificate requests, OCSP, timestamp protocol (RFC 3161), certificate path validation. **This is the module you need for PDF signing.**
+
+| **Utilities**
+| `bcutil-jdk18on`
+| PEM reader/writer, ASN.1 dump utilities, base64 encoding. Pulled in as a transitive dependency.
+
+|===
+
+[IMPORTANT]
+====
+You must explicitly register the BouncyCastle provider before using it.
+If you forget this step, you'll get cryptic `NoSuchAlgorithmException` errors at runtime.
+
+[source,java]
+----
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
+import java.security.Security;
+
+// Do this once at application startup
+if (Security.getProvider("BC") == null) {
+    Security.addProvider(new BouncyCastleProvider());
+}
+----
+
+In Spring Boot applications, put this in a `@Configuration` class with a `@PostConstruct` method.
+In standalone applications, put it in your `main()` method.
+Forgetting this registration is the #1 cause of "it works in my IDE but fails in production" signing issues.
+====
+
+=== BouncyCastle Version History and the `-jdk18on` Suffix
+
+BouncyCastle's artifact naming has changed over the years, which causes dependency confusion:
+
+- `bcprov-jdk15` — for JDK 1.5 (ancient, do not use)
+- `bcprov-jdk15on` — for JDK 1.5 and later (the long-lived artifact ID)
+- `bcprov-jdk18on` — for JDK 1.8 (Java 8) and later (current, use this)
+
+The `jdk18on` variants (introduced with BouncyCastle 1.71) dropped support for Java versions before 8 and added Java module system (`module-info.java`) support.
+If you're on Java 11 or later (and for PDF signing with PDFBox 3.x, you should be on Java 17+), use the `jdk18on` artifacts exclusively.
+
+[WARNING]
+====
+Do not mix `jdk15on` and `jdk18on` artifacts in the same classpath.
+BouncyCastle uses a provider registration model, and having two versions of the provider registered simultaneously causes unpredictable failures — the wrong version may handle a given algorithm, producing incompatible ASN.1 structures.
+====
+
+== EU DSS: The European Commission's Signing Framework
+
+=== What EU DSS Is
+
+There is one more library that deserves its own section — not because it replaces PDFBox or BouncyCastle, but because it _builds on top of them_ and adds a layer that would take months to implement yourself.
+
+**EU DSS** (Digital Signature Services) is an open-source Java framework developed and maintained by **Nowina Solutions** under contract from the **European Commission**.
+It is the reference implementation for creating and validating digital signatures that comply with the European eIDAS regulation — which means it implements the full PAdES, CAdES, XAdES, and JAdES signature profiles, including the complex long-term validation (LTV) workflows that individual libraries like PDFBox cannot do alone.
+
+The project lives at `github.com/esig/dss` and is released under the **LGPL 2.1** license.
+The Maven coordinates follow the pattern `eu.europa.ec.joinup.sd-dss:dss-*`.
+
+=== Why EU DSS Matters for PDF Signatures
+
+If your application needs to produce **PAdES-B-LTA** signatures — the gold standard for long-term archival signatures that remain verifiable for decades — you have two choices:
+
+1. **Build it yourself**: Use PDFBox for the PDF layer, BouncyCastle for CMS construction, write your own timestamp client (RFC 3161), implement OCSP and CRL fetching, construct the DSS (Document Security Store) dictionary, embed the VRI (Validation Related Information), and manage archival timestamp chains.
+   This is what Chapters 29–31 of this book teach.
+   It works.
+   It is also hundreds of hours of development and testing.
+
+2. **Use EU DSS**: Import the `dss-pades` module, configure a `PAdESSignatureParameters` object, provide a `SignatureTokenConnection` (which wraps your certificate and private key), and let the framework handle everything — CMS construction, signed attribute inclusion, timestamp requests, revocation data embedding, DSS dictionary creation, and incremental save.
+
+Here's what a PAdES-B-LTA signature looks like with EU DSS:
+
+[source,java]
+----
+// EU DSS — PAdES-B-LTA signing (simplified)
+PAdESSignatureParameters params = new PAdESSignatureParameters();
+params.setSignatureLevel(SignatureLevel.PAdES_BASELINE_LTA);
+params.setDigestAlgorithm(DigestAlgorithm.SHA256);
+params.setSigningCertificate(new CertificateToken(certificate));
+params.setCertificateChain(Arrays.asList(intermediateCerts));
+
+// TSA (Timestamp Authority) for the signature timestamp
+OnlineTSPSource tspSource = new OnlineTSPSource("http://tsa.example.com/timestamp");
+params.setContentTimestampParameters(new TimestampParameters(DigestAlgorithm.SHA256));
+
+PAdESService service = new PAdESService(commonCertificateVerifier);
+service.setTspSource(tspSource);
+
+// Two-step signing: digest, then sign
+ToBeSigned dataToSign = service.getDataToSign(documentToSign, params);
+SignatureValue signatureValue = signingToken.sign(dataToSign, params.getDigestAlgorithm(), privateKey);
+DSSDocument signedDocument = service.signDocument(documentToSign, params, signatureValue);
+----
+
+Compare this to implementing the same B-LTA profile manually with PDFBox + BouncyCastle — the EU DSS version handles the timestamp embedding, OCSP/CRL fetching, DSS dictionary construction, and VRI population automatically.
+
+=== EU DSS Architecture
+
+EU DSS is modular.
+You don't need to import the entire framework — pick the modules relevant to your signature format:
+
+.EU DSS modules relevant to PDF signing
+[cols="2,5", options="header"]
+|===
+| Module | Purpose
+
+| `dss-pades`
+| PAdES signature creation and extension (B-B → B-T → B-LT → B-LTA).
+  Uses PDFBox internally for PDF manipulation.
+
+| `dss-cades`
+| CAdES signature creation.
+  The PAdES module delegates CMS construction to this.
+
+| `dss-document`
+| Core document model (`DSSDocument`, `InMemoryDocument`, `FileDocument`) and service interfaces.
+
+| `dss-service`
+| Online data loaders — HTTP clients for TSA, OCSP, and CRL fetching.
+
+| `dss-tsl-validation`
+| EU Trusted List (EUTL) parsing and validation.
+  Essential for determining whether a signing certificate is qualified under eIDAS.
+
+| `dss-validation-report`
+| Generates detailed validation reports following ETSI TS 119 102-2 — the same validation report format that EU government validation services produce.
+
+| `dss-token`
+| `SignatureTokenConnection` implementations: PKCS#12 file, PKCS#11 (HSM), JKS keystore, MS-CAPI (Windows certificate store).
+
+|===
+
+=== EU DSS vs. Rolling Your Own
+
+The honest comparison:
+
+**Advantages of EU DSS:**
+
+- **Compliance out of the box**: EU DSS is the European Commission's reference implementation.
+  If you use it correctly, your signatures will pass validation on the EU's official validation service (DSS demonstration webapp) and on member-state validation services.
+  This is not a guarantee you get from hand-rolling with PDFBox + BouncyCastle.
+- **LTV complexity hidden**: Long-term validation requires fetching OCSP responses, downloading CRLs, embedding them in the PDF's DSS dictionary, creating VRI entries, and adding archival timestamps.
+  EU DSS does all of this.
+  Implementing it yourself is a significant effort.
+- **Trusted List integration**: The `dss-tsl-validation` module can load and parse the EU Trusted List, letting you programmatically determine whether a signing certificate is qualified.
+  Building this yourself means implementing ETSI TS 119 612 XML parsing and certificate matching — nontrivial.
+- **Validation reports**: EU DSS generates ETSI-compliant validation reports that are accepted by auditors and compliance officers.
+
+**Advantages of rolling your own (PDFBox + BouncyCastle):**
+
+- **Full control**: You understand every byte.
+  When something fails, you know exactly where to look because you wrote every layer.
+- **No framework weight**: EU DSS pulls in a substantial dependency tree.
+  If you only need PAdES-B-B (baseline signature without timestamps or LTV), you can do it with PDFBox + BouncyCastle in about 200 lines of code — EU DSS adds a megabytes of framework for something achievable with direct library calls.
+- **Learning**: Building it yourself teaches you the spec.
+  Using EU DSS teaches you the framework's API.
+  For a book like this one, understanding comes from building.
+- **Customization**: EU DSS makes assumptions about how signatures should be constructed.
+  If your use case deviates (unusual SubFilter values, custom signed attributes, non-standard timestamp configurations), you may fight the framework rather than benefit from it.
+
+[TIP]
+====
+**Our recommendation**: Learn to build signatures with PDFBox + BouncyCastle first (Chapters 29–31).
+Then, when you need PAdES-B-LTA or EU Trusted List integration in production, use EU DSS — you'll understand what it's doing under the hood, and you'll be able to debug it when it behaves unexpectedly.
+
+Chapter 23 provides a complete walkthrough of EU DSS for PAdES signing and validation.
+====
+
+=== EU DSS Version History
+
+EU DSS follows a rapid release cycle, with major versions roughly annually:
+
+- **DSS 5.x** (2017–2022): The long-lived stable series.
+  Most documentation and blog posts you'll find online reference 5.x APIs.
+- **DSS 6.x** (2023–present): The current generation, with Java 17+ as the minimum, updated dependencies (including PDFBox 3.x for the PAdES module), and improved validation reporting.
+  The API changed significantly between 5.x and 6.x — if you're following tutorials, make sure they match your version.
+
+[WARNING]
+====
+EU DSS 6.x uses PDFBox 3.x internally.
+If your project also uses PDFBox directly (for example, for document manipulation before signing), you must ensure version alignment.
+Having DSS pull in PDFBox 3.0.0 while your code uses PDFBox 3.0.1 can cause subtle `NoSuchMethodError` exceptions at runtime.
+Use Maven's `<dependencyManagement>` to lock the PDFBox version across your entire project.
+====
+
+== Analysis and Debugging Tools
+
+A signing implementation is only as good as your ability to inspect what it produces.
+The following tools are indispensable for PDF signature development.
+
+=== RUPS: The PDF Object Explorer
+
+**RUPS** (Reading and Updating PDF Syntax) is a Java Swing application that lets you browse the internal object structure of a PDF file.
+It was originally developed by Bruno Lowagie as a companion to iText, and it shows every COS object, dictionary key, stream, and cross-reference entry in the file.
+
+For signature work, RUPS is invaluable because it lets you:
+
+- Inspect the `/Sig` dictionary and all its keys (`/ByteRange`, `/Contents`, `/SubFilter`, `/Filter`)
+- Navigate the field tree to see how signature fields are structured
+- View the `/AcroForm` dictionary and its `/SigFlags`
+- Examine `/Lock` and `/SV` (Seed Value) dictionaries
+- Browse incremental updates to see what changed between revisions
+- Inspect the raw byte content of the `/Contents` hex string
+
+RUPS is available on GitHub at `LibrePDF/OpenPDF` (it's bundled with the OpenPDF project).
+It's also available as a standalone download.
+The interface is spartan — it's a developer tool, not a user-facing product — but once you learn to navigate the tree view, it becomes the fastest way to understand what's actually inside a PDF.
+
+[TIP]
+====
+When debugging a signature failure, the first thing you should do is open the PDF in RUPS and check:
+
+1. Does the `/Sig` dictionary exist? (Navigate: Root → AcroForm → Fields → [signature field] → V)
+2. Is the `/ByteRange` array plausible? (Four integers, the first should be 0, the last should be close to the file size)
+3. Is `/Contents` non-empty? (Should be a long hex string, not all zeros)
+4. What is the `/SubFilter`? (Should be `adbe.pkcs7.detached` or `ETSI.CAdES.detached`)
+
+If any of these are wrong, you've found your problem before even looking at the CMS.
+====
+
+=== veraPDF: The Compliance Validator
+
+**veraPDF** is the industry-standard PDF/A validation tool, developed by the Open Preservation Foundation and the PDF Association.
+While its primary mission is PDF/A compliance checking, it includes PDF analysis capabilities that are useful for signature work:
+
+- **Policy-based validation** — you can define custom validation profiles that check signature-specific requirements
+- **Feature extraction** — enumerate all signatures, certificates, and cryptographic properties in a PDF
+- **Structural analysis** — verify that the PDF structure conforms to the specification
+
+veraPDF is available as a CLI tool, a Java library (which you can embed in your validation pipeline), and a GUI application.
+It's the validator that national archives and government agencies use to verify PDF/A compliance — if your signed PDFs also need to be PDF/A compliant (as many government document workflows require), veraPDF is essential.
+
+=== QPDF: The Swiss Army Knife
+
+**QPDF** is a C++ command-line tool (created by Jay Berkenbilt) that can inspect, transform, and repair PDF files at the structural level.
+It's not Java, but every Java PDF developer should have it installed.
+
+Key capabilities for signature work:
+
+- `qpdf --show-xref` — displays the cross-reference table, showing where every object lives in the file.
+  Critical for understanding byte range issues.
+- `qpdf --show-object=N` — displays a specific object by number.
+  Faster than navigating a GUI when you know the object number from an error message.
+- `qpdf --check` — validates the PDF's structural integrity.
+  If this reports problems, your signing code has a bug.
+- `qpdf --qdf` — produces a "QDF" (QPDF data format) output where the PDF is restructured for human readability, with objects in order and comments showing object numbers.
+  Invaluable for understanding what incremental saves changed.
+- `qpdf --linearize` — linearizes the PDF for fast web viewing.
+  **Do not linearize after signing** — it destroys the signature by reorganizing the file.
+
+[CAUTION]
+====
+Several QPDF operations will destroy existing signatures:
+
+- `--linearize` — reorganizes the entire file
+- `--normalize-content=y` — reprocesses content streams
+- `--object-streams=generate` — restructures object storage
+- Any operation that produces a non-incremental output
+
+Always use `--copy-encryption=source.pdf` and check whether the operation preserves incremental structure before running it on a signed PDF.
+====
+
+=== MuTool (from MuPDF)
+
+**MuTool** is the command-line companion to MuPDF (Artifex's open-source PDF renderer).
+Its `mutool show` command provides quick access to PDF objects:
+
+[source,bash]
+----
+mutool show document.pdf trailer          # Show trailer dictionary
+mutool show document.pdf xref             # Show cross-reference table
+mutool show document.pdf 42 0             # Show object 42, generation 0
+mutool show document.pdf outline          # Show document outline/bookmarks
+----
+
+MuTool is lightweight and fast — useful for quick inspections when you don't want to launch a GUI tool.
+
+=== OpenSSL: CMS Verification Outside the PDF Context
+
+For verifying the CMS signature independently of the PDF wrapper, OpenSSL is the standard tool:
+
+[source,bash]
+----
+# Extract the raw signature bytes from /Contents (after hex-decoding)
+# and save as signature.der
+
+# Verify the CMS structure
+openssl cms -inform DER -in signature.der -noout -cmsout -print
+
+# Verify the signature against the signed data
+openssl cms -inform DER -in signature.der -verify \
+    -content signed-data.bin \
+    -CAfile ca-bundle.pem \
+    -out /dev/null
+----
+
+This separates the CMS verification from the PDF byte-range logic — if OpenSSL says the CMS is valid but your PDF validator says the signature is invalid, the problem is in the byte range handling, not the cryptography.
+
+=== ASN.1 Dump Tools
+
+When debugging CMS issues, being able to read the raw ASN.1 structure is essential.
+Several tools help:
+
+- **`openssl asn1parse`** — parses DER-encoded ASN.1, showing the tag-length-value tree
+- **BouncyCastle's `ASN1Dump`** — `org.bouncycastle.asn1.util.ASN1Dump.dumpAsString(obj)` — prints any ASN.1 object as a readable tree from Java code
+- **`dumpasn1`** (Peter Gutmann) — the original ASN.1 dumper, still the most detailed output
+- **Web-based tools** — several websites parse ASN.1/DER online; useful for quick checks but do not upload production signatures to third-party websites
+
+== Choosing the Right Library for Your Project
+
+After all this history, here is the practical guidance:
+
+=== Decision Matrix
+
+.Library selection for PDF signature projects
+[cols="3,2,2,2,2,2", options="header"]
+|===
+| Requirement | PDFBox + BC | EU DSS | OpenPDF | iText 7/8 (AGPL) | iText 7/8 (Commercial)
+
+| **License**
+| Apache 2.0
+| LGPL 2.1
+| LGPL 2.1
+| AGPL 3.0
+| Proprietary
+
+| **Cost**
+| Free
+| Free
+| Free
+| Free (if AGPL-compatible)
+| €€€€
+
+| **PAdES-B-B**
+| Yes (manual CMS)
+| Yes (built-in)
+| Basic
+| Yes (built-in)
+| Yes (built-in)
+
+| **PAdES-B-LTA**
+| Yes (manual DSS)
+| Yes (built-in)
+| No
+| Yes (built-in)
+| Yes (built-in)
+
+| **EUTL / eIDAS validation**
+| No (manual)
+| Yes (built-in)
+| No
+| Partial
+| Yes
+
+| **PDF 2.0**
+| Yes
+| Yes (via PDFBox)
+| No
+| Yes
+| Yes
+
+| **Community size**
+| Large (Apache)
+| Medium (EU-backed)
+| Small
+| N/A (AGPL)
+| Vendor-supported
+
+| **Signing API maturity**
+| High
+| Very high
+| Moderate
+| High
+| High
+
+| **Low-level PDF access**
+| Excellent
+| Limited (framework)
+| Limited
+| Good
+| Good
+
+| **Our recommendation**
+| **Learn + custom**
+| **Production PAdES**
+| Legacy migration
+| Open-source projects
+| Budget permits
+|===
+
+=== Our Recommendation
+
+For the projects this book targets — production signing services, validation pipelines, signature analysis tools — **Apache PDFBox 3.x with BouncyCastle** is the default recommendation:
+
+1. **Apache 2.0 license**: No surprises, no AGPL obligations, no license fees. This will not change.
+2. **Low-level access**: Signing requires understanding and manipulating the raw PDF structure. PDFBox's COS model gives you direct access. iText and OpenPDF abstract this away, which is convenient until you need to debug a byte-range computation or inspect a malformed signature dictionary.
+3. **Active maintenance**: PDFBox has a dedicated Apache community, regular releases, and responsive handling of security issues. The Bochum attacks were patched quickly.
+4. **Separation of concerns**: PDFBox handles the PDF, BouncyCastle handles the crypto. You understand both layers because you built both layers. When something breaks, you know exactly where to look.
+
+The trade-off is that PDFBox makes you build more yourself — especially the CMS layer.
+That's what Chapters 29–31 are for.
+
+[TIP]
+====
+**The best way to learn is to build it yourself.**
+Using a library that does everything for you (like commercial iText) gets you to production faster, but leaves you helpless when something goes wrong.
+With PDFBox + BouncyCastle, you understand every byte of the signature because you put it there.
+When a customer reports that their signature "shows invalid in Adobe but valid in Foxit," you'll know exactly where to look — because you wrote the code that constructed the CMS, computed the byte range, and injected the signature.
+====
+
+== The Ecosystem at a Glance
+
+To close this chapter, here is a summary of every tool and library we've discussed, organized by function:
+
+.The Java PDF signature ecosystem
+[cols="2,2,2,4", options="header"]
+|===
+| Function | Tool/Library | License | Notes
+
+| PDF manipulation (read/write)
+| Apache PDFBox 3.x
+| Apache 2.0
+| Default choice for this book. Reader-first architecture.
+
+| PDF manipulation (read/write)
+| OpenPDF 2.x
+| LGPL 2.1
+| Community fork of iText 2.x. Good for legacy migration.
+
+| PDF manipulation (read/write)
+| iText 7/8
+| AGPL / Commercial
+| Feature-rich but expensive or license-restrictive.
+
+| CMS / Cryptography
+| BouncyCastle 1.80+
+| MIT (Bouncy Castle License)
+| De facto standard for Java CMS. Register provider explicitly.
+
+| PAdES signing framework
+| EU DSS 6.x
+| LGPL 2.1
+| European Commission reference implementation. PAdES-B-B through B-LTA, validation reports, EU Trusted List integration.
+
+| PDF structure inspection
+| RUPS
+| LGPL
+| GUI object browser. First tool to reach for.
+
+| PDF/A compliance
+| veraPDF
+| Open source (MPL 2.0)
+| Industry-standard validator. Also useful for general PDF analysis.
+
+| PDF structural tools
+| QPDF
+| Apache 2.0
+| CLI Swiss army knife. `--show-xref`, `--qdf`, `--check`.
+
+| PDF rendering/inspection
+| MuTool (MuPDF)
+| AGPL
+| Lightweight CLI. Quick object inspection.
+
+| CMS verification
+| OpenSSL
+| Apache 2.0
+| CMS verification independent of PDF context.
+
+| ASN.1 inspection
+| BouncyCastle `ASN1Dump`
+| MIT
+| Java-based ASN.1 tree dump.
+
+| ASN.1 inspection
+| `dumpasn1` (Gutmann)
+| Public domain
+| The classic ASN.1 dumper.
+
+|===
+
+Every tool in this table will appear at some point in the remaining chapters.
+Install them now — when you're debugging a signature failure at 2 AM, you don't want to be downloading tools.
+
+== Key Takeaways
+
+- **iText's license change** (LGPL → AGPL in 2009) split the Java PDF world in two.
+  The consequences — old versions in production, community forks, enterprise migrations — are still visible in 2026.
+- **OpenPDF** is the LGPL continuation of iText 2.x.
+  Useful for legacy migration but limited for modern PAdES signing.
+- **PDFBox + BouncyCastle** is the recommended stack for new signing projects.
+  Apache-licensed, actively maintained, gives you low-level control.
+- **PDFBox 3.x** broke API compatibility with 2.x.
+  Budget migration time.
+  Key changes: `Loader.loadPDF()`, new font constructors, content stream API changes.
+- **BouncyCastle** provides the CMS layer that PDFBox doesn't.
+  Always register the provider explicitly.
+  Use `jdk18on` artifacts.
+- **RUPS, QPDF, veraPDF, OpenSSL** — know your tools.
+  PDF signature debugging is 50% knowing what to look at and 50% having the right tool to look at it.
+- **The library you choose is a 10-year decision.**
+  Choose based on license stability, community health, and technical fit — not just today's feature checklist.

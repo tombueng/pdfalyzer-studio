@@ -1,0 +1,108 @@
+% =============================================================================
+% Shared preamble for dictionary diagram variations
+% Include via \input{test-dict-v2-preamble}
+% =============================================================================
+\usepackage{fontspec}
+\setmainfont{Noto Serif}[
+    BoldFont={Noto Serif Bold},
+    ItalicFont={Noto Serif Italic},
+    BoldItalicFont={Noto Serif Bold Italic}
+]
+\setsansfont{Noto Sans}[
+    BoldFont={Noto Sans Bold},
+    ItalicFont={Noto Sans Italic}
+]
+\setmonofont{DejaVu Sans Mono}[Scale=0.82]
+
+\usepackage[inner=0.6in,outer=0.5in,top=0.55in,bottom=0.55in]{geometry}
+\usepackage{xcolor}
+\usepackage{tikz}
+\usetikzlibrary{
+    arrows.meta, positioning, calc, decorations.pathreplacing,
+    shapes.geometric, shapes.multipart, fit, backgrounds,
+    chains, matrix, shadows, patterns
+}
+\usepackage{tcolorbox}
+\tcbuselibrary{breakable,skins}
+\usepackage{hyperref}
+\hypersetup{colorlinks=true,linkcolor=linkblue}
+\usepackage{microtype}
+\usepackage{setspace}
+\setstretch{1.04}
+\usepackage{enumitem}
+\setlist{noitemsep,topsep=2pt}
+
+% =============================================================================
+% Color palette
+% =============================================================================
+% Accent
+\definecolor{accent}{HTML}{1a3a5c}
+\definecolor{linkblue}{HTML}{1a73e8}
+
+% Dark code theme
+\definecolor{codebg}{HTML}{1e1e2e}
+\definecolor{codetext}{HTML}{cdd6f4}
+\definecolor{keycolor}{HTML}{89b4fa}
+\definecolor{valcolor}{HTML}{a6e3a1}
+\definecolor{strcolor}{HTML}{f9e2af}
+\definecolor{commentcolor}{HTML}{6c7086}
+\definecolor{delimcolor}{HTML}{f38ba8}
+\definecolor{linenocolor}{HTML}{45475a}
+
+% Light code theme
+\definecolor{lcodebg}{HTML}{ffffff}
+\definecolor{lcodetext}{HTML}{1e1e2e}
+\definecolor{lkeycolor}{HTML}{1e40af}
+\definecolor{lvalcolor}{HTML}{166534}
+\definecolor{lstrcolor}{HTML}{92400e}
+\definecolor{lcommentcolor}{HTML}{94a3b8}
+\definecolor{ldelimcolor}{HTML}{be123c}
+
+% Annotation
+\definecolor{annobg}{HTML}{f0f4f8}
+\definecolor{annoframe}{HTML}{94a3b8}
+
+% Status badges
+\definecolor{reqred}{HTML}{dc2626}
+\definecolor{optgreen}{HTML}{16a34a}
+\definecolor{condpurple}{HTML}{7c3aed}
+
+% Group colors (dark = border/text, base = fill)
+\definecolor{grpIdent}{HTML}{dbeafe}
+\definecolor{grpIdentD}{HTML}{2563eb}
+\definecolor{grpCrypto}{HTML}{d1fae5}
+\definecolor{grpCryptoD}{HTML}{059669}
+\definecolor{grpMeta}{HTML}{fef3c7}
+\definecolor{grpMetaD}{HTML}{d97706}
+\definecolor{grpInteg}{HTML}{fce7f3}
+\definecolor{grpIntegD}{HTML}{db2777}
+\definecolor{grpBuild}{HTML}{ede9fe}
+\definecolor{grpBuildD}{HTML}{7c3aed}
+
+% Blueprint
+\definecolor{bpbg}{HTML}{f8fafc}
+\definecolor{bpgrid}{HTML}{e2e8f0}
+
+% Warm white
+\definecolor{warmbg}{HTML}{fffbeb}
+\definecolor{warmline}{HTML}{d6d3d1}
+
+\pagestyle{empty}
+
+% =============================================================================
+% Variation title macro
+% =============================================================================
+\newcommand{\vartitle}[2]{%
+    \begin{center}
+    {\Large\bfseries\sffamily\color{accent} #1}\\[2pt]
+    {\small\sffamily\color{black!60} #2}
+    \end{center}
+    \vspace{0.4em}
+}
+
+% =============================================================================
+% Shared dimensions
+% =============================================================================
+\newcommand{\lh}{0.50}          % line height
+\newcommand{\codeIndent}{0.35}  % indent for dict entries
+\newcommand{\subIndent}{0.70}   % indent for nested entries

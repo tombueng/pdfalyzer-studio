@@ -23,7 +23,7 @@
 .sig-summary-badge.valid   { background: rgba(25, 135, 84, 0.2); color: #28a745; }
 .sig-summary-badge.invalid { background: rgba(220, 53, 69, 0.2); color: #dc3545; }
 .sig-summary-badge.indeterminate { background: rgba(255, 193, 7, 0.2); color: #ffc107; }
-.sig-summary-badge.unsigned { background: rgba(108, 117, 125, 0.2); color: #adb5bd; }
+.sig-summary-badge.unsigned { background: rgba(108, 117, 125, 0.2); color: #c8cdd2; }
 .sig-summary-badge.total   { background: rgba(13, 202, 240, 0.15); color: #0dcaf0; }
 
 /* ── Signature cards ───────────────────────────────────────────────── */
@@ -44,7 +44,7 @@
 .sig-card.valid   { border-left-color: #28a745; }
 .sig-card.invalid { border-left-color: #dc3545; }
 .sig-card.indeterminate { border-left-color: #ffc107; }
-.sig-card.unsigned { border-left-color: #6c757d; }
+.sig-card.unsigned { border-left-color: #9ca3ab; }
 
 .sig-card-header {
     display: flex;
@@ -85,8 +85,8 @@
 .sig-status-badge.valid   { background: #28a745; color: #fff; }
 .sig-status-badge.invalid { background: #dc3545; color: #fff; }
 .sig-status-badge.indeterminate { background: #ffc107; color: #212529; }
-.sig-status-badge.unsigned { background: #495057; color: #ccc; }
-.sig-status-badge.not-validated { background: #343a40; color: #adb5bd; }
+.sig-status-badge.unsigned { background: #495057; color: #e8e8e8; }
+.sig-status-badge.not-validated { background: #343a40; color: #d0d4d8; }
 
 .sig-card-header .sig-signer-name {
     flex: 1;
@@ -266,7 +266,8 @@
 .sig-locate-btn {
     font-size: 11px;
     padding: 2px 8px;
-    margin-top: 6px;
+    flex-shrink: 0;
+    white-space: nowrap;
 }
 
 /* ── Section headers inside card body ──────────────────────────────── */

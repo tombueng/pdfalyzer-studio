@@ -17,7 +17,7 @@ public class SessionService {
 
     private final ConcurrentHashMap<String, PdfSession> sessions = new ConcurrentHashMap<>();
 
-    @Value("${pdfalyzer.session.timeout-minutes:30}")
+    @Value("${pdfalyzer.session.timeout-minutes:300}")
     private int timeoutMinutes;
 
     public PdfSession createSession(String filename, byte[] pdfBytes) {

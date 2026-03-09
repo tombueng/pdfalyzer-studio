@@ -1,0 +1,942 @@
+[[ch04]]
+= Certificate Chains & Trust
+ifdef::env-github[]
+:tip-caption: :bulb:
+:note-caption: :information_source:
+:important-caption: :heavy_exclamation_mark:
+:caution-caption: :fire:
+:warning-caption: :warning:
+endif::[]
+
+[abstract]
+--
+This chapter explains why a single certificate is never enough.
+We trace the trust delegation model from root CAs through intermediate certificates to the end-entity certificate that actually signs your PDF, then walk through the chain-building and path-validation algorithms that every validator must implement.
+We cover revocation checking -- both CRL and OCSP -- in exhaustive detail, because revocation failures are among the most common and most confusing reasons a PDF signature is rejected.
+Finally, we survey the trust stores that anchor the entire system: Adobe's AATL, the EU Trusted List, OS-level stores, Java's cacerts, and custom trust stores -- explaining what each one is, who controls it, and when you need which.
+
+If you already know how AuthorityKeyIdentifier links to SubjectKeyIdentifier and you can explain the difference between AATL and EUTL without hesitation, skip to Chapter 5.
+Everyone else: this is where we connect cryptographic identity to real-world trust.
+--
+
+
+== Why Chains Exist
+
+In Chapter 3 we established that an X.509 certificate binds a public key to an identity.
+A certificate authority (CA) vouches for that binding by signing the certificate with its own private key.
+But who vouches for the CA?
+
+This is the trust delegation problem.
+A root CA cannot practically issue certificates to every person and organization on the planet.
+The operational burden would be staggering: vetting applicants, maintaining infrastructure, handling revocations, passing audits -- all for millions of subscribers.
+Even if it could, concentrating all certificate issuance in a single entity would create a catastrophic single point of failure.
+If that one root CA were compromised, every certificate it had ever issued would become suspect.
+
+The solution is **hierarchical delegation**.
+A root CA issues certificates not (primarily) to end users, but to **intermediate CAs**.
+Those intermediate CAs, in turn, issue certificates to other intermediates or to end-entity subscribers.
+The root CA's private key stays in a vault -- literally, in most cases, inside an HSM in a physically secured facility that is powered on only for scheduled signing ceremonies.
+
+This creates a chain:
+
+. The **root CA** self-signs its own certificate. It is the trust anchor -- the starting point that must be accepted on faith (or, more precisely, accepted because it appears in a trust store you have chosen to rely on).
+. One or more **intermediate CAs** hold certificates signed by the root CA (or by another intermediate above them). They perform the day-to-day work of issuing certificates.
+. The **end-entity** (sometimes called the "leaf") certificate is the one that belongs to the actual signer -- the person or service that signs PDFs. This certificate is signed by an intermediate CA.
+
+[NOTE]
+====
+The term "chain" is somewhat misleading.
+In practice, a certificate's trust path can be a **directed acyclic graph** rather than a simple linear chain.
+An intermediate CA might hold multiple certificates -- one signed by Root A, another signed by Root B -- enabling cross-certification between different PKI hierarchies.
+However, for PDF signatures, you almost always deal with simple linear chains of depth two or three: root -> intermediate -> end-entity, or root -> intermediate -> intermediate -> end-entity.
+The rare cases where cross-certification matters are in government PKIs and the EU Trusted List hierarchy, which we cover later in this chapter.
+====
+
+
+== Chain Structure in Detail
+
+A typical PDF signing chain has three certificates:
+
+.Certificate chain for a PDF signing certificate
+[cols="1,2,4", options="header"]
+|===
+| Position | Role | Characteristics
+
+| 1 (leaf)
+| End-entity (signer)
+| Contains the signer's public key. Has `keyUsage` with `digitalSignature` or `nonRepudiation` set. Has `extendedKeyUsage` with document signing or email protection OIDs. Issued by the intermediate CA. Short validity period (1-3 years).
+
+| 2
+| Intermediate CA
+| Contains the intermediate CA's public key. Has `basicConstraints` with `cA=TRUE` and a `pathLenConstraint`. Has `keyUsage` with `keyCertSign` and `cRLSign`. Issued by the root CA. Medium validity period (5-10 years).
+
+| 3 (anchor)
+| Root CA
+| Self-signed: the issuer and subject are identical. Has `basicConstraints` with `cA=TRUE`. Present in trust stores. Long validity period (20-30 years). Never transmitted in the CMS structure of a PDF signature (validators must already have it in their trust store).
+|===
+
+The CMS `SignedData` structure in a PDF signature's `/Contents` field typically includes certificates at positions 1 and 2 -- the end-entity and intermediate(s).
+The root CA certificate is **not** included.
+This is by design: the validator must already trust the root, and including it in the signature would just waste space.
+The validator checks the chain by building a path from the end-entity up through the intermediates until it reaches a certificate that matches one in its trust store.
+
+IMPORTANT: Some signing implementations include the root certificate in the CMS `certificates` field. This is not wrong per se -- {rfc5652} allows it -- but it serves no purpose. A validator will not trust a root certificate just because it appears inside a signature. Trust comes from the trust store, not from the document. If anything, including the root wastes space in the `/Contents` hex string, which matters when you are estimating the size of the content gap (Chapter 13). PDFBox does not include the root by default. iText does. Adobe Acrobat tolerates both approaches.
+
+WARNING: A chain with a **missing intermediate** is the single most common cause of "certificate chain not trusted" errors in PDF signatures. The end-entity certificate is present, the root is in the trust store, but the intermediate that links them is nowhere to be found. The CMS structure does not contain it, and the validator cannot download it (or is configured not to). Always include the full chain (minus the root) in your CMS `certificates` field.
+
+
+== Building the Chain
+
+Given a bag of certificates -- perhaps from a CMS `SignedData` structure, perhaps from a PKCS#12 file, perhaps assembled from multiple sources -- how do you construct the actual chain?
+
+The algorithm relies on two X.509 extensions that exist specifically for this purpose:
+
+=== AuthorityKeyIdentifier and SubjectKeyIdentifier
+
+Every well-formed certificate contains:
+
+* **SubjectKeyIdentifier (SKI)**: an extension on the certificate itself, identifying the public key it contains. Typically a SHA-1 hash of the public key's bit string. Defined in {rfc5280} section 4.2.1.2.
+
+* **AuthorityKeyIdentifier (AKI)**: an extension identifying the certificate that signed this one. Contains the SKI of the issuer's certificate. Defined in {rfc5280} section 4.2.1.1.
+
+The chain-building algorithm is conceptually simple:
+
+. Start with the end-entity certificate (the signer's cert from the CMS `SignerInfo`).
+. Read its AKI extension. This gives you the SKI of the issuer.
+. Search the available certificates for one whose SKI matches that AKI.
+. When you find it, that is the next link in the chain. Read _its_ AKI.
+. Repeat until you find a certificate where the subject equals the issuer (self-signed) or one that matches a trust anchor.
+
+[source,java]
+----
+import java.security.cert.X509Certificate;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.List;
+
+import org.bouncycastle.asn1.x509.AuthorityKeyIdentifier;
+import org.bouncycastle.asn1.x509.Extension;
+import org.bouncycastle.asn1.x509.SubjectKeyIdentifier;
+import org.bouncycastle.cert.X509CertificateHolder;
+import org.bouncycastle.cert.jcajce.JcaX509CertificateHolder;
+
+/**
+ * Build a certificate chain from an unordered collection of certificates.
+ * Matches AuthorityKeyIdentifier -> SubjectKeyIdentifier.
+ */
+public class ChainBuilder {
+
+    public static List<X509Certificate> buildChain(
+            X509Certificate endEntity,
+            Collection<X509Certificate> candidates) throws Exception {
+
+        List<X509Certificate> chain = new ArrayList<>();
+        chain.add(endEntity);
+
+        X509Certificate current = endEntity;
+        int maxDepth = 10; // prevent infinite loops from malformed chains
+
+        for (int i = 0; i < maxDepth; i++) {
+            // Self-signed? We've reached a root.
+            if (current.getSubjectX500Principal()
+                    .equals(current.getIssuerX500Principal())) {
+                break;
+            }
+
+            byte[] akiBytes = getAuthorityKeyIdentifier(current);
+            if (akiBytes == null) {
+                break; // no AKI -- cannot chain further
+            }
+
+            X509Certificate issuer = findBySki(candidates, akiBytes);
+            if (issuer == null) {
+                break; // issuer not in our candidate set
+            }
+
+            chain.add(issuer);
+            current = issuer;
+        }
+
+        return chain;
+    }
+
+    private static byte[] getAuthorityKeyIdentifier(
+            X509Certificate cert) throws Exception {
+
+        X509CertificateHolder holder = new JcaX509CertificateHolder(cert);
+        Extension akiExt = holder.getExtension(
+                Extension.authorityKeyIdentifier);
+        if (akiExt == null) {
+            return null;
+        }
+        AuthorityKeyIdentifier aki =
+                AuthorityKeyIdentifier.getInstance(akiExt.getParsedValue());
+        return aki.getKeyIdentifier();
+    }
+
+    private static X509Certificate findBySki(
+            Collection<X509Certificate> certs,
+            byte[] targetSki) throws Exception {
+
+        for (X509Certificate candidate : certs) {
+            X509CertificateHolder holder =
+                    new JcaX509CertificateHolder(candidate);
+            Extension skiExt = holder.getExtension(
+                    Extension.subjectKeyIdentifier);
+            if (skiExt == null) {
+                continue;
+            }
+            SubjectKeyIdentifier ski =
+                    SubjectKeyIdentifier.getInstance(skiExt.getParsedValue());
+            if (Arrays.equals(ski.getKeyIdentifier(), targetSki)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+}
+----
+
+TIP: In practice, chain building can fail for several reasons. The AKI extension might be absent (legal but rare in modern certificates). The SKI might not match because the issuing CA generated the SKI using a non-standard method (SHA-1 of the public key is the norm, but {rfc5280} does not mandate it). Or the intermediate certificate might simply not be available. When debugging chain failures, always dump both the AKI of the child and the SKI of the expected parent, and compare them byte by byte.
+
+=== Fallback: Issuer Distinguished Name Matching
+
+If the AKI/SKI matching fails -- or if the certificates lack these extensions (which happens with very old CAs) -- the fallback is matching the certificate's **Issuer DN** against candidate certificates' **Subject DN**.
+This is less reliable because distinguished name comparison is notoriously tricky: leading/trailing whitespace, different string encodings (PrintableString vs UTF8String), case sensitivity of certain components -- all of these can cause a mismatch even when the certificates are part of the same chain.
+
+{rfc5280} section 7.1 defines the comparison rules for distinguished names, and they are considerably more complex than string equality.
+BouncyCastle's `X500Name.equals()` handles this correctly; Java's `X500Principal.equals()` usually does too, but edge cases exist with certain encoding combinations.
+
+
+== Path Validation: RFC 5280 Section 6
+
+Building the chain gives you an ordered list of certificates.
+**Path validation** verifies that this chain is actually valid -- that every link is cryptographically sound and that the certificates meet all the required constraints.
+
+{rfc5280} section 6 defines the algorithm in six phases.
+The full specification runs to several pages of pseudocode; here we distill the essential checks that matter for PDF signature validation.
+
+=== The Six Steps
+
+.Certificate path validation ({rfc5280} section 6)
+[cols="1,2,5", options="header"]
+|===
+| Step | Name | What It Checks
+
+| 1
+| Initialization
+| Set the initial trust anchor (root CA certificate), the expected issuer name, the expected public key, and policy constraints. These are the "inputs" to the validation algorithm.
+
+| 2
+| Basic processing
+| For each certificate in the chain (from root to leaf): verify the signature on the certificate using the issuer's public key, check that the certificate is within its validity period (notBefore <= current time <= notAfter), check that the certificate has not been revoked.
+
+| 3
+| Name constraints
+| Check that the subject name and any subject alternative names comply with any name constraints imposed by certificates higher in the chain. A CA can restrict its subordinates to only issue certificates for certain domains or email addresses.
+
+| 4
+| Policy processing
+| Process the certificate policies extension and any policy constraints. This determines which policies are valid for the entire chain. Policy processing is the most complex part of path validation and is rarely used in PDF signature contexts -- but some government PKIs rely on it.
+
+| 5
+| Basic constraints
+| Verify that every CA certificate in the chain has `basicConstraints` with `cA=TRUE`, and that the `pathLenConstraint` is not exceeded. A `pathLenConstraint` of 0 means the CA can only issue end-entity certificates, not sub-CAs.
+
+| 6
+| Wrap-up
+| After processing all certificates, check the final certificate (the end-entity) against the expected usage. For PDF signing, this means checking `keyUsage` for `digitalSignature` or `nonRepudiation`, and optionally checking `extendedKeyUsage`.
+|===
+
+[source,java]
+----
+import java.security.cert.CertPathValidator;
+import java.security.cert.CertificateFactory;
+import java.security.cert.CertPath;
+import java.security.cert.PKIXParameters;
+import java.security.cert.PKIXCertPathValidatorResult;
+import java.security.cert.TrustAnchor;
+import java.security.cert.X509Certificate;
+import java.util.Collections;
+import java.util.List;
+
+/**
+ * Validate a certificate chain using the JCA PKIX path validator.
+ * This performs the full RFC 5280 section 6 algorithm.
+ */
+public class PathValidationExample {
+
+    public static PKIXCertPathValidatorResult validateChain(
+            List<X509Certificate> chain,
+            X509Certificate trustAnchor) throws Exception {
+
+        // The chain list should NOT include the trust anchor
+        CertificateFactory cf = CertificateFactory.getInstance("X.509");
+        CertPath certPath = cf.generateCertPath(chain);
+
+        TrustAnchor anchor = new TrustAnchor(trustAnchor, null);
+        PKIXParameters params = new PKIXParameters(
+                Collections.singleton(anchor));
+
+        // Disable revocation checking here -- we handle it separately
+        params.setRevocationEnabled(false);
+
+        CertPathValidator validator =
+                CertPathValidator.getInstance("PKIX");
+
+        return (PKIXCertPathValidatorResult)
+                validator.validate(certPath, params);
+    }
+}
+----
+
+WARNING: The JCA `CertPathValidator` expects the chain in a specific order: **end-entity first, root last (or root omitted)**. If you pass the chain in the wrong order, validation will fail with a confusing error message about "unable to find valid certification path to requested target." This is the single most common mistake when using the JCA path validation API.
+
+=== Validity Period Checking and Signing Time
+
+There is a subtlety in validity period checking that matters enormously for PDF signatures.
+A certificate might be expired _now_ but was valid at the time the document was signed.
+Should the signature be considered valid?
+
+The answer depends on whether the signature includes a trusted timestamp.
+If the CMS `SignedData` contains a timestamp token in the unsigned attributes (see Chapter 18), and that timestamp was produced while the certificate was still valid, then the signature remains valid even after the certificate expires.
+This is the foundation of **long-term validation (LTV)** -- the mechanism that allows a signed PDF to remain verifiable for decades.
+
+Without a timestamp, most validators check the certificate against the current time.
+A signature made with a certificate that has since expired will show warnings or errors in Adobe Acrobat, even if the signature was perfectly valid when it was created.
+
+IMPORTANT: This is why timestamps matter so much for PDF signatures. A timestamp cryptographically proves _when_ the signature was created, allowing validators to check the certificate against the signing time rather than the current time. If you are building a signing service, always include a timestamp. Chapter 18 covers timestamps and LTV in exhaustive detail.
+
+
+== Revocation Checking
+
+A certificate may be revoked before it expires.
+The private key might have been compromised, the subscriber might have left the organization, or the CA might have discovered that the certificate was issued incorrectly.
+Revocation checking is the mechanism by which validators discover whether a certificate has been revoked.
+
+There are two mechanisms: **Certificate Revocation Lists (CRLs)** and the **Online Certificate Status Protocol (OCSP)**.
+Both have strengths and weaknesses, and a robust validator should support both.
+
+
+=== CRL Deep Dive
+
+A Certificate Revocation List is a signed data structure published by a CA that lists all certificates the CA has revoked.
+CRLs are defined in {rfc5280} section 5.
+
+==== CRL Structure
+
+A CRL contains:
+
+.CRL structure (simplified from {rfc5280} section 5.1)
+[cols="2,4", options="header"]
+|===
+| Field | Description
+
+| `tbsCertList`
+| The "to-be-signed" portion, containing the issuer name, the `thisUpdate` timestamp (when the CRL was issued), the `nextUpdate` timestamp (when the next CRL will be issued), and the list of revoked certificates.
+
+| `signatureAlgorithm`
+| The algorithm used to sign the CRL (e.g., SHA-256 with RSA).
+
+| `signatureValue`
+| The CA's signature over the `tbsCertList`, proving the CRL is authentic and unmodified.
+|===
+
+Each entry in the `revokedCertificates` list contains:
+
+* The **serial number** of the revoked certificate
+* The **revocation date**
+* Optional **CRL entry extensions**, including the `reasonCode` (keyCompromise, cACompromise, affiliationChanged, superseded, cessationOfOperation, certificateHold, removeFromCRL, privilegeWithdrawn, aACompromise)
+
+==== CRL Distribution Points
+
+How does a validator find the CRL?
+The certificate itself contains a **CRL Distribution Points** extension ({rfc5280} section 4.2.1.13) with one or more URLs where the CRL can be downloaded.
+Typically these are HTTP URLs, though LDAP URLs appear in older enterprise PKIs.
+
+[source,asn1]
+----
+CRLDistributionPoints ::= SEQUENCE SIZE (1..MAX) OF DistributionPoint
+
+DistributionPoint ::= SEQUENCE {
+    distributionPoint  [0] DistributionPointName OPTIONAL,
+    reasons            [1] ReasonFlags OPTIONAL,
+    cRLIssuer          [2] GeneralNames OPTIONAL
+}
+----
+
+==== The Size Problem
+
+CRLs have a fundamental scalability problem: they grow monotonically.
+Every revoked certificate is listed until the certificate's natural expiration date passes.
+A busy CA that revokes hundreds or thousands of certificates per year will produce CRLs that are megabytes in size.
+
+Let's Encrypt, for example, issues millions of certificates.
+A full CRL from Let's Encrypt would be enormous.
+This is why Let's Encrypt does not publish CRLs for individual certificates (they rely on OCSP and, more recently, CRL sharding).
+
+For PDF signatures, the CRL size matters because long-term validation (LTV) requires embedding revocation data _inside the PDF_.
+A 2 MB CRL embedded in the Document Security Store (DSS) inflates the PDF by 2 MB.
+If the chain has three certificates and each CRL is large, the overhead becomes significant.
+
+==== Delta CRLs
+
+Delta CRLs ({rfc5280} section 5.2.4) were designed to mitigate the size problem.
+A delta CRL contains only the changes since the last "base" CRL was published.
+In theory, this allows validators to download a small delta rather than a large full CRL.
+
+In practice, delta CRLs are rarely used.
+Most CAs do not publish them.
+Most validators do not request them.
+The overhead of tracking base/delta CRL relationships adds complexity that the industry has largely chosen to avoid, preferring OCSP for real-time status and full CRLs for archival purposes.
+
+=== OCSP Deep Dive
+
+The **Online Certificate Status Protocol** ({rfc6960}) provides real-time, per-certificate revocation status.
+Instead of downloading a list of all revoked certificates, the validator sends a request asking "is this specific certificate revoked?" and gets back a signed response.
+
+==== OCSP Request Structure
+
+An OCSP request identifies the certificate by:
+
+* The hash of the issuer's distinguished name
+* The hash of the issuer's public key
+* The certificate's serial number
+* An optional nonce to prevent replay attacks
+
+[source,asn1]
+----
+OCSPRequest ::= SEQUENCE {
+    tbsRequest     TBSRequest,
+    optionalSignature [0] EXPLICIT Signature OPTIONAL
+}
+
+TBSRequest ::= SEQUENCE {
+    version        [0] EXPLICIT Version DEFAULT v1,
+    requestorName  [1] EXPLICIT GeneralName OPTIONAL,
+    requestList    SEQUENCE OF Request,
+    requestExtensions [2] EXPLICIT Extensions OPTIONAL
+}
+
+Request ::= SEQUENCE {
+    reqCert        CertID,
+    singleRequestExtensions [0] EXPLICIT Extensions OPTIONAL
+}
+
+CertID ::= SEQUENCE {
+    hashAlgorithm  AlgorithmIdentifier,
+    issuerNameHash OCTET STRING,
+    issuerKeyHash  OCTET STRING,
+    serialNumber   CertificateSerialNumber
+}
+----
+
+==== OCSP Response Structure
+
+The responder returns one of: **good** (not revoked), **revoked** (with the revocation time and optional reason), or **unknown** (the responder does not know about this certificate).
+
+The response is signed, either by the CA itself or by a specially designated **OCSP responder certificate** -- a certificate issued by the CA with the `id-pkix-ocsp-nocheck` extension, indicating it is authorized to sign OCSP responses on behalf of the CA.
+
+==== The Nonce Problem
+
+OCSP supports a nonce extension: the requester includes a random value, and the responder echoes it back.
+This prevents an attacker from replaying an old "good" response for a certificate that has since been revoked.
+
+In practice, many OCSP responders **ignore the nonce**.
+They pre-compute responses for all active certificates and serve them from cache, which is incompatible with per-request nonces.
+Adobe's OCSP responder, for example, does not support nonces.
+The security trade-off is real: without nonces, a replay window exists equal to the response's `nextUpdate` time.
+For most PDF signature scenarios, this is acceptable -- the replay window is typically hours, not days.
+
+CAUTION: When embedding OCSP responses in a PDF for LTV, nonce-less responses are actually preferable. A response with a nonce is bound to a specific request and cannot be reused. A cached, nonce-less response can be embedded in the PDF and validated later by anyone, which is exactly what LTV requires. This is a case where the "less secure" option (no nonce) is the correct choice for the specific use case.
+
+==== OCSP Stapling
+
+**OCSP stapling** is a mechanism where the entity presenting a certificate also presents a recent OCSP response for that certificate, pre-fetched from the OCSP responder.
+In TLS, the server staples the OCSP response to the TLS handshake.
+
+For PDF signatures, the equivalent is embedding the OCSP response in the CMS `SignedData` structure or in the PDF's Document Security Store (DSS).
+This eliminates the need for the validator to contact the OCSP responder at all -- the revocation proof travels with the document, just like the certificate chain.
+
+=== CRL vs OCSP: When to Use Which
+
+.CRL vs OCSP comparison for PDF signatures
+[cols="2,3,3", options="header"]
+|===
+| Aspect | CRL | OCSP
+
+| Granularity
+| All revocations for a CA
+| Single certificate status
+
+| Freshness
+| Updated periodically (hours to days)
+| Real-time or near-real-time (minutes)
+
+| Size
+| Can be megabytes (proportional to revocations)
+| Typically 1-3 KB per response
+
+| Availability
+| Can be cached locally; works offline once downloaded
+| Requires network access (unless stapled/embedded)
+
+| LTV suitability
+| Good: can be embedded in DSS
+| Good: can be embedded in DSS (prefer nonce-less)
+
+| Privacy
+| Good: the CA does not learn which certificates you check
+| Poor: the OCSP responder learns exactly which certificates you are validating (which documents you are opening)
+|===
+
+TIP: For PDF signing services, use OCSP for real-time validation during signing, and embed both the OCSP response and relevant CRLs in the DSS for long-term validation. Belt and suspenders. Adobe Acrobat's LTV process follows exactly this approach.
+
+[source,java]
+----
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.math.BigInteger;
+import java.net.HttpURLConnection;
+import java.net.URI;
+import java.security.cert.X509Certificate;
+
+import org.bouncycastle.asn1.DEROctetString;
+import org.bouncycastle.asn1.ocsp.OCSPObjectIdentifiers;
+import org.bouncycastle.asn1.x509.Extension;
+import org.bouncycastle.asn1.x509.Extensions;
+import org.bouncycastle.cert.jcajce.JcaX509CertificateHolder;
+import org.bouncycastle.cert.ocsp.BasicOCSPResp;
+import org.bouncycastle.cert.ocsp.CertificateID;
+import org.bouncycastle.cert.ocsp.OCSPReq;
+import org.bouncycastle.cert.ocsp.OCSPReqBuilder;
+import org.bouncycastle.cert.ocsp.OCSPResp;
+import org.bouncycastle.cert.ocsp.SingleResp;
+import org.bouncycastle.operator.jcajce.JcaDigestCalculatorProviderBuilder;
+
+/**
+ * Send an OCSP request and check the response.
+ * Demonstrates the full OCSP round-trip with BouncyCastle.
+ */
+public class OcspCheckExample {
+
+    public static SingleResp checkOcsp(
+            X509Certificate cert,
+            X509Certificate issuer,
+            String ocspUrl) throws Exception {
+
+        // Build the CertificateID that identifies the cert to check
+        CertificateID certId = new CertificateID(
+                new JcaDigestCalculatorProviderBuilder()
+                        .build()
+                        .get(CertificateID.HASH_SHA1),
+                new JcaX509CertificateHolder(issuer),
+                cert.getSerialNumber());
+
+        // Build the OCSP request
+        OCSPReqBuilder reqBuilder = new OCSPReqBuilder();
+        reqBuilder.addRequest(certId);
+
+        // Add a nonce (optional -- many responders ignore it)
+        BigInteger nonce = BigInteger.valueOf(System.currentTimeMillis());
+        Extension nonceExt = new Extension(
+                OCSPObjectIdentifiers.id_pkix_ocsp_nonce,
+                false,
+                new DEROctetString(nonce.toByteArray()));
+        reqBuilder.setRequestExtensions(
+                new Extensions(new Extension[]{ nonceExt }));
+
+        OCSPReq ocspReq = reqBuilder.build();
+
+        // Send the request via HTTP POST
+        URI uri = new URI(ocspUrl);
+        HttpURLConnection conn =
+                (HttpURLConnection) uri.toURL().openConnection();
+        conn.setRequestMethod("POST");
+        conn.setRequestProperty("Content-Type",
+                "application/ocsp-request");
+        conn.setDoOutput(true);
+
+        try (OutputStream os = conn.getOutputStream()) {
+            os.write(ocspReq.getEncoded());
+        }
+
+        // Parse the response
+        OCSPResp ocspResp;
+        try (InputStream is = conn.getInputStream()) {
+            ocspResp = new OCSPResp(is);
+        }
+
+        if (ocspResp.getStatus() != OCSPResp.SUCCESSFUL) {
+            throw new RuntimeException(
+                    "OCSP response status: " + ocspResp.getStatus());
+        }
+
+        BasicOCSPResp basicResp =
+                (BasicOCSPResp) ocspResp.getResponseObject();
+
+        // Find the response for our certificate
+        for (SingleResp singleResp : basicResp.getResponses()) {
+            if (singleResp.getCertID().equals(certId)) {
+                return singleResp;
+            }
+        }
+
+        return null; // no matching response found
+    }
+}
+----
+
+
+== Trust Stores
+
+A trust store is a collection of root CA certificates that a system has decided to trust.
+Without a trust store, there is no anchor for chain validation -- every chain ends in a self-signed certificate, and if that certificate is not in a trust store, the chain is untrusted regardless of how cryptographically correct it is.
+
+Different ecosystems maintain different trust stores, and understanding which one applies to your PDF signatures is critical.
+
+
+=== Adobe Approved Trust List (AATL)
+
+The **Adobe Approved Trust List** is a curated set of root certificates that Adobe Acrobat and Adobe Reader trust for signature validation.
+If your signing certificate chains to an AATL root, Acrobat shows a green checkmark with "Signed and all signatures are valid."
+If it does not -- even if the certificate is perfectly valid, issued by a reputable CA, and trusted by your operating system -- Acrobat shows a yellow warning triangle.
+
+This is the single most important trust store for PDF signatures in practice, because Adobe Acrobat has approximately 75% of the worldwide PDF viewer market share.
+
+==== How AATL Works
+
+Adobe publishes the AATL as a signed file that Acrobat downloads automatically (the URL is hardcoded).
+The list is refreshed every 30 days.
+It contains approximately 250 root certificates from CAs around the world.
+
+To get on the AATL, a CA must:
+
+. Pass a WebTrust or ETSI audit for PDF signing
+. Meet Adobe's technical requirements (minimum RSA-2048, SHA-256 or stronger)
+. Sign an agreement with Adobe
+. Pay an annual fee (reportedly in the range of $10,000-$50,000 USD, though Adobe does not publish the exact figure)
+
+==== The Monopoly Problem
+
+The AATL creates a de facto monopoly on "valid" PDF signatures in the world's dominant viewer.
+If you want your signed PDFs to show a green checkmark in Acrobat, you need a certificate from an AATL-member CA.
+Those certificates cost significantly more than standard TLS or code-signing certificates -- typically $200-$500 per year for a basic document signing certificate, and considerably more for organizational certificates.
+
+This pricing creates a barrier to entry.
+An individual developer who wants to sign PDFs "properly" (by Acrobat's standards) must pay for an AATL-rooted certificate, even though the cryptographic security of a self-signed certificate is identical.
+The trust model imposes a financial cost on trust itself.
+
+NOTE: This is not unique to Adobe -- the TLS ecosystem has a similar dynamic with browser trust stores. But in TLS, Let's Encrypt disrupted the pricing model by offering free certificates. There is no Let's Encrypt for PDF signing certificates. The AATL's requirements (particularly the audit requirements) make a free document signing CA impractical.
+
+
+=== EU Trusted List (EUTL)
+
+The **European Union Trusted List** is a fundamentally different approach to trust.
+Instead of a single vendor curating a list, the EUTL is a hierarchy of machine-readable, cryptographically signed XML documents maintained by the 27 EU member states under the authority of the eIDAS regulation ({eidas-reg}).
+
+==== Structure: The LOT Hierarchy
+
+The EUTL follows a **List of Trusted Lists (LOT)** architecture:
+
+. The **European Commission** publishes the LOT -- a signed XML document listing the URLs of every member state's national trusted list.
+. Each **member state** publishes its own trusted list -- a signed XML document listing every Qualified Trust Service Provider (QTSP) in that country, along with the services they offer and the certificates associated with those services.
+. Each QTSP entry includes the **service type** (e.g., issuing qualified certificates for electronic signatures), the **service status** (granted, withdrawn, etc.), and the relevant certificates.
+
+The LOT is defined by {etsi-tsl} and is publicly accessible at a well-known URL maintained by the European Commission.
+
+==== How EUTL Differs from AATL
+
+.AATL vs EUTL comparison
+[cols="2,3,3", options="header"]
+|===
+| Aspect | AATL | EUTL
+
+| Governance
+| Adobe (private company)
+| European Commission + member states (public authority)
+
+| Legal basis
+| Adobe's terms of service
+| eIDAS regulation ({eidas-reg}), legally binding across 27 member states
+
+| Format
+| Proprietary signed file
+| Machine-readable XML, signed per {etsi-tsl}
+
+| Scope
+| Any CA willing to pay and pass audit
+| Only Qualified Trust Service Providers recognized under eIDAS
+
+| Cost to CAs
+| Annual fee to Adobe
+| No fee to EU; the QTSP status is granted by the national supervisory body
+
+| Viewer support
+| Adobe Acrobat (dominant), some others
+| Adobe Acrobat (imports EUTL), EU DSS validation framework, national validators
+
+| Legal effect
+| None (Acrobat showing "valid" has no legal meaning)
+| Qualified electronic signatures have the legal equivalent of handwritten signatures across the EU
+|===
+
+Adobe Acrobat can import the EUTL in addition to the AATL.
+When configured to use both, Acrobat validates against the union of AATL and EUTL trust anchors.
+In European deployments, this is the standard configuration.
+
+IMPORTANT: A signature that validates against the EUTL as a qualified electronic signature has legal standing that an AATL-only signature does not. The EUTL is not just a technical trust store -- it is a legal instrument. If you are operating in the EU, the EUTL is the authoritative trust store for determining whether a signature meets the highest legal tier. Chapter 19 covers the eIDAS legal framework in detail.
+
+
+=== Operating System Trust Stores
+
+Every major operating system maintains its own root CA trust store:
+
+* **Windows**: The Microsoft Root Certificate Program. Certificates are distributed via Windows Update. The store is managed through the `certmgr.msc` snap-in or via `certutil`. Programs using the Windows CryptoAPI (Schannel, .NET) use this store automatically.
+
+* **macOS**: The Apple Root Certificate Program. Certificates are in the System Keychain. Managed through Keychain Access or `security` command-line tool. Programs using Security.framework (Safari, macOS apps) use this store.
+
+* **Linux**: Varies by distribution. Debian/Ubuntu use `/etc/ssl/certs/` and the `ca-certificates` package. Red Hat/Fedora use `/etc/pki/tls/certs/` and the `ca-trust` system. Updated via package manager.
+
+For PDF signatures, OS trust stores are relevant primarily when using system-level PDF viewers (Preview on macOS, Evince on Linux) or when a Java application is configured to use the OS trust store instead of Java's cacerts.
+Adobe Acrobat on Windows and macOS does **not** use the OS trust store for signature validation by default -- it uses the AATL (and optionally the EUTL).
+
+
+=== Java cacerts
+
+Java ships with its own trust store: a PKCS#12 file (or JKS in older JDKs) located at `$JAVA_HOME/lib/security/cacerts`.
+The default password is the string `changeit` (and almost nobody changes it).
+
+The Java cacerts store is maintained by the JDK vendor (Oracle, Eclipse Adoptium, Amazon Corretto, etc.) and typically mirrors the major browser/OS trust stores with some additions and removals.
+
+[source,java]
+----
+import java.io.FileInputStream;
+import java.security.KeyStore;
+import java.security.cert.X509Certificate;
+import java.util.Enumeration;
+
+/**
+ * List all trusted root certificates in the Java cacerts store.
+ */
+public class CacertsExample {
+
+    public static void listTrustedRoots() throws Exception {
+        String cacertsPath = System.getProperty("java.home")
+                + "/lib/security/cacerts";
+
+        KeyStore ks = KeyStore.getInstance("PKCS12");
+        try (FileInputStream fis = new FileInputStream(cacertsPath)) {
+            ks.load(fis, "changeit".toCharArray());
+        }
+
+        Enumeration<String> aliases = ks.aliases();
+        int count = 0;
+        while (aliases.hasMoreElements()) {
+            String alias = aliases.nextElement();
+            if (ks.isCertificateEntry(alias)) {
+                X509Certificate cert = (X509Certificate)
+                        ks.getCertificate(alias);
+                count++;
+                // cert.getSubjectX500Principal().getName()
+                // gives the root CA's distinguished name
+            }
+        }
+        // Typical count: 100-150 root certificates
+    }
+}
+----
+
+To add a custom root CA to the Java trust store (for testing or internal PKIs):
+
+[source,bash]
+----
+keytool -importcert \
+    -alias "my-internal-ca" \
+    -file my-root-ca.pem \
+    -keystore $JAVA_HOME/lib/security/cacerts \
+    -storepass changeit
+----
+
+WARNING: Modifying the system cacerts file affects all Java applications on that machine. For production deployments, prefer creating a separate trust store and configuring your application to use it via `javax.net.ssl.trustStore` system property or programmatic `TrustManagerFactory` configuration. Do not modify the global cacerts unless you are administering the entire machine.
+
+
+=== Custom Trust Stores
+
+Sometimes none of the standard trust stores are appropriate:
+
+* **Internal PKIs**: Your organization runs its own CA hierarchy for internal document signing. The root CA is not in AATL, EUTL, or any OS trust store, because it was never intended to be publicly trusted.
+* **Restricted trust**: You want to validate PDF signatures but only trust a specific subset of CAs -- perhaps only EUTL-listed QTSPs, not the entire AATL.
+* **Air-gapped environments**: Systems with no network access cannot download CRL/OCSP responses or refresh trust stores. All trust material must be pre-loaded.
+
+In Java, creating a custom trust store is straightforward:
+
+[source,java]
+----
+import java.io.FileOutputStream;
+import java.security.KeyStore;
+import java.security.cert.CertificateFactory;
+import java.security.cert.X509Certificate;
+import java.io.FileInputStream;
+
+/**
+ * Create a custom trust store containing only your organization's
+ * root CA certificate. Use this for internal PKI validation.
+ */
+public class CustomTrustStoreExample {
+
+    public static void createCustomTrustStore(
+            String rootCertPath,
+            String trustStorePath,
+            String password) throws Exception {
+
+        CertificateFactory cf = CertificateFactory.getInstance("X.509");
+        X509Certificate rootCert;
+        try (FileInputStream fis = new FileInputStream(rootCertPath)) {
+            rootCert = (X509Certificate) cf.generateCertificate(fis);
+        }
+
+        KeyStore trustStore = KeyStore.getInstance("PKCS12");
+        trustStore.load(null, null); // initialize empty store
+        trustStore.setCertificateEntry("internal-root", rootCert);
+
+        try (FileOutputStream fos =
+                new FileOutputStream(trustStorePath)) {
+            trustStore.store(fos, password.toCharArray());
+        }
+    }
+}
+----
+
+
+== Trust Store Comparison
+
+.Trust store comparison for PDF signature validation
+[cols="2,2,2,2,2", options="header"]
+|===
+| Characteristic | AATL | EUTL | OS Store | Java cacerts
+
+| Primary consumer
+| Adobe Acrobat/Reader
+| EU DSS, Acrobat (configured)
+| OS-native apps, browsers
+| Java applications
+
+| Approximate root count
+| ~250
+| Varies by member state; ~100 QTSPs total
+| ~150-200
+| ~100-150
+
+| Update mechanism
+| Auto-download (30-day cycle)
+| LOT refresh per {etsi-tsl}
+| OS update (Windows Update, etc.)
+| JDK update
+
+| Legal standing
+| None
+| Qualified signatures per eIDAS
+| None
+| None
+
+| PDF viewer support
+| Adobe Acrobat (primary)
+| Adobe Acrobat (opt-in), EU validators
+| Evince, Preview, system viewers
+| PDFBox-based apps (depends on config)
+
+| Cost for CA inclusion
+| Annual fee + audit
+| National supervisory body approval
+| Vendor program requirements
+| JDK vendor decision
+|===
+
+
+== Debugging Chain Failures
+
+When a PDF signature shows "certificate chain not trusted," here is the systematic approach:
+
+=== Step 1: Extract the Certificates
+
+Open the PDF in PDFalyzer or use PDFBox to extract the CMS `SignedData` from `/Contents`.
+List every certificate in the CMS `certificates` field.
+Note the subject DN, issuer DN, serial number, SKI, and AKI of each.
+
+=== Step 2: Build the Chain Manually
+
+Starting from the signing certificate, match AKI to SKI.
+Can you build a complete chain from the signer to a self-signed root?
+If a link is missing, that is your problem -- the CMS is missing an intermediate.
+
+=== Step 3: Check the Trust Anchor
+
+Is the root certificate in the relevant trust store?
+If you are validating in Acrobat, check the AATL.
+If you are validating in your Java application, check cacerts or your custom trust store.
+The root being "well-known" is not enough -- it must be in the specific trust store the validator is using.
+
+=== Step 4: Check Validity Periods
+
+Is every certificate in the chain currently within its validity period?
+Or, if the signature has a timestamp, was every certificate valid at the time the timestamp was created?
+
+=== Step 5: Check Revocation
+
+Is every certificate in the chain un-revoked?
+Can the validator reach the CRL distribution points or OCSP responders listed in the certificates?
+Firewall rules, proxy settings, and DNS resolution failures are common culprits in enterprise environments.
+
+=== Step 6: Check Key Usage
+
+Does the signing certificate have the correct `keyUsage` bits set?
+Some validators (including Adobe Acrobat) require `nonRepudiation` (also called `contentCommitment`) for document signatures.
+Others accept `digitalSignature`.
+If neither is set, the certificate is not suitable for signing regardless of chain validity.
+
+TIP: When you encounter a chain failure in production, resist the urge to immediately add the root certificate to your trust store. First, understand _why_ the chain is failing. Is it a missing intermediate? A revoked certificate? A validator misconfiguration? Adding a root to a trust store should be a deliberate decision, not a debugging shortcut. Every root you add is a root you trust to issue certificates for any purpose -- including, potentially, certificates that could impersonate other entities.
+
+
+== Cross-Certification and Bridge CAs
+
+We mentioned earlier that trust paths can be graphs, not just chains.
+**Cross-certification** is the mechanism that creates these more complex topologies.
+
+When two independent PKI hierarchies need to trust each other's certificates, they can cross-certify: Root A issues a certificate for Root B's public key (or an intermediate in B's hierarchy), and vice versa.
+This creates a trust bridge between the two hierarchies without requiring end-entity certificates to be re-issued.
+
+The US Federal PKI uses a **Bridge CA** architecture: the Federal Bridge CA cross-certifies with individual agency CAs, enabling certificates issued by the Department of Defense to be validated by systems that trust the Department of State's root, and vice versa.
+
+For PDF signatures, cross-certification is relevant when a signing certificate chains to a root that is not directly in the validator's trust store, but _is_ cross-certified with a root that is.
+The chain-building algorithm must consider cross-certificates as additional links, potentially finding a path through an unexpected route.
+
+This adds complexity to chain building, and not all validators handle it correctly.
+Adobe Acrobat supports cross-certification for AATL and EUTL roots.
+Java's `CertPathValidator` supports it if you provide the cross-certificates as additional material via `PKIXBuilderParameters.addCertStore()`.
+PDFBox relies on BouncyCastle for chain building and validation, and BouncyCastle handles cross-certification correctly in most cases.
+
+NOTE: If you are debugging a chain failure and the certificates seem correct but the path does not reach a trust anchor, check for cross-certificates. The missing link might not be a traditional intermediate CA but a cross-certificate that bridges two PKI hierarchies. Cross-certificates are sometimes stored in LDAP directories rather than embedded in the CMS structure, making them easy to overlook.
+
+
+== Summary
+
+Certificate chains exist because no single CA can practically serve everyone.
+The hierarchical delegation model -- root CAs issuing to intermediate CAs, intermediates issuing to end-entities -- distributes the operational burden while maintaining a chain of trust back to a known anchor.
+
+Chain building matches AuthorityKeyIdentifier to SubjectKeyIdentifier, walking from the end-entity up through intermediates to the root.
+Path validation ({rfc5280} section 6) verifies that every link in the chain is cryptographically sound, temporally valid, and compliant with the constraints imposed by certificates higher in the chain.
+
+Revocation checking -- via CRLs for bulk status and OCSP for real-time, per-certificate status -- ensures that compromised or withdrawn certificates are detected.
+For PDF signatures, embedding revocation data in the document (via the DSS or CMS unsigned attributes) enables long-term validation without network access.
+
+The trust store anchoring the chain determines whether a signature is considered "trusted."
+In the PDF world, the AATL dominates because Adobe Acrobat dominates.
+In the EU, the EUTL provides legally binding trust anchors for qualified electronic signatures.
+OS trust stores and Java's cacerts serve broader ecosystems but are not the primary validation paths for most PDF viewers.
+
+When chain validation fails, the debugging process is methodical: extract certificates, build the chain manually, check the trust anchor, verify validity periods, check revocation status, and verify key usage.
+Most chain failures in production are caused by missing intermediates, not by actual trust problems.
+
+The next chapter examines the formats in which keys and certificates are stored and transported -- PKCS#12, PEM, DER, JKS, and PKCS#8 -- because loading the wrong format is the quickest way to turn a working certificate chain into an inscrutable exception stack trace.

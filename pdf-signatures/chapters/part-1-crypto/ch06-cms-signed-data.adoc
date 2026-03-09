@@ -1,0 +1,793 @@
+[[ch06]]
+= CMS/PKCS#7 Signed Data
+ifdef::env-github[]
+:tip-caption: :bulb:
+:note-caption: :information_source:
+:important-caption: :heavy_exclamation_mark:
+:caution-caption: :fire:
+:warning-caption: :warning:
+endif::[]
+
+[.lead]
+Every PDF digital signature carries its cryptographic payload inside a CMS `SignedData` structure -- a binary envelope defined by {rfc5652} that bundles the signature value, the signer's certificate chain, the digest algorithm, and a set of signed metadata attributes into a single DER-encoded blob.
+This chapter dissects that envelope layer by layer, from the outermost `ContentInfo` wrapper down to the individual signed attributes, with annotated ASN.1 dumps and BouncyCastle {bc-version} code on Java {java-version}.
+If you understand CMS `SignedData`, you understand the heart of what lives inside the `/Contents` hex string of every signed PDF.
+
+If you have parsed CMS structures before, skip to <<ch06-signerinfo-deep-dive>> for the signed attributes encoding trap that has caused more validation failures than any other single issue.
+If you want code, jump to <<ch06-java-parsing>>.
+
+
+== From PKCS#7 to CMS: A History
+
+The Cryptographic Message Syntax did not spring into existence fully formed.
+It evolved over sixteen years through three distinct phases, each driven by different organizations and different needs.
+Understanding this lineage matters because the older formats are still embedded in millions of signed PDFs, and the naming confusion between "PKCS#7" and "CMS" persists in specifications, code comments, and error messages to this day.
+
+=== PKCS#7: RSA Laboratories, 1993
+
+RSA Laboratories published **PKCS#7** (Public-Key Cryptography Standard #7) in November 1993 as a general-purpose format for signed and encrypted data.
+The full title was "Cryptographic Message Syntax Standard," which is ironic because it was not yet the CMS we know today -- it was a proprietary RSA specification, not an IETF standard.
+
+PKCS#7 version 1.5 defined the core structure that survives almost unchanged:
+
+* A `ContentInfo` wrapper with an OID identifying the content type
+* A `SignedData` type containing digest algorithms, signer information, certificates, and CRLs
+* A `SignerInfo` type containing the actual signature and per-signer metadata
+* Support for both _attached_ (encapsulated) and _detached_ signatures
+
+The design was influenced by the PEM (Privacy-Enhanced Mail) framework from RFCs 1421-1424 and by the emerging S/MIME work at RSA.
+The goal was a format that could carry signed data for email, file signing, code signing, and any other context where a digital signature needed to travel alongside or separately from its content.
+
+NOTE: The "PKCS#7" name persists everywhere. The PDF specification uses `adbe.pkcs7.detached` and `adbe.pkcs7.sha1` as SubFilter values. Java's `KeyStore.getInstance("PKCS7")` exists. OpenSSL has `pkcs7` commands. In all of these contexts, the actual format in use is CMS as defined by {rfc5652}, not the original 1993 PKCS#7. The names are legacy; the structures have evolved.
+
+=== S/MIME and RFC 2315, 1998
+
+The S/MIME (Secure/Multipurpose Internet Mail Extensions) working group at the IETF took PKCS#7 and brought it into the standards process.
+**RFC 2315** (March 1998) republished PKCS#7 v1.5 essentially verbatim as an informational RFC, giving it a stable, citable reference in the IETF document series.
+
+But the S/MIME group needed enhancements that RSA's original design did not provide: better algorithm agility, support for attribute certificates, and a cleaner separation between the content being signed and the signature metadata.
+This work produced the first true CMS specification.
+
+=== CMS: RFC 2630 (1999) and RFC 3852 (2004)
+
+**RFC 2630** (June 1999) was the first IETF-standards-track CMS specification.
+It renamed the format from "PKCS#7" to "Cryptographic Message Syntax" and introduced several changes:
+
+* The `SignedData` version number advanced from 1 to 3 (with version selection rules based on which optional fields are present)
+* `EncapsulatedContentInfo` replaced the old `ContentInfo` for the inner content, allowing non-data content types
+* The `SignerIdentifier` was formalized with two choices: `issuerAndSerialNumber` (the classic) and `subjectKeyIdentifier` (new)
+* Attribute certificates were added to the `certificates` field as an option alongside X.509 certificates
+* The `digestAlgorithms` SET was required to be consistent with the algorithms actually used in `SignerInfo` entries
+
+**RFC 3852** (July 2004) was a revision that clarified ambiguities and tightened requirements, particularly around the encoding of signed attributes.
+
+=== RFC 5652: The Current Standard (2009)
+
+**{rfc5652}** (September 2009) is the current and authoritative CMS specification.
+It obsoletes RFC 3852 and is the normative reference used by {iso32000-2}, the PAdES standards ({etsi-pades}), and BouncyCastle.
+
+The changes from RFC 3852 were modest -- mostly editorial clarifications and alignment with updated ASN.1 modules.
+The core structures are stable and have not changed since 1999.
+When we refer to "CMS" in this book, we mean {rfc5652} unless otherwise noted.
+
+.CMS evolution timeline
+[cols="1,2,4", options="header"]
+|===
+| Year | Document | Significance
+
+| 1993
+| PKCS#7 v1.5
+| RSA Laboratories' original specification. Defined SignedData, EnvelopedData, and the ContentInfo wrapper. Still referenced by name in PDF SubFilter values.
+
+| 1998
+| RFC 2315
+| PKCS#7 republished as an informational RFC. No technical changes, but gave the format an IETF-citable reference.
+
+| 1999
+| RFC 2630
+| First standards-track CMS. Introduced version 3 SignedData, SubjectKeyIdentifier as an alternative SignerIdentifier, and formalized attribute handling.
+
+| 2004
+| RFC 3852
+| Clarified signed attributes encoding requirements. Tightened consistency rules for digestAlgorithms SET.
+
+| 2009
+| {rfc5652}
+| Current standard. Obsoletes RFC 3852. The normative reference for all modern PDF signature work.
+|===
+
+
+== Why PDF Uses CMS
+
+When Adobe added digital signatures to PDF 1.3 in 1999, they needed a container format for the cryptographic signature.
+They chose PKCS#7 (which was becoming CMS at exactly the same time) for pragmatic reasons:
+
+1. **It was the only real option.** In 1999, the choices for cryptographic message formats were PKCS#7/CMS and PGP. PKCS#7/CMS was the enterprise and government standard; PGP was associated with personal email encryption. For a document format targeting business use, PKCS#7/CMS was the obvious choice.
+
+2. **It bundles everything needed for validation.** A CMS `SignedData` structure can carry the signature value, the signer's certificate, intermediate CA certificates, CRLs, and timestamp tokens -- everything a validator needs without making network requests. This self-contained property is critical for PDF, where a signed document might be validated years after signing, on an air-gapped system with no network access.
+
+3. **It supports detached signatures natively.** PDF needs the signed content (the byte range) to live in the PDF file, not inside the CMS structure. CMS's detached signature mode was designed for exactly this use case.
+
+The practical consequence is that the `/Contents` value in every PDF signature dictionary is a hex-encoded, DER-encoded CMS `SignedData` structure.
+When {iso32000-2} says the `/Contents` field contains "the DER-encoded PKCS#7 binary data object," it means a CMS `SignedData` as defined by {rfc5652}.
+The terms are used interchangeably in the spec, which is historically understandable but terminologically sloppy.
+
+
+== The ContentInfo Wrapper
+
+Every CMS structure is wrapped in a `ContentInfo` -- the outermost ASN.1 envelope that identifies what type of CMS object is inside.
+
+[source,asn1]
+----
+ContentInfo ::= SEQUENCE {
+    contentType     ContentType,     -- OID identifying the CMS type
+    content    [0]  EXPLICIT ANY DEFINED BY contentType
+}
+
+ContentType ::= OBJECT IDENTIFIER
+----
+
+For a PDF signature, the `contentType` is always:
+
+----
+1.2.840.113549.1.7.2   -- id-signedData
+----
+
+This OID lives under the RSA Security arc (`1.2.840.113549`) in the PKCS#7 namespace (`.1.7`), with `.2` identifying `SignedData` specifically.
+The `content` field contains the `SignedData` structure itself, tagged with EXPLICIT `[0]`.
+
+.CMS ContentType OIDs
+[cols="3,3,3", options="header"]
+|===
+| OID | Name | Usage in PDF
+
+| `1.2.840.113549.1.7.1`
+| `id-data`
+| Used as the `eContentType` inside SignedData to indicate that the signed content is arbitrary data (the PDF byte range)
+
+| `1.2.840.113549.1.7.2`
+| `id-signedData`
+| The outermost ContentInfo type for all PDF signatures
+
+| `1.2.840.113549.1.7.3`
+| `id-envelopedData`
+| Not used in PDF signatures (used for encryption)
+
+| `1.2.840.113549.1.9.16.1.4`
+| `id-ct-TSTInfo`
+| Used as the `eContentType` for RFC 3161 timestamp tokens embedded in PDF signatures
+|===
+
+IMPORTANT: The OID `1.2.840.113549.1.7.2` is the first thing a CMS parser encounters when reading a PDF signature. If this OID is missing or wrong, the entire structure is unparsable. When you are debugging a broken signature by examining raw hex, look for the DER encoding of this OID near the beginning of the `/Contents` value: `06 09 2A 86 48 86 F7 0D 01 07 02`. Those eleven bytes (tag `06`, length `09`, then the nine OID bytes) are the signature of a CMS `SignedData` structure.
+
+
+== The SignedData Structure
+
+Inside the `ContentInfo` wrapper, the `SignedData` structure contains everything related to the signature:
+
+[source,asn1]
+----
+SignedData ::= SEQUENCE {
+    version            CMSVersion,                          -- <1>
+    digestAlgorithms   DigestAlgorithmIdentifiers,          -- <2>
+    encapContentInfo   EncapsulatedContentInfo,             -- <3>
+    certificates  [0]  IMPLICIT CertificateSet OPTIONAL,    -- <4>
+    crls          [1]  IMPLICIT RevocationInfoChoices OPTIONAL, -- <5>
+    signerInfos        SignerInfos                          -- <6>
+}
+----
+<1> Version number: 1, 3, 4, or 5, depending on which optional fields are present. For PDF signatures with X.509 certificates and `issuerAndSerialNumber` in SignerInfo, this is typically **1**.
+<2> SET OF digest algorithm identifiers. Must include every algorithm used by any SignerInfo in this structure. For a single-signer PDF, this is a set with one element (e.g., SHA-256).
+<3> The content that was signed. For PDF detached signatures, the `eContent` field is **absent** -- the content lives in the PDF file itself.
+<4> The certificate collection. Typically contains the signer's end-entity certificate plus all intermediate CA certificates needed to build the chain to a trust anchor.
+<5> CRLs or OCSP responses for revocation checking. Rarely populated in basic PDF signatures; more common in PAdES-B-LT and PAdES-B-LTA profiles where revocation data is embedded for long-term validation.
+<6> SET OF SignerInfo structures -- one per signer. PDF signatures almost always have exactly one SignerInfo.
+
+=== Version Number Rules
+
+The version field is not arbitrary -- {rfc5652} Section 5.1 specifies strict rules:
+
+.SignedData version selection ({rfc5652} Section 5.1)
+[cols="1,4", options="header"]
+|===
+| Version | Condition
+
+| 1
+| No attribute certificates in `certificates`, no `OtherRevocationInfoFormat` in `crls`, no version-3 `SignerInfo`, and the `encapContentInfo.eContentType` is `id-data`
+
+| 3
+| The `encapContentInfo.eContentType` is other than `id-data` (e.g., `id-ct-TSTInfo` for a timestamp token), OR the structure contains `SignerInfo` version 3
+
+| 4
+| Attribute certificates with version 2 are present in `certificates`
+
+| 5
+| `OtherRevocationInfoFormat` is present in `crls`
+|===
+
+For the vast majority of PDF signatures, the version is **1**.
+Timestamp tokens embedded as unsigned attributes use version **3** because their inner `eContentType` is `id-ct-TSTInfo` rather than `id-data`.
+
+WARNING: Some older signing libraries (notably early versions of iText before version 5.3) hardcoded the version to 1 regardless of the content type. This produced technically non-compliant CMS structures that happened to validate in most tools but failed strict validators like the EU's DSS library. If you encounter a CMS blob with version 1 but a non-`id-data` content type, that is a bug in the signing library, not a feature.
+
+=== The digestAlgorithms SET
+
+This is a SET OF `AlgorithmIdentifier`, declared at the top level of `SignedData` to allow a parser to identify all digest algorithms in use before reading any `SignerInfo` entries.
+The intent is optimization: a validator reading a large detached signature can start computing digests in parallel before it reaches the `SignerInfo` structures.
+
+For PDF signatures with a single signer using SHA-256:
+
+[source,asn1]
+----
+digestAlgorithms:
+  SET (1 element)
+    SEQUENCE
+      OID: 2.16.840.1.101.3.4.2.1  (SHA-256)
+      NULL                           (parameters, absent for SHA-2)
+----
+
+TIP: The `NULL` parameters field for SHA-2 algorithms is a persistent source of interoperability issues. {rfc5652} says the parameters "SHOULD be omitted" for SHA-256 and related algorithms, but some older implementations include an explicit `NULL` (tag `05 00`), and some validators reject structures where it is absent. BouncyCastle {bc-version} includes the explicit `NULL` by default, which is the safe choice for maximum compatibility.
+
+=== EncapsulatedContentInfo: Detached vs Encapsulated
+
+[source,asn1]
+----
+EncapsulatedContentInfo ::= SEQUENCE {
+    eContentType    ContentType,
+    eContent   [0]  EXPLICIT OCTET STRING OPTIONAL
+}
+----
+
+This is where detached and encapsulated signatures diverge:
+
+* **Detached** (PDF standard): `eContent` is **absent**. The signed content lives outside the CMS structure -- in the PDF file, specified by the `/ByteRange` array. The `eContentType` is `id-data` (`1.2.840.113549.1.7.1`).
+
+* **Encapsulated**: `eContent` is **present** and contains the signed data. This mode is used in S/MIME email signatures where the message body is embedded in the CMS structure.
+
+For the SubFilter `adbe.pkcs7.sha1` (deprecated), the CMS uses a hybrid approach: the `eContent` field contains the SHA-1 hash of the byte range (not the byte range itself), making it technically an encapsulated signature over a hash rather than a detached signature over the content.
+This design was misguided and is one of the reasons `adbe.pkcs7.sha1` was deprecated.
+
+CAUTION: If you are building a PDF signing implementation and you accidentally pass `true` for the encapsulate parameter in `CMSSignedDataGenerator.generate()`, the entire byte range content will be embedded inside the CMS structure, inside the `/Contents` hex string, inside the PDF. The result is a signature that is dramatically larger than necessary (potentially megabytes), wastes space, and will be rejected by validators that expect a detached signature when the SubFilter is `adbe.pkcs7.detached` or `ETSI.CAdES.detached`.
+
+=== The certificates Field
+
+The `certificates` field is an IMPLICIT SET that can contain:
+
+* X.509 certificates (`Certificate` type from {rfc5280})
+* Attribute certificates (v1 or v2) -- rarely used in PDF signatures
+* Other certificate formats -- essentially never used
+
+For PDF signatures, this field should contain at a minimum the signer's end-entity certificate and all intermediate CA certificates needed to chain to a trust anchor.
+The root CA certificate is traditionally _not_ included because the validator must already trust it -- including it adds bytes without adding trust.
+
+The ordering of certificates in this SET is **undefined** by {rfc5652}.
+A validator must be prepared to receive certificates in any order and build the chain by matching issuer/subject Distinguished Names and Authority/Subject Key Identifiers.
+
+
+[[ch06-signerinfo-deep-dive]]
+== SignerInfo: The Core of the Signature
+
+Each `SignerInfo` structure represents one signer's contribution to the `SignedData`:
+
+[source,asn1]
+----
+SignerInfo ::= SEQUENCE {
+    version               CMSVersion,                    -- <1>
+    sid                   SignerIdentifier,               -- <2>
+    digestAlgorithm       DigestAlgorithmIdentifier,      -- <3>
+    signedAttrs      [0]  IMPLICIT SignedAttributes OPTIONAL, -- <4>
+    signatureAlgorithm    SignatureAlgorithmIdentifier,   -- <5>
+    signature             SignatureValue,                 -- <6>
+    unsignedAttrs    [1]  IMPLICIT UnsignedAttributes OPTIONAL -- <7>
+}
+----
+<1> Version 1 if `sid` is `issuerAndSerialNumber`, version 3 if `sid` is `subjectKeyIdentifier`.
+<2> Identifies which certificate belongs to this signer.
+<3> The hash algorithm used to compute the message digest (e.g., SHA-256).
+<4> Attributes that are included in the signature computation -- critical for PDF signatures.
+<5> The signature algorithm (e.g., SHA-256 with RSA, or ECDSA with SHA-256).
+<6> The raw signature bytes.
+<7> Attributes added after signing -- used for timestamps, counter-signatures.
+
+=== SignerIdentifier: Finding the Signer's Certificate
+
+[source,asn1]
+----
+SignerIdentifier ::= CHOICE {
+    issuerAndSerialNumber    IssuerAndSerialNumber,
+    subjectKeyIdentifier [0] SubjectKeyIdentifier
+}
+----
+
+The `issuerAndSerialNumber` form is dominant in PDF signatures.
+It contains the issuer DN and serial number of the signer's certificate -- enough to uniquely identify the certificate within the `certificates` SET.
+
+The `subjectKeyIdentifier` form uses the Subject Key Identifier extension from the certificate.
+It is more compact but less commonly used because older validators do not always support it.
+
+=== Signed Attributes: What Gets Signed
+
+When signed attributes are present (and for PDF signatures, they **must** be present per {iso32000-2}), the signature is computed over the DER encoding of the signed attributes -- _not_ over the content itself.
+The content's digest is included as a signed attribute, creating an indirect binding:
+
+----
+content  --(hash)-->  messageDigest attribute
+                            |
+signed attributes  --(sign)-->  signature value
+----
+
+The mandatory signed attributes for PDF signatures are:
+
+.Required signed attributes in PDF CMS signatures
+[cols="2,3,4", options="header"]
+|===
+| Attribute | OID | Description
+
+| `contentType`
+| `1.2.840.113549.1.9.3`
+| Must be `id-data` (`1.2.840.113549.1.7.1`). Identifies the type of content that was signed. Required by {rfc5652} whenever signed attributes are present.
+
+| `messageDigest`
+| `1.2.840.113549.1.9.4`
+| The hash of the content (the PDF byte range). This is the attribute that binds the CMS signature to the PDF document bytes. The validator recomputes this hash and compares it against the value in this attribute.
+
+| `signingTime`
+| `1.2.840.113549.1.9.5`
+| The time the signer claims to have signed. This is self-asserted and not cryptographically verified -- use a timestamp authority for trusted time (see `unsignedAttrs`).
+
+| `ESS-signing-certificate-v2`
+| `1.2.840.113549.1.9.16.2.47`
+| Required by PAdES ({etsi-cades}). Contains a hash of the signer's certificate, binding the signature to a specific certificate and preventing certificate substitution attacks. Without this attribute, an attacker could replace the signer's certificate with a different certificate that has the same public key.
+|===
+
+NOTE: The `signingTime` attribute is optional per {rfc5652} but effectively mandatory in practice. Every PDF viewer displays the signing time, and a signature without one looks suspicious to users. However, the signing time is _not_ cryptographically trustworthy -- the signer controls the clock. For legally binding timestamps, use an RFC 3161 timestamp token in the unsigned attributes (Chapter 18).
+
+=== The ESS-signing-certificate-v2 Attribute
+
+This attribute deserves special attention because it is the dividing line between a basic CMS signature and a CAdES-compliant signature -- and therefore between a signature that merely works and one that meets European regulatory requirements.
+
+The structure contains:
+
+[source,asn1]
+----
+SigningCertificateV2 ::= SEQUENCE {
+    certs        SEQUENCE OF ESSCertIDv2,
+    policies     SEQUENCE OF PolicyInformation OPTIONAL
+}
+
+ESSCertIDv2 ::= SEQUENCE {
+    hashAlgorithm  AlgorithmIdentifier DEFAULT {sha-256},
+    certHash       Hash,              -- hash of the signer's certificate
+    issuerSerial   IssuerSerial OPTIONAL
+}
+----
+
+The `certHash` is a hash of the signer's DER-encoded certificate.
+A validator computes this hash independently and compares it against the attribute value, ensuring that the certificate in the CMS structure is the one the signer intended to use.
+
+Without this attribute, a subtle attack is possible: if two certificates share the same public key (which can happen if a certificate is re-issued with different extensions or validity periods), an attacker could swap the certificate in the CMS structure without invalidating the signature.
+The ESS-signing-certificate-v2 attribute prevents this by binding the signature to the exact certificate, not just the public key.
+
+IMPORTANT: PAdES baseline profiles (PAdES-B-B and above) require ESS-signing-certificate-v2. A PDF signature that uses the SubFilter `ETSI.CAdES.detached` but lacks this attribute is non-compliant with {etsi-pades}. The EU's DSS validation library will flag it as a format failure. If you are implementing PDF signing and need European compliance, this attribute is not optional.
+
+
+== The Signed Attributes DER Encoding Trap
+
+This section describes the single most common cause of CMS signature validation failures.
+It has tripped up every signing library author at least once, and it will trip you up too if you are building or debugging a CMS implementation at the byte level.
+
+=== The Problem
+
+{rfc5652} Section 5.4 specifies how signed attributes are encoded for signature computation:
+
+[quote, "{rfc5652} Section 5.4"]
+____
+The result of the message digest calculation process depends on whether the signedAttrs field is present.
+When the field is present, [...] the complete DER encoding of the SignedAttrs value contained in the signedAttrs field is [used].
+[...] the IMPLICIT [0] tag in the signedAttrs is not used for the DER encoding, rather an EXPLICIT SET OF tag is used.
+____
+
+Here is what this means in practice:
+
+1. In the `SignerInfo` structure, the `signedAttrs` field is tagged `[0] IMPLICIT`, meaning the ASN.1 tag byte is `A0` (context class, constructed, tag 0).
+
+2. But when computing the signature over the signed attributes, the tag must be replaced with `31` (UNIVERSAL SET OF) -- the tag that would be used if the attributes were a standalone SET OF, not an implicitly tagged field.
+
+3. The rest of the encoding (length bytes and content) remains identical.
+
+This means the bytes that are signed are _not_ the bytes that appear in the CMS structure.
+You must re-tag the signed attributes before computing or verifying the signature.
+
+=== Why This Exists
+
+The reason is rooted in ASN.1 encoding theory.
+The `signedAttrs` field uses IMPLICIT tagging to save one byte in the encoding (implicit tagging replaces the original tag; explicit tagging adds a wrapper).
+But the signature must be computed over the _canonical_ encoding of the attributes as a SET OF, not over their implicitly tagged representation within the SignerInfo.
+The two encodings differ only in the first byte (`A0` vs `31`), but that single byte difference is enough to invalidate the signature.
+
+WARNING: If you are computing a CMS signature manually (perhaps because you are building a remote signing integration where the hash is computed locally and the signature is applied remotely), you **must** re-tag the signed attributes before hashing them. Use tag `31` (SET OF), not `A0` (IMPLICIT [0]). BouncyCastle handles this correctly in its `CMSSignedDataGenerator`, but if you are working at a lower level -- constructing CMS structures from raw ASN.1 objects, or implementing a signature interface for an HSM -- this is the byte that will break you.
+
+[source,java]
+----
+import org.bouncycastle.asn1.ASN1EncodableVector;
+import org.bouncycastle.asn1.ASN1Set;
+import org.bouncycastle.asn1.BERTags;
+import org.bouncycastle.asn1.DERSet;
+
+/**
+ * Demonstrate the signed attributes re-tagging requirement.
+ * In practice, BouncyCastle handles this internally -- this
+ * code is for understanding, not production use.
+ */
+public class SignedAttrsEncodingExample {
+
+    /**
+     * Re-encode signed attributes with SET OF tag for signing.
+     * The input is the IMPLICIT [0]-tagged bytes from SignerInfo;
+     * the output replaces tag 0xA0 with 0x31.
+     */
+    public static byte[] retagForSigning(byte[] implicitTaggedAttrs) {
+        byte[] retagged = implicitTaggedAttrs.clone();
+        // Replace IMPLICIT [0] tag (0xA0) with SET OF tag (0x31)
+        if (retagged[0] == (byte) 0xA0) {
+            retagged[0] = (byte) (BERTags.SET | BERTags.CONSTRUCTED); // 0x31
+        }
+        return retagged;
+    }
+}
+----
+
+TIP: When debugging a signature that fails cryptographic verification but the `messageDigest` attribute matches the content hash, the re-tagging issue is the first thing to check. Extract the signed attributes bytes from the CMS structure, verify that the first byte is `31` (not `A0`) when fed into the signature verification, and compare the hash of those bytes against the decrypted signature value.
+
+
+== Unsigned Attributes: Post-Signature Additions
+
+Unsigned attributes are added to the `SignerInfo` _after_ the signature has been computed.
+They are not covered by the signature and can be added or modified without invalidating it.
+This is by design -- the primary use case is adding information that is not available at signing time.
+
+The most important unsigned attributes for PDF signatures:
+
+.Common unsigned attributes in PDF CMS signatures
+[cols="2,3,4", options="header"]
+|===
+| Attribute | OID | Description
+
+| `signature-time-stamp`
+| `1.2.840.113549.1.9.16.2.14`
+| An RFC 3161 timestamp token over the signature value. Provides a trusted, third-party assertion of the time the signature existed. This is the mechanism for timestamping described in Chapter 18.
+
+| `counterSignature`
+| `1.2.840.113549.1.9.6`
+| A counter-signature -- another signer's signature over the original signature value. Rarely used in PDF signatures directly; timestamps are the modern replacement.
+|===
+
+The timestamp token in the `signature-time-stamp` attribute is itself a CMS `SignedData` structure, with its `eContentType` set to `id-ct-TSTInfo` (`1.2.840.113549.1.9.16.1.4`).
+This creates a nested CMS-within-CMS structure: the outer `SignedData` is the PDF signature, and the inner `SignedData` (inside an unsigned attribute of the outer) is the timestamp.
+
+
+== CAdES: CMS Advanced Electronic Signatures
+
+The basic CMS `SignedData` structure defined by {rfc5652} is cryptographically complete but lacks features needed for European regulatory compliance.
+**CAdES** (CMS Advanced Electronic Signatures), defined in {etsi-cades}, extends CMS with additional signed attributes and profile rules.
+
+The key additions CAdES makes to CMS for PDF signing:
+
+1. **ESS-signing-certificate-v2** (discussed above) -- mandatory in all CAdES profiles, binds the signature to a specific certificate.
+
+2. **Signature policy identifier** -- optional attribute that references a specific signature policy (a set of rules defining the meaning and validation requirements of the signature). Used in some government contexts.
+
+3. **Commitment type indication** -- optional attribute declaring what the signer intends by signing (proof of origin, proof of receipt, proof of approval, etc.).
+
+4. **Signer location** -- optional attribute with the signer's claimed location at signing time.
+
+The relationship between CMS, CAdES, and PAdES is hierarchical:
+
+----
+CMS (RFC 5652)
+  |
+  +-- CAdES (ETSI EN 319 122) = CMS + mandatory signed attributes
+        |
+        +-- PAdES (ETSI EN 319 142) = CAdES embedded in PDF per ISO 32000-2
+----
+
+A PAdES signature is a CAdES signature is a CMS signature.
+Each layer adds constraints but does not remove any.
+A basic `adbe.pkcs7.detached` signature is CMS but not necessarily CAdES.
+An `ETSI.CAdES.detached` signature is CMS, CAdES, and PAdES.
+
+
+== Old PKCS#7 vs Modern CMS: What Changed
+
+If you work with PDF signatures long enough, you will encounter CMS structures produced by older libraries that do not quite match what {rfc5652} specifies.
+The most common issues trace back to libraries that implemented the original PKCS#7 v1.5 rather than CMS, or that implemented an intermediate version with bugs that were never fixed because "it worked in Acrobat."
+
+.Differences between legacy PKCS#7 and modern CMS in the wild
+[cols="2,3,3", options="header"]
+|===
+| Issue | Legacy PKCS#7 Behavior | Modern CMS ({rfc5652})
+
+| SignedData version
+| Always 1, regardless of content type
+| Version depends on which optional fields are present (1, 3, 4, or 5)
+
+| digestAlgorithms consistency
+| May list algorithms not actually used by any SignerInfo
+| Must be consistent with SignerInfo entries
+
+| Signed attributes encoding
+| Some libraries used BER (not DER) encoding for the SET OF, causing non-deterministic byte ordering
+| Must use DER, which enforces a specific ordering of SET elements
+
+| ESS-signing-certificate
+| Absent (not part of original PKCS#7)
+| Required by CAdES and PAdES
+
+| Certificate ordering
+| Some libraries assumed specific ordering
+| No ordering defined; validators must handle any order
+
+| NULL parameters in AlgorithmIdentifier
+| Inconsistent -- some included, some omitted
+| SHA-2 algorithms SHOULD omit parameters, but explicit NULL is tolerated
+|===
+
+WARNING: Early versions of iText (before 5.3.x) and some older .NET signing libraries produced CMS structures with BER-encoded signed attributes. BER allows multiple valid encodings for the same data -- specifically, SET OF elements may appear in any order. DER requires a specific ordering (by encoded value). If the signing library used one ordering and the validator expects another, the hash of the signed attributes will not match and the signature will fail cryptographic verification. The signature is not actually broken -- it was computed over BER-encoded bytes, and if you verify against the same bytes, it passes. But strict DER-only validators will reject it. This is the most common "it works in Acrobat but fails in DSS" scenario.
+
+
+[[ch06-java-parsing]]
+== Java: Parsing CMS SignedData
+
+Here is how to parse a CMS `SignedData` structure extracted from a PDF signature's `/Contents` field, using BouncyCastle {bc-version}:
+
+[source,java]
+----
+import java.security.cert.X509Certificate;
+import java.util.Collection;
+
+import org.bouncycastle.asn1.ASN1OctetString;
+import org.bouncycastle.asn1.ASN1UTCTime;
+import org.bouncycastle.asn1.cms.Attribute;
+import org.bouncycastle.asn1.cms.CMSAttributes;
+import org.bouncycastle.cert.X509CertificateHolder;
+import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
+import org.bouncycastle.cms.CMSSignedData;
+import org.bouncycastle.cms.SignerInformation;
+import org.bouncycastle.cms.SignerInformationStore;
+import org.bouncycastle.util.Store;
+import org.bouncycastle.util.encoders.Hex;
+
+/**
+ * Parse and inspect a CMS SignedData structure from a PDF signature.
+ * The input is the raw DER bytes from the /Contents hex string.
+ */
+public class CmsParsingExample {
+
+    public static void inspectCmsSignature(byte[] cmsBytes) throws Exception {
+        CMSSignedData signedData = new CMSSignedData(cmsBytes);               // <1>
+
+        // -- SignedData version --
+        int version = signedData.getVersion();
+        // version 1 = standard PDF signature
+        // version 3 = timestamp token or SubjectKeyIdentifier used
+
+        // -- Certificates embedded in the CMS --
+        Store<X509CertificateHolder> certStore = signedData.getCertificates();
+        JcaX509CertificateConverter converter =
+                new JcaX509CertificateConverter().setProvider("BC");
+
+        // -- Iterate over SignerInfos (usually exactly one) --
+        SignerInformationStore signerInfoStore = signedData.getSignerInfos();
+
+        for (SignerInformation signerInfo : signerInfoStore.getSigners()) {    // <2>
+
+            // Digest algorithm (e.g., "2.16.840.1.101.3.4.2.1" = SHA-256)
+            String digestOid = signerInfo.getDigestAlgOID();
+
+            // Signature algorithm (e.g., "1.2.840.113549.1.1.11" = SHA256withRSA)
+            String sigAlgOid = signerInfo.getEncryptionAlgOID();
+
+            // -- Signed attributes --
+            if (signerInfo.getSignedAttributes() != null) {
+
+                // messageDigest: the hash of the PDF byte range
+                Attribute mdAttr = signerInfo.getSignedAttributes()
+                        .get(CMSAttributes.messageDigest);
+                if (mdAttr != null) {
+                    byte[] digest = ASN1OctetString.getInstance(
+                            mdAttr.getAttrValues().getObjectAt(0)
+                    ).getOctets();
+                    // Hex.toHexString(digest) for human-readable output
+                }
+
+                // signingTime: the claimed signing time
+                Attribute stAttr = signerInfo.getSignedAttributes()
+                        .get(CMSAttributes.signingTime);
+                if (stAttr != null) {
+                    ASN1UTCTime time = ASN1UTCTime.getInstance(
+                            stAttr.getAttrValues().getObjectAt(0));
+                    // time.getDate() returns a java.util.Date
+                }
+            }
+
+            // -- Find the signer's certificate --
+            Collection<X509CertificateHolder> matches =
+                    certStore.getMatches(signerInfo.getSID());                 // <3>
+            for (X509CertificateHolder holder : matches) {
+                X509Certificate cert = converter.getCertificate(holder);
+                // cert.getSubjectX500Principal() = signer identity
+                // cert.getNotAfter() = certificate expiration
+            }
+
+            // -- Raw signature bytes --
+            byte[] signatureBytes = signerInfo.getSignature();                 // <4>
+            // signatureBytes.length = 256 for RSA-2048, 384 for RSA-3072, etc.
+        }
+    }
+}
+----
+<1> The `CMSSignedData` constructor parses the DER bytes into an in-memory object graph.
+<2> PDF signatures have exactly one SignerInfo. Multiple signers use multiple signature dictionaries, not multiple SignerInfos in one CMS structure.
+<3> The `getSID()` method returns a selector that matches against the `SignerIdentifier` -- either `issuerAndSerialNumber` or `subjectKeyIdentifier`.
+<4> The raw signature value. For RSA, this is the encrypted hash. For ECDSA, this is the DER-encoded `(r, s)` pair.
+
+
+== Java: Building CMS SignedData
+
+Creating a CMS `SignedData` for PDF signing is the reverse of parsing.
+The following example uses `CMSSignedDataGenerator` with explicit control over the signed attributes:
+
+[source,java]
+----
+import java.security.PrivateKey;
+import java.security.Security;
+import java.security.cert.Certificate;
+import java.security.cert.X509Certificate;
+import java.util.ArrayList;
+import java.util.List;
+
+import org.bouncycastle.cert.jcajce.JcaCertStore;
+import org.bouncycastle.cms.CMSProcessableByteArray;
+import org.bouncycastle.cms.CMSSignedData;
+import org.bouncycastle.cms.CMSSignedDataGenerator;
+import org.bouncycastle.cms.jcajce.JcaSignerInfoGeneratorBuilder;
+import org.bouncycastle.jce.provider.BouncyCastleProvider;
+import org.bouncycastle.operator.ContentSigner;
+import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
+import org.bouncycastle.operator.jcajce.JcaDigestCalculatorProviderBuilder;
+
+/**
+ * Build a detached CMS SignedData suitable for embedding
+ * in a PDF signature's /Contents field.
+ */
+public class CmsBuildingExample {
+
+    static {
+        Security.addProvider(new BouncyCastleProvider());
+    }
+
+    /**
+     * Create a detached CMS SignedData over the given byte range content.
+     *
+     * @param byteRangeContent  the PDF bytes specified by /ByteRange
+     * @param privateKey        the signer's private key
+     * @param chain             the certificate chain (end-entity first)
+     * @return DER-encoded CMS SignedData bytes
+     */
+    public static byte[] createDetachedSignature(
+            byte[] byteRangeContent,
+            PrivateKey privateKey,
+            Certificate[] chain) throws Exception {
+
+        X509Certificate signingCert = (X509Certificate) chain[0];
+
+        // Determine signature algorithm from key type
+        String sigAlg = switch (privateKey.getAlgorithm()) {
+            case "RSA" -> "SHA256withRSA";
+            case "EC"  -> "SHA256withECDSA";
+            default -> throw new IllegalArgumentException(
+                    "Unsupported key type: " + privateKey.getAlgorithm());
+        };
+
+        ContentSigner signer = new JcaContentSignerBuilder(sigAlg)
+                .setProvider("BC")
+                .build(privateKey);
+
+        CMSSignedDataGenerator generator = new CMSSignedDataGenerator();
+
+        generator.addSignerInfoGenerator(
+                new JcaSignerInfoGeneratorBuilder(
+                        new JcaDigestCalculatorProviderBuilder()
+                                .setProvider("BC")
+                                .build()
+                ).build(signer, signingCert)                                  // <1>
+        );
+
+        // Include the full certificate chain
+        List<Certificate> certList = new ArrayList<>();
+        for (Certificate cert : chain) {
+            certList.add(cert);
+        }
+        generator.addCertificates(new JcaCertStore(certList));
+
+        // Generate DETACHED signature (false = do not encapsulate content)
+        CMSProcessableByteArray content =
+                new CMSProcessableByteArray(byteRangeContent);
+        CMSSignedData signedData = generator.generate(content, false);        // <2>
+
+        return signedData.getEncoded();
+    }
+}
+----
+<1> `JcaSignerInfoGeneratorBuilder.build()` automatically adds the standard signed attributes (`contentType`, `messageDigest`, `signingTime`). For CAdES compliance, you need to add ESS-signing-certificate-v2 explicitly using a `CMSAttributeTableGenerator`.
+<2> The `false` parameter is critical: detached signature. The byte range content is hashed but not embedded in the CMS structure.
+
+
+== Annotated ASN.1 Dump of a Real PDF Signature
+
+The following is the output of `openssl asn1parse` run against the DER-decoded `/Contents` of an actual PDF signature.
+Each line is annotated with what it represents in the CMS structure.
+
+[source,asn1]
+----
+    0:d=0  hl=4 l=2417 cons: SEQUENCE              -- ContentInfo
+    4:d=1  hl=2 l=   9 prim: OBJECT   :pkcs7-signedData
+                                                     -- OID 1.2.840.113549.1.7.2
+   15:d=1  hl=4 l=2402 cons: cont [ 0 ]             -- EXPLICIT [0] content
+   19:d=2  hl=4 l=2398 cons: SEQUENCE                -- SignedData
+   23:d=3  hl=2 l=   1 prim: INTEGER  :01            -- version = 1
+   26:d=3  hl=2 l=  15 cons: SET                     -- digestAlgorithms
+   28:d=4  hl=2 l=  13 cons: SEQUENCE
+   30:d=5  hl=2 l=   9 prim: OBJECT   :sha256        -- OID 2.16.840.1.101.3.4.2.1
+   41:d=5  hl=2 l=   0 prim: NULL                    -- parameters (explicit NULL)
+   43:d=3  hl=2 l=  11 cons: SEQUENCE                -- encapContentInfo
+   45:d=4  hl=2 l=   9 prim: OBJECT   :pkcs7-data    -- eContentType = id-data
+                                                     -- OID 1.2.840.113549.1.7.1
+                                                     -- (eContent ABSENT = detached)
+   56:d=3  hl=4 l=1735 cons: cont [ 0 ]             -- certificates [0] IMPLICIT
+   60:d=4  hl=4 l= 872 cons: SEQUENCE                -- Certificate #1 (end-entity)
+  936:d=4  hl=4 l= 855 cons: SEQUENCE                -- Certificate #2 (intermediate CA)
+ 1795:d=3  hl=4 l= 624 cons: SET                     -- signerInfos
+ 1799:d=4  hl=4 l= 620 cons: SEQUENCE                -- SignerInfo
+ 1803:d=5  hl=2 l=   1 prim: INTEGER  :01            -- version = 1
+ 1806:d=5  hl=3 l= 141 cons: SEQUENCE                -- sid = issuerAndSerialNumber
+ 1809:d=6  hl=3 l= 118 cons: SEQUENCE                --   issuer DN
+ 1930:d=6  hl=2 l=  19 prim: INTEGER  :...           --   serialNumber
+ 1951:d=5  hl=2 l=  13 cons: SEQUENCE                -- digestAlgorithm
+ 1953:d=6  hl=2 l=   9 prim: OBJECT   :sha256        --   SHA-256
+ 1964:d=6  hl=2 l=   0 prim: NULL
+ 1966:d=5  hl=3 l= 189 cons: cont [ 0 ]             -- signedAttrs [0] IMPLICIT
+ 1969:d=6  hl=2 l=  24 cons: SEQUENCE                --   contentType attribute
+ 1995:d=6  hl=2 l=  47 cons: SEQUENCE                --   messageDigest attribute
+ 2044:d=6  hl=2 l=  28 cons: SEQUENCE                --   signingTime attribute
+ 2074:d=6  hl=2 l=  79 cons: SEQUENCE                --   ESS-signing-certificate-v2
+ 2155:d=5  hl=2 l=  13 cons: SEQUENCE                -- signatureAlgorithm
+ 2157:d=6  hl=2 l=   9 prim: OBJECT   :sha256WithRSAEncryption
+                                                     -- OID 1.2.840.113549.1.1.11
+ 2168:d=6  hl=2 l=   0 prim: NULL
+ 2170:d=5  hl=4 l= 256 prim: OCTET STRING            -- signature (256 bytes = RSA-2048)
+ 2430:d=5  hl=2 l=   7 cons: cont [ 1 ]             -- unsignedAttrs [1] IMPLICIT
+                                                     -- (timestamp token would be here)
+----
+
+NOTE: The offsets in this dump are from the start of the DER-encoded CMS blob, not from the start of the PDF file. To get the absolute file offset, add the starting offset of the `/Contents` hex string (as specified by `/ByteRange`) plus the hex-to-binary decoding offset. When debugging with a hex editor, remember that the `/Contents` value is hex-encoded: each byte in the ASN.1 dump corresponds to two hex characters in the PDF file.
+
+
+== Summary
+
+CMS `SignedData` is the envelope that carries every PDF digital signature.
+Its lineage stretches from RSA's PKCS#7 in 1993 through the S/MIME working group to the current {rfc5652} standard.
+The core design has been stable for over twenty-five years, which is both its strength (mature, well-understood, universally supported) and its burden (legacy quirks from 1993 are still with us).
+
+The key points for PDF signature work:
+
+* **ContentInfo wraps everything.** The OID `1.2.840.113549.1.7.2` identifies the CMS as `SignedData`. Learn to recognize its DER encoding (`06 09 2A 86 48 86 F7 0D 01 07 02`) in hex dumps.
+* **PDF signatures are detached.** The `eContent` in `EncapsulatedContentInfo` is absent. The signed content lives in the PDF file, addressed by `/ByteRange`.
+* **Signed attributes are signed, not the content.** The signature covers the DER-encoded signed attributes, which include the `messageDigest` (hash of the content). This two-level indirection is essential to understand.
+* **The DER re-tagging trap is real.** The signed attributes must be re-tagged from `A0` to `31` before hashing for signature computation. BouncyCastle handles this, but any lower-level implementation must get this right.
+* **ESS-signing-certificate-v2 is the CAdES requirement.** Without it, the signature is CMS-valid but not CAdES-valid and therefore not PAdES-compliant.
+* **Unsigned attributes carry timestamps.** The `signature-time-stamp` attribute contains a nested CMS structure -- a timestamp token from an RFC 3161 TSA.
+* **Legacy PKCS#7 differences still cause interop failures.** BER vs DER encoding of signed attributes is the most common culprit.
+
+The next part of this book turns to PDF internals -- the file structure, incremental updates, and form fields that the CMS `SignedData` is embedded within.
+Understanding the container is meaningless without understanding the document it lives in.

@@ -1,0 +1,4 @@
+-------------------------------------------------------------------------------
+Test set: io.pdfalyzer.book.ch12.SignatureExplorerTest
+-------------------------------------------------------------------------------
+Tests run: 4, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 1.706 s -- in io.pdfalyzer.book.ch12.SignatureExplorerTest

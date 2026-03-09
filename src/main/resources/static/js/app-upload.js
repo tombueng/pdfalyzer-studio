@@ -384,6 +384,7 @@ PDFalyzer.Upload = (function ($, P) {
         upload: upload,
         loadSample: loadSample,
         loadSampleOnInit: loadSampleOnInit,
-        restoreSessionOnInit: restoreSessionOnInit
+        restoreSessionOnInit: restoreSessionOnInit,
+        applyUploadSuccess: applyUploadSuccess
     };
 })(jQuery, PDFalyzer);
