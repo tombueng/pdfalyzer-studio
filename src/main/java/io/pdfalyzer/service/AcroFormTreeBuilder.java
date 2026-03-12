@@ -1,8 +1,11 @@
 package io.pdfalyzer.service;
 
+import java.security.cert.X509Certificate;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -16,6 +19,7 @@ import org.apache.pdfbox.cos.COSString;
 import org.apache.pdfbox.pdmodel.common.PDRectangle;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAnnotationWidget;
 import org.apache.pdfbox.pdmodel.interactive.annotation.PDAppearanceCharacteristicsDictionary;
+import org.apache.pdfbox.pdmodel.interactive.digitalsignature.PDSignature;
 import org.apache.pdfbox.pdmodel.interactive.form.PDAcroForm;
 import org.apache.pdfbox.pdmodel.interactive.form.PDCheckBox;
 import org.apache.pdfbox.pdmodel.interactive.form.PDComboBox;
@@ -27,6 +31,11 @@ import org.apache.pdfbox.pdmodel.interactive.form.PDRadioButton;
 import org.apache.pdfbox.pdmodel.interactive.form.PDSignatureField;
 import org.apache.pdfbox.pdmodel.interactive.form.PDTextField;
 import org.apache.pdfbox.pdmodel.interactive.form.PDVariableText;
+import org.bouncycastle.cert.X509CertificateHolder;
+import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
+import org.bouncycastle.cms.CMSSignedData;
+import org.bouncycastle.cms.SignerInformation;
+import org.bouncycastle.util.Store;
 import org.springframework.stereotype.Component;
 
 import io.pdfalyzer.model.PdfNode;
@@ -82,26 +91,96 @@ public class AcroFormTreeBuilder {
         this.cosBuilder = cosBuilder;
     }
 
-    PdfNode buildAcroFormTree(PDAcroForm acroForm, CosNodeBuilder.ParseContext ctx) {
+    PdfNode buildAcroFormTree(PDAcroForm acroForm, CosNodeBuilder.ParseContext ctx,
+                              Map<String, String> serialToBadge) {
         List<PDField> fields = acroForm.getFields();
         PdfNode formNode = new PdfNode("acroform",
                 "AcroForm (" + fields.size() + " fields)", "acroform", "fa-wpforms", "#0dcaf0");
         formNode.setNodeCategory("acroform");
-        if (acroForm.isSignaturesExist())
-            formNode.addProperty("SignaturesExist", "true");
+
+        // Decode AcroForm-level properties
         formNode.addProperty("NeedAppearances", String.valueOf(acroForm.getNeedAppearances()));
-        for (PDField field : fields) {
-            formNode.addChild(buildFieldNode(field, ctx));
+
+        // SigFlags (ISO 32000-2 §12.7.3.2)
+        COSDictionary acroDict = acroForm.getCOSObject();
+        int sigFlags = acroDict.getInt(COSName.getPDFName("SigFlags"), 0);
+        if (sigFlags != 0) {
+            formNode.addProperty("SigFlags", formatBitfield(sigFlags, SIGFLAGS_BITS));
         }
+
+        // DA — default appearance string (font/size/color fallback for all fields)
+        String da = acroDict.getString(COSName.DA);
+        if (da != null && !da.isBlank()) {
+            formNode.addProperty("Default Appearance (DA)", da);
+        }
+
+        // Q — default quadding (text alignment) for all fields
+        int q = acroDict.getInt(COSName.Q, -1);
+        if (q >= 0) {
+            String[] alignNames = { "left", "center", "right" };
+            formNode.addProperty("Default Alignment (Q)", q < alignNames.length ? alignNames[q] : String.valueOf(q));
+        }
+
+        // DR — default resources (decoded as semantic child with font listing)
+        COSBase drBase = acroDict.getDictionaryObject(COSName.DR);
+        if (drBase != null) {
+            COSBase drResolved = drBase;
+            if (drResolved instanceof COSObject) drResolved = ((COSObject) drResolved).getObject();
+            if (drResolved instanceof COSDictionary drDict) {
+                PdfNode drNode = new PdfNode("acroform-dr", "Default Resources (DR)",
+                        "folder", "fa-cubes", "#6f42c1");
+                drNode.setNodeCategory("acroform-resources");
+                // List fonts in DR
+                COSBase fontBase = drDict.getDictionaryObject(COSName.FONT);
+                if (fontBase instanceof COSDictionary fontDict) {
+                    PdfNode fontsNode = new PdfNode("acroform-dr-fonts",
+                            "Fonts (" + fontDict.size() + ")", "folder", "fa-font", "#6f42c1");
+                    fontsNode.setNodeCategory("acroform-fonts");
+                    for (Map.Entry<COSName, COSBase> entry : fontDict.entrySet()) {
+                        String fontAlias = entry.getKey().getName();
+                        PdfNode fontNode = new PdfNode("acroform-font-" + fontAlias,
+                                "/" + fontAlias, "font-ref", "fa-font", "#6f42c1");
+                        fontNode.setNodeCategory("acroform-font");
+                        String css = STD14_CSS.get(fontAlias);
+                        if (css != null) fontNode.addProperty("CSS Family", css);
+                        COSBase fontVal = entry.getValue();
+                        if (fontVal instanceof COSObject fontObj) {
+                            fontNode.addProperty("Object", fontObj.getObjectNumber() + " " + fontObj.getGenerationNumber() + " R");
+                            fontNode.setObjectNumber((int) fontObj.getObjectNumber());
+                            fontNode.setGenerationNumber(fontObj.getGenerationNumber());
+                        }
+                        fontsNode.addChild(fontNode);
+                    }
+                    drNode.addChild(fontsNode);
+                }
+                cosBuilder.attachCosChildren(drNode, drDict, "acroform-dr-cos", ctx, 0,
+                        Set.of("Font", "Type"));
+                formNode.addChild(drNode);
+            }
+        }
+
+        // XFA — warn if present (XFA forms are deprecated and not widely supported)
+        if (acroDict.getDictionaryObject(COSName.getPDFName("XFA")) != null) {
+            formNode.addProperty("XFA", "Present (deprecated XML Forms Architecture — limited viewer support)");
+        }
+
+        for (PDField field : fields) {
+            formNode.addChild(buildFieldNode(field, ctx, serialToBadge));
+        }
+
+        // Exclude keys already decoded above or represented as semantic children
+        Set<String> excludeKeys = Set.of(
+                "Fields", "NeedAppearances", "SigFlags", "DA", "DR", "Q", "XFA", "Type");
         try {
-            cosBuilder.attachCosChildren(formNode, acroForm.getCOSObject(), "acroform-cos", ctx, 0);
+            cosBuilder.attachCosChildren(formNode, acroDict, "acroform-cos", ctx, 0, excludeKeys);
         } catch (Exception e) {
             log.debug("Error attaching COS to acroform", e);
         }
         return formNode;
     }
 
-    PdfNode buildFieldNode(PDField field, CosNodeBuilder.ParseContext ctx) {
+    PdfNode buildFieldNode(PDField field, CosNodeBuilder.ParseContext ctx,
+                           Map<String, String> serialToBadge) {
         String fieldType = field.getFieldType();
         String label = (field.getPartialName() != null
                 ? field.getPartialName()
@@ -133,6 +212,12 @@ public class AcroFormTreeBuilder {
         node.addProperty("Required", String.valueOf(field.isRequired()));
         node.addProperty("FieldSubType", detectFieldSubType(field));
 
+        // Field flags /Ff (ISO 32000-2 §12.7.4.1)
+        int ff = field.getCOSObject().getInt(COSName.FF, 0);
+        if (ff != 0) {
+            node.addProperty("FieldFlags (Ff)", formatBitfield(ff, getFieldFlagBits(field)));
+        }
+
         if (field instanceof PDTextField textField) {
             node.addProperty("Multiline", String.valueOf(textField.isMultiline()));
         }
@@ -140,7 +225,6 @@ public class AcroFormTreeBuilder {
             node.addProperty("Editable", String.valueOf(comboBox.isEdit()));
         }
         if (field instanceof PDListBox) {
-            int ff = field.getCOSObject().getInt(COSName.FF, 0);
             node.addProperty("MultiSelect", String.valueOf((ff & (1 << 21)) != 0));
         }
         if (field instanceof PDCheckBox) {
@@ -168,6 +252,11 @@ public class AcroFormTreeBuilder {
         if (jsValidation != null && !jsValidation.isBlank()) {
             node.addProperty("JavaScript", jsValidation);
         }
+        // For signature fields: extract signer cert serial and apply DSS badge
+        if (field instanceof PDSignatureField sigField && serialToBadge != null && !serialToBadge.isEmpty()) {
+            applySignatureBadge(sigField, node, ctx, serialToBadge);
+        }
+
         extractAppearanceProperties(field, node, ctx);
         if (!field.getWidgets().isEmpty()) {
             try {
@@ -189,7 +278,7 @@ public class AcroFormTreeBuilder {
         }
         if (field instanceof PDNonTerminalField) {
             for (PDField child : ((PDNonTerminalField) field).getChildren()) {
-                node.addChild(buildFieldNode(child, ctx));
+                node.addChild(buildFieldNode(child, ctx, serialToBadge));
             }
         }
         try {
@@ -302,9 +391,9 @@ public class AcroFormTreeBuilder {
         // Widget-level appearance: MK dictionary (rotation, border/bg colors) and BS dictionary
         if (!field.getWidgets().isEmpty()) {
             COSDictionary widgetDict = field.getWidgets().get(0).getCOSObject();
-            // Annotation flags /F — bit 2=Hidden (never show), bit 6=NoView (screen invisible, prints)
+            // Annotation flags /F (ISO 32000-2 §12.5.3)
             int annotFlags = widgetDict.getInt(COSName.F, 0);
-            if (annotFlags != 0) node.addProperty("AnnotationFlags", String.valueOf(annotFlags));
+            if (annotFlags != 0) node.addProperty("AnnotationFlags", formatBitfield(annotFlags, ANNOT_FLAGS_BITS));
 
             COSBase mkBase = widgetDict.getDictionaryObject(COSName.MK);
             if (mkBase instanceof COSDictionary mk) {
@@ -473,6 +562,76 @@ public class AcroFormTreeBuilder {
         node.addProperty("CheckSymbol", caption);
     }
 
+    /** Badge colors — must match DocumentStructureTreeBuilder.BADGE_COLORS. */
+    private static final String[] BADGE_COLORS = {
+        "#0d6efd", "#198754", "#dc3545", "#fd7e14", "#6f42c1", "#20c997",
+        "#d63384", "#0dcaf0", "#ffc107", "#6610f2", "#e83e8c", "#17a2b8"
+    };
+
+    /**
+     * Extracts the signer certificate serial from the CMS/PKCS#7 data embedded in
+     * a signature field and applies the matching DSS badge (number + color).
+     */
+    @SuppressWarnings("unchecked")
+    private void applySignatureBadge(PDSignatureField sigField, PdfNode node,
+                                     CosNodeBuilder.ParseContext ctx,
+                                     Map<String, String> serialToBadge) {
+        try {
+            PDSignature sig = sigField.getSignature();
+            if (sig == null) {
+                log.debug("Signature field {} has no signature object", sigField.getFullyQualifiedName());
+                return;
+            }
+
+            // Get CMS contents from the signature dictionary
+            byte[] contents = sig.getContents();
+            if (contents == null || contents.length == 0) {
+                log.debug("Signature field {} has empty contents", sigField.getFullyQualifiedName());
+                return;
+            }
+            log.debug("Signature field {} has {} bytes of CMS data", sigField.getFullyQualifiedName(), contents.length);
+
+            CMSSignedData cmsData = new CMSSignedData(contents);
+            Collection<SignerInformation> signers = cmsData.getSignerInfos().getSigners();
+            if (signers.isEmpty()) {
+                log.debug("No signers found in CMS data for field {}", sigField.getFullyQualifiedName());
+                return;
+            }
+
+            SignerInformation signer = signers.iterator().next();
+            Store<X509CertificateHolder> certStore = cmsData.getCertificates();
+            Collection<X509CertificateHolder> certs = certStore.getMatches(signer.getSID());
+            if (certs.isEmpty()) {
+                log.debug("No matching certs found in CMS data for field {}", sigField.getFullyQualifiedName());
+                return;
+            }
+
+            X509CertificateHolder certHolder = certs.iterator().next();
+            X509Certificate cert = new JcaX509CertificateConverter().getCertificate(certHolder);
+            String serial = cert.getSerialNumber().toString(16).toUpperCase();
+            log.debug("Signature field {} signer cert serial={}, serialToBadge keys={}",
+                    sigField.getFullyQualifiedName(), serial, serialToBadge.keySet());
+
+            // Look up the badge assigned during DSS tree building
+            String badge = serialToBadge.get(serial);
+            if (badge != null) {
+                node.setBadge(badge);
+                try {
+                    int idx = (Integer.parseInt(badge) - 1) % BADGE_COLORS.length;
+                    node.setBadgeColor(BADGE_COLORS[idx]);
+                } catch (NumberFormatException e) {
+                    node.setBadgeColor(BADGE_COLORS[0]);
+                }
+                log.debug("Applied badge {} to signature field {}", badge, sigField.getFullyQualifiedName());
+            } else {
+                log.debug("No badge match for serial {} in serialToBadge map", serial);
+            }
+        } catch (Exception e) {
+            log.debug("Could not extract signer cert from signature field {}: {}",
+                    sigField.getFullyQualifiedName(), e.getMessage(), e);
+        }
+    }
+
     /** Converts a COSArray of 1 (grey), 3 (RGB), or 4 (CMYK) numbers to "#RRGGBB". Returns null if not applicable. */
     private String cosArrayToHex(COSBase base) {
         if (!(base instanceof COSArray arr)) return null;
@@ -513,5 +672,128 @@ public class AcroFormTreeBuilder {
             case "Sig": return "fa-signature";
             default: return "fa-square";
         }
+    }
+
+    // ── Bitfield decoding ────────────────────────────────────────────────
+
+    /** SigFlags bits (ISO 32000-2 §12.7.3.2) */
+    private static final String[][] SIGFLAGS_BITS = {
+        { "1", "SignaturesExist", "Document contains at least one signature field" },
+        { "2", "AppendOnly", "Document must be saved incrementally (append-only) to preserve signatures" },
+    };
+
+    /** Annotation flags /F bits (ISO 32000-2 §12.5.3, Table 64) */
+    private static final String[][] ANNOT_FLAGS_BITS = {
+        { "1",  "Invisible",      "Do not display if no handler" },
+        { "2",  "Hidden",         "Do not display or print" },
+        { "3",  "Print",          "Print when page is printed" },
+        { "4",  "NoZoom",         "Do not scale with page zoom" },
+        { "5",  "NoRotate",       "Do not rotate with page" },
+        { "6",  "NoView",         "Do not display on screen (may still print)" },
+        { "7",  "ReadOnly",       "Do not allow interaction" },
+        { "8",  "Locked",         "Do not allow deletion or property changes" },
+        { "9",  "ToggleNoView",   "Invert NoView flag for certain events" },
+        { "10", "LockedContents", "Do not allow content changes" },
+    };
+
+    /** Common field flags (ISO 32000-2 §12.7.4.1, Table 226) */
+    private static final String[][] FF_COMMON_BITS = {
+        { "1",  "ReadOnly",   "Field value cannot be changed" },
+        { "2",  "Required",   "Field must have a value before submit" },
+        { "3",  "NoExport",   "Field value not exported by submit action" },
+    };
+
+    /** Text field flags (ISO 32000-2 §12.7.5.3) */
+    private static final String[][] FF_TEXT_BITS = {
+        { "1",  "ReadOnly",        "Field value cannot be changed" },
+        { "2",  "Required",        "Field must have a value before submit" },
+        { "3",  "NoExport",        "Field value not exported by submit action" },
+        { "13", "Multiline",       "Text may span multiple lines" },
+        { "14", "Password",        "Text is masked (password entry)" },
+        { "21", "FileSelect",      "Value is a file path" },
+        { "23", "DoNotSpellCheck", "Spell checking disabled" },
+        { "24", "DoNotScroll",     "Text field does not scroll" },
+        { "25", "Comb",            "Text divided into equally spaced cells" },
+        { "26", "RichText",        "Value may contain rich text (XHTML)" },
+    };
+
+    /** Button field flags (ISO 32000-2 §12.7.5.2) */
+    private static final String[][] FF_BUTTON_BITS = {
+        { "1",  "ReadOnly",        "Field value cannot be changed" },
+        { "2",  "Required",        "Field must have a value before submit" },
+        { "3",  "NoExport",        "Field value not exported by submit action" },
+        { "15", "NoToggleToOff",   "Radio: exactly one button must be selected at all times" },
+        { "16", "Radio",           "This is a set of radio buttons (not checkboxes)" },
+        { "17", "Pushbutton",      "Momentary push button (no retained value)" },
+        { "26", "RadiosInUnison",  "Radio buttons with same value turn on/off together" },
+    };
+
+    /** Choice field flags (ISO 32000-2 §12.7.5.4) */
+    private static final String[][] FF_CHOICE_BITS = {
+        { "1",  "ReadOnly",           "Field value cannot be changed" },
+        { "2",  "Required",           "Field must have a value before submit" },
+        { "3",  "NoExport",           "Field value not exported by submit action" },
+        { "18", "Combo",              "Combo box (drop-down); otherwise list box" },
+        { "19", "Edit",               "Combo box allows custom text entry" },
+        { "20", "Sort",               "Options should be sorted alphabetically" },
+        { "22", "MultiSelect",        "Multiple items may be selected simultaneously" },
+        { "23", "DoNotSpellCheck",    "Spell checking disabled" },
+        { "27", "CommitOnSelChange",  "Value committed immediately on selection change" },
+    };
+
+    /**
+     * Returns the appropriate flag bit definitions for a given field type.
+     */
+    private String[][] getFieldFlagBits(PDField field) {
+        if (field instanceof PDTextField) return FF_TEXT_BITS;
+        if (field instanceof PDPushButton || field instanceof PDCheckBox || field instanceof PDRadioButton)
+            return FF_BUTTON_BITS;
+        if (field instanceof PDComboBox || field instanceof PDListBox) return FF_CHOICE_BITS;
+        return FF_COMMON_BITS;
+    }
+
+    /**
+     * Formats a bitfield integer into a human-readable string showing the decimal value,
+     * binary representation, and the meaning of each set bit.
+     *
+     * Example output: "3 (0b11) — SignaturesExist: Document contains at least one signature field |
+     *                  AppendOnly: Document must be saved incrementally"
+     *
+     * @param value   the raw integer bitfield value
+     * @param bitDefs array of {bitPosition (1-based), name, description} for all defined bits
+     */
+    private static String formatBitfield(int value, String[][] bitDefs) {
+        if (value == 0) return "0 (none set)";
+
+        // Find highest defined bit for binary display width
+        int highBit = 0;
+        for (String[] def : bitDefs) {
+            int bit = Integer.parseInt(def[0]);
+            if (bit > highBit) highBit = bit;
+        }
+        // Also consider any set bits beyond defined ones
+        int msb = 32 - Integer.numberOfLeadingZeros(value);
+        if (msb > highBit) highBit = msb;
+
+        // Binary representation
+        String binary = Integer.toBinaryString(value);
+        StringBuilder sb = new StringBuilder();
+        sb.append(value).append(" (0b").append(binary).append(") — ");
+
+        // List set bits with descriptions
+        List<String> setFlags = new ArrayList<>();
+        for (String[] def : bitDefs) {
+            int bit = Integer.parseInt(def[0]);
+            boolean isSet = (value & (1 << (bit - 1))) != 0;
+            if (isSet) {
+                setFlags.add(def[1] + ": " + def[2]);
+            }
+        }
+        if (setFlags.isEmpty()) {
+            sb.append("(no recognized flags)");
+        } else {
+            sb.append(String.join(" | ", setFlags));
+        }
+        return sb.toString();
     }
 }
