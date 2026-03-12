@@ -39,6 +39,8 @@ public class PdfNode {
     private boolean editable;
     private String valueType;
     private String keyPath;
+    private String badge;
+    private String badgeColor;
 
     public PdfNode(String name, String type) {
         this.name = name;
@@ -70,5 +72,37 @@ public class PdfNode {
 
     public void addChild(PdfNode child) {
         this.children.add(child);
+    }
+
+    /**
+     * Copies this node tree up to {@code maxDepth} levels deep, appending the
+     * given suffix to all IDs to avoid duplicate DOM identifiers.
+     * Children beyond the depth limit are omitted.
+     */
+    public PdfNode deepCopy(String idSuffix, int maxDepth) {
+        PdfNode copy = new PdfNode(
+                id != null ? id + idSuffix : null,
+                name, type, icon, color);
+        copy.nodeCategory = nodeCategory;
+        copy.objectNumber = objectNumber;
+        copy.generationNumber = generationNumber;
+        copy.pageIndex = pageIndex;
+        copy.boundingBox = boundingBox;
+        copy.cosType = cosType;
+        copy.rawValue = rawValue;
+        copy.editable = editable;
+        copy.valueType = valueType;
+        copy.keyPath = keyPath;
+        copy.badge = badge;
+        copy.badgeColor = badgeColor;
+        if (properties != null) {
+            copy.properties = new LinkedHashMap<>(properties);
+        }
+        if (maxDepth > 0) {
+            for (PdfNode child : children) {
+                copy.children.add(child.deepCopy(idSuffix, maxDepth - 1));
+            }
+        }
+        return copy;
     }
 }

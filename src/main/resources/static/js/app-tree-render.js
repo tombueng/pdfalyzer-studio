@@ -55,6 +55,22 @@ PDFalyzer.TreeRender = (function ($, P) {
         }
         $header.append($label);
 
+        // DSS cross-reference badge (numbered, colored)
+        if (node.badge) {
+            var badges = node.badge.split(',');
+            for (var bi = 0; bi < badges.length; bi++) {
+                var $badge = $('<span>', {
+                    'class': 'dss-ref-badge',
+                    text: badges[bi],
+                    title: 'Cross-reference #' + badges[bi]
+                });
+                if (node.badgeColor) {
+                    $badge.css({ 'background-color': node.badgeColor, color: '#fff' });
+                }
+                $header.append($badge);
+            }
+        }
+
         // COS type badge
         if (node.cosType) {
             var badgeClass = COST_TYPE_CLASSES[node.cosType] || '';
