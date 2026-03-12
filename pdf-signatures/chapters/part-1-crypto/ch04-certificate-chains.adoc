@@ -15,14 +15,14 @@ We trace the trust delegation model from root CAs through intermediate certifica
 We cover revocation checking -- both CRL and OCSP -- in exhaustive detail, because revocation failures are among the most common and most confusing reasons a PDF signature is rejected.
 Finally, we survey the trust stores that anchor the entire system: Adobe's AATL, the EU Trusted List, OS-level stores, Java's cacerts, and custom trust stores -- explaining what each one is, who controls it, and when you need which.
 
-If you already know how AuthorityKeyIdentifier links to SubjectKeyIdentifier and you can explain the difference between AATL and EUTL without hesitation, skip to Chapter 5.
+If you already know how AuthorityKeyIdentifier links to SubjectKeyIdentifier and you can explain the difference between AATL and EUTL without hesitation, skip to <<ch05>>.
 Everyone else: this is where we connect cryptographic identity to real-world trust.
 --
 
 
 == Why Chains Exist
 
-In Chapter 3 we established that an X.509 certificate binds a public key to an identity.
+In <<ch03>> we established that an X.509 certificate binds a public key to an identity.
 A certificate authority (CA) vouches for that binding by signing the certificate with its own private key.
 But who vouches for the CA?
 
@@ -80,7 +80,7 @@ The root CA certificate is **not** included.
 This is by design: the validator must already trust the root, and including it in the signature would just waste space.
 The validator checks the chain by building a path from the end-entity up through the intermediates until it reaches a certificate that matches one in its trust store.
 
-IMPORTANT: Some signing implementations include the root certificate in the CMS `certificates` field. This is not wrong per se -- {rfc5652} allows it -- but it serves no purpose. A validator will not trust a root certificate just because it appears inside a signature. Trust comes from the trust store, not from the document. If anything, including the root wastes space in the `/Contents` hex string, which matters when you are estimating the size of the content gap (Chapter 13). PDFBox does not include the root by default. iText does. Adobe Acrobat tolerates both approaches.
+IMPORTANT: Some signing implementations include the root certificate in the CMS `certificates` field. This is not wrong per se -- {rfc5652} allows it -- but it serves no purpose. A validator will not trust a root certificate just because it appears inside a signature. Trust comes from the trust store, not from the document. If anything, including the root wastes space in the `/Contents` hex string, which matters when you are estimating the size of the content gap (<<ch13>>). PDFBox does not include the root by default. iText does. Adobe Acrobat tolerates both approaches.
 
 WARNING: A chain with a **missing intermediate** is the single most common cause of "certificate chain not trusted" errors in PDF signatures. The end-entity certificate is present, the root is in the trust store, but the intermediate that links them is nowhere to be found. The CMS structure does not contain it, and the validator cannot download it (or is configured not to). Always include the full chain (minus the root) in your CMS `certificates` field.
 
@@ -300,13 +300,13 @@ A certificate might be expired _now_ but was valid at the time the document was 
 Should the signature be considered valid?
 
 The answer depends on whether the signature includes a trusted timestamp.
-If the CMS `SignedData` contains a timestamp token in the unsigned attributes (see Chapter 18), and that timestamp was produced while the certificate was still valid, then the signature remains valid even after the certificate expires.
+If the CMS `SignedData` contains a timestamp token in the unsigned attributes (see <<ch18>>), and that timestamp was produced while the certificate was still valid, then the signature remains valid even after the certificate expires.
 This is the foundation of **long-term validation (LTV)** -- the mechanism that allows a signed PDF to remain verifiable for decades.
 
 Without a timestamp, most validators check the certificate against the current time.
 A signature made with a certificate that has since expired will show warnings or errors in Adobe Acrobat, even if the signature was perfectly valid when it was created.
 
-IMPORTANT: This is why timestamps matter so much for PDF signatures. A timestamp cryptographically proves _when_ the signature was created, allowing validators to check the certificate against the signing time rather than the current time. If you are building a signing service, always include a timestamp. Chapter 18 covers timestamps and LTV in exhaustive detail.
+IMPORTANT: This is why timestamps matter so much for PDF signatures. A timestamp cryptographically proves _when_ the signature was created, allowing validators to check the certificate against the signing time rather than the current time. If you are building a signing service, always include a timestamp. <<ch18>> covers timestamps and LTV in exhaustive detail.
 
 
 == Revocation Checking
@@ -686,7 +686,7 @@ Adobe Acrobat can import the EUTL in addition to the AATL.
 When configured to use both, Acrobat validates against the union of AATL and EUTL trust anchors.
 In European deployments, this is the standard configuration.
 
-IMPORTANT: A signature that validates against the EUTL as a qualified electronic signature has legal standing that an AATL-only signature does not. The EUTL is not just a technical trust store -- it is a legal instrument. If you are operating in the EU, the EUTL is the authoritative trust store for determining whether a signature meets the highest legal tier. Chapter 19 covers the eIDAS legal framework in detail.
+IMPORTANT: A signature that validates against the EUTL as a qualified electronic signature has legal standing that an AATL-only signature does not. The EUTL is not just a technical trust store -- it is a legal instrument. If you are operating in the EU, the EUTL is the authoritative trust store for determining whether a signature meets the highest legal tier. <<ch19>> covers the eIDAS legal framework in detail.
 
 
 === Operating System Trust Stores

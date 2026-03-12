@@ -228,7 +228,7 @@ CAUTION: If you encounter a PDF signed with MD5 as the digest algorithm, the sig
 
 == The Signing Process Step by Step
 
-Now we connect the hash function to the asymmetric cryptography from Chapter 1 and trace the exact sequence of operations that produces a PDF digital signature.
+Now we connect the hash function to the asymmetric cryptography from <<ch01>> and trace the exact sequence of operations that produces a PDF digital signature.
 
 === Step 1: Hash the Document
 
@@ -334,11 +334,11 @@ A signature can be cryptographically valid and still be _untrustworthy_:
 * The certificate might be expired.
 * The certificate might have been revoked.
 * The certificate might not chain to a trusted root.
-* The signed byte range might not cover the entire document (the Bochum attacks exploited exactly this -- see Chapter 24).
-* The certificate might lack the `digitalSignature` or `nonRepudiation` key usage extension (see Chapter 3).
+* The signed byte range might not cover the entire document (the Bochum attacks exploited exactly this -- see <<ch24>>).
+* The certificate might lack the `digitalSignature` or `nonRepudiation` key usage extension (see <<ch03>>).
 
 Signature **validation** -- as opposed to mere cryptographic verification -- requires checking all of these conditions.
-Chapter 16 covers the full validation process.
+<<ch16>> covers the full validation process.
 ====
 
 
@@ -616,7 +616,7 @@ public class SigningExample {
     }
 }
 ----
-<1> Extract the private key from the key store. In production, use an HSM (see Chapter 5).
+<1> Extract the private key from the key store. In production, use an HSM (see <<ch05>>).
 <2> Include the full certificate chain so validators can build the path without fetching intermediates.
 <3> For ECDSA keys, use `hashAlgorithm + "withECDSA"` instead. The algorithm name must match the key type.
 <4> Embedding certificates in the CMS is critical -- without them, the validator has no chain to verify.
@@ -691,7 +691,7 @@ public class HashDebugExample {
 }
 ----
 
-TIP: When debugging a hash mismatch, the most common causes are: (1) the byte range was extracted incorrectly -- off by one byte, or not accounting for the gap correctly; (2) the PDF was modified after signing (perhaps by a tool that did a full save instead of incremental save); (3) the byte range array values do not add up to cover the entire file (there are bytes before or after the byte range that are not part of the signed content but should be -- see Chapter 13 for the gory details).
+TIP: When debugging a hash mismatch, the most common causes are: (1) the byte range was extracted incorrectly -- off by one byte, or not accounting for the gap correctly; (2) the PDF was modified after signing (perhaps by a tool that did a full save instead of incremental save); (3) the byte range array values do not add up to cover the entire file (there are bytes before or after the byte range that are not part of the signed content but should be -- see <<ch13>> for the gory details).
 
 
 == Summary

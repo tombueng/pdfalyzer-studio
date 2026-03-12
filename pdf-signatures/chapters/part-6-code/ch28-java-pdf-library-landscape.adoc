@@ -1,3 +1,4 @@
+[[ch28]]
 = The Java PDF Library Landscape
 
 [.lead]
@@ -52,7 +53,7 @@ The Maven coordinates `com.lowagie:itext` were among the most downloaded artifac
 
 === The LGPL-to-AGPL Switch: The Day the Rules Changed (2009)
 
-On December 1, 2009, Bruno Lowagie changed the license of iText from **LGPL** to **AGPL** (GNU Affero General Public License), starting with version **5.0.0**.
+In December 2009, Bruno Lowagie changed the license of iText from **LGPL** to **AGPL** (GNU Affero General Public License), starting with version **5.0.0**.
 
 This was, depending on your perspective, either a reasonable business decision or an act of betrayal against the community that had made iText successful.
 Both perspectives have merit, and understanding the controversy matters because its consequences are still playing out in production systems today.
@@ -128,7 +129,7 @@ To verify: extract the CMS SignedData from the `/Contents` entry and check:
 2. Is the digest algorithm SHA-1 (`OID 1.3.14.3.2.26`)? (deprecated)
 3. Is the `ESS-signing-certificate-v2` attribute present in `signedAttrs`? (missing = not PAdES-compliant)
 
-Chapter 31 provides code to perform all three checks.
+<<ch31>> provides code to perform all three checks.
 ====
 
 === iText 5.x, 7.x, and 8.x: The Commercial Evolution
@@ -573,7 +574,7 @@ The honest comparison:
 **Our recommendation**: Learn to build signatures with PDFBox + BouncyCastle first (Chapters 29–31).
 Then, when you need PAdES-B-LTA or EU Trusted List integration in production, use EU DSS — you'll understand what it's doing under the hood, and you'll be able to debug it when it behaves unexpectedly.
 
-Chapter 23 provides a complete walkthrough of EU DSS for PAdES signing and validation.
+<<ch23>> provides a complete walkthrough of EU DSS for PAdES signing and validation.
 ====
 
 === EU DSS Version History

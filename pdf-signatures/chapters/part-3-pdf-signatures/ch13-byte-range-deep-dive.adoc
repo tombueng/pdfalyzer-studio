@@ -1,8 +1,9 @@
+[[ch13]]
 = Byte Range Deep Dive
 
 [.lead]
 The byte range is where PDF signatures live or die.
-Everything in Chapter 12 — the `/Sig` dictionary, the `/SubFilter`, the certificate chain, the CMS structure — all of it is meaningless if the byte range is wrong.
+Everything in <<ch12>> — the `/Sig` dictionary, the `/SubFilter`, the certificate chain, the CMS structure — all of it is meaningless if the byte range is wrong.
 A single off-by-one error in the `/ByteRange` array, and the signature is cryptographically invalid.
 A subtle gap in coverage, and an attacker can inject content that the signature appears to endorse.
 
@@ -10,7 +11,7 @@ This chapter takes the byte range apart byte by byte.
 We will trace exactly which bytes are signed, where the gap is, why the gap exists, what lives in the gap, and what goes wrong when any of these assumptions are violated.
 We will look at hex dumps of real PDFs, visualize the byte range geometry, walk through multi-signature scenarios, and examine the exact attacks that exploit byte range weaknesses.
 
-If Chapter 12 taught you _what_ a byte range is, this chapter teaches you _how_ it actually works in the raw file — and how to verify that it works correctly.
+If <<ch12>> taught you _what_ a byte range is, this chapter teaches you _how_ it actually works in the raw file — and how to verify that it works correctly.
 
 == The Byte Range Model
 
@@ -213,7 +214,7 @@ The byte range still validates — the hash over the signed segments hasn't chan
 But the file now contains unsigned data at the end.
 If this unsigned data is a valid incremental update (with its own xref, trailer, and `%%EOF`), a PDF viewer might load it and display the _attacker's_ content while showing the original signature as valid.
 
-This is exactly the **Incremental Saving Attack (ISA)** that the Bochum team demonstrated in 2019 (Chapter 24).
+This is exactly the **Incremental Saving Attack (ISA)** that the Bochum team demonstrated in 2019 (<<ch24>>).
 The attack works because PDF viewers before the patches would happily load incremental updates appended after the signed byte range, display the new content, and still report the signature as valid — because the signed bytes hadn't been modified.
 
 [CAUTION]
@@ -232,7 +233,7 @@ This doesn't necessarily mean the file was tampered with — a second legitimate
 
 If there is unsigned trailing data that is _not_ a valid subsequent signature revision, the document has been modified after signing and the signature should be treated as covering only the original content.
 
-Chapter 24 provides the full attack taxonomy and defense code.
+<<ch24>> provides the full attack taxonomy and defense code.
 ====
 
 === Multi-Signature Scenarios
@@ -498,7 +499,7 @@ Full verification requires both:
 1. Byte range hash matches CMS `messageDigest` attribute (shown above)
 2. CMS signature over `signedAttrs` verifies with the signer's certificate
 
-Chapter 31 provides complete verification code that covers both steps plus certificate chain validation.
+<<ch31>> provides complete verification code that covers both steps plus certificate chain validation.
 ====
 
 == Hex Dump Walkthrough: A Real Signed PDF
@@ -620,7 +621,7 @@ if (signedEnd < fileSize) {
 **Resolution**: Parse the trailing data.
 If it contains a valid cross-reference section and trailer pointing to a subsequent signature, it's likely a legitimate multi-signature document.
 If it contains modified objects (changed page content, replaced fonts, new pages), it may be an attack.
-Chapter 24 provides detailed analysis code.
+<<ch24>> provides detailed analysis code.
 
 === Problem 2: `/Contents` Size Exceeded
 

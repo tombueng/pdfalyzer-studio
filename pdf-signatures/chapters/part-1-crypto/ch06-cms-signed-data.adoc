@@ -340,7 +340,7 @@ The mandatory signed attributes for PDF signatures are:
 | Required by PAdES ({etsi-cades}). Contains a hash of the signer's certificate, binding the signature to a specific certificate and preventing certificate substitution attacks. Without this attribute, an attacker could replace the signer's certificate with a different certificate that has the same public key.
 |===
 
-NOTE: The `signingTime` attribute is optional per {rfc5652} but effectively mandatory in practice. Every PDF viewer displays the signing time, and a signature without one looks suspicious to users. However, the signing time is _not_ cryptographically trustworthy -- the signer controls the clock. For legally binding timestamps, use an RFC 3161 timestamp token in the unsigned attributes (Chapter 18).
+NOTE: The `signingTime` attribute is optional per {rfc5652} but effectively mandatory in practice. Every PDF viewer displays the signing time, and a signature without one looks suspicious to users. However, the signing time is _not_ cryptographically trustworthy -- the signer controls the clock. For legally binding timestamps, use an RFC 3161 timestamp token in the unsigned attributes (<<ch18>>).
 
 === The ESS-signing-certificate-v2 Attribute
 
@@ -455,7 +455,7 @@ The most important unsigned attributes for PDF signatures:
 
 | `signature-time-stamp`
 | `1.2.840.113549.1.9.16.2.14`
-| An RFC 3161 timestamp token over the signature value. Provides a trusted, third-party assertion of the time the signature existed. This is the mechanism for timestamping described in Chapter 18.
+| An RFC 3161 timestamp token over the signature value. Provides a trusted, third-party assertion of the time the signature existed. This is the mechanism for timestamping described in <<ch18>>.
 
 | `counterSignature`
 | `1.2.840.113549.1.9.6`

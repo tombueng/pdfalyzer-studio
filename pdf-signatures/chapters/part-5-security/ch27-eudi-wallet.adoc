@@ -1,3 +1,4 @@
+[[ch27]]
 = EUDI Wallet & Digital Identity
 
 [.lead]
@@ -16,7 +17,7 @@ We start with the political context (because regulation drives everything in thi
 
 === The Regulatory History
 
-The original eIDAS regulation ({eidas-reg}, Chapter 19) entered into force in 2014 and became fully effective in 2016.
+The original eIDAS regulation ({eidas-reg}, <<ch19>>) entered into force in 2014 and became fully effective in 2016.
 It was a success in the narrow sense: it created a functioning framework for qualified trust services, established the EU Trusted List, and enabled cross-border recognition of QES.
 
 It was a failure in the broad sense: almost nobody used it.
@@ -38,7 +39,7 @@ Something more forceful was needed.
 
 === Regulation (EU) 2024/1183
 
-On April 11, 2024, the revised eIDAS regulation — {eidas2-reg}, commonly called eIDAS 2.0 — entered into force.
+On May 20, 2024, the revised eIDAS regulation — {eidas2-reg}, commonly called eIDAS 2.0 — entered into force (signed April 11, 2024; published in the Official Journal on April 30, 2024).
 The revision keeps the trust services framework from eIDAS 1.0 largely intact (the three-tier signature model, QTSPs, the EU Trusted List — all unchanged) but adds a transformative new component.
 
 The headline change: **every EU member state must provide a European Digital Identity Wallet to its citizens and residents**.
@@ -50,8 +51,8 @@ The timeline:
 |===
 | Date | Milestone
 
-| April 11, 2024
-| eIDAS 2.0 enters into force
+| May 20, 2024
+| eIDAS 2.0 enters into force (signed April 11, published in OJ April 30)
 
 | By November 2024
 | European Commission publishes the first set of implementing acts defining technical specifications
@@ -376,7 +377,7 @@ Services like DocuSign (through its European qualified signing infrastructure), 
 The wallet extends this existing model to a new client (the smartphone) but does not fundamentally change the architecture.
 
 The Cloud Signature Consortium (CSC) API — the industry-standard REST API for remote signing — is being adapted for wallet integration.
-If your application already supports CSC-based remote signing (Chapter 22), adapting it for wallet-initiated signing is a relatively small change.
+If your application already supports CSC-based remote signing (<<ch22>>), adapting it for wallet-initiated signing is a relatively small change.
 ====
 
 === The Sole Control Assurance Problem
@@ -497,7 +498,7 @@ public byte[] completeWalletSignature(byte[] pdfBytes,
 ====
 The code above is simplified for illustration.
 A production implementation must handle: pre-allocating the `/Contents` placeholder, coordinating the byte range computation with the CMS injection, error handling for TSA timeouts, retry logic for remote QSCD communication failures, and verification of the completed signature.
-Chapter 29 covers the full PDFBox signing pipeline.
+<<ch29>> covers the full PDFBox signing pipeline.
 ====
 
 
@@ -577,7 +578,7 @@ This is not a technical problem, but it has technical consequences: if users do 
 
 1. **Update your trust store management.** If your enterprise trust store is managed manually (a Java `cacerts` file, a Windows certificate store), automate it. Wallet-generated signatures will come from QTSPs that may not be in your current trust store.
 
-2. **Budget for EUTL integration.** Consuming the EUTL is not trivial: the LOT and individual trusted lists are XML documents signed with specific certificates, using a specific schema (ETSI TS 119 612). The EU DSS framework (Chapter 23) provides a reference implementation, but integrating it into your architecture requires engineering effort.
+2. **Budget for EUTL integration.** Consuming the EUTL is not trivial: the LOT and individual trusted lists are XML documents signed with specific certificates, using a specific schema (ETSI TS 119 612). The EU DSS framework (<<ch23>>) provides a reference implementation, but integrating it into your architecture requires engineering effort.
 
 3. **Plan for volume.** If your system currently validates hundreds of qualified signatures per day, prepare for thousands or tens of thousands. The wallet will democratize QES, and your systems will see the increase.
 
@@ -593,7 +594,7 @@ Several significant questions remain open as of early 2026:
 
 **Will Apple and Google cooperate?** The wallet runs on smartphones, which means it needs integration with iOS and Android. Both platforms control access to NFC, secure elements, and biometric APIs. The EU Digital Markets Act (DMA) requires gatekeepers to allow third-party wallet apps to access device hardware, but the implementation details are being negotiated, and the mobile platforms have commercial interests in their own wallet ecosystems (Apple Pay, Google Pay).
 
-**What happens with AATL?** If hundreds of millions of qualified signatures are created through the wallet but the signing certificates are not in Adobe's AATL, Acrobat users will see yellow warnings on legitimate QES. This creates political pressure on Adobe to either accept the EUTL as a trust anchor by default or face regulatory action. The outcome will shape the PDF signature ecosystem for years.
+**Will Acrobat's EUTL integration keep up?** Acrobat has validated against the EUTL by default since 2015, but the integration suffers from cache corruption bugs and update lag (see <<ch26>>). If hundreds of millions of qualified signatures are created through the wallet, even occasional EUTL failures will produce a flood of false-negative yellow warnings on legitimate QES. This creates pressure on Adobe to make EUTL validation robust — not just enabled — or face regulatory action under eIDAS 2.0's stronger enforcement provisions.
 
 **Will the credential format converge?** The current ARF supports both SD-JWT and mdoc. Supporting two formats doubles the implementation effort for relying parties. The industry is watching to see if one format emerges as dominant or if the dual-format approach persists.
 

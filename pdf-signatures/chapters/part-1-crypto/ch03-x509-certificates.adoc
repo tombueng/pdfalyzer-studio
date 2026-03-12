@@ -244,7 +244,7 @@ Validity ::= SEQUENCE {
 ----
 
 {rfc5280} §4.1.2.5 specifies that dates through 2049 use UTCTime (`YYMMDDHHMMSSZ`) and dates in 2050 and beyond use GeneralizedTime (`YYYYMMDDHHMMSSZ`).
-This means every certificate issued today uses UTCTime for both `notBefore` and `notAfter` -- unless the certificate is valid until 2050 or later (some root CA certificates are).
+This means most certificates issued today use UTCTime for both `notBefore` and `notAfter` -- unless the `notAfter` date falls in 2050 or later, as is the case for many root CA certificates, which must use GeneralizedTime for that field.
 
 IMPORTANT: For PDF signatures, the validity period has a nuanced interpretation. A signature made while the certificate was valid remains meaningful _after_ the certificate expires -- the certificate was valid _at the time of signing_. This is why timestamps are critical: a timestamp proves that the signature existed at a specific point in time, allowing validation even after certificate expiration. Without a timestamp, a validator must decide whether to check the certificate against the current time (strict) or the claimed signing time (lenient). Different validators make different choices, which is one of the many reasons the same signature shows "valid" in one viewer and "invalid" in another.
 
@@ -525,7 +525,7 @@ A TLS certificate is not a signing certificate.
 *Cause:* The validator is checking the certificate against the _current_ time instead of the _signing_ time.
 Without a trusted timestamp, the validator has no proof of when the signature was actually created.
 
-*Fix:* Include a timestamp in the signature (see Chapter 18 on LTV).
+*Fix:* Include a timestamp in the signature (see <<ch18>> on LTV).
 A timestamp from a trusted TSA proves the signature existed at a specific time, allowing validators to check the certificate's validity against that time rather than the current time.
 
 ==== Self-Signed Certificates
@@ -550,7 +550,7 @@ The validator cannot build a path from the end-entity to a trusted root.
 *Fix:* Include the full certificate chain (end-entity + all intermediates) in the CMS `certificates` field.
 Do NOT include the root CA -- the root must already be in the validator's trust store.
 
-IMPORTANT: This is one of the most common PDF signature problems. Always embed the full chain (minus the root) in your CMS signatures. The signing code in Chapter 2 already does this -- note how it includes `chain` (from the PKCS#12 key store) in the `CMSSignedDataGenerator`. If your PKCS#12 file doesn't contain the intermediates, you need to add them before signing.
+IMPORTANT: This is one of the most common PDF signature problems. Always embed the full chain (minus the root) in your CMS signatures. The signing code in <<ch02>> already does this -- note how it includes `chain` (from the PKCS#12 key store) in the `CMSSignedDataGenerator`. If your PKCS#12 file doesn't contain the intermediates, you need to add them before signing.
 
 === Java: Loading and Inspecting Certificates
 

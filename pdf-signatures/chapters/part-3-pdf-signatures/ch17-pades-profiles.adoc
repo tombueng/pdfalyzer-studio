@@ -1,3 +1,4 @@
+[[ch17]]
 = PAdES Profiles (ETSI EN 319 142)
 
 [.lead]
@@ -64,7 +65,7 @@ In practice:
 
 A PAdES-B-B signature must include:
 
-1. **SubFilter**: Must be `ETSI.CAdES.detached` (not `adbe.pkcs7.detached`)
+1. **SubFilter**: Must be `ETSI.CAdES.detached` for strict PAdES conformance (many validators also accept `adbe.pkcs7.detached` with proper CAdES attributes, but this is not compliant with ETSI EN 319 142-1)
 
 2. **Mandatory signed attributes in CMS**:
    - `content-type` (OID 1.2.840.113549.1.9.3) — must be `id-data`
@@ -183,7 +184,7 @@ Key considerations:
 - **For availability**: The TSA must be reachable when you sign — if the TSA is down, your signing fails (or you produce a B-B signature without a timestamp)
 - **For cost**: Some TSAs are free (FreeTSA, DigiCert's free tier), others charge per timestamp or per certificate
 
-Chapter 18 covers timestamps in depth, including TSA selection, failover strategies, and the Document Security Store.
+<<ch18>> covers timestamps in depth, including TSA selection, failover strategies, and the Document Security Store.
 
 == PAdES-B-LT: Long-Term Data
 
@@ -242,7 +243,7 @@ The long-term data is stored in the **DSS** (Document Security Store) dictionary
 | dictionary
 | Optional
 | §12.8.4.3
-4+| Validation Related Information — a dictionary keyed by uppercase hex SHA-1 hashes of signature values, mapping each signature to its specific validation data.
+4+| Validation Related Information — a dictionary keyed by convention by uppercase hex SHA-1 hashes of signature values, mapping each signature to its specific validation data.
 
 |===
 
@@ -397,6 +398,100 @@ DSSDocument extendedDoc = service.extendDocument(
     }});
 ----
 
+== PAdES and PDF/A: Archival Signatures in Archival Documents
+
+PDF/A is the ISO-standardized archival subset of PDF (ISO 19005), designed to ensure that documents remain renderable for decades without depending on external resources.
+When signed PDFs must also be PDF/A-compliant — as is common in government document management, national archives, and regulated industries — the interaction between PDF/A conformance levels and PAdES profiles creates specific constraints that developers must navigate carefully.
+
+=== PDF/A Conformance Levels and Signatures
+
+PDF/A comes in several parts, each allowing different PDF features:
+
+[cols="1,2,3", options="header"]
+|===
+| Standard | Based On | Signature Implications
+
+| **PDF/A-1** (ISO 19005-1)
+| PDF 1.4
+| No incremental updates allowed. This is devastating for multi-signature workflows because each signature _requires_ an incremental update. A PDF/A-1 document can contain exactly one signature — and adding it technically violates PDF/A-1 conformance. In practice, many validators accept a single incremental save for signing, but the spec is clear: no incremental updates.
+
+| **PDF/A-2** (ISO 19005-2)
+| PDF 1.7 (ISO 32000-1)
+| Incremental updates are explicitly permitted. Multiple signatures work correctly. Object streams and cross-reference streams are allowed. This is the minimum PDF/A level for serious signature workflows.
+
+| **PDF/A-3** (ISO 19005-3)
+| PDF 1.7 (ISO 32000-1)
+| Same as PDF/A-2, plus embedded files of any format. Useful for ZUGFeRD/Factur-X electronic invoices where the XML invoice data is embedded alongside the signed PDF.
+
+| **PDF/A-4** (ISO 19005-4)
+| PDF 2.0 (ISO 32000-2)
+| Based on PDF 2.0. Supports all modern signature features including the DSS dictionary. The natural choice for new PAdES-B-LTA workflows.
+|===
+
+=== The PDF/A-1 Problem
+
+The PDF/A-1 restriction on incremental updates creates a fundamental tension with digital signatures.
+{iso32000-2} Section 12.8.1 requires that signed documents use incremental saves to preserve the signed byte range.
+PDF/A-1 (ISO 19005-1) Section 6.3.2 prohibits incremental updates.
+
+These two requirements are mutually exclusive.
+
+In practice, the industry has settled on a pragmatic compromise: a single incremental update for the purpose of adding a signature is tolerated by most PDF/A validators, including veraPDF.
+But if your workflow requires multiple signatures (approval chains, certification + approval, countersignatures), PDF/A-1 is simply not viable.
+
+[WARNING]
+====
+If you encounter a requirement for "PDF/A-compliant signed documents," always clarify _which_ PDF/A level.
+If the answer is PDF/A-1, push back: explain that PDF/A-1 is fundamentally incompatible with multi-signature workflows, and recommend PDF/A-2b as the minimum.
+If the stakeholder insists on PDF/A-1, document the limitation and accept that only single-signature documents are possible.
+====
+
+=== PAdES-B-LTA on PDF/A-2 and Above
+
+PAdES-B-LTA requires embedding the DSS dictionary (certificates, OCSP responses, CRLs) and adding document timestamps as incremental updates.
+This works seamlessly with PDF/A-2 and above, but introduces additional PDF/A compliance requirements:
+
+1. **Fonts in timestamp appearances**: If a document timestamp adds a visible appearance, any fonts used must be fully embedded (not just subsetted references). PDF/A does not allow external font references.
+2. **Embedded file restrictions**: PDF/A-2 does not allow embedded files. If your DSS construction code accidentally adds attachments (some libraries do this), it will break PDF/A-2 compliance. PDF/A-3 lifts this restriction.
+3. **Color space requirements**: PDF/A requires all colors to use device-independent color spaces (ICCBased or CalRGB). If your signature appearance uses DeviceRGB without an output intent, it violates PDF/A. This is easy to miss — many PDFBox signing examples use DeviceRGB.
+4. **Metadata streams**: PDF/A requires XMP metadata. Adding incremental updates for DSS and timestamps must not remove or corrupt the document's XMP metadata stream.
+
+=== Validating PDF/A + PAdES Compliance
+
+veraPDF is the reference validator for PDF/A conformance and can check both PDF/A and signature-related requirements:
+
+[source,java]
+----
+// Validate PDF/A-2b compliance of a signed document
+// veraPDF checks font embedding, color spaces, metadata, and structure
+ValidatorConfig validatorConfig = ValidatorConfigBuilder.defaultBuilder()
+        .flavour(PDFAFlavour.PDFA_2_B)
+        .build();
+ProcessorConfig config = ProcessorFactory.fromValues(
+        validatorConfig,
+        FeatureFactory.defaultConfig(),
+        PluginsCollectionConfig.defaultConfig(),
+        FixerFactory.defaultConfig(),
+        EnumSet.noneOf(TaskType.class));
+
+BatchProcessor processor = ProcessorFactory.fileBatchProcessor(config);
+// Process the signed PDF and check the validation result
+----
+
+[TIP]
+====
+**Practical recommendation**: For new document workflows that require both archival compliance and digital signatures, target **PDF/A-2b** with **PAdES-B-LTA**.
+This combination provides:
+
+- ISO-standardized archival format (renderable without external dependencies)
+- Multiple signature support (incremental updates allowed)
+- Long-term signature validation (DSS + archival timestamps)
+- Broad validator support (veraPDF, Adobe Acrobat, EU DSS all handle this combination)
+
+PDF/A-2b is the "b" (basic) conformance level — it requires visual reproducibility but not full Unicode mapping.
+If your documents contain complex text (CJK, Arabic, accessibility requirements), consider PDF/A-2a or PDF/A-2u instead.
+====
+
 == Key Takeaways
 
 - PAdES constrains ISO 32000-2 signatures for legal and regulatory compliance — a PAdES signature is always a valid PDF signature, but not vice versa
@@ -407,3 +502,5 @@ DSSDocument extendedDoc = service.extendDocument(
 - **B-LTA** provides indefinite validity through renewable archival timestamps
 - Profiles can be **upgraded** without re-signing — B-B → B-T → B-LT → B-LTA as incremental updates
 - For EU/eIDAS compliance, **B-LTA is the target** — anything less may not meet long-term archival requirements
+- **PDF/A-1 is incompatible with multi-signature workflows** — its prohibition on incremental updates conflicts with signature mechanics; use PDF/A-2b or above
+- **PDF/A-2b + PAdES-B-LTA** is the recommended combination for archival signed documents — it supports incremental updates, DSS, and document timestamps

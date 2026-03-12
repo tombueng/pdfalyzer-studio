@@ -517,7 +517,7 @@ public class Pkcs11Example {
 When you use PDFBox's `SignatureInterface.sign()` with an HSM-backed key, the signing operation is transparently delegated to the HSM.
 The `PrivateKey` object returned by `ks.getKey()` is a **handle**, not the actual key material.
 The JCA provider intercepts the signing call, forwards it to the HSM via PKCS#11, and returns the result.
-Your signing code does not change -- the same `CMSSignedDataGenerator` code from Chapter 2 works with HSM keys and software keys identically.
+Your signing code does not change -- the same `CMSSignedDataGenerator` code from <<ch02>> works with HSM keys and software keys identically.
 
 This is the elegance of the JCA provider model: the signing code is agnostic to key storage.
 Whether the key lives in a PKCS#12 file, a JKS keystore, or an HSM, the API is the same.

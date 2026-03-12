@@ -1,3 +1,4 @@
+[[ch21]]
 = Qualified Signatures vs Seals
 
 [.lead]
@@ -345,7 +346,7 @@ Your application must validate the certificate _before_ signing: check QcType, r
 ====
 Some older qualified certificates lack a QcType statement entirely.
 For these, you must fall back to the EUTL service entry's qualifiers or the certificate policy OID.
-This is yet another reason to use the EU DSS library (Chapter 23), which handles these edge cases.
+This is yet another reason to use the EU DSS library (<<ch23>>), which handles these edge cases.
 ====
 
 == Key Takeaways

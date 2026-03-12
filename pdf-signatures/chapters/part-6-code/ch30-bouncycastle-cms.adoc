@@ -1,7 +1,8 @@
+[[ch30]]
 = BouncyCastle CMS Construction
 
 [.lead]
-Chapter 29 showed how PDFBox orchestrates the signing process -- creating the signature dictionary, computing the byte range, calling your `sign()` method, and writing the result into `/Contents`.
+<<ch29>> showed how PDFBox orchestrates the signing process -- creating the signature dictionary, computing the byte range, calling your `sign()` method, and writing the result into `/Contents`.
 This chapter goes inside that `sign()` method.
 We are now in BouncyCastle territory, building the CMS `SignedData` structure that is the actual cryptographic heart of every PDF signature.
 
@@ -1012,7 +1013,7 @@ public class PadesBTBuilder
 
 == CMS Construction for Remote Signing (CSC API)
 
-When using a remote signing service via the CSC API (Chapter 22), you cannot use BouncyCastle's `CMSSignedDataGenerator` in the normal way — because you do not have the private key locally.
+When using a remote signing service via the CSC API (<<ch22>>), you cannot use BouncyCastle's `CMSSignedDataGenerator` in the normal way — because you do not have the private key locally.
 The generator expects a `ContentSigner` that performs the signing operation, but with CSC, the signing happens on a remote HSM.
 You must build the CMS `SignedData` structure _manually_ using BouncyCastle's low-level ASN.1 classes.
 
@@ -1266,6 +1267,6 @@ try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
 
 The `PadesBBBuilder` and `PadesBTBuilder` classes are production-ready.
 They handle algorithm negotiation, ESS attribute construction, certificate embedding, and timestamp integration.
-Drop them into your project alongside the BouncyCastle and PDFBox dependencies from Chapter 28, register the BouncyCastle provider, and you have a complete signing pipeline.
+Drop them into your project alongside the BouncyCastle and PDFBox dependencies from <<ch28>>, register the BouncyCastle provider, and you have a complete signing pipeline.
 
-In Chapter 31, we reverse the process: given a signed PDF, we verify the CMS signature, validate the certificate chain, check the timestamp, and extract every piece of information that these structures contain.
+In <<ch31>>, we reverse the process: given a signed PDF, we verify the CMS signature, validate the certificate chain, check the timestamp, and extract every piece of information that these structures contain.

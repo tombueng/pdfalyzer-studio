@@ -1,3 +1,4 @@
+[[ch15]]
 = Visual Appearance of Signatures
 
 [.lead]
@@ -10,7 +11,7 @@ The visual appearance of a PDF signature is an **annotation appearance stream** 
 This appearance stream is part of the signed bytes (it lives inside the signature field's widget annotation), but it is _not_ cryptographically bound to the CMS in any meaningful way.
 A valid CMS signature does not guarantee that the visual appearance accurately represents the signer — it only guarantees that the bytes haven't changed.
 
-This distinction is exactly what Shadow Attacks (Chapter 24) exploit: an attacker can create a PDF where the visual appearance shows one thing to the signer and something different to the recipient, with the signature validating correctly in both cases.
+This distinction is exactly what Shadow Attacks (<<ch24>>) exploit: an attacker can create a PDF where the visual appearance shows one thing to the signer and something different to the recipient, with the signature validating correctly in both cases.
 
 This chapter explains how signature appearances work, how to create them with PDFBox, what the layer model means, and how different viewers handle appearance rendering.
 
@@ -433,7 +434,7 @@ The validity indicators (checkmarks, status banners) come from the viewer's own 
 
 === Shadow Attacks and Visual Appearances
 
-Shadow Attacks (Chapter 24) exploit the gap between what a signer sees and what the document contains.
+Shadow Attacks (<<ch24>>) exploit the gap between what a signer sees and what the document contains.
 In the **Replace** variant, the attacker creates a form field with a specific visual appearance, then changes the field's value (and thus its appearance) after the signer certifies the document.
 Because the certification allows form filling (P=2 or P=3), the change is permitted — but the visual content of the document has changed dramatically.
 
@@ -442,7 +443,7 @@ The defense is the same as for all Shadow Attacks: validate not just the cryptog
 [TIP]
 ====
 **For maximum security**: When validating a signed PDF, don't just check the signature's validity.
-Extract the revision that was signed (by truncating the file at the byte range end — see Chapter 13) and compare its visual rendering to the current document.
+Extract the revision that was signed (by truncating the file at the byte range end — see <<ch13>>) and compare its visual rendering to the current document.
 If they differ, the document has been modified since signing — even if the modifications were technically "permitted" by the MDP level.
 ====
 
@@ -483,6 +484,63 @@ If they differ, the document has been modified since signing — even if the mod
 
 **Fix**: For text beyond basic Latin characters (accented letters, CJK, etc.), embed a TrueType or Type0 font. Standard 14 fonts (Helvetica, Times, Courier, etc.) only support a limited character set.
 
+
+== Internationalization of Signature Appearances
+
+Signature appearances must handle text from virtually any writing system — signer names in Arabic, Chinese, Cyrillic, Devanagari, or Hebrew are not edge cases but everyday reality in global document workflows.
+Getting this right requires careful attention to fonts, text direction, and cultural conventions.
+
+=== Right-to-Left Text (Arabic and Hebrew)
+
+Arabic and Hebrew text flows right-to-left (RTL), which creates specific challenges in PDF signature appearances:
+
+1. **Text direction in content streams**: PDF's text showing operators (`Tj`, `TJ`) emit glyphs in the order they appear in the string. For RTL scripts, glyphs must be stored in visual order (right-to-left), not logical order (as stored in Unicode). The shaping and reordering must happen _before_ writing to the content stream.
+
+2. **Bidirectional text (Bidi)**: A signature appearance containing both "Signed by:" (English, LTR) and an Arabic name (RTL) requires the Unicode Bidirectional Algorithm (UAX #9) to correctly interleave the runs. PDF does not handle Bidi natively — your code must resolve the Bidi levels and emit glyphs in visual order.
+
+3. **Arabic shaping**: Arabic characters change form depending on their position in a word (isolated, initial, medial, final). The font must support OpenType Arabic shaping, and your code must apply the shaping rules before emitting glyph IDs. Libraries like ICU4J provide this functionality.
+
+[source,java]
+----
+// Embedding a font that supports Arabic in a signature appearance
+// Noto Sans Arabic covers the full Arabic Unicode block
+PDType0Font arabicFont = PDType0Font.load(document,
+        new FileInputStream("NotoSansArabic-Regular.ttf"));
+
+// The font handles glyph shaping internally when using Type0/CID
+// But text direction (RTL) must be handled by your layout code
+----
+
+=== CJK (Chinese, Japanese, Korean)
+
+CJK characters require Type0/CIDFont fonts with large glyph sets. Key considerations:
+
+1. **Font size**: CJK fonts are typically 5-20 MB. Full embedding inflates the PDF significantly. Use font subsetting (embed only the glyphs actually used) to keep file size manageable.
+
+2. **Vertical text**: Japanese and Chinese can be written vertically (top-to-bottom, right-to-left columns). While this is rare in signature appearances, it is a valid typographic choice in formal documents. PDF supports vertical writing via the font's `/WMode` attribute (`/WMode 1` for vertical).
+
+3. **Name ordering**: In CJK cultures, the family name typically comes first. "山田 太郎" (Yamada Taro) has the family name first. Your signature appearance template should not assume "FirstName LastName" ordering.
+
+=== Date and Number Formatting
+
+Signature appearances commonly include the signing date and time. Cultural conventions vary:
+
+- **Date order**: 2026-03-11 (ISO 8601), 03/11/2026 (US), 11/03/2026 (EU), 2026年3月11日 (Japan)
+- **Calendar systems**: Some cultures use non-Gregorian calendars alongside or instead of the Gregorian calendar (Japanese Imperial era: 令和8年, Islamic Hijri calendar, Thai Buddhist calendar)
+- **Time zones**: A signature created in Tokyo (JST, UTC+9) should show the local time, not UTC
+
+Use Java's `DateTimeFormatter` with the appropriate `Locale` and `ZoneId` to format dates correctly for the signer's locale.
+
+=== Practical Recommendations
+
+1. **Always embed fonts**: Never rely on Standard 14 fonts for international text. Embed a Unicode-capable font (Google Noto family covers all modern scripts) as a Type0/CIDFont with subsetting.
+
+2. **Use ICU4J for complex scripts**: The International Components for Unicode library handles Bidi, Arabic shaping, Thai line breaking, and other script-specific requirements that Java's built-in text handling may not cover.
+
+3. **Make the appearance template locale-aware**: Labels like "Digitally signed by," "Date," and "Reason" should be localizable. Store these strings in a resource bundle, not hardcoded in the appearance generation code.
+
+4. **Test with real names**: Create test cases using actual names from different scripts — not just ASCII transliterations. Names like "محمد عبدالله" (Arabic), "田中 花子" (Japanese), "Müller-Lüdenscheid" (German with umlauts), and "Ковальчук" (Ukrainian Cyrillic) will quickly expose font embedding and encoding issues.
+
 == Key Takeaways
 
 - Signature appearance is an **annotation appearance stream** — a Form XObject with drawing instructions
@@ -494,3 +552,5 @@ If they differ, the document has been modified since signing — even if the mod
 - **Test in multiple viewers** — Acrobat, Foxit, LibreOffice, and browsers all render appearances differently
 - The **coordinate system** is bottom-left origin with y going up — account for page rotation when positioning
 - Visual appearances are a **security surface** — Shadow Attacks exploit the disconnect between appearance and content
+- **International text** requires embedded Type0/CIDFont fonts — Standard 14 fonts only support WinAnsiEncoding and will produce `.notdef` glyphs for Arabic, CJK, Cyrillic, and most non-Latin scripts
+- **RTL scripts** (Arabic, Hebrew) require Bidi resolution and glyph shaping _before_ writing to the content stream — PDF does not handle text direction natively

@@ -1,7 +1,8 @@
+[[ch29]]
 = PDFBox Signing -- Complete Walkthrough
 
 [.lead]
-Chapter 28 gave us the lay of the land.
+<<ch28>> gave us the lay of the land.
 Now we write code.
 This chapter is a complete, production-quality walkthrough of PDF signing with Apache PDFBox {pdfbox-version} and BouncyCastle {bc-version} on Java {java-version}.
 Every code listing compiles, every class is self-contained, and every pitfall we describe is one we have hit in production -- or watched someone else hit at 2 AM on a Friday.
@@ -9,7 +10,7 @@ Every code listing compiles, every class is self-contained, and every pitfall we
 We start with the core PDFBox signing API -- `PDDocument.addSignature()`, `SignatureInterface`, and `SignatureOptions` -- then build outward: the `PDSignature` dictionary and its fields, visible and invisible signature appearances, multi-signature workflows, external/HSM signing, certification signatures with DocMDP, timestamp embedding, and the migration traps waiting for anyone upgrading from PDFBox 2.x to 3.x.
 
 By the end of this chapter, you will have a complete, production-ready signing class that produces PAdES-B-B and PAdES-B-T compliant signatures.
-Chapter 30 goes deeper into the BouncyCastle CMS construction that powers the actual cryptography.
+<<ch30>> goes deeper into the BouncyCastle CMS construction that powers the actual cryptography.
 
 == The PDFBox Signing API: Three Moving Parts
 
@@ -680,7 +681,7 @@ public byte[] signWithExternalKey(byte[] pdfBytes,
 <3> This is the only operation that touches the external key. You send a 32-byte SHA-256 hash and receive a raw signature value (typically 256 bytes for RSA-2048 or 64 bytes for ECDSA P-256).
 <4> `setSignature()` hex-encodes the CMS bytes and patches them into the `/Contents` placeholder.
 
-NOTE: Building the CMS structure with a pre-computed raw signature is more involved than using `CMSSignedDataGenerator`. You need to construct the `SignerInfo` manually with the external signature value. Chapter 30 shows the complete code for this.
+NOTE: Building the CMS structure with a pre-computed raw signature is more involved than using `CMSSignedDataGenerator`. You need to construct the `SignerInfo` manually with the external signature value. <<ch30>> shows the complete code for this.
 
 == Certification Signatures with DocMDP
 

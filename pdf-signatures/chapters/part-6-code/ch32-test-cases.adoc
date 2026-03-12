@@ -1,3 +1,4 @@
+[[ch32]]
 = Test Cases & Reference PDFs
 
 [.lead]

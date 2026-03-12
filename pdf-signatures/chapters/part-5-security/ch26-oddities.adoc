@@ -1,3 +1,4 @@
+[[ch26]]
 = Oddities & Annoyances
 
 [.lead]
@@ -70,11 +71,18 @@ If your recipients use a custom validation workflow that checks against the EU T
 The EU Trusted List ({eidas-reg}, Article 22) is the European counterpart to the AATL.
 Every Qualified Trust Service Provider in the EU is listed on the EUTL, and a certificate chaining to a QTSP on the EUTL qualifies for the highest eIDAS tier regardless of whether Adobe has heard of the CA.
 
-But here is the catch: Acrobat does not validate against the EUTL by default.
-Acrobat uses the AATL.
-There is an option to enable EUTL validation in Acrobat (Edit > Preferences > Signatures > Verification > select "European Union Trusted Lists"), but it is off by default, and the vast majority of users never touch it.
+Since October 2015 (Acrobat DC and XI), Acrobat validates against _both_ the AATL and the EUTL by default.
+The setting is in Edit > Preferences > Trust Manager, where "Load trusted certificates from an Adobe EUTL server" is checked out of the box.
+Adobe periodically downloads the EUTL from its own servers, just as it does for the AATL.
 
-This means a signature with a qualified certificate from a QTSP that is _not_ in the AATL will show a yellow warning in Acrobat — even though it is legally a qualified electronic signature with the same standing as a handwritten signature under EU law.
+In theory, this means a qualified certificate from any QTSP on the EUTL should show a green checkmark without user intervention.
+In practice, the EUTL integration has persistent reliability problems that undermine this promise:
+
+- **EUTL cache corruption.** A https://acrobat.uservoice.com/forums/926812-acrobat-reader-for-windows-and-mac/suggestions/43504077-bug-eutl-corrupted-by-default[known bug] causes the AATL update process to corrupt the local EUTL cache. The only fix is deleting `addressbook.acrodata` and re-downloading both lists in the correct order. Most users will never do this.
+- **Update lag.** The EUTL updates less frequently than the AATL. A newly accredited QTSP may appear on the official EU Trusted List weeks before Adobe's EUTL mirror reflects it.
+- **Missing intermediates.** Some QTSPs issue signing certificates that chain through intermediate CAs not included in the EUTL download. Acrobat does not always chase AIA pointers to fetch missing intermediates, resulting in a yellow warning even when the root is trusted.
+
+The net effect is that a signature with a qualified certificate from a QTSP that is on the EUTL but _not_ the AATL will often show a yellow warning in Acrobat — even though it is legally a qualified electronic signature with the same standing as a handwritten signature under EU law.
 
 The legal framework says: this is a QES, as valid as ink.
 The software says: "The validity of the document certification is UNKNOWN."
@@ -83,10 +91,12 @@ The user believes the software.
 
 [TIP]
 ====
-If you are distributing signed PDFs to recipients who use Acrobat, and your QTSP is on the EUTL but not the AATL, include instructions for enabling EUTL validation in Acrobat.
-Better yet, embed the full certificate chain and LTV data so that validation depends on the trust store configuration rather than online lookups.
-Best of all: choose a QTSP that is on _both_ the AATL and the EUTL.
-Most major European QTSPs have pursued AATL membership precisely because of this problem.
+If you are distributing signed PDFs to recipients who use Acrobat and your QTSP is on the EUTL but not the AATL:
+
+1. **Verify your own setup.** Open a signed PDF on a clean Acrobat install and confirm the EUTL trust path works. If the EUTL cache is corrupted, delete `addressbook.acrodata` (in `%APPDATA%\Adobe\Acrobat\DC\Security\`) and let Acrobat re-download both lists.
+2. **Embed the full chain.** Include all intermediate certificates in the CMS `SignedData` so that Acrobat does not need to chase AIA pointers.
+3. **Include LTV data.** Embed OCSP responses and CRLs at signing time (PAdES-B-LTA) so validation does not depend on online lookups.
+4. **Choose a dual-listed QTSP.** Most major European QTSPs have pursued AATL membership precisely because of these reliability issues. A QTSP on _both_ lists avoids the problem entirely.
 ====
 
 === The Political Dimension
@@ -98,9 +108,9 @@ This is not a theoretical concern — Adobe has adjusted AATL requirements multi
 Some in the industry argue that this is appropriate: someone needs to curate trust, and Adobe has a legitimate interest in ensuring that signatures validated by its software are trustworthy.
 Others argue that a single company should not be the gatekeeper for a technology used in legal, governmental, and financial transactions across the globe.
 
-The emergence of the EUDI wallet (Chapter 27) may shift this dynamic.
-If QES becomes a consumer technology available to every EU citizen, the volume of qualified signatures will dwarf the current market — and the EUTL, not the AATL, will be the authoritative trust anchor for those signatures.
-Whether Adobe adjusts its defaults accordingly remains to be seen.
+The emergence of the EUDI wallet (<<ch27>>) may shift this dynamic.
+If QES becomes a consumer technology available to every EU citizen, the volume of qualified signatures will dwarf the current market — and the pressure on Adobe to make EUTL validation _reliable_ (not merely enabled by default) will intensify.
+The EUTL is already turned on, but the cache corruption bugs, update lag, and missing-intermediate problems described above mean that "enabled" and "working" are not the same thing.
 
 
 == Broken Validation Across Viewers
@@ -206,7 +216,7 @@ These are real behaviors observed in testing, not theoretical predictions.
 [WARNING]
 ====
 The most dangerous row in this table is "Incremental update after signing."
-This is exactly the scenario that the Bochum Incremental Saving Attack (Chapter 24) exploits.
+This is exactly the scenario that the Bochum Incremental Saving Attack (<<ch24>>) exploits.
 If a viewer does not detect that the file was modified after signing, it will show a valid signature on a document whose content has been changed.
 As of 2026, most major viewers have patched this — but "most" is not "all," and not every installed version has been updated.
 ====
@@ -250,7 +260,7 @@ If you are a signature _creator_, your goal is to produce signatures that valida
 
 If you are a signature _validator_, your goal is to implement the most rigorous checks and report the most precise results:
 
-1. **Verify the byte range covers the entire file minus the `/Contents` gap.** This catches the Signature Wrapping Attack (Chapter 24).
+1. **Verify the byte range covers the entire file minus the `/Contents` gap.** This catches the Signature Wrapping Attack (<<ch24>>).
 2. **Detect incremental updates after signing.** Compare the signed byte range to the file size. If there is trailing data, parse it and determine whether it represents permitted or impermissible changes.
 3. **Check revocation status.** Use embedded OCSP/CRL data if available; fall back to online checks if not; report clearly when revocation data is unavailable.
 4. **Report the PAdES profile level.** Tell the user whether the signature is B-B, B-T, B-LT, or B-LTA — this is much more informative than a binary "valid/invalid."
@@ -295,7 +305,7 @@ Over the history of PDF, five SubFilter values have been defined:
 If you are implementing a new signing feature in 2026, the answer is simple: **`ETSI.CAdES.detached`** for signatures and **`ETSI.RFC3161`** for document-level timestamps.
 
 There is no reason to use `adbe.pkcs7.detached` in new implementations unless you have a specific compatibility requirement with a legacy system that cannot parse CAdES extensions.
-The practical difference between `adbe.pkcs7.detached` and `ETSI.CAdES.detached` is the presence of the `ESS-signing-certificate-v2` signed attribute (Chapter 17) — adding it makes the signature PAdES-B-B compliant at zero additional cost.
+The practical difference between `adbe.pkcs7.detached` and `ETSI.CAdES.detached` is the presence of the `ESS-signing-certificate-v2` signed attribute (<<ch17>>) — adding it makes the signature PAdES-B-B compliant at zero additional cost.
 
 `adbe.pkcs7.sha1` is deprecated and cryptographically broken.
 Do not use it.
@@ -375,7 +385,7 @@ A signature that targets only {iso32000-2} without PAdES awareness will fail PAd
 
 [IMPORTANT]
 ====
-The EU DSS validation framework (Chapter 23) validates signatures against PAdES profiles, not against raw {iso32000-2}.
+The EU DSS validation framework (<<ch23>>) validates signatures against PAdES profiles, not against raw {iso32000-2}.
 If your signatures validate in EU DSS, they satisfy both standards.
 If you are building your own validator, validate against PAdES — it is the superset of requirements that covers both.
 ====
@@ -599,60 +609,221 @@ This is another reason to prefer PAdES-B-LTA: the archive timestamp mechanism pr
 ====
 
 
-== Reader-Enabled PDFs vs Signing Conflicts
+== Usage Rights (UR3) and the Reader-Enabling Problem
 
 === What Reader-Enabling Is
 
-Adobe Reader (the free version) historically could not save filled-in forms.
-To allow Reader users to fill in and save a form, the PDF author had to "enable" the PDF for Reader using Adobe Acrobat Pro.
-This was done by applying a special **usage rights signature** — a certification-level signature with a specific set of usage rights extensions that told Reader which features to unlock.
+For most of PDF's history, Adobe maintained a deliberate split between two products:
 
-The usage rights signature is stored in the document's permissions dictionary (`/Perms`) and uses a special Adobe-issued certificate.
-When Reader opens a document with a valid usage rights signature, it enables the specified features (fill-in, save, comment, etc.).
+- **Adobe Acrobat** (paid): create, edit, sign, and save PDFs
+- **Adobe Reader** (free): view and print PDFs — but _not_ save filled-in forms, add comments, or apply digital signatures
 
-=== The Conflict with Document Signing
+This meant that a government agency could distribute a tax form as a PDF, but citizens using the free Reader could not save their filled-in form.
+They could fill it in, but closing Reader meant losing all their work.
+The only way to "unlock" these features in Reader was for the PDF author to apply a **usage rights signature** — a special signature that told Reader which features to enable.
 
-The problem arises when a Reader-enabled PDF needs to be signed.
+This mechanism is formally known as **UR3** (Usage Rights version 3), defined in {iso32000-1} Section 12.8.2.3 and carried into {iso32000-2} as a legacy feature.
 
-The usage rights signature is a certification signature — it was the first signature on the document, and it claims `/DocMDP` permissions.
-Adding an approval signature after the certification signature requires an incremental update, which is permitted under the DocMDP permissions level set by the usage rights signature.
+=== How UR3 Works Technically
 
-But here is the catch: some PDF editors, when they save the document after adding a signature, perform operations that invalidate the usage rights signature.
-This happens because:
+The UR3 mechanism uses the document's `/Perms` dictionary in the catalog:
 
-1. The editor modifies objects that the usage rights signature's byte range covers
-2. The editor performs a full save instead of an incremental save, destroying the incremental structure that the usage rights signature depends on
-3. The editor adds or modifies AcroForm entries in a way that the usage rights signature's `/FieldMDP` transform does not permit
+[source]
+----
+/Catalog <<
+  /Perms <<
+    /UR3 15 0 R    % Reference to the usage rights signature
+  >>
+>>
+----
 
-When the usage rights signature is invalidated, Reader reverts to its restricted mode — the user can no longer save the form.
-And if the document's approval signature depends on the AcroForm structure (which it does, since signature fields _are_ form fields), the interplay between the invalidated usage rights and the new signature can produce validation errors in Acrobat.
+The `/UR3` value is a signature dictionary — structurally identical to a regular PDF signature, with `/Filter`, `/SubFilter`, `/ByteRange`, and `/Contents`.
+But it serves a completely different purpose: instead of asserting document integrity, it asserts _permissions_.
 
-=== The Historical Context
+The signature dictionary contains a `/Reference` array with a `/TransformParams` dictionary that specifies exactly which features Reader should unlock:
 
-Reader-enabling was a significant source of revenue for Adobe: Acrobat Pro was the only tool that could create the usage rights signature (because it used an Adobe-controlled certificate).
-Third-party libraries could not Reader-enable PDFs.
+[source]
+----
+/TransformParams <<
+  /Type /TransformParams
+  /V /2.2
+  /Annots [/Create /Delete /Modify /Copy /Import /Export]
+  /Form [/Add /Delete /FillIn /Import /Export /SubmitStandalone /SpawnTemplate]
+  /Signature [/Modify]
+  /EF [/Create /Delete /Modify /Import]
+  /P true    % Print permission
+>>
+----
 
-{iso32000-2} deprecated the `/Perms` usage rights mechanism.
-PDF 2.0 assumes that all viewers can save forms without special enablement.
-But the real world is not PDF 2.0 — millions of Reader-enabled PDF 1.7 documents are still in circulation, and enterprises still generate new ones because their workflows depend on the Reader experience.
+The critical fields:
+
+- **`/Form [/FillIn]`**: Allows form filling — the most commonly requested feature
+- **`/Annots [/Create /Modify]`**: Allows adding comments and annotations
+- **`/Signature [/Modify]`**: Allows adding digital signatures
+- **`/EF [/Create /Modify]`**: Allows attaching files
+
+When Reader opens a PDF and finds a valid `/UR3` signature, it checks the `/TransformParams` and enables exactly the specified features.
+The user sees a purple or blue banner at the top: _"This document has been enabled with additional features. Filling, saving, and other rights are available."_
+
+=== The Adobe-Controlled Certificate
+
+The UR3 signature must be created using a certificate issued by Adobe — specifically, a certificate chaining to Adobe's private **Reader Extensions root CA**.
+This certificate was never publicly available.
+The only way to obtain it was:
+
+1. **Adobe Acrobat Pro** — which could Reader-enable PDFs via "File > Save As > Reader Extended PDF"
+2. **Adobe LiveCycle Reader Extensions** (later renamed **Adobe Experience Manager Forms**) — a server product licensed per-CPU or per-transaction, designed for enterprises that needed to Reader-enable PDFs at scale (e.g., government form portals, banking systems)
+
+Adobe LiveCycle Reader Extensions was a significant revenue source.
+A typical enterprise license cost tens of thousands of dollars per year.
+The pricing was justified by the exclusive capability: _no other vendor could legally produce the UR3 signature_, because no other vendor had access to the Adobe Reader Extensions certificate.
+
+=== Why Adobe Did This
+
+The UR3 mechanism was a deliberate business strategy, not a technical necessity:
+
+1. **Artificial feature gating**: The free Reader was technically capable of all these operations — the code for form filling, saving, commenting, and signing was present in the Reader binary.
+UR3 was a runtime license check: Reader inspected the UR3 signature at startup and enabled or disabled features based on its presence and validity.
+There was no technical reason Reader could not save forms; the restriction was purely a policy enforcement mechanism embedded in the software.
+
+2. **Lock-in to Adobe tooling**: By requiring an Adobe-issued certificate for UR3, Adobe ensured that enterprises generating fillable forms — governments, banks, insurance companies, healthcare providers — had to purchase either Acrobat Pro licenses for every employee or a LiveCycle Reader Extensions server license.
+Third-party PDF libraries (iText, PDFBox, Foxit SDK) could _create_ fillable forms with perfect AcroForm markup, but the resulting PDFs would show the restrictive banner in Reader, directing users to purchase Acrobat.
+
+3. **Revenue multiplication**: The same customer paid twice: once for Acrobat Pro or LiveCycle (to create and Reader-enable the form) and once for Adobe's form distribution infrastructure (to host and process submissions).
+The UR3 mechanism was the keystone of this revenue model.
+
+4. **Competitive moat**: Because UR3 relied on a cryptographic signature with an Adobe-controlled root, it was not possible to reverse-engineer or circumvent it without either breaking the signature verification or distributing unauthorized certificates — both of which would be legally and technically problematic.
 
 [NOTE]
 ====
-If your signing service processes documents that may be Reader-enabled, test the signing workflow with Reader-enabled PDFs specifically.
-Ensure your signing code performs an incremental save (not a full save) and does not modify objects covered by the usage rights signature.
-PDFBox's `PDDocument.saveIncremental()` is designed for this — but you must be careful not to load and re-save objects that the usage rights signature covers.
+Some third-party libraries (notably iText) briefly offered "Reader-enabling" functionality by using self-signed certificates or Adobe's expired certificates.
+Adobe's legal team aggressively shut this down, arguing that the UR3 certificate chain was proprietary.
+The resulting legal disputes underscored that UR3 was as much a legal/business mechanism as a technical one.
 ====
 
-=== The Modern Alternative
+=== The "Fill Out This Form" Banner Problem
 
-The practical alternative to Reader-enabling is to stop caring about it.
-Adobe Acrobat Reader DC (the current free version) can save filled-in forms without usage rights.
-The limitation existed in older versions of Reader (pre-DC) and was removed as Adobe shifted to a subscription model for Acrobat.
+The most visible consequence of UR3 for end users was the **blue/purple banner** that Adobe Reader displayed when opening a PDF with form fields:
 
-If your user base has upgraded to Reader DC (and by 2026, most have), Reader-enabling is no longer necessary.
-If you must support legacy Reader versions, the only safe approach is to Reader-enable the PDF _after_ all signatures have been applied — which is usually not possible, since the usage rights signature must be the first signature.
+- **If UR3 is present and valid**: Reader shows a permissive banner — _"This document has been enabled with additional features"_ — and allows filling, saving, commenting, and signing.
+- **If UR3 is absent**: Reader shows a restrictive banner — _"Please fill out the following form. You can save data typed into this form. Print..."_ — but the form data _cannot_ be saved. Clicking "save" either does nothing or prompts for Acrobat Pro.
+- **If UR3 is present but invalid** (e.g., the certificate has expired, or the document was modified after Reader-enabling): Reader shows a warning — _"This document enabled extended features in Adobe Reader. The document has been changed since it was created and use of extended features is no longer available."_ — and reverts to restricted mode.
 
-The real answer is: test your specific workflow, document the behavior, and warn your users if they are operating in a scenario where Reader-enabling and signing conflict.
+The third scenario is the one that causes the most pain in signature workflows.
+
+=== The Collision with Digital Signatures
+
+When a user signs a Reader-enabled PDF, the signing operation adds an incremental update to the file.
+This incremental update does not _modify_ the bytes covered by the UR3 signature's byte range — but it can still invalidate the UR3 signature in practice, because:
+
+1. **The UR3 `/TransformParams` may not permit the changes**: If the UR3 signature's transform parameters specify `/Signature [/Modify]`, then adding an approval signature is permitted.
+But if the transform parameters do not include `/Signature`, or if the signing tool modifies form fields beyond what `/Form [/FillIn]` permits, Reader considers the UR3 signature violated.
+
+2. **Non-incremental saves destroy UR3**: If the signing tool performs a full save (rewriting the entire PDF) instead of an incremental save, the UR3 signature's byte range no longer matches the file content.
+The UR3 signature is silently invalidated.
+Reader reverts to restricted mode.
+The user loses the ability to save — even though the document signature itself is valid.
+
+3. **AcroForm modifications can break UR3**: When a signing tool adds a signature field to the AcroForm, it modifies the `/Fields` array in the AcroForm dictionary.
+If the UR3 signature's `/FieldMDP` transform restricts which fields can be modified, the new signature field may violate those restrictions.
+This produces a paradox: the user has been granted `/Signature [/Modify]` permission, but the act of creating the signature field changes the form structure in a way the UR3 transform did not anticipate.
+
+4. **Certificate expiration**: Adobe's UR3 certificates had finite lifetimes.
+Many LiveCycle-issued UR3 signatures used certificates that have since expired.
+When Reader encounters an expired UR3 certificate, it invalidates the usage rights — even though the document has not been modified.
+Forms that worked perfectly for years suddenly lose their "extended features" when the UR3 certificate expires, causing helpdesk tickets and confused users.
+
+The practical failure mode is this: a user fills in a Reader-enabled government form, signs it, and tries to save.
+Reader shows the warning banner — _"extended features are no longer available"_ — and refuses to save.
+The user's signature is embedded in the PDF, but they cannot produce a saved copy of the signed document.
+
+[WARNING]
+====
+The UR3 + signing conflict is the single most common reason for the "I signed the form but now I can't save it" complaint in enterprise PDF workflows.
+If your application produces PDFs that will be filled in and signed in Reader, you _must_ test the entire lifecycle: create form -> Reader-enable -> fill in -> sign -> save.
+Each step can invalidate the previous step's integrity assertions.
+====
+
+=== Why UR3 Was Dropped
+
+Several forces converged to make UR3 obsolete:
+
+1. **Adobe's business model shifted**: When Adobe moved to the Creative Cloud subscription model (2013), the revenue argument for UR3 weakened.
+Adobe no longer needed to sell perpetual Acrobat Pro licenses; they needed subscribers.
+Making Reader more capable (encouraging users to stay in the Adobe ecosystem) became more valuable than gating features behind UR3.
+
+2. **Adobe Reader DC removed the restrictions (2015)**: Starting with Acrobat Reader DC (released April 2015), Adobe unlocked form filling and saving for all PDFs — no UR3 signature required.
+Reader DC can fill, save, comment on, and sign any PDF without usage rights.
+The UR3 mechanism became unnecessary for new documents.
+
+3. **Competitive pressure**: Free PDF viewers (Foxit Reader, Chrome's built-in viewer, macOS Preview, Evince) never enforced UR3 restrictions.
+Users who could not save forms in Adobe Reader simply switched to Foxit or Chrome — which hurt Adobe's market share more than the UR3 revenue helped.
+
+4. **ISO standardization**: When PDF became ISO 32000-1 (2008), the UR3 mechanism was included for backward compatibility but was not embraced as a core feature.
+{iso32000-2} (2020) deprecated the `/Perms` usage rights mechanism entirely, signaling that the standard body considers it a legacy artifact.
+
+5. **Legal and interoperability pressure**: The EU's push for open document standards and interoperability (particularly through eIDAS and digital government initiatives) made Adobe-proprietary gating mechanisms politically untenable for government forms.
+
+=== Why Modern Reader Still Interprets UR3
+
+Despite UR3 being deprecated and unnecessary in Reader DC, modern Acrobat Reader (2026) _still_ interprets UR3 signatures.
+This creates a subtle backward-compatibility trap:
+
+1. **The blue banner still appears**: When Reader DC opens a PDF with a valid UR3 signature, it still displays the "extended features" banner — even though those features are available regardless.
+This confuses users who see the banner disappear after they sign (because the signing invalidated the UR3), and assume they have lost permissions.
+
+2. **Invalid UR3 triggers a warning**: If the UR3 signature is invalid (expired certificate, modified document), Reader DC shows a warning banner — _"extended features are no longer available"_ — even though the features _are_ still available in Reader DC.
+The warning is cosmetically alarming but functionally meaningless.
+Users and support staff do not know this, leading to unnecessary escalations.
+
+3. **Legacy workflows depend on UR3 detection**: Some enterprise document management systems check for the presence of UR3 as a workflow signal ("this form has been prepared for distribution").
+Removing UR3 interpretation from Reader would break these workflows.
+
+4. **Acrobat (paid) still Reader-enables**: Adobe Acrobat Pro (the paid version) still offers "Save As > Reader Extended PDF" in 2026.
+This feature is vestigial — it adds a UR3 signature that is unnecessary for Reader DC — but it remains in the product because enterprise customers have Standard Operating Procedures that specify "Reader-enable the form before distribution."
+Removing the feature would break these SOPs.
+
+=== Practical Guidance for Signing Applications
+
+If your signing service processes PDFs that may contain UR3 signatures:
+
+1. **Always use incremental save**: `PDDocument.saveIncremental()` in PDFBox preserves the UR3 byte range.
+A full save will always invalidate UR3.
+
+2. **Do not modify objects outside the signature field**: When adding a signature, create the signature field and its value — nothing else.
+Do not reorganize the AcroForm `/Fields` array, do not update `/NeedAppearances`, do not touch font resources.
+Any unnecessary modification risks violating the UR3 transform parameters.
+
+3. **Detect UR3 before signing**: Check for `/Perms` -> `/UR3` in the catalog.
+If present, warn the user that signing may affect the "extended features" banner in Reader.
+This is cosmetic in Reader DC but can be confusing.
+
+4. **Consider stripping UR3 if unnecessary**: If your target audience uses Reader DC (which is almost everyone by 2026), you can strip the UR3 signature before signing.
+This eliminates the conflict entirely — but it requires a document modification that itself must be done via incremental save if other signatures are present.
+
+5. **Test with expired UR3 certificates**: Many UR3 signatures in the wild use Adobe certificates that expired years ago.
+Your signing code should handle the "UR3 present but invalid" case gracefully — it should not refuse to sign just because the UR3 is expired.
+
+[source,java]
+----
+/**
+ * Checks whether a PDF contains a UR3 (usage rights) signature
+ * in the document catalog's /Perms dictionary.
+ */
+public boolean hasUsageRights(PDDocument doc) {
+    COSDictionary catalog = doc.getDocumentCatalog().getCOSObject();
+    COSDictionary perms = catalog.getCOSDictionary(COSName.getPDFName("Perms"));
+    if (perms == null) {
+        return false;
+    }
+    boolean hasUR3 = perms.containsKey(COSName.getPDFName("UR3"));
+    if (hasUR3) {
+        log.info("Document contains UR3 usage rights signature — "
+                + "signing may affect Reader's 'extended features' banner");
+    }
+    return hasUR3;
+}
+----
 
 
 == Trailing Bytes and Garbage After `%%EOF`
@@ -697,5 +868,7 @@ Distinguish between "there are trailing bytes that are not an incremental update
 - **Pre-allocate 32-64 KB for `/Contents`** — undersizing causes signing failures; oversizing wastes a few KB of padding
 - **Always verify the result after signing** — check that `/Contents` contains valid CMS, the byte range is correct, and the chain is complete
 - **Monitor TSA certificate expiration** — expired TSA certs degrade B-T signatures to effectively B-B
-- **Reader-enabled PDFs conflict with signing** — test specifically if your workflow involves Reader-enabled documents
+- **UR3 (usage rights) was Adobe's revenue gating mechanism** — it used a proprietary certificate to lock features in the free Reader, forcing enterprises to buy Acrobat Pro or LiveCycle
+- **Reader DC (2015+) removed the UR3 restrictions** — form filling, saving, and signing work without usage rights — but Reader still _interprets_ UR3, causing confusing banners when signing invalidates the UR3 signature
+- **Signing a Reader-enabled PDF can invalidate UR3** — use incremental saves, minimize AcroForm modifications, and warn users about the cosmetic banner change
 - **Trailing bytes after `%%EOF`** are common and usually harmless, but your validator should distinguish cosmetic trailing data from actual post-signature modifications

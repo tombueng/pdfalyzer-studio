@@ -1,3 +1,4 @@
+[[ch23]]
 = The EU DSS Framework
 
 [.lead]
@@ -22,7 +23,7 @@ This chapter covers everything you need to use it: architecture, core modules, t
 The EU DSS project began in 2011 as part of the European Commission's **ISA programme** (Interoperability Solutions for European Public Administrations).
 The goal was to provide member states with a reusable software library that correctly implemented the ETSI signature standards — so that each country would not have to write its own implementation from scratch and risk incompatibilities.
 
-The project was motivated by the same cross-border recognition failures that led to eIDAS itself (Chapter 19).
+The project was motivated by the same cross-border recognition failures that led to eIDAS itself (<<ch19>>).
 Even when countries agreed on the legal framework, their software implementations often produced or validated signatures differently.
 A common reference implementation was the practical answer to "why doesn't my signature validate in your system?"
 
@@ -62,7 +63,7 @@ The source code is hosted on the European Commission's **GitHub organization** a
 
 | 6.0
 | 2024
-| Java 17 minimum. Module system (JPMS) support. Restructured Maven coordinates (groupId changed from `eu.europa.ec.joinup.sd-dss` to `eu.europa.dss`). Updated {bc-version} dependency.
+| Java 17 minimum. Module system (JPMS) support. Jakarta namespace migration. Updated {bc-version} dependency.
 
 | 6.2
 | 2025
@@ -72,10 +73,9 @@ The source code is hosted on the European Commission's **GitHub organization** a
 
 [NOTE]
 ====
-The groupId change in version 6.0 is a common source of confusion.
-If your project depends on `eu.europa.ec.joinup.sd-dss:dss-pades`, that is DSS 5.x.
-If it depends on `eu.europa.dss:dss-pades`, that is DSS 6.x.
-The two groupIds are not interchangeable — do not mix modules from different major versions.
+The Maven groupId has remained `eu.europa.ec.joinup.sd-dss` across all versions, including 6.x.
+The Java package names use `eu.europa.esig.dss` (note the `esig` segment).
+Do not mix modules from different major versions — DSS 5.x and 6.x are not binary-compatible.
 ====
 
 == Architecture
@@ -160,28 +160,28 @@ For a typical PAdES signing and validation project with EU DSS 6.2, you need:
 <dependencies>
     <!-- Core signing and validation for PAdES -->
     <dependency>
-        <groupId>eu.europa.dss</groupId>
+        <groupId>eu.europa.ec.joinup.sd-dss</groupId>
         <artifactId>dss-pades</artifactId>
         <version>${dss.version}</version>
     </dependency>
 
     <!-- Token support (PKCS#12, PKCS#11) -->
     <dependency>
-        <groupId>eu.europa.dss</groupId>
+        <groupId>eu.europa.ec.joinup.sd-dss</groupId>
         <artifactId>dss-token</artifactId>
         <version>${dss.version}</version>
     </dependency>
 
     <!-- Online sources for OCSP, CRL, TSA -->
     <dependency>
-        <groupId>eu.europa.dss</groupId>
+        <groupId>eu.europa.ec.joinup.sd-dss</groupId>
         <artifactId>dss-service</artifactId>
         <version>${dss.version}</version>
     </dependency>
 
     <!-- EU Trusted List validation -->
     <dependency>
-        <groupId>eu.europa.dss</groupId>
+        <groupId>eu.europa.ec.joinup.sd-dss</groupId>
         <artifactId>dss-tsl-validation</artifactId>
         <version>${dss.version}</version>
     </dependency>
@@ -199,7 +199,7 @@ Check the DSS BOM (Bill of Materials) for the exact PDFBox version it expects.
 
 === The Two-Phase Signing Model
 
-EU DSS uses a two-phase signing model that maps directly to the hash-signing model described in Chapter 22.
+EU DSS uses a two-phase signing model that maps directly to the hash-signing model described in <<ch22>>.
 This separation is what makes remote signing possible — the private key operation can happen anywhere, including on a remote HSM via the CSC API.
 
 **Phase 1: Compute what needs to be signed**
@@ -225,7 +225,7 @@ ToBeSigned dataToSign = service.getDataToSign(
         toSignDocument, parameters);
 ----
 
-The `ToBeSigned` object contains the bytes that must be signed — specifically, the DER-encoded signed attributes of the CMS SignerInfo, exactly as described in Chapter 22's hash-signing flow.
+The `ToBeSigned` object contains the bytes that must be signed — specifically, the DER-encoded signed attributes of the CMS SignerInfo, exactly as described in <<ch22>>'s hash-signing flow.
 EU DSS has already computed the message digest over the PDF byte range, built the ESS-signing-certificate-v2 attribute, and assembled the signed attributes.
 
 **Phase 2: Sign the hash and finalize**
@@ -285,25 +285,25 @@ Here is a complete, working example that signs a PDF with PAdES-B-T using a PKCS
 
 [source,java]
 ----
-import eu.europa.dss.cades.signature.CAdESService;
-import eu.europa.dss.enumerations.DigestAlgorithm;
-import eu.europa.dss.enumerations.SignatureLevel;
-import eu.europa.dss.model.DSSDocument;
-import eu.europa.dss.model.InMemoryDocument;
-import eu.europa.dss.model.SignatureValue;
-import eu.europa.dss.model.ToBeSigned;
-import eu.europa.dss.pades.PAdESSignatureParameters;
-import eu.europa.dss.pades.signature.PAdESService;
-import eu.europa.dss.service.http.commons.CommonsDataLoader;
-import eu.europa.dss.service.http.commons.OCSPDataLoader;
-import eu.europa.dss.service.ocsp.OnlineOCSPSource;
-import eu.europa.dss.service.crl.OnlineCRLSource;
-import eu.europa.dss.service.tsp.OnlineTSPSource;
-import eu.europa.dss.spi.x509.CertificateSource;
-import eu.europa.dss.spi.x509.CommonTrustedCertificateSource;
-import eu.europa.dss.token.DSSPrivateKeyEntry;
-import eu.europa.dss.token.Pkcs12SignatureToken;
-import eu.europa.dss.validation.CommonCertificateVerifier;
+import eu.europa.esig.dss.cades.signature.CAdESService;
+import eu.europa.esig.dss.enumerations.DigestAlgorithm;
+import eu.europa.esig.dss.enumerations.SignatureLevel;
+import eu.europa.esig.dss.model.DSSDocument;
+import eu.europa.esig.dss.model.InMemoryDocument;
+import eu.europa.esig.dss.model.SignatureValue;
+import eu.europa.esig.dss.model.ToBeSigned;
+import eu.europa.esig.dss.pades.PAdESSignatureParameters;
+import eu.europa.esig.dss.pades.signature.PAdESService;
+import eu.europa.esig.dss.service.http.commons.CommonsDataLoader;
+import eu.europa.esig.dss.service.http.commons.OCSPDataLoader;
+import eu.europa.esig.dss.service.ocsp.OnlineOCSPSource;
+import eu.europa.esig.dss.service.crl.OnlineCRLSource;
+import eu.europa.esig.dss.service.tsp.OnlineTSPSource;
+import eu.europa.esig.dss.spi.x509.CertificateSource;
+import eu.europa.esig.dss.spi.x509.CommonTrustedCertificateSource;
+import eu.europa.esig.dss.token.DSSPrivateKeyEntry;
+import eu.europa.esig.dss.token.Pkcs12SignatureToken;
+import eu.europa.esig.dss.validation.CommonCertificateVerifier;
 
 /**
  * Complete PAdES-B-T signing with EU DSS.
@@ -383,7 +383,7 @@ public byte[] signWithEuDss(byte[] pdfBytes, String keystorePath,
 ----
 
 That is roughly 60 lines of code — including logging, comments, and error handling setup — to produce a fully compliant PAdES-B-T signature.
-Compare this to the hundreds of lines required to build the CMS structure manually with BouncyCastle (Chapter 12), and the value proposition of EU DSS becomes clear.
+Compare this to the hundreds of lines required to build the CMS structure manually with BouncyCastle (<<ch12>>), and the value proposition of EU DSS becomes clear.
 
 == Extending Signatures
 
@@ -435,7 +435,7 @@ public byte[] extendToLta(byte[] signedPdfBytes,
 }
 ----
 
-The `extendDocument` method handles all the complexity described in Chapter 17 (PAdES Profiles) and Chapter 18 (Timestamps and LTV):
+The `extendDocument` method handles all the complexity described in <<ch17>> (PAdES Profiles) and <<ch18>> (Timestamps and LTV):
 
 1. Parses the existing signature to determine its current level
 2. Fetches OCSP responses and CRLs for every certificate in the chain
@@ -612,7 +612,7 @@ EU DSS provides a Spring Boot starter module that auto-configures most of the fr
 [source,xml]
 ----
 <dependency>
-    <groupId>eu.europa.dss</groupId>
+    <groupId>eu.europa.ec.joinup.sd-dss</groupId>
     <artifactId>dss-spring-boot-starter</artifactId>
     <version>${dss.version}</version>
 </dependency>

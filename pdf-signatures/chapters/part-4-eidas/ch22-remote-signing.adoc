@@ -1,3 +1,4 @@
+[[ch22]]
 = Remote Signing
 
 [.lead]
@@ -1060,7 +1061,7 @@ A production implementation must also handle:
 - **Content size estimation**: PDFBox's `addSignature` requires you to pre-estimate the size of the `/Contents` value. If you underestimate, the CMS will not fit. Set `SignatureOptions.setPreferredSignatureSize()` generously (e.g., 16384 bytes).
 - **Thread safety**: If multiple users sign concurrently, your CSC API client must handle concurrent requests correctly. Use separate HTTP connections per request.
 
-For production remote signing with {pdfbox-version}, consider using the EU DSS framework (Chapter 23), which provides a complete, tested implementation of the remote signing flow with CSC API support.
+For production remote signing with {pdfbox-version}, consider using the EU DSS framework (<<ch23>>), which provides a complete, tested implementation of the remote signing flow with CSC API support.
 ====
 
 == Security Considerations
@@ -1120,4 +1121,4 @@ Operational mitigations:
 - Many providers run **Ascertia ADSS** as their CSC platform — if you've tested one ADSS deployment, the behavior will be identical across all of them
 - **National eID integration** (SPID, BankID, SwissID) routes authentication through the national identity provider via OpenID Connect — not a simple username/password flow
 - The CSC `/info` endpoint enables **endpoint discovery** — it responds without authentication and reveals the provider's capabilities and supported methods
-- For production PDF signing via remote services, consider the EU DSS framework (Chapter 23), which provides tested CSC API integration
+- For production PDF signing via remote services, consider the EU DSS framework (<<ch23>>), which provides tested CSC API integration

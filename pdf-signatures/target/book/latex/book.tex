@@ -361,8 +361,7 @@
 \DefineVerbatimEnvironment{Highlighting}{Verbatim}{
     commandchars=\\\{\},
     fontsize=\small,
-    xleftmargin=1.5em,
-    breaklines=true
+    xleftmargin=1.5em
 }
 \renewenvironment{Shaded}{}{}
 % Redefine all pandoc token commands to plain text
@@ -938,8 +937,9 @@ Java code that generates the key pairs you will use to sign PDFs.
 
 If you can already explain why RSA-2048 and ECDSA with P-256 provide
 roughly equivalent security, and you know why BouncyCastle exists
-alongside the JDK's built-in providers, skip to Chapter 2. Everyone
-else: this is where your journey into PDF signatures begins.
+alongside the JDK's built-in providers, skip to \hyperref[ch02]{Hash
+Functions \& Digital Signing}. Everyone else: this is where your journey
+into PDF signatures begins.
 
 \section{The Key Distribution
 Problem}\label{_the_key_distribution_problem}
@@ -1402,9 +1402,9 @@ For PDF signatures specifically, the \texttt{/Contents} hex string must
 be large enough to hold the entire CMS \texttt{SignedData} structure,
 including the signer's certificate chain. With RSA-4096 certificates and
 a chain of three certificates, this blob can exceed 10 KB. With ECDSA
-P-256, the same chain might be 3 KB. Chapter 13 covers why the size of
-\texttt{/Contents} matters --- it determines the byte range gap, which
-must be estimated before signing.
+P-256, the same chain might be 3 KB. \hyperref[ch13]{Byte Range Deep
+Dive} covers why the size of \texttt{/Contents} matters --- it
+determines the byte range gap, which must be estimated before signing.
 
 \subsection{ECDSA Adoption in PDF
 Signatures}\label{_ecdsa_adoption_in_pdf_signatures}
@@ -1523,8 +1523,8 @@ That said, EdDSA adoption is accelerating in the broader PKI ecosystem
 viewers add support. The eIDAS 2.0 Architecture Reference Framework
 (Regulation (EU) 2024/1183 (eIDAS 2.0)) includes EdDSA in its list of
 acceptable algorithms for the EUDI wallet. When EUDI wallet-based PDF
-signing becomes mainstream (Chapter 27), EdDSA support in PDF viewers
-will follow.
+signing becomes mainstream (\hyperref[ch27]{EUDI Wallet \& Digital
+Identity}), EdDSA support in PDF viewers will follow.
 
 \section{Algorithm Comparison}\label{_algorithm_comparison}
 
@@ -1841,7 +1841,8 @@ The output will show a 3072-bit key with public exponent 65537, the
 public key in X.509 (SubjectPublicKeyInfo) format, and the private key
 in PKCS\#8 format. These format names --- X.509 for public keys, PKCS\#8
 for private keys --- are the standard encodings that appear in PEM
-files. Chapter 5 covers key material formats in detail.
+files. \hyperref[ch05]{Key Material Formats} covers key material formats
+in detail.
 
 \subsection{ECDSA Key Pair Generation}\label{_ecdsa_key_pair_generation}
 
@@ -1938,10 +1939,11 @@ the RSA public key at roughly 400 bytes versus 90 bytes for the EC
 public key.
 
 These numbers matter in practice. If you are building a self-signed
-certificate generator for testing (as we do in Chapter 29), RSA key
-generation is the bottleneck. If you are deploying a signing service
-that provisions per-user keys, the hundred-fold speed advantage of ECDSA
-key generation is worth considering.
+certificate generator for testing (as we do in \hyperref[ch29]{PDFBox
+Signing --- Complete Walkthrough}), RSA key generation is the
+bottleneck. If you are deploying a signing service that provisions
+per-user keys, the hundred-fold speed advantage of ECDSA key generation
+is worth considering.
 
 \section{Choosing an Algorithm for PDF
 Signatures}\label{_choosing_an_algorithm_for_pdf_signatures}
@@ -1980,7 +1982,175 @@ material you provide.
 
 This means you can switch algorithms by changing your certificate and
 keystore --- the signing code remains identical. We demonstrate this in
-Chapter 29.
+\hyperref[ch29]{PDFBox Signing --- Complete Walkthrough}.
+
+\section{Post-Quantum Cryptography and PDF
+Signatures}\label{_post_quantum_cryptography_and_pdf_signatures}
+
+Every algorithm discussed so far --- RSA, ECDSA, EdDSA --- relies on
+mathematical problems that a sufficiently powerful quantum computer
+could solve efficiently. Shor's algorithm (1994) can factor integers and
+compute discrete logarithms in polynomial time on a quantum computer,
+which would break RSA and all elliptic curve schemes. This is not a
+theoretical concern confined to academic papers: governments and
+standardization bodies are actively preparing for the transition.
+
+\subsection{The Threat: "Harvest Now, Decrypt
+Later"}\label{_the_threat_harvest_now_decrypt_later}
+
+The most immediate risk to digital signatures is not that someone will
+forge a signature tomorrow, but that adversaries are collecting signed
+documents \emph{today} with the intention of breaking the signatures
+once quantum computers become capable. For PDF signatures this matters
+because:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item
+  \textbf{Long-lived documents}: A contract signed today and archived
+  for 30 years must remain verifiable for the entire retention period.
+  If quantum computers can break RSA-3072 in 2045, every document signed
+  with RSA before that date becomes suspect.
+\item
+  \textbf{Non-repudiation collapses}: If the signature algorithm is
+  broken, the signer can plausibly deny having signed --- the signature
+  no longer proves anything.
+\item
+  \textbf{PAdES-B-LTA does not help}: Archival timestamps extend the
+  \emph{validity chain}, but if the underlying signature algorithm (RSA,
+  ECDSA) is broken, the cryptographic proof is gone regardless of how
+  many timestamps you stack on top.
+\end{enumerate}
+
+\subsection{NIST Post-Quantum
+Standards}\label{_nist_post_quantum_standards}
+
+In August 2024, NIST published the first post-quantum cryptographic
+standards, including two digital signature standards:
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.1667}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.1667}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.3333}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Standard
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Algorithm
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Type
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Signature Size
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\textbf{FIPS 204} (ML-DSA) & CRYSTALS-Dilithium & Lattice-based &
+2,420--4,595 bytes (depending on security level) \\
+\textbf{FIPS 205} (SLH-DSA) & SPHINCS+ & Hash-based (stateless) &
+7,856--49,856 bytes \\
+\textbf{FIPS 206} (FN-DSA) \emph{draft} & FALCON & Lattice-based (NTRU)
+& 666--1,280 bytes (compact but complex implementation) \\
+\end{longtable}
+}
+
+FIPS 204 and FIPS 205 were finalized in August 2024. FIPS 206 (FN-DSA,
+based on FALCON) is still in draft as of early 2026 and has not yet been
+formally published. NIST also published FIPS 203 (ML-KEM, a key
+encapsulation mechanism based on CRYSTALS-KYBER), but ML-KEM is not a
+signature algorithm and is therefore not relevant to PDF signing.
+
+For comparison, an RSA-3072 signature is 384 bytes and an ECDSA P-256
+signature is approximately 72 bytes. Post-quantum signatures are
+significantly larger --- ML-DSA-65 (the recommended general-purpose
+level) produces signatures of 3,309 bytes, plus public keys of 1,952
+bytes.
+
+\subsection{Impact on PDF Signatures}\label{_impact_on_pdf_signatures}
+
+Post-quantum cryptography will affect PDF signatures in several concrete
+ways:
+
+\textbf{CMS \texttt{/Contents} size estimation.} The CMS
+\texttt{SignedData} blob stored in \texttt{/Contents} will grow
+substantially. An ML-DSA-65 signature value alone is 3,309 bytes ---
+larger than many complete CMS blobs with RSA today. Add the signer's
+certificate (which now contains an ML-DSA public key of 1,952 bytes
+instead of an RSA public key of \textasciitilde400 bytes), intermediate
+certificates, and signed attributes, and the \texttt{/Contents} hex
+string could easily exceed 20 KB. Byte range estimation code
+(\hyperref[ch13]{Byte Range Deep Dive}) will need to account for these
+larger sizes.
+
+\textbf{Certificate chain sizes.} Every certificate in the chain carries
+a public key and a signature from the issuing CA. With ML-DSA, both are
+larger. A three-certificate chain (root → intermediate → signer) with
+ML-DSA-65 adds roughly 15 KB compared to the same chain with RSA-3072.
+For PAdES-B-LTA, where all certificates are embedded in the DSS
+dictionary, this compounds.
+
+\textbf{Hybrid signatures.} During the transition period --- which will
+last years, possibly decades --- some implementations will use
+\textbf{hybrid signatures}: a classical algorithm (RSA or ECDSA)
+combined with a post-quantum algorithm, so the signature remains valid
+even if either algorithm is broken. CMS supports this through multiple
+\texttt{SignerInfo} entries or through composite signature algorithms
+(draft-ounsworth-pq-composite-sigs). PDF viewers will need to understand
+and validate both signature values.
+
+\textbf{Performance.} ML-DSA signing is approximately 10x faster than
+RSA-3072 but verification is roughly comparable. SLH-DSA signing is
+dramatically slower (seconds per signature on typical hardware). For
+batch signing or remote signing via CSC API, the algorithm choice will
+affect throughput.
+
+\subsection{When to Act}\label{_when_to_act}
+
+As of early 2026, no PDF viewer supports post-quantum signature
+algorithms. The ETSI standards for PAdES have not yet been updated to
+reference FIPS 204/205/206. ISO 32000 does not restrict signature
+algorithms (the algorithm is determined by the CMS \texttt{SignedData},
+not by PDF itself), so the PDF format is technically ready --- the
+ecosystem is not.
+
+\textbf{What to do now:}
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item
+  \textbf{Design for algorithm agility.} If your signing code hardcodes
+  \texttt{"SHA256withRSA"} or a specific key type, refactor it to accept
+  the algorithm as a parameter. The PDFBox \texttt{SignatureInterface}
+  is already algorithm-agnostic --- make sure your CMS construction code
+  is too.
+\item
+  \textbf{Watch BouncyCastle.} BouncyCastle has included experimental
+  ML-DSA (Dilithium), SLH-DSA (SPHINCS+), and FN-DSA (FALCON)
+  implementations since version 1.78. These are not yet production-ready
+  for PDF signing, but they allow experimentation.
+\item
+  \textbf{Plan for larger \texttt{/Contents}.} If you control the byte
+  range estimation, build in headroom. A \texttt{/Contents} allocation
+  of 32 KB (the current generous estimate for PAdES-B-LTA with RSA) may
+  not suffice for post-quantum signatures with embedded chains.
+\item
+  \textbf{Consider re-signing archival documents.} Documents signed
+  today with RSA and archived for 30+ years may need to be re-signed
+  with post-quantum algorithms once the ecosystem matures. PAdES-B-LTA's
+  re-timestamping mechanism provides a framework for this --- but
+  re-signing (not just re-timestamping) will be necessary if the
+  original algorithm is broken.
+\end{enumerate}
+
+The transition to post-quantum cryptography will be the most significant
+change in PDF digital signatures since the move from PKCS\#7 to CAdES.
+It will not happen overnight, and it will not require throwing away
+everything you know. The PDF format, the CMS container, and the PAdES
+profiles are all algorithm-agnostic by design. The algorithms change;
+the architecture does not.
 
 \section{Summary}\label{_summary}
 
@@ -2436,8 +2606,8 @@ determined attacker.
 Step}\label{_the_signing_process_step_by_step}
 
 Now we connect the hash function to the asymmetric cryptography from
-Chapter 1 and trace the exact sequence of operations that produces a PDF
-digital signature.
+\hyperref[ch01]{Asymmetric Cryptography Primer} and trace the exact
+sequence of operations that produces a PDF digital signature.
 
 \subsection{Step 1: Hash the Document}\label{_step_1_hash_the_document}
 
@@ -2607,15 +2777,18 @@ be cryptographically valid and still be \emph{untrustworthy}:
   The certificate might not chain to a trusted root.
 \item
   The signed byte range might not cover the entire document (the Bochum
-  attacks exploited exactly this --- see Chapter 24).
+  attacks exploited exactly this --- see \hyperref[ch24]{PDF Signature
+  Attacks: A Complete Technical Analysis}).
 \item
   The certificate might lack the \texttt{digitalSignature} or
-  \texttt{nonRepudiation} key usage extension (see Chapter 3).
+  \texttt{nonRepudiation} key usage extension (see \hyperref[ch03]{X.509
+  Certificates}).
 \end{itemize}
 
 Signature \textbf{validation} --- as opposed to mere cryptographic
-verification --- requires checking all of these conditions. Chapter 16
-covers the full validation process.
+verification --- requires checking all of these conditions.
+\hyperref[ch16]{Signature Validation} covers the full validation
+process.
 
 \section{DigestMethod in PDF
 Signatures}\label{_digestmethod_in_pdf_signatures}
@@ -2981,7 +3154,7 @@ what ends up in a PDF signature's \texttt{/Contents} value.
 \begin{itemize}
 \item
   Extract the private key from the key store. In production, use an HSM
-  (see Chapter 5).
+  (see \hyperref[ch05]{Key Material Formats}).
 \item
   Include the full certificate chain so validators can build the path
   without fetching intermediates.
@@ -3083,7 +3256,8 @@ for the gap correctly; (2) the PDF was modified after signing (perhaps
 by a tool that did a full save instead of incremental save); (3) the
 byte range array values do not add up to cover the entire file (there
 are bytes before or after the byte range that are not part of the signed
-content but should be --- see Chapter 13 for the gory details).
+content but should be --- see \hyperref[ch13]{Byte Range Deep Dive} for
+the gory details).
 
 \section{Summary}\label{_summary_2}
 
@@ -3455,10 +3629,11 @@ Validity ::= SEQUENCE {
 RFC 5280 --- Internet X.509 PKI Certificate and CRL Profile §4.1.2.5
 specifies that dates through 2049 use UTCTime (\texttt{YYMMDDHHMMSSZ})
 and dates in 2050 and beyond use GeneralizedTime
-(\texttt{YYYYMMDDHHMMSSZ}). This means every certificate issued today
-uses UTCTime for both \texttt{notBefore} and
-\texttt{notAfter} --- unless the certificate is valid until 2050 or
-later (some root CA certificates are).
+(\texttt{YYYYMMDDHHMMSSZ}). This means most certificates issued today
+use UTCTime for both \texttt{notBefore} and \texttt{notAfter} --- unless
+the \texttt{notAfter} date falls in 2050 or later, as is the case for
+many root CA certificates, which must use GeneralizedTime for that
+field.
 
 For PDF signatures, the validity period has a nuanced interpretation. A
 signature made while the certificate was valid remains meaningful
@@ -3925,10 +4100,11 @@ document was signed years ago when the certificate was valid.
 trusted timestamp, the validator has no proof of when the signature was
 actually created.
 
-\textbf{Fix:} Include a timestamp in the signature (see Chapter 18 on
-LTV). A timestamp from a trusted TSA proves the signature existed at a
-specific time, allowing validators to check the certificate's validity
-against that time rather than the current time.
+\textbf{Fix:} Include a timestamp in the signature (see
+\hyperref[ch18]{Timestamps \& Long-Term Validation} on LTV). A timestamp
+from a trusted TSA proves the signature existed at a specific time,
+allowing validators to check the certificate's validity against that
+time rather than the current time.
 
 \subsubsection{Self-Signed
 Certificates}\label{_self_signed_certificates}
@@ -3967,10 +4143,10 @@ the root CA --- the root must already be in the validator's trust store.
 
 This is one of the most common PDF signature problems. Always embed the
 full chain (minus the root) in your CMS signatures. The signing code in
-Chapter 2 already does this --- note how it includes \texttt{chain}
-(from the PKCS\#12 key store) in the \texttt{CMSSignedDataGenerator}. If
-your PKCS\#12 file doesn't contain the intermediates, you need to add
-them before signing.
+\hyperref[ch02]{Hash Functions \& Digital Signing} already does
+this --- note how it includes \texttt{chain} (from the PKCS\#12 key
+store) in the \texttt{CMSSignedDataGenerator}. If your PKCS\#12 file
+doesn't contain the intermediates, you need to add them before signing.
 
 \subsection{Java: Loading and Inspecting
 Certificates}\label{_java_loading_and_inspecting_certificates}
@@ -4318,10 +4494,10 @@ that anchors the entire trust hierarchy.
 
 \section{Why Chains Exist}\label{_why_chains_exist}
 
-In Chapter 3 we established that an X.509 certificate binds a public key
-to an identity. A certificate authority (CA) vouches for that binding by
-signing the certificate with its own private key. But who vouches for
-the CA?
+In \hyperref[ch03]{X.509 Certificates} we established that an X.509
+certificate binds a public key to an identity. A certificate authority
+(CA) vouches for that binding by signing the certificate with its own
+private key. But who vouches for the CA?
 
 This is the trust delegation problem. A root CA cannot practically issue
 certificates to every person and organization on the planet. The
@@ -4434,8 +4610,9 @@ purpose. A validator will not trust a root certificate just because it
 appears inside a signature. Trust comes from the trust store, not from
 the document. If anything, including the root wastes space in the
 \texttt{/Contents} hex string, which matters when you are estimating the
-size of the content gap (Chapter 13). PDFBox does not include the root
-by default. iText does. Adobe Acrobat tolerates both approaches.
+size of the content gap (\hyperref[ch13]{Byte Range Deep Dive}). PDFBox
+does not include the root by default. iText does. Adobe Acrobat
+tolerates both approaches.
 
 A chain with a \textbf{missing intermediate} is the single most common
 cause of "certificate chain not trusted" errors in PDF signatures. The
@@ -4744,11 +4921,12 @@ considered valid?
 
 The answer depends on whether the signature includes a trusted
 timestamp. If the CMS \texttt{SignedData} contains a timestamp token in
-the unsigned attributes (see Chapter 18), and that timestamp was
-produced while the certificate was still valid, then the signature
-remains valid even after the certificate expires. This is the foundation
-of \textbf{long-term validation (LTV)} --- the mechanism that allows a
-signed PDF to remain verifiable for decades.
+the unsigned attributes (see \hyperref[ch18]{Timestamps \& Long-Term
+Validation}), and that timestamp was produced while the certificate was
+still valid, then the signature remains valid even after the certificate
+expires. This is the foundation of \textbf{long-term validation
+(LTV)} --- the mechanism that allows a signed PDF to remain verifiable
+for decades.
 
 Without a timestamp, most validators check the certificate against the
 current time. A signature made with a certificate that has since expired
@@ -4759,7 +4937,8 @@ This is why timestamps matter so much for PDF signatures. A timestamp
 cryptographically proves \emph{when} the signature was created, allowing
 validators to check the certificate against the signing time rather than
 the current time. If you are building a signing service, always include
-a timestamp. Chapter 18 covers timestamps and LTV in exhaustive detail.
+a timestamp. \hyperref[ch18]{Timestamps \& Long-Term Validation} covers
+timestamps and LTV in exhaustive detail.
 
 \section{Revocation Checking}\label{_revocation_checking}
 
@@ -5285,7 +5464,8 @@ signature has legal standing that an AATL-only signature does not. The
 EUTL is not just a technical trust store --- it is a legal instrument.
 If you are operating in the EU, the EUTL is the authoritative trust
 store for determining whether a signature meets the highest legal tier.
-Chapter 19 covers the eIDAS legal framework in detail.
+\hyperref[ch19]{The eIDAS Regulation} covers the eIDAS legal framework
+in detail.
 
 \subsection{Operating System Trust
 Stores}\label{_operating_system_trust_stores}
@@ -6345,8 +6525,8 @@ HSM. The \texttt{PrivateKey} object returned by \texttt{ks.getKey()} is
 a \textbf{handle}, not the actual key material. The JCA provider
 intercepts the signing call, forwards it to the HSM via PKCS\#11, and
 returns the result. Your signing code does not change --- the same
-\texttt{CMSSignedDataGenerator} code from Chapter 2 works with HSM keys
-and software keys identically.
+\texttt{CMSSignedDataGenerator} code from \hyperref[ch02]{Hash Functions
+\& Digital Signing} works with HSM keys and software keys identically.
 
 This is the elegance of the JCA provider model: the signing code is
 agnostic to key storage. Whether the key lives in a PKCS\#12 file, a JKS
@@ -7099,7 +7279,8 @@ practice. Every PDF viewer displays the signing time, and a signature
 without one looks suspicious to users. However, the signing time is
 \emph{not} cryptographically trustworthy --- the signer controls the
 clock. For legally binding timestamps, use an RFC 3161 timestamp token
-in the unsigned attributes (Chapter 18).
+in the unsigned attributes (\hyperref[ch18]{Timestamps \& Long-Term
+Validation}).
 
 \subsection{The ESS-signing-certificate-v2
 Attribute}\label{_the_ess_signing_certificate_v2_attribute}
@@ -7292,7 +7473,8 @@ Description
 \texttt{signature-time-stamp} & \texttt{1.2.840.113549.1.9.16.2.14} & An
 RFC 3161 timestamp token over the signature value. Provides a trusted,
 third-party assertion of the time the signature existed. This is the
-mechanism for timestamping described in Chapter 18. \\
+mechanism for timestamping described in \hyperref[ch18]{Timestamps \&
+Long-Term Validation}. \\
 \texttt{counterSignature} & \texttt{1.2.840.113549.1.9.6} & A
 counter-signature --- another signer's signature over the original
 signature value. Rarely used in PDF signatures directly; timestamps are
@@ -7806,7 +7988,7 @@ delimiter, which means the header line is technically a comment --- a
 design choice that lets non-PDF-aware tools skip it without error.
 
 The version in the header is the \emph{file} version. ISO 32000-2:2020
-Section 7.5.2 specifies that a \texttt{/Version} key in the document
+Section 7.2.2 specifies that a \texttt{/Version} key in the document
 catalog may override this value. In practice, many generators write
 \texttt{\%PDF-1.7} in the header and then set \texttt{/Version\ /2.0} in
 the catalog when they need PDF 2.0 features. This dual-version mechanism
@@ -7969,8 +8151,9 @@ can navigate to every object in the document.
 
 \textbf{Parsing a PDF starts from the end, not the beginning.} This
 backward-search strategy is fundamental to how incremental updates work
-(Chapter 8), and it is the reason a PDF can be extended by appending
-data without rewriting the beginning of the file.
+(\hyperref[ch08]{Incremental Updates}), and it is the reason a PDF can
+be extended by appending data without rewriting the beginning of the
+file.
 
 \begin{longtable}[]{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.2000}}
@@ -8014,7 +8197,7 @@ on each save. Signatures depend on \texttt{/ID} --- PAdES profiles
 strongly recommend it. \\
 \texttt{/Prev} & integer & Byte offset of the \emph{previous}
 cross-reference section. This is how incremental updates chain together
-(Chapter 8). \\
+(\hyperref[ch08]{Incremental Updates}). \\
 \texttt{/Encrypt} & dictionary or reference & Encryption dictionary. The
 signature value itself (\texttt{/Contents}) is never encrypted even in
 encrypted PDFs, but the surrounding content may be. \\
@@ -8430,7 +8613,8 @@ This has concrete consequences:
 and writing it back out --- even without changing any logical
 content --- rewrites the file from scratch: new object ordering, new
 byte offsets, new xref entries. The bytes change. The signature dies.
-Signed PDFs must be saved incrementally (Chapter 8).
+Signed PDFs must be saved incrementally (\hyperref[ch08]{Incremental
+Updates}).
 
 \textbf{Linearization affects byte layout.} Linearizing a PDF after
 signing rearranges objects for progressive display. The bytes move. The
@@ -8585,10 +8769,11 @@ programmatically.
 
 \subsection{Multiple \%\%EOF Markers}\label{_multiple_eof_markers}
 
-A PDF with incremental updates (Chapter 8) will have multiple
-\texttt{\%\%EOF} markers. This is normal for signed documents. But some
-web-based PDF processors strip everything after the first
-\texttt{\%\%EOF}, destroying all incremental updates and all signatures.
+A PDF with incremental updates (\hyperref[ch08]{Incremental Updates})
+will have multiple \texttt{\%\%EOF} markers. This is normal for signed
+documents. But some web-based PDF processors strip everything after the
+first \texttt{\%\%EOF}, destroying all incremental updates and all
+signatures.
 
 \subsection{Trailing Bytes After Final
 \%\%EOF}\label{_trailing_bytes_after_final_eof}
@@ -8597,7 +8782,8 @@ Bytes after the last \texttt{\%\%EOF} are not part of the PDF. For
 signed documents, the \texttt{/ByteRange} of the outermost signature
 must cover every byte up to the end of the file. Trailing bytes outside
 the byte range create a validation gap that the Bochum ISA attacks
-(Chapter 24) exploited.
+(\hyperref[ch24]{PDF Signature Attacks: A Complete Technical Analysis})
+exploited.
 
 \subsection{Cross-Reference Table
 Corruption}\label{_cross_reference_table_corruption}
@@ -8620,12 +8806,12 @@ compressed stream formats), object streams, trailer, and
 class, walked through a minimal file byte by byte, and connected the
 physical structure to the requirements of digital signatures.
 
-Chapter 8 builds directly on this foundation with \textbf{incremental
-updates} --- the append-only mechanism that makes PDF signatures
-possible in the first place. If this chapter was about the structure of
-a single snapshot, Chapter 8 is about how those snapshots stack on top
-of each other, forming the layered history that signatures depend on to
-survive.
+\hyperref[ch08]{Incremental Updates} builds directly on this foundation
+with \textbf{incremental updates} --- the append-only mechanism that
+makes PDF signatures possible in the first place. If this chapter was
+about the structure of a single snapshot, \hyperref[ch08]{Incremental
+Updates} is about how those snapshots stack on top of each other,
+forming the layered history that signatures depend on to survive.
 
 \chapter{Incremental Updates}\label{ch08}
 
@@ -8639,8 +8825,9 @@ numbers to byte offsets, and a trailer that points to the root object
 and the cross-reference table. The file ends with the \texttt{\%\%EOF}
 marker.
 
-Chapter 7 covered this structure in detail. What Chapter 7 did not cover
-is what happens when you \emph{modify} a PDF.
+\hyperref[ch07]{PDF File Structure} covered this structure in detail.
+What \hyperref[ch07]{PDF File Structure} did not cover is what happens
+when you \emph{modify} a PDF.
 
 There are exactly two ways to save changes to a PDF file:
 
@@ -8707,7 +8894,7 @@ before the change.
 
 This property is not a side effect. It is a design goal. ISO
 32000-2:2020 Section 7.5.6 explicitly states that conforming readers
-should be able to retrieve previous revisions of a document by following
+shall be able to retrieve previous revisions of a document by following
 the chain of \texttt{/Prev} pointers in the trailers.
 
 For workflows where audit trails matter --- legal documents, contracts,
@@ -8788,8 +8975,9 @@ startxref
   End-of-file marker
 \end{itemize}
 
-Nothing surprising here. This is the standard PDF structure from Chapter
-7. Let us say this file is 350 bytes long.
+Nothing surprising here. This is the standard PDF structure from
+\hyperref[ch07]{PDF File Structure}. Let us say this file is 350 bytes
+long.
 
 \subsection{Appending an Incremental
 Update}\label{_appending_an_incremental_update}
@@ -8929,10 +9117,9 @@ Some tools claim to "optimize" PDFs by removing unused objects and
 rebuilding the xref table. This is a full rewrite. If the PDF contains
 signatures, every signature is destroyed. Tools that do this include
 some versions of Ghostscript's \texttt{pdfwrite} device, QPDF's
-\texttt{-\/-linearize} option (when not combined with
-\texttt{-\/-preserve-unreferenced-objects}), and various online "PDF
-optimizer" services. If you are processing signed PDFs in an automated
-pipeline, test your tools carefully.
+\texttt{-\/-linearize} option, and various online "PDF optimizer"
+services. If you are processing signed PDFs in an automated pipeline,
+test your tools carefully.
 
 \section{Cross-Reference Streams and Incremental
 Updates}\label{_cross_reference_streams_and_incremental_updates}
@@ -9004,11 +9191,11 @@ updates are not a convenience. They are a \emph{requirement}.
 \subsection{The Fundamental
 Constraint}\label{_the_fundamental_constraint}
 
-A PDF digital signature covers a specific byte range (see Chapter 13 for
-the complete deep dive). The \texttt{/ByteRange} array in the signature
-dictionary specifies exactly which bytes in the file are hashed and
-signed. For the signature to remain valid, those bytes must not change.
-Not a single one.
+A PDF digital signature covers a specific byte range (see
+\hyperref[ch13]{Byte Range Deep Dive} for the complete deep dive). The
+\texttt{/ByteRange} array in the signature dictionary specifies exactly
+which bytes in the file are hashed and signed. For the signature to
+remain valid, those bytes must not change. Not a single one.
 
 If you do a full rewrite of a signed PDF --- reorganizing objects,
 recomputing byte offsets, rebuilding the cross-reference table --- the
@@ -9449,8 +9636,9 @@ information:
   signature was created during the initial save (some tools do this), or
   the file was flattened after signing (which means the signature is
   almost certainly invalid, even if the bytes were carefully
-  reconstructed --- see the discussion in Chapter 24 about the
-  Incremental Saving Attack).
+  reconstructed --- see the discussion in \hyperref[ch24]{PDF Signature
+  Attacks: A Complete Technical Analysis} about the Incremental Saving
+  Attack).
 \end{itemize}
 
 \section{Tracing the Revision
@@ -9602,10 +9790,11 @@ allowed form fill under DocMDP level 2) or malicious requires deeper
 analysis of what the appended objects actually do --- which is where the
 complexity lies.
 
-Chapter 24 covers the ISA and its variants in complete technical detail,
-including the specific techniques attackers used to bypass even the
-"unsigned content detected" warnings that some viewers implemented as an
-initial defense.
+\hyperref[ch24]{PDF Signature Attacks: A Complete Technical Analysis}
+covers the ISA and its variants in complete technical detail, including
+the specific techniques attackers used to bypass even the "unsigned
+content detected" warnings that some viewers implemented as an initial
+defense.
 
 \section{Debugging Incremental Updates}\label{ch08-debugging}
 
@@ -9772,7 +9961,7 @@ The incremental update itself is structurally fine in all three cases.
 The question is whether the \emph{content} of the update is semantically
 permissible. This distinction --- structural validity vs. semantic
 permissibility --- is at the heart of the Incremental Saving Attack
-(Chapter 24).
+(\hyperref[ch24]{PDF Signature Attacks: A Complete Technical Analysis}).
 
 \subsection{Scenario 5: The Flattened
 Disaster}\label{_scenario_5_the_flattened_disaster}
@@ -9834,12 +10023,13 @@ The rules are simple:
   incremental save.
 \end{itemize}
 
-The next chapter (Chapter 9) examines AcroForm fields --- the form
-infrastructure that signature fields are built on. Chapter 12 will bring
-incremental updates and signature architecture together, and Chapter 13
-will dissect the byte range in complete detail. If the byte range is
-where signatures live or die, incremental updates are the ground they
-stand on.
+The next chapter (\hyperref[ch09]{AcroForm \& Interactive Forms})
+examines AcroForm fields --- the form infrastructure that signature
+fields are built on. \hyperref[ch12]{Signature Architecture} will bring
+incremental updates and signature architecture together, and
+\hyperref[ch13]{Byte Range Deep Dive} will dissect the byte range in
+complete detail. If the byte range is where signatures live or die,
+incremental updates are the ground they stand on.
 
 \chapter{AcroForm \& Interactive Forms}\label{ch09}
 
@@ -10119,7 +10309,8 @@ string). Key properties: \texttt{/MaxLen} (maximum character count),
 interact with signatures in one important way: if a text field is filled
 \emph{after} a document is signed, the fill operation is an incremental
 update. Whether this invalidates the signature depends on the
-\texttt{/Lock} and \texttt{/FieldMDP} settings (covered in Chapter 14).
+\texttt{/Lock} and \texttt{/FieldMDP} settings (covered in
+\hyperref[ch14]{Approval vs. Certification Signatures}).
 
 \subsection{/Btn --- Button Fields}\label{_btnbutton_fields}
 
@@ -10175,8 +10366,9 @@ The same field after signing:
 >>
 \end{verbatim}
 
-Object 42 is the signature dictionary (covered in depth in Chapter 12).
-Object 43 is the visual appearance of the signature.
+Object 42 is the signature dictionary (covered in depth in
+\hyperref[ch12]{Signature Architecture}). Object 43 is the visual
+appearance of the signature.
 
 The signature field is \emph{not} the signature. The field is the
 \textbf{container}. The signature dictionary (the \texttt{/V} value) is
@@ -10300,7 +10492,8 @@ streams. If you have custom signature appearances (hand-drawn images,
 company logos), call this \emph{before} setting up your custom
 appearances, or call it only on non-signature fields. For signature
 appearances, most signing workflows build the appearance stream manually
-using a \texttt{PDFormXObject} --- Chapter 15 covers this in detail.
+using a \texttt{PDFormXObject} --- \hyperref[ch15]{Visual Appearance of
+Signatures} covers this in detail.
 
 \section{XFA Forms: The Deprecated
 Complication}\label{_xfa_forms_the_deprecated_complication}
@@ -10316,11 +10509,12 @@ form from XML rather than from the AcroForm field tree. XFA could do
 things AcroForm could not: dynamic layouts, complex validation rules,
 repeating sections, and data binding to external schemas.
 
-ISO 32000-2:2020 deprecated XFA for three reasons: (1) only Adobe
-implemented it fully --- interoperability was abysmal; (2) XFA and
-AcroForm coexist awkwardly in the same file, with the two
-representations frequently disagreeing about field values; and (3) XFA's
-scripting capabilities have been exploited in multiple CVEs.
+Adobe deprecated XFA, and ISO 32000-2:2020 treats it as a legacy
+feature, for three reasons: (1) only Adobe implemented it
+fully --- interoperability was abysmal; (2) XFA and AcroForm coexist
+awkwardly in the same file, with the two representations frequently
+disagreeing about field values; and (3) XFA's scripting capabilities
+have been exploited in multiple CVEs.
 
 \subsection{Why XFA Still Causes
 Problems}\label{_why_xfa_still_causes_problems}
@@ -10525,7 +10719,8 @@ blank. \textbf{Cause:} No \texttt{/AP} entry on the widget, or
 \texttt{/NeedAppearances} is \texttt{true} and the viewer destroyed the
 original appearance during regeneration. \textbf{Fix:} Always generate a
 complete \texttt{PDAppearanceStream} during signing and set it as the
-normal appearance on the widget (see Chapter 15 for details).
+normal appearance on the widget (see \hyperref[ch15]{Visual Appearance
+of Signatures} for details).
 
 \subsection{Wrong Field Hierarchy}\label{_wrong_field_hierarchy}
 
@@ -10590,11 +10785,11 @@ data was never updated, and signs the document.
 The signature is technically valid --- it covers the bytes that were
 present at signing time. But the signed content includes XFA data that
 disagrees with the AcroForm data. There is no clean fix short of
-removing XFA from the document entirely. This is precisely why ISO
-32000-2:2020 deprecated XFA, and why the deprecation matters for
-real-world signature workflows.
+removing XFA from the document entirely. This is precisely why XFA was
+deprecated, and why the deprecation matters for real-world signature
+workflows.
 
-\chapter{PDF Coordinate System}\label{_pdf_coordinate_system}
+\chapter{PDF Coordinate System}\label{ch10}
 
 The PDF coordinate system is the single most common source of signature
 placement bugs. It is conceptually simple --- an origin at the
@@ -10620,7 +10815,7 @@ PDFBox code and debugging techniques.
 System}\label{_user_space_the_default_coordinate_system}
 
 Every PDF page has a \textbf{user space} coordinate system defined in
-ISO 32000-2:2020 Section 8.3.2. The rules are few but non-negotiable:
+ISO 32000-2:2020 Section 8.3.2.3. The rules are few but non-negotiable:
 
 \begin{itemize}
 \item
@@ -11358,7 +11553,7 @@ These are not complex algorithms. They are simple arithmetic applied
 consistently. The bugs come from skipping a step, not from the math
 being hard.
 
-\chapter{Font Embedding in PDF}\label{_font_embedding_in_pdf}
+\chapter{Font Embedding in PDF}\label{ch11}
 
 Fonts are the invisible infrastructure of every PDF document. When they
 work, nobody notices. When they break, the document becomes
@@ -11387,10 +11582,10 @@ A PDF digital signature has two independent representations: the
 \textbf{cryptographic} representation (the CMS \texttt{SignedData}
 structure, the byte range, the certificate chain) and the
 \textbf{visual} representation (the appearance stream that shows the
-signer's name, date, and reason on the page). Chapter 15 covers how
-appearance streams are structured; this chapter covers the font
-infrastructure that makes the \emph{text} inside those appearances
-render correctly.
+signer's name, date, and reason on the page). \hyperref[ch15]{Visual
+Appearance of Signatures} covers how appearance streams are structured;
+this chapter covers the font infrastructure that makes the \emph{text}
+inside those appearances render correctly.
 
 The visual appearance of a signature is a Form XObject --- a miniature
 PDF page with its own resource dictionary, its own content stream, and
@@ -11509,7 +11704,7 @@ etc.). \\
 \end{longtable}
 
 The critical word is "expected." ISO 32000-2:2020 Section 9.6.2.2 states
-that conforming readers \emph{should} provide these fonts, but PDF 2.0
+that conforming readers \emph{shall} provide these fonts, but PDF 2.0
 actually recommends embedding even the Standard 14 fonts to ensure
 consistent rendering. The practical reality is that most viewers do
 provide metrics-compatible substitutes for these fonts, but the
@@ -11531,10 +11726,11 @@ invisible at the font sizes used in signature blocks (8-12 points).
 
 For non-ASCII text --- accented characters, umlauts, CJK
 characters --- the Standard 14 fonts are \emph{not} sufficient, because
-their built-in encoding (WinAnsiEncoding) cannot represent characters
-outside the Windows-1252 code page. If your signers have names with
-characters outside that range, you must embed a TrueType or OpenType
-font with the appropriate glyph coverage.
+their built-in encoding (WinAnsiEncoding, similar to but not identical
+to Windows-1252) cannot represent characters outside that encoding's
+range. If your signers have names with characters outside that range,
+you must embed a TrueType or OpenType font with the appropriate glyph
+coverage.
 
 \subsubsection{PDFBox 3.x and the Standard 14 API
 Change}\label{_pdfbox_3_x_and_the_standard_14_api_change}
@@ -12515,9 +12711,10 @@ specifically, the key takeaways are:
   \texttt{/ToUnicode} CMap tell the full story.
 \end{itemize}
 
-The next chapter --- Chapter 12 --- moves from the document
-infrastructure we've built up across Part II into the core subject of
-this book: the architecture of PDF digital signatures themselves.
+The next chapter --- \hyperref[ch12]{Signature Architecture} --- moves
+from the document infrastructure we've built up across Part II into the
+core subject of this book: the architecture of PDF digital signatures
+themselves.
 
 \chapter{PDF Digital Signatures}\label{_pdf_digital_signatures}
 
@@ -12875,7 +13072,8 @@ What to lock after signing: \texttt{/All} (lock everything),
 \texttt{/Include} (lock fields listed in \texttt{/Fields}), or
 \texttt{/Exclude} (lock everything \emph{except} fields listed in
 \texttt{/Fields}). This is how approval signatures can lock specific
-fields --- see \hyperref[ch14]{???}.} \\
+fields --- see \hyperref[ch14]{Approval vs. Certification
+Signatures}.} \\
 \texttt{/Fields} & array & Conditional & §12.7.5.5, Table 237 \\
 \multicolumn{4}{@{}>{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{1.0000} + 6\tabcolsep}@{}}{%
 Array of field names to include or exclude from locking. Required when
@@ -13184,7 +13382,8 @@ It Right} for the full history and current recommendation.} \\
 Four integers \texttt{{[}offset1\ length1\ offset2\ length2{]}} defining
 which bytes of the file are signed. The gap between the two ranges is
 where \texttt{/Contents} lives. The most important array in the entire
-dictionary --- a deep dive is in \hyperref[ch13]{???}.} \\
+dictionary --- a deep dive is in \hyperref[ch13]{Byte Range Deep
+Dive}.} \\
 \texttt{/Contents} & string & Required & §12.8.1, Table 255 \\
 \multicolumn{4}{@{}>{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{1.0000} + 6\tabcolsep}@{}}{%
 Hex-encoded CMS \texttt{SignedData} blob (RFC 5652 --- Cryptographic
@@ -13271,7 +13470,8 @@ The \texttt{/Reference} entry is an array of \textbf{signature reference
 dictionaries} (\texttt{/Type\ /SigRef}) that define transform methods
 --- rules about what can and cannot change after signing. This is the
 mechanism behind certification signatures and field-level locking
-(covered in depth in \hyperref[ch14]{???}).
+(covered in depth in \hyperref[ch14]{Approval vs. Certification
+Signatures}).
 
 \begin{longtable}[]{@{}
   >{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{0.2500}}
@@ -13315,7 +13515,8 @@ Always \texttt{/SigRef}.} \\
 The transform method: \texttt{/DocMDP} (document modification detection
 and prevention), \texttt{/FieldMDP} (field-level locking), or
 \texttt{/UR} (usage rights --- deprecated in PDF 2.0). DocMDP is by far
-the most common. See \hyperref[ch14]{???}.} \\
+the most common. See \hyperref[ch14]{Approval vs. Certification
+Signatures}.} \\
 \texttt{/TransformParams} & dictionary & Optional & §12.8.1, Table
 256 \\
 \multicolumn{4}{@{}>{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{1.0000} + 6\tabcolsep}@{}}{%
@@ -13922,7 +14123,7 @@ RFC 5126 §5.6.1 \\
 \multicolumn{4}{@{}>{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{1.0000} + 6\tabcolsep}@{}}{%
 Full certificate chain values. Used in CAdES-X-Long. In the PAdES world,
 these typically go in the DSS dictionary instead (see
-\hyperref[ch18]{???}).} \\
+\hyperref[ch18]{Timestamps \& Long-Term Validation}).} \\
 \texttt{revocation-values} & 1.2.840.113549.1.9.16.2.24 & Optional & RFC
 5126 §5.6.1 \\
 \multicolumn{4}{@{}>{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{1.0000} + 6\tabcolsep}@{}}{%
@@ -14009,7 +14210,7 @@ SHA-384/512) over the concatenated byte ranges. This hash becomes the
 signs the DER-encoded signed attributes (which include the hash). This
 may happen locally or via a remote HSM/signing service. In the remote
 case, only the hash leaves your system --- the private key never does.
-More on remote signing in \hyperref[ch22]{???}. \\
+More on remote signing in \hyperref[ch22]{Remote Signing}. \\
 \textbf{9} & \textbf{Build the CMS \texttt{SignedData} structure.}
 Include: digest algorithm, signer certificate, certificate chain, signed
 attributes (content-type, message-digest, signing-certificate-v2),
@@ -14517,15 +14718,15 @@ call should be \texttt{saveIncremental()}. Nothing in between. \\
 
 \subsection{Specification References}\label{ch12-spec-refs}
 
-\chapter{Byte Range Deep Dive}\label{_byte_range_deep_dive}
+\chapter{Byte Range Deep Dive}\label{ch13}
 
 The byte range is where PDF signatures live or die. Everything in
-Chapter 12 --- the \texttt{/Sig} dictionary, the \texttt{/SubFilter},
-the certificate chain, the CMS structure --- all of it is meaningless if
-the byte range is wrong. A single off-by-one error in the
-\texttt{/ByteRange} array, and the signature is cryptographically
-invalid. A subtle gap in coverage, and an attacker can inject content
-that the signature appears to endorse.
+\hyperref[ch12]{Signature Architecture} --- the \texttt{/Sig}
+dictionary, the \texttt{/SubFilter}, the certificate chain, the CMS
+structure --- all of it is meaningless if the byte range is wrong. A
+single off-by-one error in the \texttt{/ByteRange} array, and the
+signature is cryptographically invalid. A subtle gap in coverage, and an
+attacker can inject content that the signature appears to endorse.
 
 This chapter takes the byte range apart byte by byte. We will trace
 exactly which bytes are signed, where the gap is, why the gap exists,
@@ -14534,9 +14735,9 @@ are violated. We will look at hex dumps of real PDFs, visualize the byte
 range geometry, walk through multi-signature scenarios, and examine the
 exact attacks that exploit byte range weaknesses.
 
-If Chapter 12 taught you \emph{what} a byte range is, this chapter
-teaches you \emph{how} it actually works in the raw file --- and how to
-verify that it works correctly.
+If \hyperref[ch12]{Signature Architecture} taught you \emph{what} a byte
+range is, this chapter teaches you \emph{how} it actually works in the
+raw file --- and how to verify that it works correctly.
 
 \section{The Byte Range Model}\label{_the_byte_range_model}
 
@@ -14851,11 +15052,11 @@ the \emph{attacker's} content while showing the original signature as
 valid.
 
 This is exactly the \textbf{Incremental Saving Attack (ISA)} that the
-Bochum team demonstrated in 2019 (Chapter 24). The attack works because
-PDF viewers before the patches would happily load incremental updates
-appended after the signed byte range, display the new content, and still
-report the signature as valid --- because the signed bytes hadn't been
-modified.
+Bochum team demonstrated in 2019 (\hyperref[ch24]{PDF Signature Attacks:
+A Complete Technical Analysis}). The attack works because PDF viewers
+before the patches would happily load incremental updates appended after
+the signed byte range, display the new content, and still report the
+signature as valid --- because the signed bytes hadn't been modified.
 
 \textbf{The trailing bytes check is the most critical validation step.}
 
@@ -14874,7 +15075,8 @@ If there is unsigned trailing data that is \emph{not} a valid subsequent
 signature revision, the document has been modified after signing and the
 signature should be treated as covering only the original content.
 
-Chapter 24 provides the full attack taxonomy and defense code.
+\hyperref[ch24]{PDF Signature Attacks: A Complete Technical Analysis}
+provides the full attack taxonomy and defense code.
 
 \subsection{Multi-Signature Scenarios}\label{_multi_signature_scenarios}
 
@@ -15273,8 +15475,9 @@ signed attributes). Full verification requires both:
   certificate
 \end{enumerate}
 
-Chapter 31 provides complete verification code that covers both steps
-plus certificate chain validation.
+\hyperref[ch31]{Verification \& Analysis with PDFBox} provides complete
+verification code that covers both steps plus certificate chain
+validation.
 
 \section{Hex Dump Walkthrough: A Real Signed
 PDF}\label{_hex_dump_walkthrough_a_real_signed_pdf}
@@ -15420,7 +15623,8 @@ or possibly an Incremental Saving Attack.
 cross-reference section and trailer pointing to a subsequent signature,
 it's likely a legitimate multi-signature document. If it contains
 modified objects (changed page content, replaced fonts, new pages), it
-may be an attack. Chapter 24 provides detailed analysis code.
+may be an attack. \hyperref[ch24]{PDF Signature Attacks: A Complete
+Technical Analysis} provides detailed analysis code.
 
 \subsection{\texorpdfstring{Problem 2: \texttt{/Contents} Size
 Exceeded}{Problem 2: /Contents Size Exceeded}}\label{_problem_2_contents_size_exceeded}
@@ -15523,8 +15727,7 @@ computing the hash:
   problem; the trailing bytes check is your primary defense
 \end{itemize}
 
-\chapter{Approval vs. Certification
-Signatures}\label{_approval_vs_certification_signatures}
+\chapter{Approval vs. Certification Signatures}\label{ch14}
 
 PDF digital signatures come in two fundamentally different flavors, and
 confusing them is one of the most common mistakes in signature
@@ -15776,7 +15979,8 @@ The exact wording varies by viewer, and --- this is important ---
 only check whether the byte range is intact and don't analyze the
 incremental updates for permission compliance. This is one of the
 weaknesses that the Bochum team exploited in the Incremental Saving
-Attack (Chapter 24).
+Attack (\hyperref[ch24]{PDF Signature Attacks: A Complete Technical
+Analysis}).
 
 \section{Lock Dictionaries: Field-Level
 Protection}\label{_lock_dictionaries_field_level_protection}
@@ -16353,8 +16557,7 @@ you can \emph{detect} that the modification occurred.
   signatures. The certification establishes the permission framework.
 \end{itemize}
 
-\chapter{Visual Appearance of
-Signatures}\label{_visual_appearance_of_signatures}
+\chapter{Visual Appearance of Signatures}\label{ch15}
 
 A digital signature has two faces. The cryptographic face --- the CMS
 \texttt{SignedData}, the byte range, the certificate chain --- is what
@@ -16374,9 +16577,10 @@ any meaningful way. A valid CMS signature does not guarantee that the
 visual appearance accurately represents the signer --- it only
 guarantees that the bytes haven't changed.
 
-This distinction is exactly what Shadow Attacks (Chapter 24) exploit: an
-attacker can create a PDF where the visual appearance shows one thing to
-the signer and something different to the recipient, with the signature
+This distinction is exactly what Shadow Attacks (\hyperref[ch24]{PDF
+Signature Attacks: A Complete Technical Analysis}) exploit: an attacker
+can create a PDF where the visual appearance shows one thing to the
+signer and something different to the recipient, with the signature
 validating correctly in both cases.
 
 This chapter explains how signature appearances work, how to create them
@@ -16918,13 +17122,14 @@ don't come from the appearance stream.
 \subsection{Shadow Attacks and Visual
 Appearances}\label{_shadow_attacks_and_visual_appearances}
 
-Shadow Attacks (Chapter 24) exploit the gap between what a signer sees
-and what the document contains. In the \textbf{Replace} variant, the
-attacker creates a form field with a specific visual appearance, then
-changes the field's value (and thus its appearance) after the signer
-certifies the document. Because the certification allows form filling
-(P=2 or P=3), the change is permitted --- but the visual content of the
-document has changed dramatically.
+Shadow Attacks (\hyperref[ch24]{PDF Signature Attacks: A Complete
+Technical Analysis}) exploit the gap between what a signer sees and what
+the document contains. In the \textbf{Replace} variant, the attacker
+creates a form field with a specific visual appearance, then changes the
+field's value (and thus its appearance) after the signer certifies the
+document. Because the certification allows form filling (P=2 or P=3),
+the change is permitted --- but the visual content of the document has
+changed dramatically.
 
 The defense is the same as for all Shadow Attacks: validate not just the
 cryptographic integrity but also the \emph{semantic} integrity --- what
@@ -16933,10 +17138,11 @@ displayed content?
 
 \textbf{For maximum security}: When validating a signed PDF, don't just
 check the signature's validity. Extract the revision that was signed (by
-truncating the file at the byte range end --- see Chapter 13) and
-compare its visual rendering to the current document. If they differ,
-the document has been modified since signing --- even if the
-modifications were technically "permitted" by the MDP level.
+truncating the file at the byte range end --- see \hyperref[ch13]{Byte
+Range Deep Dive}) and compare its visual rendering to the current
+document. If they differ, the document has been modified since signing
+--- even if the modifications were technically "permitted" by the MDP
+level.
 
 \section{Common Appearance Problems}\label{_common_appearance_problems}
 
@@ -17008,6 +17214,130 @@ invisible.
 CJK, etc.), embed a TrueType or Type0 font. Standard 14 fonts
 (Helvetica, Times, Courier, etc.) only support a limited character set.
 
+\section{Internationalization of Signature
+Appearances}\label{_internationalization_of_signature_appearances}
+
+Signature appearances must handle text from virtually any writing system
+--- signer names in Arabic, Chinese, Cyrillic, Devanagari, or Hebrew are
+not edge cases but everyday reality in global document workflows.
+Getting this right requires careful attention to fonts, text direction,
+and cultural conventions.
+
+\subsection{Right-to-Left Text (Arabic and
+Hebrew)}\label{_right_to_left_text_arabic_and_hebrew}
+
+Arabic and Hebrew text flows right-to-left (RTL), which creates specific
+challenges in PDF signature appearances:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item
+  \textbf{Text direction in content streams}: PDF's text showing
+  operators (\texttt{Tj}, \texttt{TJ}) emit glyphs in the order they
+  appear in the string. For RTL scripts, glyphs must be stored in visual
+  order (right-to-left), not logical order (as stored in Unicode). The
+  shaping and reordering must happen \emph{before} writing to the
+  content stream.
+\item
+  \textbf{Bidirectional text (Bidi)}: A signature appearance containing
+  both "Signed by:" (English, LTR) and an Arabic name (RTL) requires the
+  Unicode Bidirectional Algorithm (UAX \#9) to correctly interleave the
+  runs. PDF does not handle Bidi natively --- your code must resolve the
+  Bidi levels and emit glyphs in visual order.
+\item
+  \textbf{Arabic shaping}: Arabic characters change form depending on
+  their position in a word (isolated, initial, medial, final). The font
+  must support OpenType Arabic shaping, and your code must apply the
+  shaping rules before emitting glyph IDs. Libraries like ICU4J provide
+  this functionality.
+\end{enumerate}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{// Embedding a font that supports Arabic in a signature appearance}
+\CommentTok{// Noto Sans Arabic covers the full Arabic Unicode block}
+\NormalTok{PDType0Font arabicFont }\OperatorTok{=}\NormalTok{ PDType0Font}\OperatorTok{.}\FunctionTok{load}\OperatorTok{(}\NormalTok{document}\OperatorTok{,}
+        \KeywordTok{new} \BuiltInTok{FileInputStream}\OperatorTok{(}\StringTok{"NotoSansArabic{-}Regular.ttf"}\OperatorTok{));}
+
+\CommentTok{// The font handles glyph shaping internally when using Type0/CID}
+\CommentTok{// But text direction (RTL) must be handled by your layout code}
+\end{Highlighting}
+\end{Shaded}
+
+\subsection{CJK (Chinese, Japanese,
+Korean)}\label{_cjk_chinese_japanese_korean}
+
+CJK characters require Type0/CIDFont fonts with large glyph sets. Key
+considerations:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item
+  \textbf{Font size}: CJK fonts are typically 5-20 MB. Full embedding
+  inflates the PDF significantly. Use font subsetting (embed only the
+  glyphs actually used) to keep file size manageable.
+\item
+  \textbf{Vertical text}: Japanese and Chinese can be written vertically
+  (top-to-bottom, right-to-left columns). While this is rare in
+  signature appearances, it is a valid typographic choice in formal
+  documents. PDF supports vertical writing via the font's
+  \texttt{/WMode} attribute (\texttt{/WMode\ 1} for vertical).
+\item
+  \textbf{Name ordering}: In CJK cultures, the family name typically
+  comes first. "山田 太郎" (Yamada Taro) has the family name first. Your
+  signature appearance template should not assume "FirstName LastName"
+  ordering.
+\end{enumerate}
+
+\subsection{Date and Number
+Formatting}\label{_date_and_number_formatting}
+
+Signature appearances commonly include the signing date and time.
+Cultural conventions vary:
+
+\begin{itemize}
+\item
+  \textbf{Date order}: 2026-03-11 (ISO 8601), 03/11/2026 (US),
+  11/03/2026 (EU), 2026年3月11日 (Japan)
+\item
+  \textbf{Calendar systems}: Some cultures use non-Gregorian calendars
+  alongside or instead of the Gregorian calendar (Japanese Imperial era:
+  令和8年, Islamic Hijri calendar, Thai Buddhist calendar)
+\item
+  \textbf{Time zones}: A signature created in Tokyo (JST, UTC+9) should
+  show the local time, not UTC
+\end{itemize}
+
+Use Java's \texttt{DateTimeFormatter} with the appropriate
+\texttt{Locale} and \texttt{ZoneId} to format dates correctly for the
+signer's locale.
+
+\subsection{Practical Recommendations}\label{_practical_recommendations}
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item
+  \textbf{Always embed fonts}: Never rely on Standard 14 fonts for
+  international text. Embed a Unicode-capable font (Google Noto family
+  covers all modern scripts) as a Type0/CIDFont with subsetting.
+\item
+  \textbf{Use ICU4J for complex scripts}: The International Components
+  for Unicode library handles Bidi, Arabic shaping, Thai line breaking,
+  and other script-specific requirements that Java's built-in text
+  handling may not cover.
+\item
+  \textbf{Make the appearance template locale-aware}: Labels like
+  "Digitally signed by," "Date," and "Reason" should be localizable.
+  Store these strings in a resource bundle, not hardcoded in the
+  appearance generation code.
+\item
+  \textbf{Test with real names}: Create test cases using actual names
+  from different scripts --- not just ASCII transliterations. Names like
+  "محمد عبدالله" (Arabic), "田中 花子" (Japanese), "Müller-Lüdenscheid"
+  (German with umlauts), and "Ковальчук" (Ukrainian Cyrillic) will
+  quickly expose font embedding and encoding issues.
+\end{enumerate}
+
 \section{Key Takeaways}\label{_key_takeaways_3}
 
 \begin{itemize}
@@ -17040,9 +17370,18 @@ CJK, etc.), embed a TrueType or Type0 font. Standard 14 fonts
 \item
   Visual appearances are a \textbf{security surface} --- Shadow Attacks
   exploit the disconnect between appearance and content
+\item
+  \textbf{International text} requires embedded Type0/CIDFont fonts ---
+  Standard 14 fonts only support WinAnsiEncoding and will produce
+  \texttt{.notdef} glyphs for Arabic, CJK, Cyrillic, and most non-Latin
+  scripts
+\item
+  \textbf{RTL scripts} (Arabic, Hebrew) require Bidi resolution and
+  glyph shaping \emph{before} writing to the content stream --- PDF does
+  not handle text direction natively
 \end{itemize}
 
-\chapter{Signature Validation}\label{_signature_validation}
+\chapter{Signature Validation}\label{ch16}
 
 Signing a PDF is the easy part. Validating a signed PDF --- correctly,
 securely, and in a way that matches what other validators produce --- is
@@ -17097,14 +17436,16 @@ of the file?"
 \begin{itemize}
 \item
   Trailing bytes after the signed region --- possible Incremental Saving
-  Attack (Chapter 24)
+  Attack (\hyperref[ch24]{PDF Signature Attacks: A Complete Technical
+  Analysis})
 \item
   ByteRange doesn't start at 0 --- broken signing implementation
 \item
   Gap contains unexpected data --- corrupted or manually edited PDF
 \end{itemize}
 
-Chapter 13 covers this step in exhaustive detail.
+\hyperref[ch13]{Byte Range Deep Dive} covers this step in exhaustive
+detail.
 
 \subsection{Step 2: Hash Verification (Digest
 Match)}\label{_step_2_hash_verification_digest_match}
@@ -17622,7 +17963,7 @@ certificate. This certificate has its own chain and trust requirements:
 
 If the TSA's certificate has also expired by the time you validate
 (years later), you need \textbf{long-term validation (LTV)} --- which is
-the subject of Chapter 18.
+the subject of \hyperref[ch18]{Timestamps \& Long-Term Validation}.
 
 \section{Building a Complete Validation
 Pipeline}\label{_building_a_complete_validation_pipeline}
@@ -17651,7 +17992,8 @@ Input: PDF file
         └─→ Detailed diagnostics
 \end{verbatim}
 
-Chapter 31 provides a complete Java implementation of this pipeline.
+\hyperref[ch31]{Verification \& Analysis with PDFBox} provides a
+complete Java implementation of this pipeline.
 
 \subsection{When to Use EU DSS
 Instead}\label{_when_to_use_eu_dss_instead}
@@ -17659,9 +18001,10 @@ Instead}\label{_when_to_use_eu_dss_instead}
 If you need to produce \textbf{ETSI-compliant validation reports} (ETSI
 TS 119 102-2) --- for example, because you're building a validation
 service for a government or regulated industry --- use the EU DSS
-framework (Chapter 23) instead of building the pipeline yourself. EU DSS
-handles all validation steps, produces standards-compliant reports, and
-has been tested against the full range of PAdES profiles and edge cases.
+framework (\hyperref[ch23]{The EU DSS Framework}) instead of building
+the pipeline yourself. EU DSS handles all validation steps, produces
+standards-compliant reports, and has been tested against the full range
+of PAdES profiles and edge cases.
 
 Building your own pipeline is appropriate when:
 
@@ -17712,8 +18055,7 @@ Building your own pipeline is appropriate when:
   automate the pipeline --- you build it yourself
 \end{itemize}
 
-\chapter{PAdES Profiles (ETSI EN 319
-142)}\label{_pades_profiles_etsi_en_319_142}
+\chapter{PAdES Profiles (ETSI EN 319 142)}\label{ch17}
 
 ISO 32000-2 defines \emph{how} a digital signature is embedded in a PDF.
 PAdES defines \emph{what} that signature must contain to be legally
@@ -17844,8 +18186,10 @@ A PAdES-B-B signature must include:
 \begin{enumerate}
 \def\labelenumi{\arabic{enumi}.}
 \item
-  \textbf{SubFilter}: Must be \texttt{ETSI.CAdES.detached} (not
-  \texttt{adbe.pkcs7.detached})
+  \textbf{SubFilter}: Must be \texttt{ETSI.CAdES.detached} for strict
+  PAdES conformance (many validators also accept
+  \texttt{adbe.pkcs7.detached} with proper CAdES attributes, but this is
+  not compliant with ETSI EN 319 142-1)
 \item
   \textbf{Mandatory signed attributes in CMS}:
 
@@ -18024,8 +18368,9 @@ considerations:
   others charge per timestamp or per certificate
 \end{itemize}
 
-Chapter 18 covers timestamps in depth, including TSA selection, failover
-strategies, and the Document Security Store.
+\hyperref[ch18]{Timestamps \& Long-Term Validation} covers timestamps in
+depth, including TSA selection, failover strategies, and the Document
+Security Store.
 
 \section{PAdES-B-LT: Long-Term Data}\label{_pades_b_lt_long_term_data}
 
@@ -18108,9 +18453,9 @@ DER-encoded Certificate Revocation Lists. Used when OCSP is not
 available for a certificate.} \\
 \texttt{/VRI} & dictionary & Optional & §12.8.4.3 \\
 \multicolumn{4}{@{}>{\raggedright\arraybackslash}p{(\linewidth - 6\tabcolsep) * \real{1.0000} + 6\tabcolsep}@{}}{%
-Validation Related Information --- a dictionary keyed by uppercase hex
-SHA-1 hashes of signature values, mapping each signature to its specific
-validation data.} \\
+Validation Related Information --- a dictionary keyed by convention by
+uppercase hex SHA-1 hashes of signature values, mapping each signature
+to its specific validation data.} \\
 \end{longtable}
 
 \subsection{Why B-LT Matters}\label{_why_b_lt_matters}
@@ -18302,6 +18647,161 @@ provides methods for exactly this:
 \end{Highlighting}
 \end{Shaded}
 
+\section{PAdES and PDF/A: Archival Signatures in Archival
+Documents}\label{_pades_and_pdfa_archival_signatures_in_archival_documents}
+
+PDF/A is the ISO-standardized archival subset of PDF (ISO 19005),
+designed to ensure that documents remain renderable for decades without
+depending on external resources. When signed PDFs must also be
+PDF/A-compliant --- as is common in government document management,
+national archives, and regulated industries --- the interaction between
+PDF/A conformance levels and PAdES profiles creates specific constraints
+that developers must navigate carefully.
+
+\subsection{PDF/A Conformance Levels and
+Signatures}\label{_pdfa_conformance_levels_and_signatures}
+
+PDF/A comes in several parts, each allowing different PDF features:
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.1667}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.3333}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.5000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Standard
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Based On
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Signature Implications
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\textbf{PDF/A-1} (ISO 19005-1) & PDF 1.4 & No incremental updates
+allowed. This is devastating for multi-signature workflows because each
+signature \emph{requires} an incremental update. A PDF/A-1 document can
+contain exactly one signature --- and adding it technically violates
+PDF/A-1 conformance. In practice, many validators accept a single
+incremental save for signing, but the spec is clear: no incremental
+updates. \\
+\textbf{PDF/A-2} (ISO 19005-2) & PDF 1.7 (ISO 32000-1) & Incremental
+updates are explicitly permitted. Multiple signatures work correctly.
+Object streams and cross-reference streams are allowed. This is the
+minimum PDF/A level for serious signature workflows. \\
+\textbf{PDF/A-3} (ISO 19005-3) & PDF 1.7 (ISO 32000-1) & Same as
+PDF/A-2, plus embedded files of any format. Useful for ZUGFeRD/Factur-X
+electronic invoices where the XML invoice data is embedded alongside the
+signed PDF. \\
+\textbf{PDF/A-4} (ISO 19005-4) & PDF 2.0 (ISO 32000-2) & Based on PDF
+2.0. Supports all modern signature features including the DSS
+dictionary. The natural choice for new PAdES-B-LTA workflows. \\
+\end{longtable}
+}
+
+\subsection{The PDF/A-1 Problem}\label{_the_pdfa_1_problem}
+
+The PDF/A-1 restriction on incremental updates creates a fundamental
+tension with digital signatures. ISO 32000-2:2020 Section 12.8.1
+requires that signed documents use incremental saves to preserve the
+signed byte range. PDF/A-1 (ISO 19005-1) Section 6.3.2 prohibits
+incremental updates.
+
+These two requirements are mutually exclusive.
+
+In practice, the industry has settled on a pragmatic compromise: a
+single incremental update for the purpose of adding a signature is
+tolerated by most PDF/A validators, including veraPDF. But if your
+workflow requires multiple signatures (approval chains, certification +
+approval, countersignatures), PDF/A-1 is simply not viable.
+
+If you encounter a requirement for "PDF/A-compliant signed documents,"
+always clarify \emph{which} PDF/A level. If the answer is PDF/A-1, push
+back: explain that PDF/A-1 is fundamentally incompatible with
+multi-signature workflows, and recommend PDF/A-2b as the minimum. If the
+stakeholder insists on PDF/A-1, document the limitation and accept that
+only single-signature documents are possible.
+
+\subsection{PAdES-B-LTA on PDF/A-2 and
+Above}\label{_pades_b_lta_on_pdfa_2_and_above}
+
+PAdES-B-LTA requires embedding the DSS dictionary (certificates, OCSP
+responses, CRLs) and adding document timestamps as incremental updates.
+This works seamlessly with PDF/A-2 and above, but introduces additional
+PDF/A compliance requirements:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item
+  \textbf{Fonts in timestamp appearances}: If a document timestamp adds
+  a visible appearance, any fonts used must be fully embedded (not just
+  subsetted references). PDF/A does not allow external font references.
+\item
+  \textbf{Embedded file restrictions}: PDF/A-2 does not allow embedded
+  files. If your DSS construction code accidentally adds attachments
+  (some libraries do this), it will break PDF/A-2 compliance. PDF/A-3
+  lifts this restriction.
+\item
+  \textbf{Color space requirements}: PDF/A requires all colors to use
+  device-independent color spaces (ICCBased or CalRGB). If your
+  signature appearance uses DeviceRGB without an output intent, it
+  violates PDF/A. This is easy to miss --- many PDFBox signing examples
+  use DeviceRGB.
+\item
+  \textbf{Metadata streams}: PDF/A requires XMP metadata. Adding
+  incremental updates for DSS and timestamps must not remove or corrupt
+  the document's XMP metadata stream.
+\end{enumerate}
+
+\subsection{Validating PDF/A + PAdES
+Compliance}\label{_validating_pdfa_pades_compliance}
+
+veraPDF is the reference validator for PDF/A conformance and can check
+both PDF/A and signature-related requirements:
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{// Validate PDF/A{-}2b compliance of a signed document}
+\CommentTok{// veraPDF checks font embedding, color spaces, metadata, and structure}
+\NormalTok{ValidatorConfig validatorConfig }\OperatorTok{=}\NormalTok{ ValidatorConfigBuilder}\OperatorTok{.}\FunctionTok{defaultBuilder}\OperatorTok{()}
+        \OperatorTok{.}\FunctionTok{flavour}\OperatorTok{(}\NormalTok{PDFAFlavour}\OperatorTok{.}\FunctionTok{PDFA\_2\_B}\OperatorTok{)}
+        \OperatorTok{.}\FunctionTok{build}\OperatorTok{();}
+\NormalTok{ProcessorConfig config }\OperatorTok{=}\NormalTok{ ProcessorFactory}\OperatorTok{.}\FunctionTok{fromValues}\OperatorTok{(}
+\NormalTok{        validatorConfig}\OperatorTok{,}
+\NormalTok{        FeatureFactory}\OperatorTok{.}\FunctionTok{defaultConfig}\OperatorTok{(),}
+\NormalTok{        PluginsCollectionConfig}\OperatorTok{.}\FunctionTok{defaultConfig}\OperatorTok{(),}
+\NormalTok{        FixerFactory}\OperatorTok{.}\FunctionTok{defaultConfig}\OperatorTok{(),}
+        \BuiltInTok{EnumSet}\OperatorTok{.}\FunctionTok{noneOf}\OperatorTok{(}\NormalTok{TaskType}\OperatorTok{.}\FunctionTok{class}\OperatorTok{));}
+
+\NormalTok{BatchProcessor processor }\OperatorTok{=}\NormalTok{ ProcessorFactory}\OperatorTok{.}\FunctionTok{fileBatchProcessor}\OperatorTok{(}\NormalTok{config}\OperatorTok{);}
+\CommentTok{// Process the signed PDF and check the validation result}
+\end{Highlighting}
+\end{Shaded}
+
+\textbf{Practical recommendation}: For new document workflows that
+require both archival compliance and digital signatures, target
+\textbf{PDF/A-2b} with \textbf{PAdES-B-LTA}. This combination provides:
+
+\begin{itemize}
+\item
+  ISO-standardized archival format (renderable without external
+  dependencies)
+\item
+  Multiple signature support (incremental updates allowed)
+\item
+  Long-term signature validation (DSS + archival timestamps)
+\item
+  Broad validator support (veraPDF, Adobe Acrobat, EU DSS all handle
+  this combination)
+\end{itemize}
+
+PDF/A-2b is the "b" (basic) conformance level --- it requires visual
+reproducibility but not full Unicode mapping. If your documents contain
+complex text (CJK, Arabic, accessibility requirements), consider
+PDF/A-2a or PDF/A-2u instead.
+
 \section{Key Takeaways}\label{_key_takeaways_5}
 
 \begin{itemize}
@@ -18331,10 +18831,17 @@ provides methods for exactly this:
 \item
   For EU/eIDAS compliance, \textbf{B-LTA is the target} --- anything
   less may not meet long-term archival requirements
+\item
+  \textbf{PDF/A-1 is incompatible with multi-signature workflows} ---
+  its prohibition on incremental updates conflicts with signature
+  mechanics; use PDF/A-2b or above
+\item
+  \textbf{PDF/A-2b + PAdES-B-LTA} is the recommended combination for
+  archival signed documents --- it supports incremental updates, DSS,
+  and document timestamps
 \end{itemize}
 
-\chapter{Timestamps \& Long-Term
-Validation}\label{_timestamps_long_term_validation}
+\chapter{Timestamps \& Long-Term Validation}\label{ch18}
 
 A digital signature without a timestamp is like a contract without a
 date. You can prove \emph{who} signed and \emph{what} they signed, but
@@ -19200,7 +19707,7 @@ timestamp --- everything needed for indefinite validation.
 \chapter{eIDAS \& Qualified
 Signatures}\label{_eidas_qualified_signatures}
 
-\chapter{The eIDAS Regulation}\label{_the_eidas_regulation}
+\chapter{The eIDAS Regulation}\label{ch19}
 
 In 2014, the European Union did something that no other jurisdiction had
 managed: it created a legal framework where a digital signature --- a
@@ -19509,15 +20016,16 @@ control over the key.
 The fact that the user logged into the application is not sufficient.
 The authentication must be linked to the \emph{signing action}, not just
 the \emph{session}. This is the distinction that the SCAL (Sole Control
-Assurance Level) framework addresses --- more on this in Chapter 22.
+Assurance Level) framework addresses --- more on this in
+\hyperref[ch22]{Remote Signing}.
 
 \subsubsection{(d) Linked to the data}\label{_d_linked_to_the_data}
 
 Any change to the signed data must be detectable. This is the integrity
 property that every digital signature scheme provides: if you change
 even one bit of the signed data, the signature will no longer verify.
-For PDF signatures, the byte range mechanism (Chapter 13) ensures this
-linkage.
+For PDF signatures, the byte range mechanism (\hyperref[ch13]{Byte Range
+Deep Dive}) ensures this linkage.
 
 \subsection{Tier 3: Qualified Electronic Signature (Article
 3(12))}\label{_tier_3_qualified_electronic_signature_article_312}
@@ -19725,8 +20233,9 @@ wallet). But eIDAS Annex II does not require \emph{physical possession}
 --- it requires sole control. A private key in an HSM operated by a
 QTSP, accessible only through strong multi-factor authentication
 specific to the signer and the signing operation, satisfies the
-requirement. This opened the door to remote signing (Chapter 22), which
-is now the dominant model for QES in practice.
+requirement. This opened the door to remote signing
+(\hyperref[ch22]{Remote Signing}), which is now the dominant model for
+QES in practice.
 
 \subsection{Article 35-40: Electronic
 Seals}\label{_article_35_40_electronic_seals}
@@ -19747,8 +20256,8 @@ The key difference: Article 35(2) says a qualified seal enjoys a
 "presumption of integrity of the data and of correctness of the origin
 of that data." Note the careful wording --- it says nothing about the
 legal \emph{intent} behind the seal. A signature expresses consent or
-approval. A seal proves origin and integrity. Chapter 21 explores this
-distinction in depth.
+approval. A seal proves origin and integrity. \hyperref[ch21]{Qualified
+Signatures vs Seals} explores this distinction in depth.
 
 \section{Mutual Recognition}\label{_mutual_recognition}
 
@@ -19770,8 +20279,8 @@ features beyond what eIDAS specifies.
 The mechanism that makes this work is the \textbf{EU Trusted List
 (EUTL)} --- a machine-readable, cryptographically signed registry of all
 QTSPs in the EU. If a certificate chains to a QTSP on the EUTL, it
-qualifies for cross-border recognition. Chapter 20 covers the EUTL in
-detail.
+qualifies for cross-border recognition. \hyperref[ch20]{Qualified
+Certificates \& Trust Services} covers the EUTL in detail.
 
 In practice, cross-border recognition is still imperfect. While the
 \emph{legal} framework is clear, many national IT systems have not been
@@ -19811,9 +20320,10 @@ state's supervisory body, not a technical property of the certificate.
 \section{eIDAS 2.0: Regulation (EU)
 2024/1183}\label{_eidas_2_0_regulation_eu_20241183}
 
-On April 11, 2024, the revised eIDAS regulation --- commonly called
+On May 20, 2024, the revised eIDAS regulation --- commonly called
 \textbf{eIDAS 2.0} or Regulation (EU) 2024/1183 (eIDAS 2.0) --- entered
-into force. The revision keeps the trust services framework largely
+into force (signed April 11, 2024; published in the Official Journal on
+April 30, 2024). The revision keeps the trust services framework largely
 intact but adds a transformative new component: the \textbf{European
 Digital Identity Wallet (EUDI Wallet)}.
 
@@ -19986,6 +20496,156 @@ designing their own electronic signature frameworks often look to eIDAS
 for inspiration. The three-tier model (basic, advanced, qualified) has
 been adopted in various forms by multiple non-EU jurisdictions.
 
+\subsection{Global Electronic Signature
+Frameworks}\label{_global_electronic_signature_frameworks}
+
+While this book focuses on eIDAS and PAdES (the dominant framework for
+PDF digital signatures), developers building global products must
+understand how other major jurisdictions handle electronic signatures.
+The approaches vary dramatically --- from permissive technology-neutral
+laws to prescriptive certificate-based regimes.
+
+\textbf{United States: E-SIGN Act and UETA}
+
+The United States takes a fundamentally different approach from the EU.
+The \textbf{Electronic Signatures in Global and National Commerce Act
+(E-SIGN, 2000)} and the \textbf{Uniform Electronic Transactions Act
+(UETA, 1999)} are technology-neutral: they give legal effect to
+\emph{any} electronic record or signature, without mandating specific
+cryptographic techniques or certificate authorities.
+
+This means a typed name at the bottom of an email, a click-to-accept
+checkbox, and a PAdES-B-LTA signature with a qualified certificate all
+have the same legal standing under US federal law. There is no tiered
+system. There is no concept of a "qualified" signature. Courts evaluate
+electronic signatures on a case-by-case basis using the same evidentiary
+standards they apply to any other evidence.
+
+For developers, this has a profound practical consequence: US customers
+rarely require specific signature formats or certificate types. They
+care about audit trails, signer authentication, and the ability to
+demonstrate intent --- not about cryptographic compliance with ETSI
+standards. Companies like DocuSign and Adobe Sign built billion-dollar
+businesses on click-to-sign workflows that would not qualify as
+"advanced" under eIDAS Article 26.
+
+There are sector-specific exceptions. The \textbf{FDA 21 CFR Part 11}
+imposes strict requirements for electronic signatures in pharmaceutical
+and medical device manufacturing. \textbf{IRS e-filing} has its own
+signature requirements. Some states have adopted the \textbf{Uniform
+Real Property Electronic Recording Act (URPERA)} with specific
+requirements for real estate transactions. But the general federal
+framework remains technology-neutral.
+
+\textbf{Switzerland: ZertES}
+
+Switzerland's \textbf{Federal Act on Electronic Signatures (ZertES,
+Bundesgesetz über die elektronische Signatur)} closely mirrors eIDAS. It
+defines qualified electronic signatures, requires qualified certificates
+from recognized certification service providers, and mandates signature
+creation devices. The Swiss \emph{Anerkennungsstelle für
+Zertifizierungsdienste} (recognition body) publishes a list of
+recognized providers analogous to the EUTL.
+
+A bilateral agreement between Switzerland and the EU provides for mutual
+recognition of trust services, making Switzerland the closest non-EU
+jurisdiction to full eIDAS interoperability. Swisscom Trust Services,
+the dominant Swiss QTSP, operates a CSC API endpoint and issues
+certificates that are recognized in both Swiss and EU contexts.
+
+\textbf{India: Information Technology Act 2000}
+
+India's IT Act 2000 (amended 2008) establishes a Controller of
+Certifying Authorities (CCA) that licenses CAs to issue digital
+signature certificates. The Act distinguishes between "electronic
+signatures" (broad, technology-neutral) and "digital signatures"
+(specific to asymmetric cryptography with licensed CAs). Digital
+signatures using certificates from CCA-licensed CAs are presumed valid
+unless disproved --- similar to eIDAS's QES presumption.
+
+India's Aadhaar-based eSign service enables remote signing for over a
+billion citizens using their biometric identity, making it one of the
+largest remote signing deployments in the world. The eSign API is
+conceptually similar to the CSC API but uses Aadhaar authentication
+instead of OAuth 2.0.
+
+\textbf{China, Japan, South Korea}
+
+China's \textbf{Electronic Signature Law (2004)} establishes a
+ministry-supervised CA infrastructure. Japan's \textbf{Act on Electronic
+Signatures and Certification Business (2000)} creates a similar
+framework with accredited certification authorities. South Korea's
+\textbf{Digital Signature Act} mandated the use of government-issued
+certificates (공인인증서, \emph{gong-in-injeung-seo}) for online banking
+and government services until 2020, when the requirement was relaxed to
+allow private-sector alternatives.
+
+These East Asian frameworks share a common pattern:
+government-supervised CA hierarchies with legally recognized certificate
+classes, similar in spirit to eIDAS but without the standardized
+cross-border recognition mechanism.
+
+\textbf{Latin America}
+
+Several Latin American countries have adopted electronic signature
+frameworks modeled on EU directives:
+
+\begin{itemize}
+\item
+  \textbf{Brazil}: ICP-Brasil (Infraestrutura de Chaves Públicas
+  Brasileira) operates a national PKI with the Instituto Nacional de
+  Tecnologia da Informação as root CA. Brazilian digital signatures
+  using ICP-Brasil certificates have legal equivalence to handwritten
+  signatures.
+\item
+  \textbf{Argentina}: Ley de Firma Digital (Digital Signature Law
+  25.506) establishes a national PKI infrastructure.
+\item
+  \textbf{Mexico}: FIEL/e.firma certificates issued by the SAT (Servicio
+  de Administración Tributaria) are required for tax filings and
+  government transactions.
+\end{itemize}
+
+\textbf{Practical Implications for Global Software}
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.2000}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.4000}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 4\tabcolsep) * \real{0.4000}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Region
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Signature Format Requirements
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+Trust Model
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+EU/EEA & PAdES strongly preferred; qualified certificates for QES &
+Centralized (EUTL) \\
+United States & Technology-neutral; no format mandated & Decentralized
+(case-by-case evidence) \\
+Switzerland & ZertES mirrors eIDAS; PAdES for interoperability &
+Centralized (Swiss recognition body) \\
+India & eSign/Aadhaar for consumer; CCA certificates for enterprise &
+Centralized (CCA hierarchy) \\
+China/Japan/Korea & National PKI certificates; formats vary &
+Centralized (government CA hierarchies) \\
+Brazil & ICP-Brasil certificates; PAdES/CAdES used & Centralized
+(ICP-Brasil root) \\
+\end{longtable}
+}
+
+If your software must serve multiple jurisdictions, the safest approach
+is: generate PAdES-B-LTA signatures with the strongest available
+certificate, and let each jurisdiction evaluate the result under its own
+legal framework. A PAdES-B-LTA signature is technically sound everywhere
+--- the legal weight varies, but the cryptographic validity does not.
+
 \section{What Your Code Needs to Do}\label{_what_your_code_needs_to_do}
 
 For developers building PDF signature creation or validation software,
@@ -20096,10 +20756,10 @@ determination is significantly more complex because:
   not others
 \end{itemize}
 
-For production use, the \textbf{EU DSS framework} (Chapter 23) provides
-a complete, tested implementation of eIDAS tier determination. Do not
-implement this from scratch unless you have very specific requirements
-that EU DSS cannot meet.
+For production use, the \textbf{EU DSS framework} (\hyperref[ch23]{The
+EU DSS Framework}) provides a complete, tested implementation of eIDAS
+tier determination. Do not implement this from scratch unless you have
+very specific requirements that EU DSS cannot meet.
 
 \section{Key Takeaways}\label{_key_takeaways_7}
 
@@ -20130,12 +20790,20 @@ that EU DSS cannot meet.
   hardcodes trust stores instead of checking the EUTL violates the
   mutual recognition principle
 \item
-  For production eIDAS validation, use the EU DSS framework (Chapter 23)
-  rather than implementing from scratch
+  For production eIDAS validation, use the EU DSS framework
+  (\hyperref[ch23]{The EU DSS Framework}) rather than implementing from
+  scratch
+\item
+  \textbf{Non-EU frameworks vary dramatically}: the US is
+  technology-neutral (E-SIGN/UETA), Switzerland mirrors eIDAS (ZertES),
+  India has CCA-supervised PKI with Aadhaar eSign, East Asian countries
+  use government CA hierarchies
+\item
+  \textbf{PAdES-B-LTA is technically sound everywhere} --- the legal
+  weight varies by jurisdiction, but the cryptographic validity does not
 \end{itemize}
 
-\chapter{Qualified Certificates \& Trust
-Services}\label{_qualified_certificates_trust_services}
+\chapter{Qualified Certificates \& Trust Services}\label{ch20}
 
 A certificate is just a data structure --- some ASN.1 fields, a public
 key, and a signature from someone who claims to be a Certificate
@@ -20151,8 +20819,8 @@ Trust Service Providers that issue qualified certificates, the EU
 Trusted List that publishes who they are, the technical requirements
 that separate a qualified certificate from an ordinary one, the QSCD
 hardware that protects the keys, and the Java code you need to actually
-parse and verify all of this. If Chapter 19 was the legal framework,
-this chapter is the plumbing.
+parse and verify all of this. If \hyperref[ch19]{The eIDAS Regulation}
+was the legal framework, this chapter is the plumbing.
 
 \section{Qualified Trust Service Providers
 (QTSPs)}\label{_qualified_trust_service_providers_qtsps}
@@ -20560,9 +21228,9 @@ parsing to implement correctly.
 
 For production systems, implement a scheduled refresh --- daily or
 weekly --- that re-downloads, re-verifies, and re-parses the entire EUTL
-hierarchy. The EU DSS library (Chapter 23) provides a
-\texttt{TrustedListsCertificateSource} that handles all of this
-automatically, including caching, refresh scheduling, signature
+hierarchy. The EU DSS library (\hyperref[ch23]{The EU DSS Framework})
+provides a \texttt{TrustedListsCertificateSource} that handles all of
+this automatically, including caching, refresh scheduling, signature
 verification, and the pivot mechanism.
 
 \section{Qualified Certificates: What Makes Them
@@ -20750,7 +21418,8 @@ the evaluation.
   security model as smart cards, USB form factor
 \item
   \textbf{HSMs} (Thales Luna, Utimaco SecurityServer): rack-mounted
-  devices for server-side signing; basis for remote signing (Chapter 22)
+  devices for server-side signing; basis for remote signing
+  (\hyperref[ch22]{Remote Signing})
 \end{itemize}
 
 Not every HSM is a certified QSCD. An HSM may be FIPS 140-2 Level 3 or
@@ -21067,10 +21736,10 @@ parsing and certificate matching. A production implementation must also:
   the qualification type
 \end{itemize}
 
-For production use, the \textbf{EU DSS library} (Chapter 23) provides
-\texttt{TrustedListsCertificateSource}, which handles all of this
-correctly. Do not reimplement this from scratch unless you have a very
-specific reason.
+For production use, the \textbf{EU DSS library} (\hyperref[ch23]{The EU
+DSS Framework}) provides \texttt{TrustedListsCertificateSource}, which
+handles all of this correctly. Do not reimplement this from scratch
+unless you have a very specific reason.
 
 \section{Key Takeaways}\label{_key_takeaways_8}
 
@@ -21110,8 +21779,7 @@ specific reason.
   parsing, pivot handling, and signature verification from scratch
 \end{itemize}
 
-\chapter{Qualified Signatures vs
-Seals}\label{_qualified_signatures_vs_seals}
+\chapter{Qualified Signatures vs Seals}\label{ch21}
 
 Here is a question that trips up almost every developer the first time
 they encounter it: if an electronic signature and an electronic seal use
@@ -21588,7 +22256,8 @@ certificate."
 Some older qualified certificates lack a QcType statement entirely. For
 these, you must fall back to the EUTL service entry's qualifiers or the
 certificate policy OID. This is yet another reason to use the EU DSS
-library (Chapter 23), which handles these edge cases.
+library (\hyperref[ch23]{The EU DSS Framework}), which handles these
+edge cases.
 
 \section{Key Takeaways}\label{_key_takeaways_9}
 
@@ -21628,7 +22297,7 @@ library (Chapter 23), which handles these edge cases.
   from QEAAs
 \end{itemize}
 
-\chapter{Remote Signing}\label{_remote_signing}
+\chapter{Remote Signing}\label{ch22}
 
 For the first two decades of digital signatures, the assumption was
 simple: the private key lives with the signer. A smart card in a wallet,
@@ -23055,8 +23724,9 @@ A production implementation must also handle:
 \end{itemize}
 
 For production remote signing with 3.0.0, consider using the EU DSS
-framework (Chapter 23), which provides a complete, tested implementation
-of the remote signing flow with CSC API support.
+framework (\hyperref[ch23]{The EU DSS Framework}), which provides a
+complete, tested implementation of the remote signing flow with CSC API
+support.
 
 \section{Security Considerations}\label{_security_considerations}
 
@@ -23161,10 +23831,11 @@ breach liability (some QTSPs carry specific cyber insurance)
   capabilities and supported methods
 \item
   For production PDF signing via remote services, consider the EU DSS
-  framework (Chapter 23), which provides tested CSC API integration
+  framework (\hyperref[ch23]{The EU DSS Framework}), which provides
+  tested CSC API integration
 \end{itemize}
 
-\chapter{The EU DSS Framework}\label{_the_eu_dss_framework}
+\chapter{The EU DSS Framework}\label{ch23}
 
 Throughout this book, we have been building PDF signing and validation
 code from the ground up --- constructing CMS structures by hand with
@@ -23204,11 +23875,11 @@ software library that correctly implemented the ETSI signature standards
 from scratch and risk incompatibilities.
 
 The project was motivated by the same cross-border recognition failures
-that led to eIDAS itself (Chapter 19). Even when countries agreed on the
-legal framework, their software implementations often produced or
-validated signatures differently. A common reference implementation was
-the practical answer to "why doesn't my signature validate in your
-system?"
+that led to eIDAS itself (\hyperref[ch19]{The eIDAS Regulation}). Even
+when countries agreed on the legal framework, their software
+implementations often produced or validated signatures differently. A
+common reference implementation was the practical answer to "why doesn't
+my signature validate in your system?"
 
 \subsection{Development}\label{_development}
 
@@ -23262,20 +23933,18 @@ EN 319 102-1 validation policy. Improved EU Trusted List parsing. \\
 Updated BouncyCastle dependency (1.70+). \\
 5.13 & 2023 & Improved PKCS\#11 token support. PSD2 (Payment Services
 Directive) certificate validation. Updated CRL/OCSP handling. \\
-6.0 & 2024 & Java 17 minimum. Module system (JPMS) support. Restructured
-Maven coordinates (groupId changed from
-\texttt{eu.europa.ec.joinup.sd-dss} to \texttt{eu.europa.dss}). Updated
-1.80 dependency. \\
+6.0 & 2024 & Java 17 minimum. Module system (JPMS) support. Jakarta
+namespace migration. Updated 1.80 dependency. \\
 6.2 & 2025 & Java 17+. Enhanced EUDI wallet integration. Improved TSL
 (Trusted List) refresh mechanisms. This is the current stable release as
 of early 2026. \\
 \end{longtable}
 
-The groupId change in version 6.0 is a common source of confusion. If
-your project depends on \texttt{eu.europa.ec.joinup.sd-dss:dss-pades},
-that is DSS 5.x. If it depends on \texttt{eu.europa.dss:dss-pades}, that
-is DSS 6.x. The two groupIds are not interchangeable --- do not mix
-modules from different major versions.
+The Maven groupId has remained \texttt{eu.europa.ec.joinup.sd-dss}
+across all versions, including 6.x. The Java package names use
+\texttt{eu.europa.esig.dss} (note the \texttt{esig} segment). Do not mix
+modules from different major versions --- DSS 5.x and 6.x are not
+binary-compatible.
 
 \section{Architecture}\label{_architecture_2}
 
@@ -23389,28 +24058,28 @@ need:
 \NormalTok{\textless{}}\KeywordTok{dependencies}\NormalTok{\textgreater{}}
     \CommentTok{\textless{}!{-}{-} Core signing and validation for PAdES {-}{-}\textgreater{}}
 \NormalTok{    \textless{}}\KeywordTok{dependency}\NormalTok{\textgreater{}}
-\NormalTok{        \textless{}}\KeywordTok{groupId}\NormalTok{\textgreater{}eu.europa.dss\textless{}/}\KeywordTok{groupId}\NormalTok{\textgreater{}}
+\NormalTok{        \textless{}}\KeywordTok{groupId}\NormalTok{\textgreater{}eu.europa.ec.joinup.sd{-}dss\textless{}/}\KeywordTok{groupId}\NormalTok{\textgreater{}}
 \NormalTok{        \textless{}}\KeywordTok{artifactId}\NormalTok{\textgreater{}dss{-}pades\textless{}/}\KeywordTok{artifactId}\NormalTok{\textgreater{}}
 \NormalTok{        \textless{}}\KeywordTok{version}\NormalTok{\textgreater{}$\{dss.version\}\textless{}/}\KeywordTok{version}\NormalTok{\textgreater{}}
 \NormalTok{    \textless{}/}\KeywordTok{dependency}\NormalTok{\textgreater{}}
 
     \CommentTok{\textless{}!{-}{-} Token support (PKCS\#12, PKCS\#11) {-}{-}\textgreater{}}
 \NormalTok{    \textless{}}\KeywordTok{dependency}\NormalTok{\textgreater{}}
-\NormalTok{        \textless{}}\KeywordTok{groupId}\NormalTok{\textgreater{}eu.europa.dss\textless{}/}\KeywordTok{groupId}\NormalTok{\textgreater{}}
+\NormalTok{        \textless{}}\KeywordTok{groupId}\NormalTok{\textgreater{}eu.europa.ec.joinup.sd{-}dss\textless{}/}\KeywordTok{groupId}\NormalTok{\textgreater{}}
 \NormalTok{        \textless{}}\KeywordTok{artifactId}\NormalTok{\textgreater{}dss{-}token\textless{}/}\KeywordTok{artifactId}\NormalTok{\textgreater{}}
 \NormalTok{        \textless{}}\KeywordTok{version}\NormalTok{\textgreater{}$\{dss.version\}\textless{}/}\KeywordTok{version}\NormalTok{\textgreater{}}
 \NormalTok{    \textless{}/}\KeywordTok{dependency}\NormalTok{\textgreater{}}
 
     \CommentTok{\textless{}!{-}{-} Online sources for OCSP, CRL, TSA {-}{-}\textgreater{}}
 \NormalTok{    \textless{}}\KeywordTok{dependency}\NormalTok{\textgreater{}}
-\NormalTok{        \textless{}}\KeywordTok{groupId}\NormalTok{\textgreater{}eu.europa.dss\textless{}/}\KeywordTok{groupId}\NormalTok{\textgreater{}}
+\NormalTok{        \textless{}}\KeywordTok{groupId}\NormalTok{\textgreater{}eu.europa.ec.joinup.sd{-}dss\textless{}/}\KeywordTok{groupId}\NormalTok{\textgreater{}}
 \NormalTok{        \textless{}}\KeywordTok{artifactId}\NormalTok{\textgreater{}dss{-}service\textless{}/}\KeywordTok{artifactId}\NormalTok{\textgreater{}}
 \NormalTok{        \textless{}}\KeywordTok{version}\NormalTok{\textgreater{}$\{dss.version\}\textless{}/}\KeywordTok{version}\NormalTok{\textgreater{}}
 \NormalTok{    \textless{}/}\KeywordTok{dependency}\NormalTok{\textgreater{}}
 
     \CommentTok{\textless{}!{-}{-} EU Trusted List validation {-}{-}\textgreater{}}
 \NormalTok{    \textless{}}\KeywordTok{dependency}\NormalTok{\textgreater{}}
-\NormalTok{        \textless{}}\KeywordTok{groupId}\NormalTok{\textgreater{}eu.europa.dss\textless{}/}\KeywordTok{groupId}\NormalTok{\textgreater{}}
+\NormalTok{        \textless{}}\KeywordTok{groupId}\NormalTok{\textgreater{}eu.europa.ec.joinup.sd{-}dss\textless{}/}\KeywordTok{groupId}\NormalTok{\textgreater{}}
 \NormalTok{        \textless{}}\KeywordTok{artifactId}\NormalTok{\textgreater{}dss{-}tsl{-}validation\textless{}/}\KeywordTok{artifactId}\NormalTok{\textgreater{}}
 \NormalTok{        \textless{}}\KeywordTok{version}\NormalTok{\textgreater{}$\{dss.version\}\textless{}/}\KeywordTok{version}\NormalTok{\textgreater{}}
 \NormalTok{    \textless{}/}\KeywordTok{dependency}\NormalTok{\textgreater{}}
@@ -23431,9 +24100,10 @@ SignatureValue}\label{_the_signing_flow_tobesigned_signaturevalue}
 Model}\label{_the_two_phase_signing_model}
 
 EU DSS uses a two-phase signing model that maps directly to the
-hash-signing model described in Chapter 22. This separation is what
-makes remote signing possible --- the private key operation can happen
-anywhere, including on a remote HSM via the CSC API.
+hash-signing model described in \hyperref[ch22]{Remote Signing}. This
+separation is what makes remote signing possible --- the private key
+operation can happen anywhere, including on a remote HSM via the CSC
+API.
 
 \textbf{Phase 1: Compute what needs to be signed}
 
@@ -23461,9 +24131,10 @@ anywhere, including on a remote HSM via the CSC API.
 
 The \texttt{ToBeSigned} object contains the bytes that must be signed
 --- specifically, the DER-encoded signed attributes of the CMS
-SignerInfo, exactly as described in Chapter 22's hash-signing flow. EU
-DSS has already computed the message digest over the PDF byte range,
-built the ESS-signing-certificate-v2 attribute, and assembled the signed
+SignerInfo, exactly as described in \hyperref[ch22]{Remote
+Signing}\textquotesingle s hash-signing flow. EU DSS has already
+computed the message digest over the PDF byte range, built the
+ESS-signing-certificate-v2 attribute, and assembled the signed
 attributes.
 
 \textbf{Phase 2: Sign the hash and finalize}
@@ -23532,25 +24203,25 @@ using a PKCS\#12 keystore and a TSA:
 
 \begin{Shaded}
 \begin{Highlighting}[]
-\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{cades}\OperatorTok{.}\ImportTok{signature}\OperatorTok{.}\ImportTok{CAdESService}\OperatorTok{;}
-\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{enumerations}\OperatorTok{.}\ImportTok{DigestAlgorithm}\OperatorTok{;}
-\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{enumerations}\OperatorTok{.}\ImportTok{SignatureLevel}\OperatorTok{;}
-\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{model}\OperatorTok{.}\ImportTok{DSSDocument}\OperatorTok{;}
-\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{model}\OperatorTok{.}\ImportTok{InMemoryDocument}\OperatorTok{;}
-\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{model}\OperatorTok{.}\ImportTok{SignatureValue}\OperatorTok{;}
-\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{model}\OperatorTok{.}\ImportTok{ToBeSigned}\OperatorTok{;}
-\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{pades}\OperatorTok{.}\ImportTok{PAdESSignatureParameters}\OperatorTok{;}
-\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{pades}\OperatorTok{.}\ImportTok{signature}\OperatorTok{.}\ImportTok{PAdESService}\OperatorTok{;}
-\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{service}\OperatorTok{.}\ImportTok{http}\OperatorTok{.}\ImportTok{commons}\OperatorTok{.}\ImportTok{CommonsDataLoader}\OperatorTok{;}
-\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{service}\OperatorTok{.}\ImportTok{http}\OperatorTok{.}\ImportTok{commons}\OperatorTok{.}\ImportTok{OCSPDataLoader}\OperatorTok{;}
-\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{service}\OperatorTok{.}\ImportTok{ocsp}\OperatorTok{.}\ImportTok{OnlineOCSPSource}\OperatorTok{;}
-\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{service}\OperatorTok{.}\ImportTok{crl}\OperatorTok{.}\ImportTok{OnlineCRLSource}\OperatorTok{;}
-\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{service}\OperatorTok{.}\ImportTok{tsp}\OperatorTok{.}\ImportTok{OnlineTSPSource}\OperatorTok{;}
-\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{spi}\OperatorTok{.}\ImportTok{x509}\OperatorTok{.}\ImportTok{CertificateSource}\OperatorTok{;}
-\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{spi}\OperatorTok{.}\ImportTok{x509}\OperatorTok{.}\ImportTok{CommonTrustedCertificateSource}\OperatorTok{;}
-\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{token}\OperatorTok{.}\ImportTok{DSSPrivateKeyEntry}\OperatorTok{;}
-\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{token}\OperatorTok{.}\ImportTok{Pkcs12SignatureToken}\OperatorTok{;}
-\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{validation}\OperatorTok{.}\ImportTok{CommonCertificateVerifier}\OperatorTok{;}
+\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{esig}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{cades}\OperatorTok{.}\ImportTok{signature}\OperatorTok{.}\ImportTok{CAdESService}\OperatorTok{;}
+\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{esig}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{enumerations}\OperatorTok{.}\ImportTok{DigestAlgorithm}\OperatorTok{;}
+\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{esig}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{enumerations}\OperatorTok{.}\ImportTok{SignatureLevel}\OperatorTok{;}
+\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{esig}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{model}\OperatorTok{.}\ImportTok{DSSDocument}\OperatorTok{;}
+\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{esig}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{model}\OperatorTok{.}\ImportTok{InMemoryDocument}\OperatorTok{;}
+\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{esig}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{model}\OperatorTok{.}\ImportTok{SignatureValue}\OperatorTok{;}
+\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{esig}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{model}\OperatorTok{.}\ImportTok{ToBeSigned}\OperatorTok{;}
+\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{esig}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{pades}\OperatorTok{.}\ImportTok{PAdESSignatureParameters}\OperatorTok{;}
+\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{esig}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{pades}\OperatorTok{.}\ImportTok{signature}\OperatorTok{.}\ImportTok{PAdESService}\OperatorTok{;}
+\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{esig}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{service}\OperatorTok{.}\ImportTok{http}\OperatorTok{.}\ImportTok{commons}\OperatorTok{.}\ImportTok{CommonsDataLoader}\OperatorTok{;}
+\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{esig}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{service}\OperatorTok{.}\ImportTok{http}\OperatorTok{.}\ImportTok{commons}\OperatorTok{.}\ImportTok{OCSPDataLoader}\OperatorTok{;}
+\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{esig}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{service}\OperatorTok{.}\ImportTok{ocsp}\OperatorTok{.}\ImportTok{OnlineOCSPSource}\OperatorTok{;}
+\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{esig}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{service}\OperatorTok{.}\ImportTok{crl}\OperatorTok{.}\ImportTok{OnlineCRLSource}\OperatorTok{;}
+\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{esig}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{service}\OperatorTok{.}\ImportTok{tsp}\OperatorTok{.}\ImportTok{OnlineTSPSource}\OperatorTok{;}
+\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{esig}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{spi}\OperatorTok{.}\ImportTok{x509}\OperatorTok{.}\ImportTok{CertificateSource}\OperatorTok{;}
+\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{esig}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{spi}\OperatorTok{.}\ImportTok{x509}\OperatorTok{.}\ImportTok{CommonTrustedCertificateSource}\OperatorTok{;}
+\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{esig}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{token}\OperatorTok{.}\ImportTok{DSSPrivateKeyEntry}\OperatorTok{;}
+\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{esig}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{token}\OperatorTok{.}\ImportTok{Pkcs12SignatureToken}\OperatorTok{;}
+\KeywordTok{import} \ImportTok{eu}\OperatorTok{.}\ImportTok{europa}\OperatorTok{.}\ImportTok{esig}\OperatorTok{.}\ImportTok{dss}\OperatorTok{.}\ImportTok{validation}\OperatorTok{.}\ImportTok{CommonCertificateVerifier}\OperatorTok{;}
 
 \CommentTok{/**}
  \CommentTok{*}\NormalTok{ Complete PAdES}\CommentTok{{-}}\NormalTok{B}\CommentTok{{-}}\NormalTok{T signing with EU DSS}\CommentTok{.}
@@ -23633,8 +24304,8 @@ using a PKCS\#12 keystore and a TSA:
 That is roughly 60 lines of code --- including logging, comments, and
 error handling setup --- to produce a fully compliant PAdES-B-T
 signature. Compare this to the hundreds of lines required to build the
-CMS structure manually with BouncyCastle (Chapter 12), and the value
-proposition of EU DSS becomes clear.
+CMS structure manually with BouncyCastle (\hyperref[ch12]{Signature
+Architecture}), and the value proposition of EU DSS becomes clear.
 
 \section{Extending Signatures}\label{_extending_signatures}
 
@@ -23689,7 +24360,9 @@ upgrading a signature's PAdES profile without re-signing.
 \end{Shaded}
 
 The \texttt{extendDocument} method handles all the complexity described
-in Chapter 17 (PAdES Profiles) and Chapter 18 (Timestamps and LTV):
+in \hyperref[ch17]{PAdES Profiles (ETSI EN 319 142)} (PAdES Profiles)
+and \hyperref[ch18]{Timestamps \& Long-Term Validation} (Timestamps and
+LTV):
 
 \begin{enumerate}
 \def\labelenumi{\arabic{enumi}.}
@@ -23896,7 +24569,7 @@ of the framework:
 \begin{Shaded}
 \begin{Highlighting}[]
 \NormalTok{\textless{}}\KeywordTok{dependency}\NormalTok{\textgreater{}}
-\NormalTok{    \textless{}}\KeywordTok{groupId}\NormalTok{\textgreater{}eu.europa.dss\textless{}/}\KeywordTok{groupId}\NormalTok{\textgreater{}}
+\NormalTok{    \textless{}}\KeywordTok{groupId}\NormalTok{\textgreater{}eu.europa.ec.joinup.sd{-}dss\textless{}/}\KeywordTok{groupId}\NormalTok{\textgreater{}}
 \NormalTok{    \textless{}}\KeywordTok{artifactId}\NormalTok{\textgreater{}dss{-}spring{-}boot{-}starter\textless{}/}\KeywordTok{artifactId}\NormalTok{\textgreater{}}
 \NormalTok{    \textless{}}\KeywordTok{version}\NormalTok{\textgreater{}$\{dss.version\}\textless{}/}\KeywordTok{version}\NormalTok{\textgreater{}}
 \NormalTok{\textless{}/}\KeywordTok{dependency}\NormalTok{\textgreater{}}
@@ -24254,7 +24927,7 @@ Always log the sub-indication alongside the indication for debugging.
 Outlook}\label{_security_incidents_outlook}
 
 \section{PDF Signature Attacks: A Complete Technical
-Analysis}\label{_pdf_signature_attacks_a_complete_technical_analysis}
+Analysis}\label{ch24}
 
 \begin{quote}
 We found 21 out of 22 desktop viewer applications and 5 out of 7 online
@@ -25607,10 +26280,10 @@ new signature created after 2017.
 \subsubsection{The Comodo Registration Authority Breach
 (2011)}\label{_the_comodo_registration_authority_breach_2011}
 
-In March 2011 --- the same month as DigiNotar, though discovered
-slightly earlier --- an attacker compromised a \textbf{registration
-authority (RA)} affiliated with Comodo, one of the world's largest
-certificate authorities at the time.
+In March 2011 --- several months before the DigiNotar breach that summer
+--- an attacker compromised a \textbf{registration authority (RA)}
+affiliated with Comodo, one of the world's largest certificate
+authorities at the time.
 
 The attacker used the compromised RA account to issue nine fraudulent
 SSL certificates for high-profile domains: \texttt{login.live.com},
@@ -26027,8 +26700,7 @@ nothing, and test adversarially}. The validation checklist in this
 chapter is the minimum. The next attack class is already being
 researched.
 
-\chapter{Certificate Authority
-Breaches}\label{_certificate_authority_breaches}
+\chapter{Certificate Authority Breaches}\label{ch25}
 
 Every PDF digital signature carries an implicit assertion: "I trust the
 certificate authority that issued this certificate." That assertion is
@@ -26098,12 +26770,12 @@ originally an offshoot of the Dutch notarial profession --- the name is
 a portmanteau of "Digital Notary" --- and it carved out a niche issuing
 certificates for Dutch government services, notaries, and businesses.
 
-In 2010, VASCO Data Security International (now OneSpan) acquired
-DigiNotar for approximately 10 million euros. At the time, DigiNotar was
-one of the root CAs trusted by every major browser and operating system.
-Its certificates were embedded in the trust stores of Windows, macOS,
-Firefox, Chrome, and by extension, in the trust stores used by PDF
-viewers.
+In January 2011, VASCO Data Security International (now OneSpan)
+acquired DigiNotar for approximately 10 million euros. At the time,
+DigiNotar was one of the root CAs trusted by every major browser and
+operating system. Its certificates were embedded in the trust stores of
+Windows, macOS, Firefox, Chrome, and by extension, in the trust stores
+used by PDF viewers.
 
 DigiNotar also operated \textbf{PKIoverheid} (PKI for Government) ---
 the Dutch government's public key infrastructure. PKIoverheid
@@ -26278,7 +26950,7 @@ multiple CA servers, and had access to issuing infrastructure for both
 DigiNotar's commercial certificates and the PKIoverheid government
 certificates.
 
-\subsection{Impact on PDF Signatures}\label{_impact_on_pdf_signatures}
+\subsection{Impact on PDF Signatures}\label{_impact_on_pdf_signatures_2}
 
 The immediate impact on PDF signatures was severe and irreversible.
 
@@ -26553,7 +27225,7 @@ giving website operators time to obtain replacement certificates. But
 the endpoint was absolute: after October 2018, no Symantec-issued
 certificate was trusted by Chrome or Firefox.
 
-\subsection{Impact on PDF Signatures}\label{_impact_on_pdf_signatures_2}
+\subsection{Impact on PDF Signatures}\label{_impact_on_pdf_signatures_3}
 
 The Symantec distrust had a less dramatic but more insidious impact on
 PDF signatures than the DigiNotar breach.
@@ -26827,8 +27499,9 @@ However, CT is increasingly relevant for PDF signatures:
   Organizations building their own signature validation can incorporate
   CT log monitoring as an additional trust signal
 \item
-  The EUDI Wallet infrastructure (Chapter 27) may incorporate CT-like
-  transparency mechanisms for wallet-issued certificates
+  The EUDI Wallet infrastructure (\hyperref[ch27]{EUDI Wallet \& Digital
+  Identity}) may incorporate CT-like transparency mechanisms for
+  wallet-issued certificates
 \end{itemize}
 
 \begin{Shaded}
@@ -27169,7 +27842,7 @@ chain without a trusted root.
   verifiability beyond any single CA's lifetime
 \end{itemize}
 
-\chapter{Oddities \& Annoyances}\label{_oddities_annoyances}
+\chapter{Oddities \& Annoyances}\label{ch26}
 
 Every technology has its dark corners --- the design decisions that made
 sense in 1999 but haunt us today, the interoperability failures that no
@@ -27271,30 +27944,72 @@ Provider in the EU is listed on the EUTL, and a certificate chaining to
 a QTSP on the EUTL qualifies for the highest eIDAS tier regardless of
 whether Adobe has heard of the CA.
 
-But here is the catch: Acrobat does not validate against the EUTL by
-default. Acrobat uses the AATL. There is an option to enable EUTL
-validation in Acrobat (Edit \textgreater{} Preferences \textgreater{}
-Signatures \textgreater{} Verification \textgreater{} select "European
-Union Trusted Lists"), but it is off by default, and the vast majority
-of users never touch it.
+Since October 2015 (Acrobat DC and XI), Acrobat validates against
+\emph{both} the AATL and the EUTL by default. The setting is in Edit
+\textgreater{} Preferences \textgreater{} Trust Manager, where "Load
+trusted certificates from an Adobe EUTL server" is checked out of the
+box. Adobe periodically downloads the EUTL from its own servers, just as
+it does for the AATL.
 
-This means a signature with a qualified certificate from a QTSP that is
-\emph{not} in the AATL will show a yellow warning in Acrobat --- even
-though it is legally a qualified electronic signature with the same
-standing as a handwritten signature under EU law.
+In theory, this means a qualified certificate from any QTSP on the EUTL
+should show a green checkmark without user intervention. In practice,
+the EUTL integration has persistent reliability problems that undermine
+this promise:
+
+\begin{itemize}
+\item
+  \textbf{EUTL cache corruption.} A
+  \href{https://acrobat.uservoice.com/forums/926812-acrobat-reader-for-windows-and-mac/suggestions/43504077-bug-eutl-corrupted-by-default}{known
+  bug} causes the AATL update process to corrupt the local EUTL cache.
+  The only fix is deleting \texttt{addressbook.acrodata} and
+  re-downloading both lists in the correct order. Most users will never
+  do this.
+\item
+  \textbf{Update lag.} The EUTL updates less frequently than the AATL. A
+  newly accredited QTSP may appear on the official EU Trusted List weeks
+  before Adobe's EUTL mirror reflects it.
+\item
+  \textbf{Missing intermediates.} Some QTSPs issue signing certificates
+  that chain through intermediate CAs not included in the EUTL download.
+  Acrobat does not always chase AIA pointers to fetch missing
+  intermediates, resulting in a yellow warning even when the root is
+  trusted.
+\end{itemize}
+
+The net effect is that a signature with a qualified certificate from a
+QTSP that is on the EUTL but \emph{not} the AATL will often show a
+yellow warning in Acrobat --- even though it is legally a qualified
+electronic signature with the same standing as a handwritten signature
+under EU law.
 
 The legal framework says: this is a QES, as valid as ink. The software
 says: "The validity of the document certification is UNKNOWN."
 
 The user believes the software.
 
-If you are distributing signed PDFs to recipients who use Acrobat, and
-your QTSP is on the EUTL but not the AATL, include instructions for
-enabling EUTL validation in Acrobat. Better yet, embed the full
-certificate chain and LTV data so that validation depends on the trust
-store configuration rather than online lookups. Best of all: choose a
-QTSP that is on \emph{both} the AATL and the EUTL. Most major European
-QTSPs have pursued AATL membership precisely because of this problem.
+If you are distributing signed PDFs to recipients who use Acrobat and
+your QTSP is on the EUTL but not the AATL:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item
+  \textbf{Verify your own setup.} Open a signed PDF on a clean Acrobat
+  install and confirm the EUTL trust path works. If the EUTL cache is
+  corrupted, delete \texttt{addressbook.acrodata} (in
+  \texttt{\%APPDATA\%\textbackslash{}Adobe\textbackslash{}Acrobat\textbackslash{}DC\textbackslash{}Security\textbackslash{}})
+  and let Acrobat re-download both lists.
+\item
+  \textbf{Embed the full chain.} Include all intermediate certificates
+  in the CMS \texttt{SignedData} so that Acrobat does not need to chase
+  AIA pointers.
+\item
+  \textbf{Include LTV data.} Embed OCSP responses and CRLs at signing
+  time (PAdES-B-LTA) so validation does not depend on online lookups.
+\item
+  \textbf{Choose a dual-listed QTSP.} Most major European QTSPs have
+  pursued AATL membership precisely because of these reliability issues.
+  A QTSP on \emph{both} lists avoids the problem entirely.
+\end{enumerate}
 
 \subsection{The Political Dimension}\label{_the_political_dimension}
 
@@ -27310,12 +28025,14 @@ signatures validated by its software are trustworthy. Others argue that
 a single company should not be the gatekeeper for a technology used in
 legal, governmental, and financial transactions across the globe.
 
-The emergence of the EUDI wallet (Chapter 27) may shift this dynamic. If
-QES becomes a consumer technology available to every EU citizen, the
-volume of qualified signatures will dwarf the current market --- and the
-EUTL, not the AATL, will be the authoritative trust anchor for those
-signatures. Whether Adobe adjusts its defaults accordingly remains to be
-seen.
+The emergence of the EUDI wallet (\hyperref[ch27]{EUDI Wallet \& Digital
+Identity}) may shift this dynamic. If QES becomes a consumer technology
+available to every EU citizen, the volume of qualified signatures will
+dwarf the current market --- and the pressure on Adobe to make EUTL
+validation \emph{reliable} (not merely enabled by default) will
+intensify. The EUTL is already turned on, but the cache corruption bugs,
+update lag, and missing-intermediate problems described above mean that
+"enabled" and "working" are not the same thing.
 
 \section{Broken Validation Across
 Viewers}\label{_broken_validation_across_viewers}
@@ -27419,10 +28136,11 @@ fail & Fails & Not supported \\
 
 The most dangerous row in this table is "Incremental update after
 signing." This is exactly the scenario that the Bochum Incremental
-Saving Attack (Chapter 24) exploits. If a viewer does not detect that
-the file was modified after signing, it will show a valid signature on a
-document whose content has been changed. As of 2026, most major viewers
-have patched this --- but "most" is not "all," and not every installed
+Saving Attack (\hyperref[ch24]{PDF Signature Attacks: A Complete
+Technical Analysis}) exploits. If a viewer does not detect that the file
+was modified after signing, it will show a valid signature on a document
+whose content has been changed. As of 2026, most major viewers have
+patched this --- but "most" is not "all," and not every installed
 version has been updated.
 
 \subsection{Why Viewers Disagree}\label{_why_viewers_disagree}
@@ -27497,7 +28215,8 @@ most rigorous checks and report the most precise results:
 \item
   \textbf{Verify the byte range covers the entire file minus the
   \texttt{/Contents} gap.} This catches the Signature Wrapping Attack
-  (Chapter 24).
+  (\hyperref[ch24]{PDF Signature Attacks: A Complete Technical
+  Analysis}).
 \item
   \textbf{Detect incremental updates after signing.} Compare the signed
   byte range to the file size. If there is trailing data, parse it and
@@ -27583,9 +28302,9 @@ implementations unless you have a specific compatibility requirement
 with a legacy system that cannot parse CAdES extensions. The practical
 difference between \texttt{adbe.pkcs7.detached} and
 \texttt{ETSI.CAdES.detached} is the presence of the
-\texttt{ESS-signing-certificate-v2} signed attribute (Chapter 17) ---
-adding it makes the signature PAdES-B-B compliant at zero additional
-cost.
+\texttt{ESS-signing-certificate-v2} signed attribute
+(\hyperref[ch17]{PAdES Profiles (ETSI EN 319 142)}) --- adding it makes
+the signature PAdES-B-B compliant at zero additional cost.
 
 \texttt{adbe.pkcs7.sha1} is deprecated and cryptographically broken. Do
 not use it. If you encounter it in a legacy document, validate it with
@@ -27708,11 +28427,11 @@ PAdES awareness will fail PAdES validation --- and PAdES validation is
 what matters for EU compliance, for AATL-listed CAs, and for most
 enterprise validation workflows.
 
-The EU DSS validation framework (Chapter 23) validates signatures
-against PAdES profiles, not against raw ISO 32000-2:2020. If your
-signatures validate in EU DSS, they satisfy both standards. If you are
-building your own validator, validate against PAdES --- it is the
-superset of requirements that covers both.
+The EU DSS validation framework (\hyperref[ch23]{The EU DSS Framework})
+validates signatures against PAdES profiles, not against raw ISO
+32000-2:2020. If your signatures validate in EU DSS, they satisfy both
+standards. If you are building your own validator, validate against
+PAdES --- it is the superset of requirements that covers both.
 
 \section{The Timestamp Chicken-and-Egg
 Problem}\label{_the_timestamp_chicken_and_egg_problem}
@@ -28040,99 +28759,385 @@ This is another reason to prefer PAdES-B-LTA: the archive timestamp
 mechanism provides a renewable chain that survives individual
 certificate expirations.
 
-\section{Reader-Enabled PDFs vs Signing
-Conflicts}\label{_reader_enabled_pdfs_vs_signing_conflicts}
+\section{Usage Rights (UR3) and the Reader-Enabling
+Problem}\label{_usage_rights_ur3_and_the_reader_enabling_problem}
 
 \subsection{What Reader-Enabling Is}\label{_what_reader_enabling_is}
 
-Adobe Reader (the free version) historically could not save filled-in
-forms. To allow Reader users to fill in and save a form, the PDF author
-had to "enable" the PDF for Reader using Adobe Acrobat Pro. This was
-done by applying a special \textbf{usage rights signature} --- a
-certification-level signature with a specific set of usage rights
-extensions that told Reader which features to unlock.
+For most of PDF's history, Adobe maintained a deliberate split between
+two products:
 
-The usage rights signature is stored in the document's permissions
-dictionary (\texttt{/Perms}) and uses a special Adobe-issued
-certificate. When Reader opens a document with a valid usage rights
-signature, it enables the specified features (fill-in, save, comment,
-etc.).
+\begin{itemize}
+\item
+  \textbf{Adobe Acrobat} (paid): create, edit, sign, and save PDFs
+\item
+  \textbf{Adobe Reader} (free): view and print PDFs --- but \emph{not}
+  save filled-in forms, add comments, or apply digital signatures
+\end{itemize}
 
-\subsection{The Conflict with Document
-Signing}\label{_the_conflict_with_document_signing}
+This meant that a government agency could distribute a tax form as a
+PDF, but citizens using the free Reader could not save their filled-in
+form. They could fill it in, but closing Reader meant losing all their
+work. The only way to "unlock" these features in Reader was for the PDF
+author to apply a \textbf{usage rights signature} --- a special
+signature that told Reader which features to enable.
 
-The problem arises when a Reader-enabled PDF needs to be signed.
+This mechanism is formally known as \textbf{UR3} (Usage Rights version
+3), defined in ISO 32000-1:2008 Section 12.8.2.3 and carried into ISO
+32000-2:2020 as a legacy feature.
 
-The usage rights signature is a certification signature --- it was the
-first signature on the document, and it claims \texttt{/DocMDP}
-permissions. Adding an approval signature after the certification
-signature requires an incremental update, which is permitted under the
-DocMDP permissions level set by the usage rights signature.
+\subsection{How UR3 Works Technically}\label{_how_ur3_works_technically}
 
-But here is the catch: some PDF editors, when they save the document
-after adding a signature, perform operations that invalidate the usage
-rights signature. This happens because:
+The UR3 mechanism uses the document's \texttt{/Perms} dictionary in the
+catalog:
+
+\begin{verbatim}
+/Catalog <<
+  /Perms <<
+    /UR3 15 0 R    % Reference to the usage rights signature
+  >>
+>>
+\end{verbatim}
+
+The \texttt{/UR3} value is a signature dictionary --- structurally
+identical to a regular PDF signature, with \texttt{/Filter},
+\texttt{/SubFilter}, \texttt{/ByteRange}, and \texttt{/Contents}. But it
+serves a completely different purpose: instead of asserting document
+integrity, it asserts \emph{permissions}.
+
+The signature dictionary contains a \texttt{/Reference} array with a
+\texttt{/TransformParams} dictionary that specifies exactly which
+features Reader should unlock:
+
+\begin{verbatim}
+/TransformParams <<
+  /Type /TransformParams
+  /V /2.2
+  /Annots [/Create /Delete /Modify /Copy /Import /Export]
+  /Form [/Add /Delete /FillIn /Import /Export /SubmitStandalone /SpawnTemplate]
+  /Signature [/Modify]
+  /EF [/Create /Delete /Modify /Import]
+  /P true    % Print permission
+>>
+\end{verbatim}
+
+The critical fields:
+
+\begin{itemize}
+\item
+  \textbf{\texttt{/Form\ {[}/FillIn{]}}}: Allows form filling --- the
+  most commonly requested feature
+\item
+  \textbf{\texttt{/Annots\ {[}/Create\ /Modify{]}}}: Allows adding
+  comments and annotations
+\item
+  \textbf{\texttt{/Signature\ {[}/Modify{]}}}: Allows adding digital
+  signatures
+\item
+  \textbf{\texttt{/EF\ {[}/Create\ /Modify{]}}}: Allows attaching files
+\end{itemize}
+
+When Reader opens a PDF and finds a valid \texttt{/UR3} signature, it
+checks the \texttt{/TransformParams} and enables exactly the specified
+features. The user sees a purple or blue banner at the top: \emph{"This
+document has been enabled with additional features. Filling, saving, and
+other rights are available."}
+
+\subsection{The Adobe-Controlled
+Certificate}\label{_the_adobe_controlled_certificate}
+
+The UR3 signature must be created using a certificate issued by Adobe
+--- specifically, a certificate chaining to Adobe's private
+\textbf{Reader Extensions root CA}. This certificate was never publicly
+available. The only way to obtain it was:
 
 \begin{enumerate}
 \def\labelenumi{\arabic{enumi}.}
 \item
-  The editor modifies objects that the usage rights signature's byte
-  range covers
+  \textbf{Adobe Acrobat Pro} --- which could Reader-enable PDFs via
+  {File \textgreater{} Save As \textgreater{} Reader Extended PDF}
 \item
-  The editor performs a full save instead of an incremental save,
-  destroying the incremental structure that the usage rights signature
-  depends on
-\item
-  The editor adds or modifies AcroForm entries in a way that the usage
-  rights signature's \texttt{/FieldMDP} transform does not permit
+  \textbf{Adobe LiveCycle Reader Extensions} (later renamed
+  \textbf{Adobe Experience Manager Forms}) --- a server product licensed
+  per-CPU or per-transaction, designed for enterprises that needed to
+  Reader-enable PDFs at scale (e.g., government form portals, banking
+  systems)
 \end{enumerate}
 
-When the usage rights signature is invalidated, Reader reverts to its
-restricted mode --- the user can no longer save the form. And if the
-document's approval signature depends on the AcroForm structure (which
-it does, since signature fields \emph{are} form fields), the interplay
-between the invalidated usage rights and the new signature can produce
-validation errors in Acrobat.
+Adobe LiveCycle Reader Extensions was a significant revenue source. A
+typical enterprise license cost tens of thousands of dollars per year.
+The pricing was justified by the exclusive capability: \emph{no other
+vendor could legally produce the UR3 signature}, because no other vendor
+had access to the Adobe Reader Extensions certificate.
 
-\subsection{The Historical Context}\label{_the_historical_context}
+\subsection{Why Adobe Did This}\label{_why_adobe_did_this}
 
-Reader-enabling was a significant source of revenue for Adobe: Acrobat
-Pro was the only tool that could create the usage rights signature
-(because it used an Adobe-controlled certificate). Third-party libraries
-could not Reader-enable PDFs.
+The UR3 mechanism was a deliberate business strategy, not a technical
+necessity:
 
-ISO 32000-2:2020 deprecated the \texttt{/Perms} usage rights mechanism.
-PDF 2.0 assumes that all viewers can save forms without special
-enablement. But the real world is not PDF 2.0 --- millions of
-Reader-enabled PDF 1.7 documents are still in circulation, and
-enterprises still generate new ones because their workflows depend on
-the Reader experience.
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item
+  \textbf{Artificial feature gating}: The free Reader was technically
+  capable of all these operations --- the code for form filling, saving,
+  commenting, and signing was present in the Reader binary. UR3 was a
+  runtime license check: Reader inspected the UR3 signature at startup
+  and enabled or disabled features based on its presence and validity.
+  There was no technical reason Reader could not save forms; the
+  restriction was purely a policy enforcement mechanism embedded in the
+  software.
+\item
+  \textbf{Lock-in to Adobe tooling}: By requiring an Adobe-issued
+  certificate for UR3, Adobe ensured that enterprises generating
+  fillable forms --- governments, banks, insurance companies, healthcare
+  providers --- had to purchase either Acrobat Pro licenses for every
+  employee or a LiveCycle Reader Extensions server license. Third-party
+  PDF libraries (iText, PDFBox, Foxit SDK) could \emph{create} fillable
+  forms with perfect AcroForm markup, but the resulting PDFs would show
+  the restrictive banner in Reader, directing users to purchase Acrobat.
+\item
+  \textbf{Revenue multiplication}: The same customer paid twice: once
+  for Acrobat Pro or LiveCycle (to create and Reader-enable the form)
+  and once for Adobe's form distribution infrastructure (to host and
+  process submissions). The UR3 mechanism was the keystone of this
+  revenue model.
+\item
+  \textbf{Competitive moat}: Because UR3 relied on a cryptographic
+  signature with an Adobe-controlled root, it was not possible to
+  reverse-engineer or circumvent it without either breaking the
+  signature verification or distributing unauthorized certificates ---
+  both of which would be legally and technically problematic.
+\end{enumerate}
 
-If your signing service processes documents that may be Reader-enabled,
-test the signing workflow with Reader-enabled PDFs specifically. Ensure
-your signing code performs an incremental save (not a full save) and
-does not modify objects covered by the usage rights signature. PDFBox's
-\texttt{PDDocument.saveIncremental()} is designed for this --- but you
-must be careful not to load and re-save objects that the usage rights
-signature covers.
+Some third-party libraries (notably iText) briefly offered
+"Reader-enabling" functionality by using self-signed certificates or
+Adobe's expired certificates. Adobe's legal team aggressively shut this
+down, arguing that the UR3 certificate chain was proprietary. The
+resulting legal disputes underscored that UR3 was as much a
+legal/business mechanism as a technical one.
 
-\subsection{The Modern Alternative}\label{_the_modern_alternative}
+\subsection{The "Fill Out This Form" Banner
+Problem}\label{_the_fill_out_this_form_banner_problem}
 
-The practical alternative to Reader-enabling is to stop caring about it.
-Adobe Acrobat Reader DC (the current free version) can save filled-in
-forms without usage rights. The limitation existed in older versions of
-Reader (pre-DC) and was removed as Adobe shifted to a subscription model
-for Acrobat.
+The most visible consequence of UR3 for end users was the
+\textbf{blue/purple banner} that Adobe Reader displayed when opening a
+PDF with form fields:
 
-If your user base has upgraded to Reader DC (and by 2026, most have),
-Reader-enabling is no longer necessary. If you must support legacy
-Reader versions, the only safe approach is to Reader-enable the PDF
-\emph{after} all signatures have been applied --- which is usually not
-possible, since the usage rights signature must be the first signature.
+\begin{itemize}
+\item
+  \textbf{If UR3 is present and valid}: Reader shows a permissive banner
+  --- \emph{"This document has been enabled with additional features"}
+  --- and allows filling, saving, commenting, and signing.
+\item
+  \textbf{If UR3 is absent}: Reader shows a restrictive banner ---
+  \emph{"Please fill out the following form. You can save data typed
+  into this form. Print\ldots\hspace{0pt}"} --- but the form data
+  \emph{cannot} be saved. Clicking "save" either does nothing or prompts
+  for Acrobat Pro.
+\item
+  \textbf{If UR3 is present but invalid} (e.g., the certificate has
+  expired, or the document was modified after Reader-enabling): Reader
+  shows a warning --- \emph{"This document enabled extended features in
+  Adobe Reader. The document has been changed since it was created and
+  use of extended features is no longer available."} --- and reverts to
+  restricted mode.
+\end{itemize}
 
-The real answer is: test your specific workflow, document the behavior,
-and warn your users if they are operating in a scenario where
-Reader-enabling and signing conflict.
+The third scenario is the one that causes the most pain in signature
+workflows.
+
+\subsection{The Collision with Digital
+Signatures}\label{_the_collision_with_digital_signatures}
+
+When a user signs a Reader-enabled PDF, the signing operation adds an
+incremental update to the file. This incremental update does not
+\emph{modify} the bytes covered by the UR3 signature's byte range ---
+but it can still invalidate the UR3 signature in practice, because:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item
+  \textbf{The UR3 \texttt{/TransformParams} may not permit the changes}:
+  If the UR3 signature's transform parameters specify
+  \texttt{/Signature\ {[}/Modify{]}}, then adding an approval signature
+  is permitted. But if the transform parameters do not include
+  \texttt{/Signature}, or if the signing tool modifies form fields
+  beyond what \texttt{/Form\ {[}/FillIn{]}} permits, Reader considers
+  the UR3 signature violated.
+\item
+  \textbf{Non-incremental saves destroy UR3}: If the signing tool
+  performs a full save (rewriting the entire PDF) instead of an
+  incremental save, the UR3 signature's byte range no longer matches the
+  file content. The UR3 signature is silently invalidated. Reader
+  reverts to restricted mode. The user loses the ability to save ---
+  even though the document signature itself is valid.
+\item
+  \textbf{AcroForm modifications can break UR3}: When a signing tool
+  adds a signature field to the AcroForm, it modifies the
+  \texttt{/Fields} array in the AcroForm dictionary. If the UR3
+  signature's \texttt{/FieldMDP} transform restricts which fields can be
+  modified, the new signature field may violate those restrictions. This
+  produces a paradox: the user has been granted
+  \texttt{/Signature\ {[}/Modify{]}} permission, but the act of creating
+  the signature field changes the form structure in a way the UR3
+  transform did not anticipate.
+\item
+  \textbf{Certificate expiration}: Adobe's UR3 certificates had finite
+  lifetimes. Many LiveCycle-issued UR3 signatures used certificates that
+  have since expired. When Reader encounters an expired UR3 certificate,
+  it invalidates the usage rights --- even though the document has not
+  been modified. Forms that worked perfectly for years suddenly lose
+  their "extended features" when the UR3 certificate expires, causing
+  helpdesk tickets and confused users.
+\end{enumerate}
+
+The practical failure mode is this: a user fills in a Reader-enabled
+government form, signs it, and tries to save. Reader shows the warning
+banner --- \emph{"extended features are no longer available"} --- and
+refuses to save. The user's signature is embedded in the PDF, but they
+cannot produce a saved copy of the signed document.
+
+The UR3 + signing conflict is the single most common reason for the "I
+signed the form but now I can't save it" complaint in enterprise PDF
+workflows. If your application produces PDFs that will be filled in and
+signed in Reader, you \emph{must} test the entire lifecycle: create form
+→ Reader-enable → fill in → sign → save. Each step can invalidate the
+previous step's integrity assertions.
+
+\subsection{Why UR3 Was Dropped}\label{_why_ur3_was_dropped}
+
+Several forces converged to make UR3 obsolete:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item
+  \textbf{Adobe's business model shifted}: When Adobe moved to the
+  Creative Cloud subscription model (2013), the revenue argument for UR3
+  weakened. Adobe no longer needed to sell perpetual Acrobat Pro
+  licenses; they needed subscribers. Making Reader more capable
+  (encouraging users to stay in the Adobe ecosystem) became more
+  valuable than gating features behind UR3.
+\item
+  \textbf{Adobe Reader DC removed the restrictions (2015)}: Starting
+  with Acrobat Reader DC (released April 2015), Adobe unlocked form
+  filling and saving for all PDFs --- no UR3 signature required. Reader
+  DC can fill, save, comment on, and sign any PDF without usage rights.
+  The UR3 mechanism became unnecessary for new documents.
+\item
+  \textbf{Competitive pressure}: Free PDF viewers (Foxit Reader,
+  Chrome's built-in viewer, macOS Preview, Evince) never enforced UR3
+  restrictions. Users who could not save forms in Adobe Reader simply
+  switched to Foxit or Chrome --- which hurt Adobe's market share more
+  than the UR3 revenue helped.
+\item
+  \textbf{ISO standardization}: When PDF became ISO 32000-1 (2008), the
+  UR3 mechanism was included for backward compatibility but was not
+  embraced as a core feature. ISO 32000-2:2020 (2020) deprecated the
+  \texttt{/Perms} usage rights mechanism entirely, signaling that the
+  standard body considers it a legacy artifact.
+\item
+  \textbf{Legal and interoperability pressure}: The EU's push for open
+  document standards and interoperability (particularly through eIDAS
+  and digital government initiatives) made Adobe-proprietary gating
+  mechanisms politically untenable for government forms.
+\end{enumerate}
+
+\subsection{Why Modern Reader Still Interprets
+UR3}\label{_why_modern_reader_still_interprets_ur3}
+
+Despite UR3 being deprecated and unnecessary in Reader DC, modern
+Acrobat Reader (2026) \emph{still} interprets UR3 signatures. This
+creates a subtle backward-compatibility trap:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item
+  \textbf{The blue banner still appears}: When Reader DC opens a PDF
+  with a valid UR3 signature, it still displays the "extended features"
+  banner --- even though those features are available regardless. This
+  confuses users who see the banner disappear after they sign (because
+  the signing invalidated the UR3), and assume they have lost
+  permissions.
+\item
+  \textbf{Invalid UR3 triggers a warning}: If the UR3 signature is
+  invalid (expired certificate, modified document), Reader DC shows a
+  warning banner --- \emph{"extended features are no longer available"}
+  --- even though the features \emph{are} still available in Reader DC.
+  The warning is cosmetically alarming but functionally meaningless.
+  Users and support staff do not know this, leading to unnecessary
+  escalations.
+\item
+  \textbf{Legacy workflows depend on UR3 detection}: Some enterprise
+  document management systems check for the presence of UR3 as a
+  workflow signal ("this form has been prepared for distribution").
+  Removing UR3 interpretation from Reader would break these workflows.
+\item
+  \textbf{Acrobat (paid) still Reader-enables}: Adobe Acrobat Pro (the
+  paid version) still offers {Save As \textgreater{} Reader Extended
+  PDF} in 2026. This feature is vestigial --- it adds a UR3 signature
+  that is unnecessary for Reader DC --- but it remains in the product
+  because enterprise customers have Standard Operating Procedures that
+  specify "Reader-enable the form before distribution." Removing the
+  feature would break these SOPs.
+\end{enumerate}
+
+\subsection{Practical Guidance for Signing
+Applications}\label{_practical_guidance_for_signing_applications}
+
+If your signing service processes PDFs that may contain UR3 signatures:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item
+  \textbf{Always use incremental save}:
+  \texttt{PDDocument.saveIncremental()} in PDFBox preserves the UR3 byte
+  range. A full save will always invalidate UR3.
+\item
+  \textbf{Do not modify objects outside the signature field}: When
+  adding a signature, create the signature field and its value ---
+  nothing else. Do not reorganize the AcroForm \texttt{/Fields} array,
+  do not update \texttt{/NeedAppearances}, do not touch font resources.
+  Any unnecessary modification risks violating the UR3 transform
+  parameters.
+\item
+  \textbf{Detect UR3 before signing}: Check for \texttt{/Perms} →
+  \texttt{/UR3} in the catalog. If present, warn the user that signing
+  may affect the "extended features" banner in Reader. This is cosmetic
+  in Reader DC but can be confusing.
+\item
+  \textbf{Consider stripping UR3 if unnecessary}: If your target
+  audience uses Reader DC (which is almost everyone by 2026), you can
+  strip the UR3 signature before signing. This eliminates the conflict
+  entirely --- but it requires a document modification that itself must
+  be done via incremental save if other signatures are present.
+\item
+  \textbf{Test with expired UR3 certificates}: Many UR3 signatures in
+  the wild use Adobe certificates that expired years ago. Your signing
+  code should handle the "UR3 present but invalid" case gracefully ---
+  it should not refuse to sign just because the UR3 is expired.
+\end{enumerate}
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{/**}
+ \CommentTok{*}\NormalTok{ Checks whether a PDF contains a UR3 }\CommentTok{(}\NormalTok{usage rights}\CommentTok{)}\NormalTok{ signature}
+ \CommentTok{*}\NormalTok{ in the document catalog}\CommentTok{\textquotesingle{}}\NormalTok{s }\CommentTok{/}\NormalTok{Perms dictionary}\CommentTok{.}
+ \CommentTok{*/}
+\KeywordTok{public} \DataTypeTok{boolean} \FunctionTok{hasUsageRights}\OperatorTok{(}\NormalTok{PDDocument doc}\OperatorTok{)} \OperatorTok{\{}
+\NormalTok{    COSDictionary catalog }\OperatorTok{=}\NormalTok{ doc}\OperatorTok{.}\FunctionTok{getDocumentCatalog}\OperatorTok{().}\FunctionTok{getCOSObject}\OperatorTok{();}
+\NormalTok{    COSDictionary perms }\OperatorTok{=}\NormalTok{ catalog}\OperatorTok{.}\FunctionTok{getCOSDictionary}\OperatorTok{(}\NormalTok{COSName}\OperatorTok{.}\FunctionTok{getPDFName}\OperatorTok{(}\StringTok{"Perms"}\OperatorTok{));}
+    \ControlFlowTok{if} \OperatorTok{(}\NormalTok{perms }\OperatorTok{==} \KeywordTok{null}\OperatorTok{)} \OperatorTok{\{}
+        \ControlFlowTok{return} \KeywordTok{false}\OperatorTok{;}
+    \OperatorTok{\}}
+    \DataTypeTok{boolean}\NormalTok{ hasUR3 }\OperatorTok{=}\NormalTok{ perms}\OperatorTok{.}\FunctionTok{containsKey}\OperatorTok{(}\NormalTok{COSName}\OperatorTok{.}\FunctionTok{getPDFName}\OperatorTok{(}\StringTok{"UR3"}\OperatorTok{));}
+    \ControlFlowTok{if} \OperatorTok{(}\NormalTok{hasUR3}\OperatorTok{)} \OperatorTok{\{}
+\NormalTok{        log}\OperatorTok{.}\FunctionTok{info}\OperatorTok{(}\StringTok{"Document contains UR3 usage rights signature — "}
+                \OperatorTok{+} \StringTok{"signing may affect Reader\textquotesingle{}s \textquotesingle{}extended features\textquotesingle{} banner"}\OperatorTok{);}
+    \OperatorTok{\}}
+    \ControlFlowTok{return}\NormalTok{ hasUR3}\OperatorTok{;}
+\OperatorTok{\}}
+\end{Highlighting}
+\end{Shaded}
 
 \section{\texorpdfstring{Trailing Bytes and Garbage After
 \texttt{\%\%EOF}}{Trailing Bytes and Garbage After \%\%EOF}}\label{_trailing_bytes_and_garbage_after_eof}
@@ -28214,16 +29219,25 @@ was not covered by any signature" (potentially malicious).
   \textbf{Monitor TSA certificate expiration} --- expired TSA certs
   degrade B-T signatures to effectively B-B
 \item
-  \textbf{Reader-enabled PDFs conflict with signing} --- test
-  specifically if your workflow involves Reader-enabled documents
+  \textbf{UR3 (usage rights) was Adobe's revenue gating mechanism} ---
+  it used a proprietary certificate to lock features in the free Reader,
+  forcing enterprises to buy Acrobat Pro or LiveCycle
+\item
+  \textbf{Reader DC (2015+) removed the UR3 restrictions} --- form
+  filling, saving, and signing work without usage rights --- but Reader
+  still \emph{interprets} UR3, causing confusing banners when signing
+  invalidates the UR3 signature
+\item
+  \textbf{Signing a Reader-enabled PDF can invalidate UR3} --- use
+  incremental saves, minimize AcroForm modifications, and warn users
+  about the cosmetic banner change
 \item
   \textbf{Trailing bytes after \texttt{\%\%EOF}} are common and usually
   harmless, but your validator should distinguish cosmetic trailing data
   from actual post-signature modifications
 \end{itemize}
 
-\chapter{EUDI Wallet \& Digital
-Identity}\label{_eudi_wallet_digital_identity}
+\chapter{EUDI Wallet \& Digital Identity}\label{ch27}
 
 For three decades, qualified electronic signatures have been a niche
 technology --- expensive, complicated, and reserved for enterprises,
@@ -28250,10 +29264,11 @@ Why}\label{_eidas_2_0_what_changed_and_why}
 \subsection{The Regulatory History}\label{_the_regulatory_history}
 
 The original eIDAS regulation (Regulation (EU) No 910/2014 (eIDAS),
-Chapter 19) entered into force in 2014 and became fully effective in
-2016. It was a success in the narrow sense: it created a functioning
-framework for qualified trust services, established the EU Trusted List,
-and enabled cross-border recognition of QES.
+\hyperref[ch19]{The eIDAS Regulation}) entered into force in 2014 and
+became fully effective in 2016. It was a success in the narrow sense: it
+created a functioning framework for qualified trust services,
+established the EU Trusted List, and enabled cross-border recognition of
+QES.
 
 It was a failure in the broad sense: almost nobody used it.
 
@@ -28293,11 +29308,12 @@ forceful was needed.
 
 \subsection{Regulation (EU) 2024/1183}\label{_regulation_eu_20241183}
 
-On April 11, 2024, the revised eIDAS regulation --- Regulation (EU)
-2024/1183 (eIDAS 2.0), commonly called eIDAS 2.0 --- entered into force.
-The revision keeps the trust services framework from eIDAS 1.0 largely
-intact (the three-tier signature model, QTSPs, the EU Trusted List ---
-all unchanged) but adds a transformative new component.
+On May 20, 2024, the revised eIDAS regulation --- Regulation (EU)
+2024/1183 (eIDAS 2.0), commonly called eIDAS 2.0 --- entered into force
+(signed April 11, 2024; published in the Official Journal on April 30,
+2024). The revision keeps the trust services framework from eIDAS 1.0
+largely intact (the three-tier signature model, QTSPs, the EU Trusted
+List --- all unchanged) but adds a transformative new component.
 
 The headline change: \textbf{every EU member state must provide a
 European Digital Identity Wallet to its citizens and residents}.
@@ -28326,7 +29342,8 @@ Milestone
 \endhead
 \bottomrule\noalign{}
 \endlastfoot
-April 11, 2024 & eIDAS 2.0 enters into force \\
+May 20, 2024 & eIDAS 2.0 enters into force (signed April 11, published
+in OJ April 30) \\
 By November 2024 & European Commission publishes the first set of
 implementing acts defining technical specifications \\
 2024-2025 & Large-Scale Pilots (LSPs) across the EU test wallet
@@ -28830,8 +29847,9 @@ architecture.
 
 The Cloud Signature Consortium (CSC) API --- the industry-standard REST
 API for remote signing --- is being adapted for wallet integration. If
-your application already supports CSC-based remote signing (Chapter 22),
-adapting it for wallet-initiated signing is a relatively small change.
+your application already supports CSC-based remote signing
+(\hyperref[ch22]{Remote Signing}), adapting it for wallet-initiated
+signing is a relatively small change.
 
 \subsection{The Sole Control Assurance
 Problem}\label{_the_sole_control_assurance_problem}
@@ -29013,7 +30031,8 @@ implementation must handle: pre-allocating the \texttt{/Contents}
 placeholder, coordinating the byte range computation with the CMS
 injection, error handling for TSA timeouts, retry logic for remote QSCD
 communication failures, and verification of the completed signature.
-Chapter 29 covers the full PDFBox signing pipeline.
+\hyperref[ch29]{PDFBox Signing --- Complete Walkthrough} covers the full
+PDFBox signing pipeline.
 
 \section{Pilot Programs}\label{_pilot_programs}
 
@@ -29190,8 +30209,9 @@ Systems}\label{_if_you_build_enterprise_systems}
   \textbf{Budget for EUTL integration.} Consuming the EUTL is not
   trivial: the LOT and individual trusted lists are XML documents signed
   with specific certificates, using a specific schema (ETSI TS 119 612).
-  The EU DSS framework (Chapter 23) provides a reference implementation,
-  but integrating it into your architecture requires engineering effort.
+  The EU DSS framework (\hyperref[ch23]{The EU DSS Framework}) provides
+  a reference implementation, but integrating it into your architecture
+  requires engineering effort.
 \item
   \textbf{Plan for volume.} If your system currently validates hundreds
   of qualified signatures per day, prepare for thousands or tens of
@@ -29224,12 +30244,15 @@ implementation details are being negotiated, and the mobile platforms
 have commercial interests in their own wallet ecosystems (Apple Pay,
 Google Pay).
 
-\textbf{What happens with AATL?} If hundreds of millions of qualified
-signatures are created through the wallet but the signing certificates
-are not in Adobe's AATL, Acrobat users will see yellow warnings on
-legitimate QES. This creates political pressure on Adobe to either
-accept the EUTL as a trust anchor by default or face regulatory action.
-The outcome will shape the PDF signature ecosystem for years.
+\textbf{Will Acrobat's EUTL integration keep up?} Acrobat has validated
+against the EUTL by default since 2015, but the integration suffers from
+cache corruption bugs and update lag (see \hyperref[ch26]{Oddities \&
+Annoyances}). If hundreds of millions of qualified signatures are
+created through the wallet, even occasional EUTL failures will produce a
+flood of false-negative yellow warnings on legitimate QES. This creates
+pressure on Adobe to make EUTL validation robust --- not just enabled
+--- or face regulatory action under eIDAS 2.0's stronger enforcement
+provisions.
 
 \textbf{Will the credential format converge?} The current ARF supports
 both SD-JWT and mdoc. Supporting two formats doubles the implementation
@@ -29306,8 +30329,7 @@ evolved.
 \chapter{Code, Tools \&
 Implementation}\label{_code_tools_implementation}
 
-\chapter{The Java PDF Library
-Landscape}\label{_the_java_pdf_library_landscape}
+\chapter{The Java PDF Library Landscape}\label{ch28}
 
 Before we write a single line of signing code, we need to talk about the
 tools we're using --- where they came from, why they exist, and what
@@ -29384,7 +30406,7 @@ downloaded artifacts in the Java ecosystem.
 \subsection{The LGPL-to-AGPL Switch: The Day the Rules Changed
 (2009)}\label{_the_lgpl_to_agpl_switch_the_day_the_rules_changed_2009}
 
-On December 1, 2009, Bruno Lowagie changed the license of iText from
+In December 2009, Bruno Lowagie changed the license of iText from
 \textbf{LGPL} to \textbf{AGPL} (GNU Affero General Public License),
 starting with version \textbf{5.0.0}.
 
@@ -29521,7 +30543,8 @@ and check:
   \texttt{signedAttrs}? (missing = not PAdES-compliant)
 \end{enumerate}
 
-Chapter 31 provides code to perform all three checks.
+\hyperref[ch31]{Verification \& Analysis with PDFBox} provides code to
+perform all three checks.
 
 \subsection{iText 5.x, 7.x, and 8.x: The Commercial
 Evolution}\label{_itext_5_x_7_x_and_8_x_the_commercial_evolution}
@@ -30249,8 +31272,8 @@ EU Trusted List integration in production, use EU DSS --- you'll
 understand what it's doing under the hood, and you'll be able to debug
 it when it behaves unexpectedly.
 
-Chapter 23 provides a complete walkthrough of EU DSS for PAdES signing
-and validation.
+\hyperref[ch23]{The EU DSS Framework} provides a complete walkthrough of
+EU DSS for PAdES signing and validation.
 
 \subsection{EU DSS Version History}\label{_eu_dss_version_history}
 
@@ -30692,15 +31715,14 @@ at 2 AM, you don't want to be downloading tools.
   today's feature checklist.
 \end{itemize}
 
-\chapter{PDFBox Signing --- Complete
-Walkthrough}\label{_pdfbox_signingcomplete_walkthrough}
+\chapter{PDFBox Signing --- Complete Walkthrough}\label{ch29}
 
-Chapter 28 gave us the lay of the land. Now we write code. This chapter
-is a complete, production-quality walkthrough of PDF signing with Apache
-PDFBox 3.0.0 and BouncyCastle 1.80 on Java 21. Every code listing
-compiles, every class is self-contained, and every pitfall we describe
-is one we have hit in production --- or watched someone else hit at 2 AM
-on a Friday.
+\hyperref[ch28]{The Java PDF Library Landscape} gave us the lay of the
+land. Now we write code. This chapter is a complete, production-quality
+walkthrough of PDF signing with Apache PDFBox 3.0.0 and BouncyCastle
+1.80 on Java 21. Every code listing compiles, every class is
+self-contained, and every pitfall we describe is one we have hit in
+production --- or watched someone else hit at 2 AM on a Friday.
 
 We start with the core PDFBox signing
 API --- \texttt{PDDocument.addSignature()}, \texttt{SignatureInterface},
@@ -30712,8 +31734,9 @@ migration traps waiting for anyone upgrading from PDFBox 2.x to 3.x.
 
 By the end of this chapter, you will have a complete, production-ready
 signing class that produces PAdES-B-B and PAdES-B-T compliant
-signatures. Chapter 30 goes deeper into the BouncyCastle CMS
-construction that powers the actual cryptography.
+signatures. \hyperref[ch30]{BouncyCastle CMS Construction} goes deeper
+into the BouncyCastle CMS construction that powers the actual
+cryptography.
 
 \section{The PDFBox Signing API: Three Moving
 Parts}\label{_the_pdfbox_signing_api_three_moving_parts}
@@ -31593,7 +32616,8 @@ PDFBox supports this through a two-phase API using
 Building the CMS structure with a pre-computed raw signature is more
 involved than using \texttt{CMSSignedDataGenerator}. You need to
 construct the \texttt{SignerInfo} manually with the external signature
-value. Chapter 30 shows the complete code for this.
+value. \hyperref[ch30]{BouncyCastle CMS Construction} shows the complete
+code for this.
 
 \section{Certification Signatures with
 DocMDP}\label{_certification_signatures_with_docmdp}
@@ -32616,16 +33640,15 @@ every ASN.1 structure, every decision point that determines whether your
 signature is a basic CMS blob or a fully PAdES-compliant
 \texttt{SignedData}.
 
-\chapter{BouncyCastle CMS
-Construction}\label{_bouncycastle_cms_construction}
+\chapter{BouncyCastle CMS Construction}\label{ch30}
 
-Chapter 29 showed how PDFBox orchestrates the signing
-process --- creating the signature dictionary, computing the byte range,
-calling your \texttt{sign()} method, and writing the result into
-\texttt{/Contents}. This chapter goes inside that \texttt{sign()}
-method. We are now in BouncyCastle territory, building the CMS
-\texttt{SignedData} structure that is the actual cryptographic heart of
-every PDF signature.
+\hyperref[ch29]{PDFBox Signing --- Complete Walkthrough} showed how
+PDFBox orchestrates the signing process --- creating the signature
+dictionary, computing the byte range, calling your \texttt{sign()}
+method, and writing the result into \texttt{/Contents}. This chapter
+goes inside that \texttt{sign()} method. We are now in BouncyCastle
+territory, building the CMS \texttt{SignedData} structure that is the
+actual cryptographic heart of every PDF signature.
 
 If you have ever looked at a CMS signature in an ASN.1 dump and wondered
 what each field means, why certain attributes are mandatory for PAdES,
@@ -33883,12 +34906,13 @@ signature is generated:
 \section{CMS Construction for Remote Signing (CSC
 API)}\label{_cms_construction_for_remote_signing_csc_api}
 
-When using a remote signing service via the CSC API (Chapter 22), you
-cannot use BouncyCastle's \texttt{CMSSignedDataGenerator} in the normal
-way --- because you do not have the private key locally. The generator
-expects a \texttt{ContentSigner} that performs the signing operation,
-but with CSC, the signing happens on a remote HSM. You must build the
-CMS \texttt{SignedData} structure \emph{manually} using BouncyCastle's
+When using a remote signing service via the CSC API
+(\hyperref[ch22]{Remote Signing}), you cannot use BouncyCastle's
+\texttt{CMSSignedDataGenerator} in the normal way --- because you do not
+have the private key locally. The generator expects a
+\texttt{ContentSigner} that performs the signing operation, but with
+CSC, the signing happens on a remote HSM. You must build the CMS
+\texttt{SignedData} structure \emph{manually} using BouncyCastle's
 low-level ASN.1 classes.
 
 \subsection{The Challenge}\label{_the_challenge}
@@ -34166,15 +35190,16 @@ The \texttt{PadesBBBuilder} and \texttt{PadesBTBuilder} classes are
 production-ready. They handle algorithm negotiation, ESS attribute
 construction, certificate embedding, and timestamp integration. Drop
 them into your project alongside the BouncyCastle and PDFBox
-dependencies from Chapter 28, register the BouncyCastle provider, and
-you have a complete signing pipeline.
+dependencies from \hyperref[ch28]{The Java PDF Library Landscape},
+register the BouncyCastle provider, and you have a complete signing
+pipeline.
 
-In Chapter 31, we reverse the process: given a signed PDF, we verify the
-CMS signature, validate the certificate chain, check the timestamp, and
-extract every piece of information that these structures contain.
+In \hyperref[ch31]{Verification \& Analysis with PDFBox}, we reverse the
+process: given a signed PDF, we verify the CMS signature, validate the
+certificate chain, check the timestamp, and extract every piece of
+information that these structures contain.
 
-\chapter{Verification \& Analysis with
-PDFBox}\label{_verification_analysis_with_pdfbox}
+\chapter{Verification \& Analysis with PDFBox}\label{ch31}
 
 Signing a PDF is a matter of following a recipe. Verifying a signed PDF
 is where things get interesting --- and where most implementations get
@@ -34187,8 +35212,9 @@ failure mode because you wrote the code that handles it.
 This chapter walks through a complete verification implementation using
 Apache PDFBox 3.0.0 and BouncyCastle 1.80. We start with extracting
 signatures from a PDF document, proceed through each verification step
-from Chapter 16, and end with a production-ready five-step pipeline that
-handles the edge cases real-world PDFs throw at you. If Chapter 16
+from \hyperref[ch16]{Signature Validation}, and end with a
+production-ready five-step pipeline that handles the edge cases
+real-world PDFs throw at you. If \hyperref[ch16]{Signature Validation}
 described \emph{what} to verify, this chapter shows you \emph{how} ---
 with code you can compile and run.
 
@@ -34199,10 +35225,11 @@ Document}\label{_extracting_signatures_from_a_pdf_document}
 PDSignature}\label{_the_extraction_path_acroform_to_pdsignature}
 
 Every PDF signature lives inside the AcroForm field tree. The extraction
-path follows the object hierarchy we dissected in Chapter 12: the
-document's \texttt{/AcroForm} dictionary contains a \texttt{/Fields}
-array, which includes \texttt{PDSignatureField} entries, each of which
-references a \texttt{PDSignature} dictionary.
+path follows the object hierarchy we dissected in
+\hyperref[ch12]{Signature Architecture}: the document's
+\texttt{/AcroForm} dictionary contains a \texttt{/Fields} array, which
+includes \texttt{PDSignatureField} entries, each of which references a
+\texttt{PDSignature} dictionary.
 
 PDFBox models this hierarchy directly. The key classes are:
 
@@ -34476,7 +35503,8 @@ Code}\label{_byte_range_verification_in_code}
 
 \subsection{The Three Checks}\label{_the_three_checks}
 
-Byte range verification (Step 1 from Chapter 16) requires three checks:
+Byte range verification (Step 1 from \hyperref[ch16]{Signature
+Validation}) requires three checks:
 
 \begin{enumerate}
 \def\labelenumi{\arabic{enumi}.}
@@ -34545,14 +35573,16 @@ Byte range verification (Step 1 from Chapter 16) requires three checks:
 Trailing bytes are not always an attack. In a multi-signature document,
 each signature covers only up to the end of its own incremental
 revision. Subsequent revisions (containing later signatures) appear as
-"trailing bytes" from the perspective of the earlier signature. Chapter
-8 covers how incremental updates work, and Chapter 13 covers the byte
-range geometry in multi-signature scenarios.
+"trailing bytes" from the perspective of the earlier signature.
+\hyperref[ch08]{Incremental Updates} covers how incremental updates
+work, and \hyperref[ch13]{Byte Range Deep Dive} covers the byte range
+geometry in multi-signature scenarios.
 
 However, trailing bytes on the \emph{last} signature in a document are
-suspicious and may indicate a Shadow Attack (Chapter 24). Your
-verification code should distinguish between "trailing bytes that are a
-legitimate later revision" and "trailing bytes that are unexplained."
+suspicious and may indicate a Shadow Attack (\hyperref[ch24]{PDF
+Signature Attacks: A Complete Technical Analysis}). Your verification
+code should distinguish between "trailing bytes that are a legitimate
+later revision" and "trailing bytes that are unexplained."
 
 \subsection{Validating the Contents
 Gap}\label{_validating_the_contents_gap}
@@ -34601,10 +35631,10 @@ Verification}\label{_cms_cryptographic_verification}
 \subsection{Building the
 SignerInformationVerifier}\label{_building_the_signerinformationverifier}
 
-This is Step 3 from Chapter 16 --- verifying that the CMS
-\texttt{SignedData} was actually created by the claimed signer's private
-key. BouncyCastle's \texttt{SignerInformation.verify()} method performs
-this check, but you need to provide the correct
+This is Step 3 from \hyperref[ch16]{Signature Validation} --- verifying
+that the CMS \texttt{SignedData} was actually created by the claimed
+signer's private key. BouncyCastle's \texttt{SignerInformation.verify()}
+method performs this check, but you need to provide the correct
 \texttt{SignerInformationVerifier}:
 
 \begin{Shaded}
@@ -34784,7 +35814,8 @@ Set}\label{_building_the_trust_anchor_set}
 The \texttt{TrustAnchor} set represents your trust store --- the root
 certificates you are willing to trust. In a real application, this might
 come from the Java default trust store (\texttt{cacerts}), a custom
-keystore, or the AATL/EUTL (see Chapter 16, Step 5).
+keystore, or the AATL/EUTL (see \hyperref[ch16]{Signature Validation},
+Step 5).
 
 \begin{Shaded}
 \begin{Highlighting}[]
@@ -35218,9 +36249,9 @@ Comparison}\label{_why_multi_signature_documents_need_revision_comparison}
 When a PDF has multiple signatures, each signature covers a specific
 revision of the document --- a snapshot of the file at the point when
 that signature was applied. Later signatures add incremental updates
-(Chapter 8) that extend the file. From the perspective of the first
-signature, the second signature's bytes are "trailing bytes" beyond its
-byte range.
+(\hyperref[ch08]{Incremental Updates}) that extend the file. From the
+perspective of the first signature, the second signature's bytes are
+"trailing bytes" beyond its byte range.
 
 The critical question is: \textbf{did the incremental update between
 revisions only add the new signature, or did it modify existing
@@ -35230,7 +36261,8 @@ If someone added a new page, changed text, or altered form field values
 between signing events, the earlier signature's byte range still
 verifies (the signed bytes haven't changed), but the document's visible
 content has changed. This is the basis of the Shadow Attacks described
-in Chapter 24.
+in \hyperref[ch24]{PDF Signature Attacks: A Complete Technical
+Analysis}.
 
 \subsection{Extracting Individual
 Revisions}\label{_extracting_individual_revisions}
@@ -35473,10 +36505,10 @@ When intermediates are missing, you have two options:
 
 In production, always cache downloaded certificates. AIA chasing adds
 network latency and introduces a dependency on external servers ---
-exactly the kind of dependency that LTV (Chapter 18) is designed to
-eliminate. If you are building a signing service, embed all intermediate
-certificates in the CMS at signing time, so validators never need to
-chase AIA.
+exactly the kind of dependency that LTV (\hyperref[ch18]{Timestamps \&
+Long-Term Validation}) is designed to eliminate. If you are building a
+signing service, embed all intermediate certificates in the CMS at
+signing time, so validators never need to chase AIA.
 
 \section{Algorithm OID Mapping
 Utility}\label{_algorithm_oid_mapping_utility}
@@ -35515,6 +36547,284 @@ you will encounter in real PDF signatures:
 \end{Highlighting}
 \end{Shaded}
 
+\section{Debugging a Broken Signature: A Practical
+Walkthrough}\label{_debugging_a_broken_signature_a_practical_walkthrough}
+
+When a signature fails validation --- whether it shows a yellow warning
+in Acrobat, throws an exception in your PDFBox code, or is rejected by a
+customer's compliance system --- you need a systematic approach to
+isolate the problem. This section walks through the debugging workflow
+using the tools introduced in \hyperref[ch28]{The Java PDF Library
+Landscape}, showing which tool to reach for at each step.
+
+\subsection{Step 1: Structural Inspection with
+QPDF}\label{_step_1_structural_inspection_with_qpdf}
+
+Start with QPDF to verify the PDF's structural integrity and inspect the
+signature dictionaries. Structural corruption is the most common cause
+of "impossible" validation failures --- the CMS may be perfect, but if
+the cross-reference table is broken or the byte range is wrong,
+validation will fail.
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# Check the PDF for structural errors}
+\ExtensionTok{qpdf} \AttributeTok{{-}{-}check}\NormalTok{ document.pdf}
+
+\CommentTok{\# Dump all objects in JSON form ({-}{-}show{-}object requires a specific object number)}
+\ExtensionTok{qpdf} \AttributeTok{{-}{-}json}\NormalTok{ document.pdf}
+
+\CommentTok{\# Show the linearization (if any) — linearized PDFs}
+\CommentTok{\# sometimes have duplicate xref entries that confuse validators}
+\ExtensionTok{qpdf} \AttributeTok{{-}{-}show{-}linearization}\NormalTok{ document.pdf}
+
+\CommentTok{\# Extract a specific revision (e.g., the state before the last signature)}
+\CommentTok{\# Object numbers for /Sig dictionaries can be found in {-}{-}show{-}object output}
+\ExtensionTok{qpdf} \AttributeTok{{-}{-}qdf}\NormalTok{ document.pdf decoded.pdf}
+\end{Highlighting}
+\end{Shaded}
+
+QPDF's \texttt{-\/-check} output will report cross-reference errors,
+stream length mismatches, and dangling object references. If
+\texttt{-\/-check} reports errors, fix the structural issues before
+debugging the signature itself.
+
+\subsection{Step 2: Byte Range Visualization with a Hex
+Editor}\label{_step_2_byte_range_visualization_with_a_hex_editor}
+
+If QPDF reports the structure is clean, the next suspect is the byte
+range. Use a hex editor (HxD on Windows, \texttt{xxd} on Linux/macOS, or
+any tool that shows file offsets) to manually verify the
+\texttt{/ByteRange} array:
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# Extract the ByteRange values using QPDF\textquotesingle{}s JSON output}
+\ExtensionTok{qpdf} \AttributeTok{{-}{-}json}\NormalTok{ document.pdf }\KeywordTok{|} \FunctionTok{grep} \AttributeTok{{-}A5}\NormalTok{ ByteRange}
+
+\CommentTok{\# Example output: /ByteRange [0 12345 67890 44444]}
+\CommentTok{\# This means: sign bytes 0{-}12344, skip 12345{-}67889 (the /Contents hex),}
+\CommentTok{\# then sign bytes 67890{-}(67890+44444{-}1)}
+
+\CommentTok{\# Verify the gap contains only hex characters (the /Contents value)}
+\ExtensionTok{xxd} \AttributeTok{{-}s}\NormalTok{ 12345 }\AttributeTok{{-}l}\NormalTok{ 100 document.pdf}
+
+\CommentTok{\# Verify the signed range ends at EOF (no trailing bytes)}
+\FunctionTok{wc} \AttributeTok{{-}c}\NormalTok{ document.pdf  }\CommentTok{\# total file size should equal 67890 + 44444}
+\end{Highlighting}
+\end{Shaded}
+
+Common byte range problems:
+
+\begin{itemize}
+\item
+  \textbf{Trailing bytes after the second range}: the signed range does
+  not cover the entire file. This is a modification detection failure
+  --- someone (or some tool) appended data after the signature was
+  applied.
+\item
+  \textbf{Gap does not contain valid hex}: corruption in the
+  \texttt{/Contents} value.
+\item
+  \textbf{Byte range values inconsistent with actual file offsets}: the
+  PDF was modified after signing without using incremental saves.
+\end{itemize}
+
+\subsection{Step 3: CMS Inspection with
+OpenSSL}\label{_step_3_cms_inspection_with_openssl}
+
+Extract the CMS blob from \texttt{/Contents} and inspect it with OpenSSL
+to check the signature algorithm, certificates, signed attributes, and
+timestamp:
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# Extract the CMS blob using PDFBox or a script}
+\CommentTok{\# (The /Contents value is a hex{-}encoded DER blob)}
+\CommentTok{\# Convert hex to binary:}
+\ExtensionTok{xxd} \AttributeTok{{-}r} \AttributeTok{{-}p}\NormalTok{ contents\_hex.txt }\OperatorTok{\textgreater{}}\NormalTok{ signature.der}
+
+\CommentTok{\# Parse the CMS structure}
+\ExtensionTok{openssl}\NormalTok{ cms }\AttributeTok{{-}inform}\NormalTok{ DER }\AttributeTok{{-}in}\NormalTok{ signature.der }\AttributeTok{{-}noout} \AttributeTok{{-}print}
+
+\CommentTok{\# Show the full CMS structure including certificates}
+\ExtensionTok{openssl}\NormalTok{ cms }\AttributeTok{{-}inform}\NormalTok{ DER }\AttributeTok{{-}in}\NormalTok{ signature.der }\AttributeTok{{-}cmsout} \AttributeTok{{-}print}
+
+\CommentTok{\# Verify the CMS independently (detached signature)}
+\CommentTok{\# Note: this verifies crypto only, not byte range coverage}
+\ExtensionTok{openssl}\NormalTok{ cms }\AttributeTok{{-}verify} \AttributeTok{{-}inform}\NormalTok{ DER }\AttributeTok{{-}in}\NormalTok{ signature.der }\DataTypeTok{\textbackslash{}}
+    \AttributeTok{{-}content}\NormalTok{ signed\_bytes.bin }\AttributeTok{{-}noverify} \AttributeTok{{-}out}\NormalTok{ /dev/null}
+\end{Highlighting}
+\end{Shaded}
+
+Key things to check in the CMS output:
+
+\begin{itemize}
+\item
+  \textbf{SignedAttributes}: Look for \texttt{content-type} (must be
+  \texttt{id-data}), \texttt{message-digest} (the hash of the signed
+  bytes), \texttt{signing-time}, and \texttt{ESS-signing-certificate-v2}
+  (required for PAdES).
+\item
+  \textbf{DigestAlgorithm}: Should match what's expected (SHA-256,
+  SHA-384, etc.). If it says SHA-1, that's a problem for modern
+  validators.
+\item
+  \textbf{Certificate chain}: Are all intermediates present? Is the
+  signer certificate included? Missing intermediates cause
+  chain-building failures.
+\item
+  \textbf{Timestamp token}: If present as an unsigned attribute, parse
+  it separately to check the TSA certificate and timestamp value.
+\end{itemize}
+
+\subsection{Step 4: ASN.1 Deep Dive with BouncyCastle
+ASN1Dump}\label{_step_4_asn_1_deep_dive_with_bouncycastle_asn1dump}
+
+For issues that OpenSSL's output doesn't clarify --- malformed
+attributes, unexpected OIDs, encoding errors --- use BouncyCastle's
+\texttt{ASN1Dump} for a complete ASN.1 tree:
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\KeywordTok{import} \ImportTok{org}\OperatorTok{.}\ImportTok{bouncycastle}\OperatorTok{.}\ImportTok{asn1}\OperatorTok{.}\ImportTok{ASN1InputStream}\OperatorTok{;}
+\KeywordTok{import} \ImportTok{org}\OperatorTok{.}\ImportTok{bouncycastle}\OperatorTok{.}\ImportTok{asn1}\OperatorTok{.}\ImportTok{ASN1Primitive}\OperatorTok{;}
+\KeywordTok{import} \ImportTok{org}\OperatorTok{.}\ImportTok{bouncycastle}\OperatorTok{.}\ImportTok{asn1}\OperatorTok{.}\ImportTok{util}\OperatorTok{.}\ImportTok{ASN1Dump}\OperatorTok{;}
+
+\DataTypeTok{byte}\OperatorTok{[]}\NormalTok{ cmsBytes }\OperatorTok{=}\NormalTok{ Files}\OperatorTok{.}\FunctionTok{readAllBytes}\OperatorTok{(}\NormalTok{Path}\OperatorTok{.}\FunctionTok{of}\OperatorTok{(}\StringTok{"signature.der"}\OperatorTok{));}
+\ControlFlowTok{try} \OperatorTok{(}\NormalTok{ASN1InputStream asn1 }\OperatorTok{=} \KeywordTok{new} \FunctionTok{ASN1InputStream}\OperatorTok{(}\NormalTok{cmsBytes}\OperatorTok{))} \OperatorTok{\{}
+\NormalTok{    ASN1Primitive obj }\OperatorTok{=}\NormalTok{ asn1}\OperatorTok{.}\FunctionTok{readObject}\OperatorTok{();}
+    \CommentTok{// verbose=true shows full hex values for octet strings}
+    \BuiltInTok{System}\OperatorTok{.}\FunctionTok{out}\OperatorTok{.}\FunctionTok{println}\OperatorTok{(}\NormalTok{ASN1Dump}\OperatorTok{.}\FunctionTok{dumpAsString}\OperatorTok{(}\NormalTok{obj}\OperatorTok{,} \KeywordTok{true}\OperatorTok{));}
+\OperatorTok{\}}
+\end{Highlighting}
+\end{Shaded}
+
+This produces a complete tree showing every SEQUENCE, SET, OBJECT
+IDENTIFIER, and OCTET STRING. Compare it against the CMS structure
+diagrams in \hyperref[ch06]{CMS/PKCS\#7 Signed Data} to identify where
+the structure diverges from expectations.
+
+\subsection{Step 5: Cross-Viewer
+Validation}\label{_step_5_cross_viewer_validation}
+
+Different viewers implement different validation logic. Testing against
+multiple viewers isolates whether the problem is in the signature or in
+the validator:
+
+{\def\LTcaptype{none} % do not increment counter
+\begin{longtable}[]{@{}
+  >{\raggedright\arraybackslash}p{(\linewidth - 2\tabcolsep) * \real{0.2500}}
+  >{\raggedright\arraybackslash}p{(\linewidth - 2\tabcolsep) * \real{0.7500}}@{}}
+\toprule\noalign{}
+\begin{minipage}[b]{\linewidth}\raggedright
+Viewer
+\end{minipage} & \begin{minipage}[b]{\linewidth}\raggedright
+What It Tells You
+\end{minipage} \\
+\midrule\noalign{}
+\endhead
+\bottomrule\noalign{}
+\endlastfoot
+\textbf{Adobe Acrobat} & The de facto standard. If Acrobat says "valid,"
+most customers will accept it. But Acrobat uses AATL for trust --- a
+valid signature from a non-AATL CA will show "unknown signer." \\
+\textbf{Adobe Reader} & Same validation engine as Acrobat but cannot
+modify signatures. Tests the read-only validation path. \\
+\textbf{Foxit Reader} & Independent implementation. If Acrobat says
+valid but Foxit says invalid (or vice versa), the issue is likely in
+edge-case handling (SubFilter, timestamp format, unusual extensions). \\
+\textbf{LibreOffice Draw} & Uses NSS (Network Security Services) for
+crypto. Tests a completely different validation stack. NSS handles
+certificate chain building differently from Java's PKIX. \\
+\textbf{PDFBox (your code)} & Full control over every validation step.
+Use the five-step pipeline from this chapter to identify exactly which
+step fails. \\
+\textbf{EU DSS Demonstration Webapp} & Validates against the EUTL and
+checks PAdES compliance. The only tool that will tell you the exact
+PAdES profile level and any compliance deviations. \\
+\end{longtable}
+}
+
+\subsection{Step 6: Incremental Update Analysis with
+mutool}\label{_step_6_incremental_update_analysis_with_mutool}
+
+If the signature validates cryptographically but shows "document
+modified after signing" (the dreaded yellow warning), use
+\texttt{mutool} to inspect incremental updates:
+
+\begin{Shaded}
+\begin{Highlighting}[]
+\CommentTok{\# Show all objects and their generations}
+\ExtensionTok{mutool}\NormalTok{ show document.pdf trailer}
+
+\CommentTok{\# Show the cross{-}reference table(s)}
+\ExtensionTok{mutool}\NormalTok{ show document.pdf xref}
+
+\CommentTok{\# Extract a specific page\textquotesingle{}s content stream}
+\ExtensionTok{mutool}\NormalTok{ show document.pdf }\StringTok{\textquotesingle{}pages/1/Contents\textquotesingle{}}
+\end{Highlighting}
+\end{Shaded}
+
+Compare the objects in each incremental update section to identify what
+changed between the signing revision and the current revision. Common
+culprits:
+
+\begin{itemize}
+\item
+  \textbf{Form field value changes} (allowed under DocMDP P=2 or P=3,
+  but some validators reject them)
+\item
+  \textbf{Appearance regeneration} (\texttt{/NeedAppearances} was
+  \texttt{true}, so a viewer regenerated appearances)
+\item
+  \textbf{Metadata updates} (some tools update \texttt{/ModDate} in the
+  document info dictionary)
+\item
+  \textbf{PDF optimizer} stripped or reorganized objects without using
+  incremental saves
+\end{itemize}
+
+\subsection{The Debugging Checklist}\label{_the_debugging_checklist}
+
+When a signature fails, work through this checklist in order:
+
+\begin{enumerate}
+\def\labelenumi{\arabic{enumi}.}
+\item
+  {[} {]} \texttt{qpdf\ -\/-check} passes with no errors
+\item
+  {[} {]} \texttt{/ByteRange} values are consistent (gap + ranges = file
+  size)
+\item
+  {[} {]} \texttt{/Contents} hex decodes to valid DER (no truncation, no
+  padding errors)
+\item
+  {[} {]} CMS \texttt{DigestAlgorithm} matches the expected hash
+  algorithm
+\item
+  {[} {]} \texttt{message-digest} attribute value matches the hash of
+  the signed bytes
+\item
+  {[} {]} Signer certificate is present in the CMS \texttt{certificates}
+  field
+\item
+  {[} {]} All intermediate CA certificates are present (chain is
+  complete)
+\item
+  {[} {]} Signer certificate was valid at signing time (check
+  \texttt{notBefore}/\texttt{notAfter})
+\item
+  {[} {]} No incremental updates added after the signature that modify
+  signed content
+\item
+  {[} {]} The trust anchor (root CA) is in the validator's trust store
+\end{enumerate}
+
+Nine times out of ten, the problem is one of items 6-8. Missing
+intermediates, expired certificates, and wrong trust stores account for
+the vast majority of real-world signature failures.
+
 \section{Key Takeaways}\label{_key_takeaways_16}
 
 \begin{itemize}
@@ -35551,9 +36861,16 @@ you will encounter in real PDF signatures:
 \item
   The \texttt{VerificationReport} model gives callers granular per-step
   results rather than a binary pass/fail
+\item
+  \textbf{Debug systematically}: structure (QPDF) → byte range (hex
+  editor) → CMS (OpenSSL/ASN1Dump) → cross-viewer → incremental updates
+  (mutool) --- work from the outside in
+\item
+  \textbf{Missing intermediates, expired certificates, and wrong trust
+  stores} account for the vast majority of real-world signature failures
 \end{itemize}
 
-\chapter{Test Cases \& Reference PDFs}\label{_test_cases_reference_pdfs}
+\chapter{Test Cases \& Reference PDFs}\label{ch32}
 
 Testing PDF digital signatures is one of the hardest testing problems in
 software engineering. A signature that is valid today may be invalid
