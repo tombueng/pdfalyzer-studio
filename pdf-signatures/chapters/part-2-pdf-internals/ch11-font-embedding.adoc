@@ -1,3 +1,4 @@
+[[ch11]]
 = Font Embedding in PDF
 
 [.lead]
@@ -13,7 +14,7 @@ If you have ever seen a signature block that shows `.notdef` squares where a sig
 == Why Fonts Matter for Digital Signatures
 
 A PDF digital signature has two independent representations: the **cryptographic** representation (the CMS `SignedData` structure, the byte range, the certificate chain) and the **visual** representation (the appearance stream that shows the signer's name, date, and reason on the page).
-Chapter 15 covers how appearance streams are structured; this chapter covers the font infrastructure that makes the _text_ inside those appearances render correctly.
+<<ch15>> covers how appearance streams are structured; this chapter covers the font infrastructure that makes the _text_ inside those appearances render correctly.
 
 The visual appearance of a signature is a Form XObject -- a miniature PDF page with its own resource dictionary, its own content stream, and its own font references.
 When that content stream contains a `Tj` or `TJ` operator to draw text, the PDF viewer must resolve the font reference, find the glyph outlines, and render them.
@@ -87,7 +88,7 @@ These are the **Standard 14 fonts**, specified in {iso32000-2} Section 9.6.2.2:
 |===
 
 The critical word is "expected."
-{iso32000-2} Section 9.6.2.2 states that conforming readers _should_ provide these fonts, but PDF 2.0 actually recommends embedding even the Standard 14 fonts to ensure consistent rendering.
+{iso32000-2} Section 9.6.2.2 states that conforming readers _shall_ provide these fonts, but PDF 2.0 actually recommends embedding even the Standard 14 fonts to ensure consistent rendering.
 The practical reality is that most viewers do provide metrics-compatible substitutes for these fonts, but the substitutes are not identical -- a document typeset with Helvetica on one viewer may render with Arial or Liberation Sans on another, causing slight differences in character widths, line breaks, and text positioning.
 
 For signature appearances, these differences are usually cosmetic and acceptable.
@@ -98,7 +99,7 @@ But if your signature appearance calculates text positions based on precise Helv
 For signature appearances, the Standard 14 fonts are "good enough" for ASCII text.
 They are available everywhere, they don't require embedding, and the rendering differences between substitute fonts are typically invisible at the font sizes used in signature blocks (8-12 points).
 
-For non-ASCII text -- accented characters, umlauts, CJK characters -- the Standard 14 fonts are _not_ sufficient, because their built-in encoding (WinAnsiEncoding) cannot represent characters outside the Windows-1252 code page.
+For non-ASCII text -- accented characters, umlauts, CJK characters -- the Standard 14 fonts are _not_ sufficient, because their built-in encoding (WinAnsiEncoding, similar to but not identical to Windows-1252) cannot represent characters outside that encoding's range.
 If your signers have names with characters outside that range, you must embed a TrueType or OpenType font with the appropriate glyph coverage.
 ====
 
@@ -810,4 +811,4 @@ For digital signatures specifically, the key takeaways are:
 - **Test in multiple viewers** -- what works in Adobe Acrobat may fail in pdf.js or LibreOffice.
 - **When debugging, look at the COS structure**, not just the rendered output. The font dictionary, font descriptor, encoding, and `/ToUnicode` CMap tell the full story.
 
-The next chapter -- Chapter 12 -- moves from the document infrastructure we've built up across Part II into the core subject of this book: the architecture of PDF digital signatures themselves.
+The next chapter -- <<ch12>> -- moves from the document infrastructure we've built up across Part II into the core subject of this book: the architecture of PDF digital signatures themselves.

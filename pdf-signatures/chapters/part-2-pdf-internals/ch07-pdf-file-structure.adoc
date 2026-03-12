@@ -41,7 +41,7 @@ That is nine bytes: the five characters `%PDF-`, the version number, and a line 
 The `%` character is the PDF comment delimiter, which means the header line is technically a comment -- a design choice that lets non-PDF-aware tools skip it without error.
 
 The version in the header is the _file_ version.
-{iso32000-2} Section 7.5.2 specifies that a `/Version` key in the document catalog may override this value.
+{iso32000-2} Section 7.2.2 specifies that a `/Version` key in the document catalog may override this value.
 In practice, many generators write `%PDF-1.7` in the header and then set `/Version /2.0` in the catalog when they need PDF 2.0 features.
 This dual-version mechanism exists for backward compatibility: an older parser that does not understand the catalog `/Version` will still see a version number it can process (or at least attempt to process) in the header.
 
@@ -168,7 +168,7 @@ From the trailer dictionary's `/Root` key, it finds the document catalog.
 From the catalog, it can navigate to every object in the document.
 
 **Parsing a PDF starts from the end, not the beginning.**
-This backward-search strategy is fundamental to how incremental updates work (Chapter 8), and it is the reason a PDF can be extended by appending data without rewriting the beginning of the file.
+This backward-search strategy is fundamental to how incremental updates work (<<ch08>>), and it is the reason a PDF can be extended by appending data without rewriting the beginning of the file.
 
 .Trailer Dictionary Keys -- {iso32000-2} Section 7.5.5, Table 15
 [cols="2,2,6", options="header"]
@@ -193,7 +193,7 @@ This backward-search strategy is fundamental to how incremental updates work (Ch
 
 | `/Prev`
 | integer
-| Byte offset of the _previous_ cross-reference section. This is how incremental updates chain together (Chapter 8).
+| Byte offset of the _previous_ cross-reference section. This is how incremental updates chain together (<<ch08>>).
 
 | `/Encrypt`
 | dictionary or reference
@@ -517,7 +517,7 @@ This has concrete consequences:
 Loading a signed PDF into memory and writing it back out -- even without changing any logical content -- rewrites the file from scratch: new object ordering, new byte offsets, new xref entries.
 The bytes change.
 The signature dies.
-Signed PDFs must be saved incrementally (Chapter 8).
+Signed PDFs must be saved incrementally (<<ch08>>).
 
 **Linearization affects byte layout.**
 Linearizing a PDF after signing rearranges objects for progressive display.
@@ -635,7 +635,7 @@ Use the PDFBox code above to detect missing `/ID` programmatically.
 
 === Multiple %%EOF Markers
 
-A PDF with incremental updates (Chapter 8) will have multiple `%%EOF` markers.
+A PDF with incremental updates (<<ch08>>) will have multiple `%%EOF` markers.
 This is normal for signed documents.
 But some web-based PDF processors strip everything after the first `%%EOF`, destroying all incremental updates and all signatures.
 
@@ -643,7 +643,7 @@ But some web-based PDF processors strip everything after the first `%%EOF`, dest
 
 Bytes after the last `%%EOF` are not part of the PDF.
 For signed documents, the `/ByteRange` of the outermost signature must cover every byte up to the end of the file.
-Trailing bytes outside the byte range create a validation gap that the Bochum ISA attacks (Chapter 24) exploited.
+Trailing bytes outside the byte range create a validation gap that the Bochum ISA attacks (<<ch24>>) exploited.
 
 === Cross-Reference Table Corruption
 
@@ -660,5 +660,5 @@ For signed documents, repair is not an option -- you need the original uncorrupt
 We have now dissected the complete physical structure of a PDF file: header, body, cross-reference table (in both classic ASCII and compressed stream formats), object streams, trailer, and `%%EOF`.
 We have mapped every PDF object type to its PDFBox COS class, walked through a minimal file byte by byte, and connected the physical structure to the requirements of digital signatures.
 
-Chapter 8 builds directly on this foundation with **incremental updates** -- the append-only mechanism that makes PDF signatures possible in the first place.
-If this chapter was about the structure of a single snapshot, Chapter 8 is about how those snapshots stack on top of each other, forming the layered history that signatures depend on to survive.
+<<ch08>> builds directly on this foundation with **incremental updates** -- the append-only mechanism that makes PDF signatures possible in the first place.
+If this chapter was about the structure of a single snapshot, <<ch08>> is about how those snapshots stack on top of each other, forming the layered history that signatures depend on to survive.

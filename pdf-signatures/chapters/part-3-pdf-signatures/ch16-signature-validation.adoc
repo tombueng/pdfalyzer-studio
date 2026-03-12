@@ -1,3 +1,4 @@
+[[ch16]]
 = Signature Validation
 
 [.lead]
@@ -31,11 +32,11 @@ A failure at any step means the signature is invalid (or at least questionable),
 
 **Common failures**:
 
-- Trailing bytes after the signed region — possible Incremental Saving Attack (Chapter 24)
+- Trailing bytes after the signed region — possible Incremental Saving Attack (<<ch24>>)
 - ByteRange doesn't start at 0 — broken signing implementation
 - Gap contains unexpected data — corrupted or manually edited PDF
 
-Chapter 13 covers this step in exhaustive detail.
+<<ch13>> covers this step in exhaustive detail.
 
 === Step 2: Hash Verification (Digest Match)
 
@@ -421,7 +422,7 @@ This certificate has its own chain and trust requirements:
 2. The TSA certificate chain must be valid at the time of verification
 3. The TSA's root must be in your trust store
 
-If the TSA's certificate has also expired by the time you validate (years later), you need **long-term validation (LTV)** — which is the subject of Chapter 18.
+If the TSA's certificate has also expired by the time you validate (years later), you need **long-term validation (LTV)** — which is the subject of <<ch18>>.
 
 == Building a Complete Validation Pipeline
 
@@ -450,11 +451,11 @@ Input: PDF file
         └─→ Detailed diagnostics
 ----
 
-Chapter 31 provides a complete Java implementation of this pipeline.
+<<ch31>> provides a complete Java implementation of this pipeline.
 
 === When to Use EU DSS Instead
 
-If you need to produce **ETSI-compliant validation reports** (ETSI TS 119 102-2) — for example, because you're building a validation service for a government or regulated industry — use the EU DSS framework (Chapter 23) instead of building the pipeline yourself.
+If you need to produce **ETSI-compliant validation reports** (ETSI TS 119 102-2) — for example, because you're building a validation service for a government or regulated industry — use the EU DSS framework (<<ch23>>) instead of building the pipeline yourself.
 EU DSS handles all validation steps, produces standards-compliant reports, and has been tested against the full range of PAdES profiles and edge cases.
 
 Building your own pipeline is appropriate when:

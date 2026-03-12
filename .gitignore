@@ -12,3 +12,4 @@
 /installer/windows/output/
 /installer/linux/bundle/
 bugs-todo.txt
+pdf-signatures/target/

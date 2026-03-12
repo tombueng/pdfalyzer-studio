@@ -192,7 +192,7 @@ All of them can appear in the same AcroForm, side by side, and a single document
 Text fields hold user-entered text (value in `/V` as a text string).
 Key properties: `/MaxLen` (maximum character count), `/Q` (text alignment: 0=left, 1=center, 2=right).
 Text fields interact with signatures in one important way: if a text field is filled _after_ a document is signed, the fill operation is an incremental update.
-Whether this invalidates the signature depends on the `/Lock` and `/FieldMDP` settings (covered in Chapter 14).
+Whether this invalidates the signature depends on the `/Lock` and `/FieldMDP` settings (covered in <<ch14>>).
 
 === /Btn -- Button Fields
 
@@ -239,7 +239,7 @@ The same field after signing:
 >>
 ----
 
-Object 42 is the signature dictionary (covered in depth in Chapter 12).
+Object 42 is the signature dictionary (covered in depth in <<ch12>>).
 Object 43 is the visual appearance of the signature.
 
 [IMPORTANT]
@@ -320,7 +320,7 @@ try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
 }
 ----
 
-CAUTION: `refreshAppearances()` will overwrite existing appearance streams. If you have custom signature appearances (hand-drawn images, company logos), call this _before_ setting up your custom appearances, or call it only on non-signature fields. For signature appearances, most signing workflows build the appearance stream manually using a `PDFormXObject` -- Chapter 15 covers this in detail.
+CAUTION: `refreshAppearances()` will overwrite existing appearance streams. If you have custom signature appearances (hand-drawn images, company logos), call this _before_ setting up your custom appearances, or call it only on non-signature fields. For signature appearances, most signing workflows build the appearance stream manually using a `PDFormXObject` -- <<ch15>> covers this in detail.
 
 
 == XFA Forms: The Deprecated Complication
@@ -331,7 +331,7 @@ XFA (XML Forms Architecture) was Adobe's attempt to replace the limited AcroForm
 An XFA form embeds XML data inside the PDF file (in the `/XFA` key of the AcroForm dictionary), and a viewer that supports XFA renders the form from XML rather than from the AcroForm field tree.
 XFA could do things AcroForm could not: dynamic layouts, complex validation rules, repeating sections, and data binding to external schemas.
 
-{iso32000-2} deprecated XFA for three reasons: (1) only Adobe implemented it fully -- interoperability was abysmal; (2) XFA and AcroForm coexist awkwardly in the same file, with the two representations frequently disagreeing about field values; and (3) XFA's scripting capabilities have been exploited in multiple CVEs.
+Adobe deprecated XFA, and {iso32000-2} treats it as a legacy feature, for three reasons: (1) only Adobe implemented it fully -- interoperability was abysmal; (2) XFA and AcroForm coexist awkwardly in the same file, with the two representations frequently disagreeing about field values; and (3) XFA's scripting capabilities have been exploited in multiple CVEs.
 
 === Why XFA Still Causes Problems
 
@@ -475,7 +475,7 @@ These are not edge cases -- they are the everyday reality of working with signed
 
 **Symptom:** Signature validates, but the rectangle on the page is blank.
 **Cause:** No `/AP` entry on the widget, or `/NeedAppearances` is `true` and the viewer destroyed the original appearance during regeneration.
-**Fix:** Always generate a complete `PDAppearanceStream` during signing and set it as the normal appearance on the widget (see Chapter 15 for details).
+**Fix:** Always generate a complete `PDAppearanceStream` during signing and set it as the normal appearance on the widget (see <<ch15>> for details).
 
 === Wrong Field Hierarchy
 
@@ -513,4 +513,4 @@ The citizen's tax advisor opens the filled form in Acrobat (which _does_ support
 The signature is technically valid -- it covers the bytes that were present at signing time.
 But the signed content includes XFA data that disagrees with the AcroForm data.
 There is no clean fix short of removing XFA from the document entirely.
-This is precisely why {iso32000-2} deprecated XFA, and why the deprecation matters for real-world signature workflows.
+This is precisely why XFA was deprecated, and why the deprecation matters for real-world signature workflows.

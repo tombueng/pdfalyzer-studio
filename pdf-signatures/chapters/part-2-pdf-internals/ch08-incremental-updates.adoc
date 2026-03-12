@@ -8,7 +8,7 @@ Not because they are complicated — the concept is straightforward — but beca
 The byte range that defines what is signed, the ability to add multiple signatures without invalidating earlier ones, the entire model of "append, never rewrite" — all of it rests on incremental updates.
 
 This chapter explains how incremental updates work at the byte level, why they exist, what goes wrong when tools ignore them, and how to inspect and debug them in real PDF files.
-When you reach Chapter 12 and we start signing documents, you will be glad you spent time here first.
+When you reach <<ch12>> and we start signing documents, you will be glad you spent time here first.
 --
 
 == What Incremental Updates Are
@@ -16,8 +16,8 @@ When you reach Chapter 12 and we start signing documents, you will be glad you s
 A PDF file, at its simplest, has four parts: a header (`%PDF-1.x` or `%PDF-2.0`), a body of numbered objects, a cross-reference table (or cross-reference stream) that maps object numbers to byte offsets, and a trailer that points to the root object and the cross-reference table.
 The file ends with the `%%EOF` marker.
 
-Chapter 7 covered this structure in detail.
-What Chapter 7 did not cover is what happens when you _modify_ a PDF.
+<<ch07>> covered this structure in detail.
+What <<ch07>> did not cover is what happens when you _modify_ a PDF.
 
 There are exactly two ways to save changes to a PDF file:
 
@@ -60,7 +60,7 @@ This means you can "undo" an incremental update by truncating the file at the pr
 
 This property is not a side effect.
 It is a design goal.
-{iso32000-2} Section 7.5.6 explicitly states that conforming readers should be able to retrieve previous revisions of a document by following the chain of `/Prev` pointers in the trailers.
+{iso32000-2} Section 7.5.6 explicitly states that conforming readers shall be able to retrieve previous revisions of a document by following the chain of `/Prev` pointers in the trailers.
 
 For workflows where audit trails matter — legal documents, contracts, government forms — this built-in version history is valuable.
 You do not need an external version control system.
@@ -128,7 +128,7 @@ startxref                       <4>
 <5> End-of-file marker
 
 Nothing surprising here.
-This is the standard PDF structure from Chapter 7.
+This is the standard PDF structure from <<ch07>>.
 Let us say this file is 350 bytes long.
 
 === Appending an Incremental Update
@@ -230,7 +230,7 @@ This is critical for signatures because the `/ByteRange` and cross-reference tab
 - **Generation numbers exist but are rarely used.** The spec allows incrementing the generation number when an object is freed and reused, but in practice, most tools reuse generation 0 for everything.
 Do not write code that assumes generation numbers will be non-zero — you will almost never see them in the wild.
 
-WARNING: Some tools claim to "optimize" PDFs by removing unused objects and rebuilding the xref table. This is a full rewrite. If the PDF contains signatures, every signature is destroyed. Tools that do this include some versions of Ghostscript's `pdfwrite` device, QPDF's `--linearize` option (when not combined with `--preserve-unreferenced-objects`), and various online "PDF optimizer" services. If you are processing signed PDFs in an automated pipeline, test your tools carefully.
+WARNING: Some tools claim to "optimize" PDFs by removing unused objects and rebuilding the xref table. This is a full rewrite. If the PDF contains signatures, every signature is destroyed. Tools that do this include some versions of Ghostscript's `pdfwrite` device, QPDF's `--linearize` option, and various online "PDF optimizer" services. If you are processing signed PDFs in an automated pipeline, test your tools carefully.
 
 == Cross-Reference Streams and Incremental Updates
 
@@ -286,7 +286,7 @@ They are a _requirement_.
 
 === The Fundamental Constraint
 
-A PDF digital signature covers a specific byte range (see Chapter 13 for the complete deep dive).
+A PDF digital signature covers a specific byte range (see <<ch13>> for the complete deep dive).
 The `/ByteRange` array in the signature dictionary specifies exactly which bytes in the file are hashed and signed.
 For the signature to remain valid, those bytes must not change.
 Not a single one.
@@ -593,7 +593,7 @@ The first signature covers revisions 1-2.
 Whatever is in revision 3 was added after signing — whether it is permissible depends on the `/TransformMethod` and `/DocMDP` settings.
 
 - A signed PDF with only 1 `%%EOF` is suspicious.
-Either the signature was created during the initial save (some tools do this), or the file was flattened after signing (which means the signature is almost certainly invalid, even if the bytes were carefully reconstructed — see the discussion in Chapter 24 about the Incremental Saving Attack).
+Either the signature was created during the initial save (some tools do this), or the file was flattened after signing (which means the signature is almost certainly invalid, even if the bytes were carefully reconstructed — see the discussion in <<ch24>> about the Incremental Saving Attack).
 
 == Tracing the Revision History
 
@@ -698,7 +698,7 @@ If the file extends beyond the end of the signed byte range, there are unsigned 
 
 Whether those changes are permissible (e.g., a subsequent signature, an allowed form fill under DocMDP level 2) or malicious requires deeper analysis of what the appended objects actually do — which is where the complexity lies.
 
-Chapter 24 covers the ISA and its variants in complete technical detail, including the specific techniques attackers used to bypass even the "unsigned content detected" warnings that some viewers implemented as an initial defense.
+<<ch24>> covers the ISA and its variants in complete technical detail, including the specific techniques attackers used to bypass even the "unsigned content detected" warnings that some viewers implemented as an initial defense.
 ====
 
 [[ch08-debugging]]
@@ -821,7 +821,7 @@ A conforming viewer should warn that the document has been modified in a way tha
 
 The incremental update itself is structurally fine in all three cases.
 The question is whether the _content_ of the update is semantically permissible.
-This distinction — structural validity vs. semantic permissibility — is at the heart of the Incremental Saving Attack (Chapter 24).
+This distinction — structural validity vs. semantic permissibility — is at the heart of the Incremental Saving Attack (<<ch24>>).
 
 === Scenario 5: The Flattened Disaster
 
@@ -860,6 +860,6 @@ The rules are simple:
 - A full rewrite destroys all incremental history and all signatures.
 - Linearization and incremental updates are incompatible after the first incremental save.
 
-The next chapter (Chapter 9) examines AcroForm fields — the form infrastructure that signature fields are built on.
-Chapter 12 will bring incremental updates and signature architecture together, and Chapter 13 will dissect the byte range in complete detail.
+The next chapter (<<ch09>>) examines AcroForm fields — the form infrastructure that signature fields are built on.
+<<ch12>> will bring incremental updates and signature architecture together, and <<ch13>> will dissect the byte range in complete detail.
 If the byte range is where signatures live or die, incremental updates are the ground they stand on.
