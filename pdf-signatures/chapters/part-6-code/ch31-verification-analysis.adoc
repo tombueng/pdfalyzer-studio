@@ -1,3 +1,4 @@
+[[ch31]]
 = Verification & Analysis with PDFBox
 
 [.lead]
@@ -8,15 +9,15 @@ But it deliberately does not give you a "verify this signature" method.
 You build the pipeline yourself, step by step, and you understand every failure mode because you wrote the code that handles it.
 
 This chapter walks through a complete verification implementation using Apache PDFBox {pdfbox-version} and BouncyCastle {bc-version}.
-We start with extracting signatures from a PDF document, proceed through each verification step from Chapter 16, and end with a production-ready five-step pipeline that handles the edge cases real-world PDFs throw at you.
-If Chapter 16 described _what_ to verify, this chapter shows you _how_ — with code you can compile and run.
+We start with extracting signatures from a PDF document, proceed through each verification step from <<ch16>>, and end with a production-ready five-step pipeline that handles the edge cases real-world PDFs throw at you.
+If <<ch16>> described _what_ to verify, this chapter shows you _how_ — with code you can compile and run.
 
 == Extracting Signatures from a PDF Document
 
 === The Extraction Path: AcroForm to PDSignature
 
 Every PDF signature lives inside the AcroForm field tree.
-The extraction path follows the object hierarchy we dissected in Chapter 12: the document's `/AcroForm` dictionary contains a `/Fields` array, which includes `PDSignatureField` entries, each of which references a `PDSignature` dictionary.
+The extraction path follows the object hierarchy we dissected in <<ch12>>: the document's `/AcroForm` dictionary contains a `/Fields` array, which includes `PDSignatureField` entries, each of which references a `PDSignature` dictionary.
 
 PDFBox models this hierarchy directly.
 The key classes are:
@@ -252,7 +253,7 @@ private void logAttribute(AttributeTable table,
 
 === The Three Checks
 
-Byte range verification (Step 1 from Chapter 16) requires three checks:
+Byte range verification (Step 1 from <<ch16>>) requires three checks:
 
 1. The `/ByteRange` array has exactly four elements
 2. The first offset is zero (the signed region starts at the beginning of the file)
@@ -314,9 +315,9 @@ public ValidationResult verifyByteRange(int[] byteRange, long fileSize) {
 Trailing bytes are not always an attack.
 In a multi-signature document, each signature covers only up to the end of its own incremental revision.
 Subsequent revisions (containing later signatures) appear as "trailing bytes" from the perspective of the earlier signature.
-Chapter 8 covers how incremental updates work, and Chapter 13 covers the byte range geometry in multi-signature scenarios.
+<<ch08>> covers how incremental updates work, and <<ch13>> covers the byte range geometry in multi-signature scenarios.
 
-However, trailing bytes on the _last_ signature in a document are suspicious and may indicate a Shadow Attack (Chapter 24).
+However, trailing bytes on the _last_ signature in a document are suspicious and may indicate a Shadow Attack (<<ch24>>).
 Your verification code should distinguish between "trailing bytes that are a legitimate later revision" and "trailing bytes that are unexplained."
 ====
 
@@ -362,7 +363,7 @@ public boolean validateContentsGap(byte[] pdfBytes, int[] byteRange) {
 
 === Building the SignerInformationVerifier
 
-This is Step 3 from Chapter 16 — verifying that the CMS `SignedData` was actually created by the claimed signer's private key.
+This is Step 3 from <<ch16>> — verifying that the CMS `SignedData` was actually created by the claimed signer's private key.
 BouncyCastle's `SignerInformation.verify()` method performs this check, but you need to provide the correct `SignerInformationVerifier`:
 
 [source,java]
@@ -518,7 +519,7 @@ public CertPath validateCertificateChain(
 === Building the Trust Anchor Set
 
 The `TrustAnchor` set represents your trust store — the root certificates you are willing to trust.
-In a real application, this might come from the Java default trust store (`cacerts`), a custom keystore, or the AATL/EUTL (see Chapter 16, Step 5).
+In a real application, this might come from the Java default trust store (`cacerts`), a custom keystore, or the AATL/EUTL (see <<ch16>>, Step 5).
 
 [source,java]
 ----
@@ -928,13 +929,13 @@ public enum ValidationResult {
 === Why Multi-Signature Documents Need Revision Comparison
 
 When a PDF has multiple signatures, each signature covers a specific revision of the document — a snapshot of the file at the point when that signature was applied.
-Later signatures add incremental updates (Chapter 8) that extend the file.
+Later signatures add incremental updates (<<ch08>>) that extend the file.
 From the perspective of the first signature, the second signature's bytes are "trailing bytes" beyond its byte range.
 
 The critical question is: **did the incremental update between revisions only add the new signature, or did it modify existing content?**
 
 If someone added a new page, changed text, or altered form field values between signing events, the earlier signature's byte range still verifies (the signed bytes haven't changed), but the document's visible content has changed.
-This is the basis of the Shadow Attacks described in Chapter 24.
+This is the basis of the Shadow Attacks described in <<ch24>>.
 
 === Extracting Individual Revisions
 
@@ -1153,7 +1154,7 @@ public X509Certificate fetchIssuerViaAia(X509Certificate cert)
 [TIP]
 ====
 In production, always cache downloaded certificates.
-AIA chasing adds network latency and introduces a dependency on external servers — exactly the kind of dependency that LTV (Chapter 18) is designed to eliminate.
+AIA chasing adds network latency and introduces a dependency on external servers — exactly the kind of dependency that LTV (<<ch18>>) is designed to eliminate.
 If you are building a signing service, embed all intermediate certificates in the CMS at signing time, so validators never need to chase AIA.
 ====
 
@@ -1191,6 +1192,184 @@ public static String mapOidToAlgorithm(String oid) {
 }
 ----
 
+== Debugging a Broken Signature: A Practical Walkthrough
+
+When a signature fails validation — whether it shows a yellow warning in Acrobat, throws an exception in your PDFBox code, or is rejected by a customer's compliance system — you need a systematic approach to isolate the problem.
+This section walks through the debugging workflow using the tools introduced in <<ch28>>, showing which tool to reach for at each step.
+
+=== Step 1: Structural Inspection with QPDF
+
+Start with QPDF to verify the PDF's structural integrity and inspect the signature dictionaries.
+Structural corruption is the most common cause of "impossible" validation failures — the CMS may be perfect, but if the cross-reference table is broken or the byte range is wrong, validation will fail.
+
+[source,bash]
+----
+# Check the PDF for structural errors
+qpdf --check document.pdf
+
+# Dump all objects in JSON form (--show-object requires a specific object number)
+qpdf --json document.pdf
+
+# Show the linearization (if any) — linearized PDFs
+# sometimes have duplicate xref entries that confuse validators
+qpdf --show-linearization document.pdf
+
+# Extract a specific revision (e.g., the state before the last signature)
+# Object numbers for /Sig dictionaries can be found in --show-object output
+qpdf --qdf document.pdf decoded.pdf
+----
+
+QPDF's `--check` output will report cross-reference errors, stream length mismatches, and dangling object references.
+If `--check` reports errors, fix the structural issues before debugging the signature itself.
+
+=== Step 2: Byte Range Visualization with a Hex Editor
+
+If QPDF reports the structure is clean, the next suspect is the byte range.
+Use a hex editor (HxD on Windows, `xxd` on Linux/macOS, or any tool that shows file offsets) to manually verify the `/ByteRange` array:
+
+[source,bash]
+----
+# Extract the ByteRange values using QPDF's JSON output
+qpdf --json document.pdf | grep -A5 ByteRange
+
+# Example output: /ByteRange [0 12345 67890 44444]
+# This means: sign bytes 0-12344, skip 12345-67889 (the /Contents hex),
+# then sign bytes 67890-(67890+44444-1)
+
+# Verify the gap contains only hex characters (the /Contents value)
+xxd -s 12345 -l 100 document.pdf
+
+# Verify the signed range ends at EOF (no trailing bytes)
+wc -c document.pdf  # total file size should equal 67890 + 44444
+----
+
+Common byte range problems:
+
+- **Trailing bytes after the second range**: the signed range does not cover the entire file. This is a modification detection failure — someone (or some tool) appended data after the signature was applied.
+- **Gap does not contain valid hex**: corruption in the `/Contents` value.
+- **Byte range values inconsistent with actual file offsets**: the PDF was modified after signing without using incremental saves.
+
+=== Step 3: CMS Inspection with OpenSSL
+
+Extract the CMS blob from `/Contents` and inspect it with OpenSSL to check the signature algorithm, certificates, signed attributes, and timestamp:
+
+[source,bash]
+----
+# Extract the CMS blob using PDFBox or a script
+# (The /Contents value is a hex-encoded DER blob)
+# Convert hex to binary:
+xxd -r -p contents_hex.txt > signature.der
+
+# Parse the CMS structure
+openssl cms -inform DER -in signature.der -noout -print
+
+# Show the full CMS structure including certificates
+openssl cms -inform DER -in signature.der -cmsout -print
+
+# Verify the CMS independently (detached signature)
+# Note: this verifies crypto only, not byte range coverage
+openssl cms -verify -inform DER -in signature.der \
+    -content signed_bytes.bin -noverify -out /dev/null
+----
+
+Key things to check in the CMS output:
+
+- **SignedAttributes**: Look for `content-type` (must be `id-data`), `message-digest` (the hash of the signed bytes), `signing-time`, and `ESS-signing-certificate-v2` (required for PAdES).
+- **DigestAlgorithm**: Should match what's expected (SHA-256, SHA-384, etc.). If it says SHA-1, that's a problem for modern validators.
+- **Certificate chain**: Are all intermediates present? Is the signer certificate included? Missing intermediates cause chain-building failures.
+- **Timestamp token**: If present as an unsigned attribute, parse it separately to check the TSA certificate and timestamp value.
+
+=== Step 4: ASN.1 Deep Dive with BouncyCastle ASN1Dump
+
+For issues that OpenSSL's output doesn't clarify — malformed attributes, unexpected OIDs, encoding errors — use BouncyCastle's `ASN1Dump` for a complete ASN.1 tree:
+
+[source,java]
+----
+import org.bouncycastle.asn1.ASN1InputStream;
+import org.bouncycastle.asn1.ASN1Primitive;
+import org.bouncycastle.asn1.util.ASN1Dump;
+
+byte[] cmsBytes = Files.readAllBytes(Path.of("signature.der"));
+try (ASN1InputStream asn1 = new ASN1InputStream(cmsBytes)) {
+    ASN1Primitive obj = asn1.readObject();
+    // verbose=true shows full hex values for octet strings
+    System.out.println(ASN1Dump.dumpAsString(obj, true));
+}
+----
+
+This produces a complete tree showing every SEQUENCE, SET, OBJECT IDENTIFIER, and OCTET STRING.
+Compare it against the CMS structure diagrams in <<ch06>> to identify where the structure diverges from expectations.
+
+=== Step 5: Cross-Viewer Validation
+
+Different viewers implement different validation logic.
+Testing against multiple viewers isolates whether the problem is in the signature or in the validator:
+
+[cols="1,3", options="header"]
+|===
+| Viewer | What It Tells You
+
+| **Adobe Acrobat**
+| The de facto standard. If Acrobat says "valid," most customers will accept it. But Acrobat uses AATL for trust — a valid signature from a non-AATL CA will show "unknown signer."
+
+| **Adobe Reader**
+| Same validation engine as Acrobat but cannot modify signatures. Tests the read-only validation path.
+
+| **Foxit Reader**
+| Independent implementation. If Acrobat says valid but Foxit says invalid (or vice versa), the issue is likely in edge-case handling (SubFilter, timestamp format, unusual extensions).
+
+| **LibreOffice Draw**
+| Uses NSS (Network Security Services) for crypto. Tests a completely different validation stack. NSS handles certificate chain building differently from Java's PKIX.
+
+| **PDFBox (your code)**
+| Full control over every validation step. Use the five-step pipeline from this chapter to identify exactly which step fails.
+
+| **EU DSS Demonstration Webapp**
+| Validates against the EUTL and checks PAdES compliance. The only tool that will tell you the exact PAdES profile level and any compliance deviations.
+|===
+
+=== Step 6: Incremental Update Analysis with mutool
+
+If the signature validates cryptographically but shows "document modified after signing" (the dreaded yellow warning), use `mutool` to inspect incremental updates:
+
+[source,bash]
+----
+# Show all objects and their generations
+mutool show document.pdf trailer
+
+# Show the cross-reference table(s)
+mutool show document.pdf xref
+
+# Extract a specific page's content stream
+mutool show document.pdf 'pages/1/Contents'
+----
+
+Compare the objects in each incremental update section to identify what changed between the signing revision and the current revision.
+Common culprits:
+
+- **Form field value changes** (allowed under DocMDP P=2 or P=3, but some validators reject them)
+- **Appearance regeneration** (`/NeedAppearances` was `true`, so a viewer regenerated appearances)
+- **Metadata updates** (some tools update `/ModDate` in the document info dictionary)
+- **PDF optimizer** stripped or reorganized objects without using incremental saves
+
+=== The Debugging Checklist
+
+When a signature fails, work through this checklist in order:
+
+1. [ ] `qpdf --check` passes with no errors
+2. [ ] `/ByteRange` values are consistent (gap + ranges = file size)
+3. [ ] `/Contents` hex decodes to valid DER (no truncation, no padding errors)
+4. [ ] CMS `DigestAlgorithm` matches the expected hash algorithm
+5. [ ] `message-digest` attribute value matches the hash of the signed bytes
+6. [ ] Signer certificate is present in the CMS `certificates` field
+7. [ ] All intermediate CA certificates are present (chain is complete)
+8. [ ] Signer certificate was valid at signing time (check `notBefore`/`notAfter`)
+9. [ ] No incremental updates added after the signature that modify signed content
+10. [ ] The trust anchor (root CA) is in the validator's trust store
+
+Nine times out of ten, the problem is one of items 6-8.
+Missing intermediates, expired certificates, and wrong trust stores account for the vast majority of real-world signature failures.
+
 == Key Takeaways
 
 - PDFBox provides signature extraction via two paths: the AcroForm field tree (full metadata) or `getSignatureDictionaries()` (fast, crypto-only)
@@ -1203,3 +1382,5 @@ public static String mapOidToAlgorithm(String oid) {
 - Self-signed signatures are cryptographically valid but untrusted — always report the distinction clearly
 - Missing intermediates are the most common chain failure — implement AIA chasing or embed all intermediates at signing time
 - The `VerificationReport` model gives callers granular per-step results rather than a binary pass/fail
+- **Debug systematically**: structure (QPDF) → byte range (hex editor) → CMS (OpenSSL/ASN1Dump) → cross-viewer → incremental updates (mutool) — work from the outside in
+- **Missing intermediates, expired certificates, and wrong trust stores** account for the vast majority of real-world signature failures

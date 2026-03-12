@@ -12,7 +12,7 @@ endif::[]
 This chapter builds the cryptographic foundation that everything else in this book depends on.
 We start with the key distribution problem that asymmetric cryptography was invented to solve, work through RSA and elliptic curve algorithms at a conceptual level, and end with practical Java code that generates the key pairs you will use to sign PDFs.
 
-If you can already explain why RSA-2048 and ECDSA with P-256 provide roughly equivalent security, and you know why BouncyCastle exists alongside the JDK's built-in providers, skip to Chapter 2.
+If you can already explain why RSA-2048 and ECDSA with P-256 provide roughly equivalent security, and you know why BouncyCastle exists alongside the JDK's built-in providers, skip to <<ch02>>.
 Everyone else: this is where your journey into PDF signatures begins.
 
 
@@ -308,7 +308,7 @@ This size difference cascades through every part of the system: smaller keys mea
 For PDF signatures specifically, the `/Contents` hex string must be large enough to hold the entire CMS `SignedData` structure, including the signer's certificate chain.
 With RSA-4096 certificates and a chain of three certificates, this blob can exceed 10 KB.
 With ECDSA P-256, the same chain might be 3 KB.
-Chapter 13 covers why the size of `/Contents` matters -- it determines the byte range gap, which must be estimated before signing.
+<<ch13>> covers why the size of `/Contents` matters -- it determines the byte range gap, which must be estimated before signing.
 
 === ECDSA Adoption in PDF Signatures
 
@@ -372,7 +372,7 @@ A signature that cannot be validated by the dominant PDF viewer is, for all prac
 
 That said, EdDSA adoption is accelerating in the broader PKI ecosystem (TLS, SSH, code signing), and it is a matter of when -- not if -- PDF viewers add support.
 The eIDAS 2.0 Architecture Reference Framework ({eidas2-reg}) includes EdDSA in its list of acceptable algorithms for the EUDI wallet.
-When EUDI wallet-based PDF signing becomes mainstream (Chapter 27), EdDSA support in PDF viewers will follow.
+When EUDI wallet-based PDF signing becomes mainstream (<<ch27>>), EdDSA support in PDF viewers will follow.
 ====
 
 
@@ -632,7 +632,7 @@ public class RsaKeyPairExample {
 
 The output will show a 3072-bit key with public exponent 65537, the public key in X.509 (SubjectPublicKeyInfo) format, and the private key in PKCS#8 format.
 These format names -- X.509 for public keys, PKCS#8 for private keys -- are the standard encodings that appear in PEM files.
-Chapter 5 covers key material formats in detail.
+<<ch05>> covers key material formats in detail.
 
 === ECDSA Key Pair Generation
 
@@ -724,7 +724,7 @@ On a typical machine, RSA-3072 key generation takes 200-1500 ms (it varies becau
 The encoded key sizes will show the RSA public key at roughly 400 bytes versus 90 bytes for the EC public key.
 
 These numbers matter in practice.
-If you are building a self-signed certificate generator for testing (as we do in Chapter 29), RSA key generation is the bottleneck.
+If you are building a self-signed certificate generator for testing (as we do in <<ch29>>), RSA key generation is the bottleneck.
 If you are deploying a signing service that provisions per-user keys, the hundred-fold speed advantage of ECDSA key generation is worth considering.
 
 
@@ -754,8 +754,100 @@ The `SignatureInterface.sign(InputStream content)` method receives the document 
 Whether that blob contains an RSA signature or an ECDSA signature depends entirely on what key material you provide.
 
 This means you can switch algorithms by changing your certificate and keystore -- the signing code remains identical.
-We demonstrate this in Chapter 29.
+We demonstrate this in <<ch29>>.
 ====
+
+
+== Post-Quantum Cryptography and PDF Signatures
+
+Every algorithm discussed so far — RSA, ECDSA, EdDSA — relies on mathematical problems that a sufficiently powerful quantum computer could solve efficiently.
+Shor's algorithm (1994) can factor integers and compute discrete logarithms in polynomial time on a quantum computer, which would break RSA and all elliptic curve schemes.
+This is not a theoretical concern confined to academic papers: governments and standardization bodies are actively preparing for the transition.
+
+=== The Threat: "Harvest Now, Decrypt Later"
+
+The most immediate risk to digital signatures is not that someone will forge a signature tomorrow, but that adversaries are collecting signed documents _today_ with the intention of breaking the signatures once quantum computers become capable.
+For PDF signatures this matters because:
+
+1. **Long-lived documents**: A contract signed today and archived for 30 years must remain verifiable for the entire retention period. If quantum computers can break RSA-3072 in 2045, every document signed with RSA before that date becomes suspect.
+2. **Non-repudiation collapses**: If the signature algorithm is broken, the signer can plausibly deny having signed — the signature no longer proves anything.
+3. **PAdES-B-LTA does not help**: Archival timestamps extend the _validity chain_, but if the underlying signature algorithm (RSA, ECDSA) is broken, the cryptographic proof is gone regardless of how many timestamps you stack on top.
+
+=== NIST Post-Quantum Standards
+
+In August 2024, NIST published the first post-quantum cryptographic standards, including two digital signature standards:
+
+[cols="1,1,2,2", options="header"]
+|===
+| Standard | Algorithm | Type | Signature Size
+
+| **FIPS 204** (ML-DSA)
+| CRYSTALS-Dilithium
+| Lattice-based
+| 2,420–4,595 bytes (depending on security level)
+
+| **FIPS 205** (SLH-DSA)
+| SPHINCS+
+| Hash-based (stateless)
+| 7,856–49,856 bytes
+
+| **FIPS 206** (FN-DSA) _draft_
+| FALCON
+| Lattice-based (NTRU)
+| 666–1,280 bytes (compact but complex implementation)
+|===
+
+NOTE: FIPS 204 and FIPS 205 were finalized in August 2024. FIPS 206 (FN-DSA, based on FALCON) is still in draft as of early 2026 and has not yet been formally published. NIST also published FIPS 203 (ML-KEM, a key encapsulation mechanism based on CRYSTALS-KYBER), but ML-KEM is not a signature algorithm and is therefore not relevant to PDF signing.
+
+For comparison, an RSA-3072 signature is 384 bytes and an ECDSA P-256 signature is approximately 72 bytes.
+Post-quantum signatures are significantly larger — ML-DSA-65 (the recommended general-purpose level) produces signatures of 3,309 bytes, plus public keys of 1,952 bytes.
+
+=== Impact on PDF Signatures
+
+Post-quantum cryptography will affect PDF signatures in several concrete ways:
+
+**CMS `/Contents` size estimation.**
+The CMS `SignedData` blob stored in `/Contents` will grow substantially.
+An ML-DSA-65 signature value alone is 3,309 bytes — larger than many complete CMS blobs with RSA today.
+Add the signer's certificate (which now contains an ML-DSA public key of 1,952 bytes instead of an RSA public key of ~400 bytes), intermediate certificates, and signed attributes, and the `/Contents` hex string could easily exceed 20 KB.
+Byte range estimation code (<<ch13>>) will need to account for these larger sizes.
+
+**Certificate chain sizes.**
+Every certificate in the chain carries a public key and a signature from the issuing CA.
+With ML-DSA, both are larger.
+A three-certificate chain (root → intermediate → signer) with ML-DSA-65 adds roughly 15 KB compared to the same chain with RSA-3072.
+For PAdES-B-LTA, where all certificates are embedded in the DSS dictionary, this compounds.
+
+**Hybrid signatures.**
+During the transition period — which will last years, possibly decades — some implementations will use **hybrid signatures**: a classical algorithm (RSA or ECDSA) combined with a post-quantum algorithm, so the signature remains valid even if either algorithm is broken.
+CMS supports this through multiple `SignerInfo` entries or through composite signature algorithms (draft-ounsworth-pq-composite-sigs).
+PDF viewers will need to understand and validate both signature values.
+
+**Performance.**
+ML-DSA signing is approximately 10x faster than RSA-3072 but verification is roughly comparable.
+SLH-DSA signing is dramatically slower (seconds per signature on typical hardware).
+For batch signing or remote signing via CSC API, the algorithm choice will affect throughput.
+
+=== When to Act
+
+As of early 2026, no PDF viewer supports post-quantum signature algorithms.
+The ETSI standards for PAdES have not yet been updated to reference FIPS 204/205/206.
+ISO 32000 does not restrict signature algorithms (the algorithm is determined by the CMS `SignedData`, not by PDF itself), so the PDF format is technically ready — the ecosystem is not.
+
+[TIP]
+====
+**What to do now:**
+
+1. **Design for algorithm agility.** If your signing code hardcodes `"SHA256withRSA"` or a specific key type, refactor it to accept the algorithm as a parameter. The PDFBox `SignatureInterface` is already algorithm-agnostic — make sure your CMS construction code is too.
+2. **Watch BouncyCastle.** BouncyCastle has included experimental ML-DSA (Dilithium), SLH-DSA (SPHINCS+), and FN-DSA (FALCON) implementations since version 1.78. These are not yet production-ready for PDF signing, but they allow experimentation.
+3. **Plan for larger `/Contents`.** If you control the byte range estimation, build in headroom. A `/Contents` allocation of 32 KB (the current generous estimate for PAdES-B-LTA with RSA) may not suffice for post-quantum signatures with embedded chains.
+4. **Consider re-signing archival documents.** Documents signed today with RSA and archived for 30+ years may need to be re-signed with post-quantum algorithms once the ecosystem matures. PAdES-B-LTA's re-timestamping mechanism provides a framework for this — but re-signing (not just re-timestamping) will be necessary if the original algorithm is broken.
+====
+
+The transition to post-quantum cryptography will be the most significant change in PDF digital signatures since the move from PKCS#7 to CAdES.
+It will not happen overnight, and it will not require throwing away everything you know.
+The PDF format, the CMS container, and the PAdES profiles are all algorithm-agnostic by design.
+The algorithms change; the architecture does not.
 
 
 == Summary

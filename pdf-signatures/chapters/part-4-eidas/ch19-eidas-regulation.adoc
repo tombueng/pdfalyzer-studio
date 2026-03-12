@@ -1,3 +1,4 @@
+[[ch19]]
 = The eIDAS Regulation
 
 [.lead]
@@ -211,14 +212,14 @@ If a signing key is stored in a server-side keystore and an application signs on
 
 The fact that the user logged into the application is not sufficient.
 The authentication must be linked to the _signing action_, not just the _session_.
-This is the distinction that the SCAL (Sole Control Assurance Level) framework addresses — more on this in Chapter 22.
+This is the distinction that the SCAL (Sole Control Assurance Level) framework addresses — more on this in <<ch22>>.
 ====
 
 ==== (d) Linked to the data
 
 Any change to the signed data must be detectable.
 This is the integrity property that every digital signature scheme provides: if you change even one bit of the signed data, the signature will no longer verify.
-For PDF signatures, the byte range mechanism (Chapter 13) ensures this linkage.
+For PDF signatures, the byte range mechanism (<<ch13>>) ensures this linkage.
 
 === Tier 3: Qualified Electronic Signature (Article 3(12))
 
@@ -351,7 +352,7 @@ The rise of remote QSCDs has been the biggest practical change since eIDAS enter
 The original assumption was that QES required a physical device in the signer's possession (a smart card in their wallet).
 But eIDAS Annex II does not require _physical possession_ — it requires sole control.
 A private key in an HSM operated by a QTSP, accessible only through strong multi-factor authentication specific to the signer and the signing operation, satisfies the requirement.
-This opened the door to remote signing (Chapter 22), which is now the dominant model for QES in practice.
+This opened the door to remote signing (<<ch22>>), which is now the dominant model for QES in practice.
 ====
 
 === Article 35-40: Electronic Seals
@@ -369,7 +370,7 @@ The key difference: Article 35(2) says a qualified seal enjoys a "presumption of
 Note the careful wording — it says nothing about the legal _intent_ behind the seal.
 A signature expresses consent or approval.
 A seal proves origin and integrity.
-Chapter 21 explores this distinction in depth.
+<<ch21>> explores this distinction in depth.
 
 == Mutual Recognition
 
@@ -389,7 +390,7 @@ They cannot require additional technical features beyond what eIDAS specifies.
 
 The mechanism that makes this work is the **EU Trusted List (EUTL)** — a machine-readable, cryptographically signed registry of all QTSPs in the EU.
 If a certificate chains to a QTSP on the EUTL, it qualifies for cross-border recognition.
-Chapter 20 covers the EUTL in detail.
+<<ch20>> covers the EUTL in detail.
 
 [WARNING]
 ====
@@ -415,7 +416,7 @@ Qualification is a _legal status_ granted by an EU member state's supervisory bo
 
 == eIDAS 2.0: Regulation (EU) 2024/1183
 
-On April 11, 2024, the revised eIDAS regulation — commonly called **eIDAS 2.0** or {eidas2-reg} — entered into force.
+On May 20, 2024, the revised eIDAS regulation — commonly called **eIDAS 2.0** or {eidas2-reg} — entered into force (signed April 11, 2024; published in the Official Journal on April 30, 2024).
 The revision keeps the trust services framework largely intact but adds a transformative new component: the **European Digital Identity Wallet (EUDI Wallet)**.
 
 === What Changed
@@ -519,6 +520,99 @@ However, eIDAS has become a de facto global reference model.
 Countries designing their own electronic signature frameworks often look to eIDAS for inspiration.
 The three-tier model (basic, advanced, qualified) has been adopted in various forms by multiple non-EU jurisdictions.
 
+=== Global Electronic Signature Frameworks
+
+While this book focuses on eIDAS and PAdES (the dominant framework for PDF digital signatures), developers building global products must understand how other major jurisdictions handle electronic signatures.
+The approaches vary dramatically — from permissive technology-neutral laws to prescriptive certificate-based regimes.
+
+**United States: E-SIGN Act and UETA**
+
+The United States takes a fundamentally different approach from the EU.
+The **Electronic Signatures in Global and National Commerce Act (E-SIGN, 2000)** and the **Uniform Electronic Transactions Act (UETA, 1999)** are technology-neutral: they give legal effect to _any_ electronic record or signature, without mandating specific cryptographic techniques or certificate authorities.
+
+This means a typed name at the bottom of an email, a click-to-accept checkbox, and a PAdES-B-LTA signature with a qualified certificate all have the same legal standing under US federal law.
+There is no tiered system.
+There is no concept of a "qualified" signature.
+Courts evaluate electronic signatures on a case-by-case basis using the same evidentiary standards they apply to any other evidence.
+
+For developers, this has a profound practical consequence: US customers rarely require specific signature formats or certificate types.
+They care about audit trails, signer authentication, and the ability to demonstrate intent — not about cryptographic compliance with ETSI standards.
+Companies like DocuSign and Adobe Sign built billion-dollar businesses on click-to-sign workflows that would not qualify as "advanced" under eIDAS Article 26.
+
+There are sector-specific exceptions.
+The **FDA 21 CFR Part 11** imposes strict requirements for electronic signatures in pharmaceutical and medical device manufacturing.
+**IRS e-filing** has its own signature requirements.
+Some states have adopted the **Uniform Real Property Electronic Recording Act (URPERA)** with specific requirements for real estate transactions.
+But the general federal framework remains technology-neutral.
+
+**Switzerland: ZertES**
+
+Switzerland's **Federal Act on Electronic Signatures (ZertES, Bundesgesetz über die elektronische Signatur)** closely mirrors eIDAS.
+It defines qualified electronic signatures, requires qualified certificates from recognized certification service providers, and mandates signature creation devices.
+The Swiss _Anerkennungsstelle für Zertifizierungsdienste_ (recognition body) publishes a list of recognized providers analogous to the EUTL.
+
+A bilateral agreement between Switzerland and the EU provides for mutual recognition of trust services, making Switzerland the closest non-EU jurisdiction to full eIDAS interoperability.
+Swisscom Trust Services, the dominant Swiss QTSP, operates a CSC API endpoint and issues certificates that are recognized in both Swiss and EU contexts.
+
+**India: Information Technology Act 2000**
+
+India's IT Act 2000 (amended 2008) establishes a Controller of Certifying Authorities (CCA) that licenses CAs to issue digital signature certificates.
+The Act distinguishes between "electronic signatures" (broad, technology-neutral) and "digital signatures" (specific to asymmetric cryptography with licensed CAs).
+Digital signatures using certificates from CCA-licensed CAs are presumed valid unless disproved — similar to eIDAS's QES presumption.
+
+India's Aadhaar-based eSign service enables remote signing for over a billion citizens using their biometric identity, making it one of the largest remote signing deployments in the world.
+The eSign API is conceptually similar to the CSC API but uses Aadhaar authentication instead of OAuth 2.0.
+
+**China, Japan, South Korea**
+
+China's **Electronic Signature Law (2004)** establishes a ministry-supervised CA infrastructure.
+Japan's **Act on Electronic Signatures and Certification Business (2000)** creates a similar framework with accredited certification authorities.
+South Korea's **Digital Signature Act** mandated the use of government-issued certificates (공인인증서, _gong-in-injeung-seo_) for online banking and government services until 2020, when the requirement was relaxed to allow private-sector alternatives.
+
+These East Asian frameworks share a common pattern: government-supervised CA hierarchies with legally recognized certificate classes, similar in spirit to eIDAS but without the standardized cross-border recognition mechanism.
+
+**Latin America**
+
+Several Latin American countries have adopted electronic signature frameworks modeled on EU directives:
+
+- **Brazil**: ICP-Brasil (Infraestrutura de Chaves Públicas Brasileira) operates a national PKI with the Instituto Nacional de Tecnologia da Informação as root CA. Brazilian digital signatures using ICP-Brasil certificates have legal equivalence to handwritten signatures.
+- **Argentina**: Ley de Firma Digital (Digital Signature Law 25.506) establishes a national PKI infrastructure.
+- **Mexico**: FIEL/e.firma certificates issued by the SAT (Servicio de Administración Tributaria) are required for tax filings and government transactions.
+
+**Practical Implications for Global Software**
+
+[cols="1,2,2", options="header"]
+|===
+| Region | Signature Format Requirements | Trust Model
+
+| EU/EEA
+| PAdES strongly preferred; qualified certificates for QES
+| Centralized (EUTL)
+
+| United States
+| Technology-neutral; no format mandated
+| Decentralized (case-by-case evidence)
+
+| Switzerland
+| ZertES mirrors eIDAS; PAdES for interoperability
+| Centralized (Swiss recognition body)
+
+| India
+| eSign/Aadhaar for consumer; CCA certificates for enterprise
+| Centralized (CCA hierarchy)
+
+| China/Japan/Korea
+| National PKI certificates; formats vary
+| Centralized (government CA hierarchies)
+
+| Brazil
+| ICP-Brasil certificates; PAdES/CAdES used
+| Centralized (ICP-Brasil root)
+|===
+
+If your software must serve multiple jurisdictions, the safest approach is: generate PAdES-B-LTA signatures with the strongest available certificate, and let each jurisdiction evaluate the result under its own legal framework.
+A PAdES-B-LTA signature is technically sound everywhere — the legal weight varies, but the cryptographic validity does not.
+
 == What Your Code Needs to Do
 
 For developers building PDF signature creation or validation software, eIDAS imposes specific technical requirements depending on the tier you are targeting:
@@ -608,7 +702,7 @@ Production eIDAS tier determination is significantly more complex because:
 - QSCD status may need to be inferred from the certificate's QCStatements rather than verified directly
 - Some QTSPs issue certificates that are qualified for some services but not others
 
-For production use, the **EU DSS framework** (Chapter 23) provides a complete, tested implementation of eIDAS tier determination.
+For production use, the **EU DSS framework** (<<ch23>>) provides a complete, tested implementation of eIDAS tier determination.
 Do not implement this from scratch unless you have very specific requirements that EU DSS cannot meet.
 ====
 
@@ -621,4 +715,6 @@ Do not implement this from scratch unless you have very specific requirements th
 - Cross-border recognition is mandatory for QES (Article 25(3)) — enforced through the EU Trusted List
 - eIDAS 2.0 ({eidas2-reg}) adds the EUDI wallet, making QES accessible to all EU citizens via smartphone
 - The gap between regulation and implementation is real — code that hardcodes trust stores instead of checking the EUTL violates the mutual recognition principle
-- For production eIDAS validation, use the EU DSS framework (Chapter 23) rather than implementing from scratch
+- For production eIDAS validation, use the EU DSS framework (<<ch23>>) rather than implementing from scratch
+- **Non-EU frameworks vary dramatically**: the US is technology-neutral (E-SIGN/UETA), Switzerland mirrors eIDAS (ZertES), India has CCA-supervised PKI with Aadhaar eSign, East Asian countries use government CA hierarchies
+- **PAdES-B-LTA is technically sound everywhere** — the legal weight varies by jurisdiction, but the cryptographic validity does not

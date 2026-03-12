@@ -12,7 +12,7 @@
 # Pipeline:
 #   1. AsciiDoc → DocBook XML  (asciidoctor)
 #   2. DocBook  → LaTeX        (pandoc + custom preamble)
-#   3. LaTeX    → PDF          (lualatex, 2 passes for TOC/refs)
+#   3. LaTeX    → PDF          (lualatex, 2-3 passes for TOC/refs)
 #
 # For HTML/Markdown: TikZ diagrams are pre-rendered to SVG via standalone class.
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -122,7 +122,7 @@ build_latex() {
 # Step 3: LaTeX → PDF
 # ─────────────────────────────────────────────────────────────────────────────
 build_pdf() {
-    log "LaTeX → PDF (LuaLaTeX, 2 passes)"
+    log "LaTeX → PDF (LuaLaTeX, up to 3 passes)"
     mkdir -p "${PDF_DIR}"
 
     # Pass 1: generate .aux, .toc
@@ -136,6 +136,15 @@ build_pdf() {
         -interaction=nonstopmode \
         -output-directory="${LATEX_DIR}" \
         "${LATEX_DIR}/book.tex" || true
+
+    # Pass 3: only if labels changed (e.g. after adding new cross-reference anchors)
+    if grep -q "Label(s) may have changed" "${LATEX_DIR}/book.log" 2>/dev/null; then
+        log "  Labels changed — running pass 3"
+        lualatex \
+            -interaction=nonstopmode \
+            -output-directory="${LATEX_DIR}" \
+            "${LATEX_DIR}/book.tex" || true
+    fi
 
     if [ -f "${LATEX_DIR}/book.pdf" ]; then
         # Determine next version number from existing files

@@ -1,3 +1,4 @@
+[[ch25]]
 = Certificate Authority Breaches
 
 [.lead]
@@ -42,7 +43,7 @@ Without LTV data, a validator checking the signature after the CA revocation has
 DigiNotar was a Dutch certificate authority founded in 1998, headquartered in Beverwijk, a small town near Amsterdam.
 The company was originally an offshoot of the Dutch notarial profession — the name is a portmanteau of "Digital Notary" — and it carved out a niche issuing certificates for Dutch government services, notaries, and businesses.
 
-In 2010, VASCO Data Security International (now OneSpan) acquired DigiNotar for approximately 10 million euros.
+In January 2011, VASCO Data Security International (now OneSpan) acquired DigiNotar for approximately 10 million euros.
 At the time, DigiNotar was one of the root CAs trusted by every major browser and operating system.
 Its certificates were embedded in the trust stores of Windows, macOS, Firefox, Chrome, and by extension, in the trust stores used by PDF viewers.
 
@@ -475,7 +476,7 @@ However, CT is increasingly relevant for PDF signatures:
 
 - Some CAs voluntarily log their document signing certificates in CT logs
 - Organizations building their own signature validation can incorporate CT log monitoring as an additional trust signal
-- The EUDI Wallet infrastructure (Chapter 27) may incorporate CT-like transparency mechanisms for wallet-issued certificates
+- The EUDI Wallet infrastructure (<<ch27>>) may incorporate CT-like transparency mechanisms for wallet-issued certificates
 
 [source,java]
 ----

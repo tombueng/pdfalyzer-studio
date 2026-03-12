@@ -1,3 +1,4 @@
+[[ch14]]
 = Approval vs. Certification Signatures
 
 [.lead]
@@ -152,7 +153,7 @@ In LibreOffice, it shows as: "Document has been modified since it was last signe
 
 The exact wording varies by viewer, and — this is important — **not all viewers enforce MDP permissions correctly**.
 Some viewers only check whether the byte range is intact and don't analyze the incremental updates for permission compliance.
-This is one of the weaknesses that the Bochum team exploited in the Incremental Saving Attack (Chapter 24).
+This is one of the weaknesses that the Bochum team exploited in the Incremental Saving Attack (<<ch24>>).
 
 == Lock Dictionaries: Field-Level Protection
 

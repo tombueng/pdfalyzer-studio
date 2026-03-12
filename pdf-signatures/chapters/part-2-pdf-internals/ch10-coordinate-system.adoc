@@ -1,3 +1,4 @@
+[[ch10]]
 = PDF Coordinate System
 
 [.lead]
@@ -10,7 +11,7 @@ We will cover the coordinate system from first principles, work through every pa
 
 == User Space: The Default Coordinate System
 
-Every PDF page has a **user space** coordinate system defined in {iso32000-2} Section 8.3.2.
+Every PDF page has a **user space** coordinate system defined in {iso32000-2} Section 8.3.2.3.
 The rules are few but non-negotiable:
 
 * The **origin** is at the **bottom-left** corner of the page.

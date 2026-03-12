@@ -1,3 +1,4 @@
+[[ch24]]
 == PDF Signature Attacks: A Complete Technical Analysis
 
 [quote, Vladislav Mladenov et al., "1 Trillion Dollar Refund" (CCS 2019)]
@@ -945,7 +946,7 @@ WARNING: If your code still generates signatures using SHA-1 (either via `adbe.p
 
 ==== The Comodo Registration Authority Breach (2011)
 
-In March 2011 — the same month as DigiNotar, though discovered slightly earlier — an attacker compromised a **registration authority (RA)** affiliated with Comodo, one of the world's largest certificate authorities at the time.
+In March 2011 — several months before the DigiNotar breach that summer — an attacker compromised a **registration authority (RA)** affiliated with Comodo, one of the world's largest certificate authorities at the time.
 
 The attacker used the compromised RA account to issue nine fraudulent SSL certificates for high-profile domains: `login.live.com`, `mail.google.com`, `www.google.com`, `login.yahoo.com`, `login.skype.com`, `addons.mozilla.org`, and three others.
 The certificates were issued by Comodo's legitimate intermediate CA, meaning they chained correctly to a trusted root.

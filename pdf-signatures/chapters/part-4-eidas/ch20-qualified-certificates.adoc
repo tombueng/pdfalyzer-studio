@@ -1,3 +1,4 @@
+[[ch20]]
 = Qualified Certificates & Trust Services
 
 [.lead]
@@ -6,7 +7,7 @@ What makes a certificate _qualified_ is not a technical property you can detect 
 It is a legal status, conferred by a government supervisory body, published in a machine-readable trust infrastructure, and backed by an institutional apparatus that most developers have never heard of, let alone queried programmatically.
 
 This chapter takes you through that entire apparatus: the Qualified Trust Service Providers that issue qualified certificates, the EU Trusted List that publishes who they are, the technical requirements that separate a qualified certificate from an ordinary one, the QSCD hardware that protects the keys, and the Java code you need to actually parse and verify all of this.
-If Chapter 19 was the legal framework, this chapter is the plumbing.
+If <<ch19>> was the legal framework, this chapter is the plumbing.
 
 == Qualified Trust Service Providers (QTSPs)
 
@@ -280,7 +281,7 @@ When the signing certificate rotates, the new certificate is announced in advanc
 [TIP]
 ====
 For production systems, implement a scheduled refresh -- daily or weekly -- that re-downloads, re-verifies, and re-parses the entire EUTL hierarchy.
-The EU DSS library (Chapter 23) provides a `TrustedListsCertificateSource` that handles all of this automatically, including caching, refresh scheduling, signature verification, and the pivot mechanism.
+The EU DSS library (<<ch23>>) provides a `TrustedListsCertificateSource` that handles all of this automatically, including caching, refresh scheduling, signature verification, and the pivot mechanism.
 ====
 
 == Qualified Certificates: What Makes Them Qualified
@@ -391,7 +392,7 @@ A national certification body (BSI in Germany, ANSSI in France) performs the eva
 
 - **Smart cards** (Thales IDPrime MD, Atos CardOS): private key generated on chip, never exported, signing performed on-card
 - **USB tokens** (SafeNet eToken 5110, YubiKey 5 FIPS): same security model as smart cards, USB form factor
-- **HSMs** (Thales Luna, Utimaco SecurityServer): rack-mounted devices for server-side signing; basis for remote signing (Chapter 22)
+- **HSMs** (Thales Luna, Utimaco SecurityServer): rack-mounted devices for server-side signing; basis for remote signing (<<ch22>>)
 
 [CAUTION]
 ====
@@ -688,7 +689,7 @@ A production implementation must also:
 - **Cache and refresh** the hierarchy on a schedule (not on every validation)
 - **Parse QCStatements** from the signer's certificate to determine the qualification type
 
-For production use, the **EU DSS library** (Chapter 23) provides `TrustedListsCertificateSource`, which handles all of this correctly.
+For production use, the **EU DSS library** (<<ch23>>) provides `TrustedListsCertificateSource`, which handles all of this correctly.
 Do not reimplement this from scratch unless you have a very specific reason.
 ====
 
