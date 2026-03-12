@@ -92,25 +92,38 @@ public class CosNodeBuilder {
         return root;
     }
 
-    /** Attach a COS subtree for a dictionary as a child of a semantic node. */
+    /**
+     * Inline COS dictionary entries directly as children of the given parent node.
+     * No wrapper "Raw COS Data" node is created — each key becomes a direct child.
+     */
     public void attachCosChildren(PdfNode parent, COSDictionary dict,
                                    String idPrefix, ParseContext ctx, int depth) {
-        PdfNode cosNode = buildCosNode(dict, "COS Dictionary", idPrefix,
-                ctx.visited, depth, new ArrayList<>(), ctx);
-        cosNode.setName("Raw COS Data {" + dict.size() + " entries}");
-        cosNode.setIcon("fa-th-list");
-        cosNode.setColor("#00bcd4");
+        attachCosChildren(parent, dict, idPrefix, ctx, depth, Set.of());
+    }
 
-        // Resolve the indirect object key so that all child primitive nodes can be edited
-        if (cosNode.getObjectNumber() < 0) {
-            COSObjectKey key = null;
-            try { key = dict.getKey(); } catch (Exception ignored) {}
-            if (key == null) key = findObjectKeyInDocument(dict, ctx.doc);
-            if (key != null) {
-                propagateObjectInfo(cosNode, (int) key.getNumber(), key.getGeneration());
+    /**
+     * Inline COS dictionary entries directly as children of the given parent node,
+     * skipping any keys in {@code excludeKeys} (already represented by semantic nodes).
+     */
+    public void attachCosChildren(PdfNode parent, COSDictionary dict,
+                                   String idPrefix, ParseContext ctx, int depth,
+                                   Set<String> excludeKeys) {
+        COSObjectKey objKey = null;
+        try { objKey = dict.getKey(); } catch (Exception ignored) {}
+        if (objKey == null) objKey = findObjectKeyInDocument(dict, ctx.doc);
+
+        for (Map.Entry<COSName, COSBase> entry : dict.entrySet()) {
+            String key = entry.getKey().getName();
+            if (excludeKeys.contains(key)) continue;
+            List<String> childPath = new ArrayList<>();
+            childPath.add(key);
+            PdfNode child = buildCosNode(entry.getValue(), "/" + key,
+                    idPrefix + "-" + key, ctx.visited, depth + 1, childPath, ctx);
+            if (objKey != null && child.getObjectNumber() < 0) {
+                propagateObjectInfo(child, (int) objKey.getNumber(), objKey.getGeneration());
             }
+            parent.addChild(child);
         }
-        parent.addChild(cosNode);
     }
 
     public PdfNode buildCosNode(COSBase obj, String label, String idPrefix,
@@ -233,6 +246,18 @@ public class CosNodeBuilder {
                     visited, depth + 1, currentKeyPath, ctx);
         }
         String objLabel = label + " (obj " + key.getNumber() + " " + key.getGeneration() + " R)";
+
+        // Check cache first — if already fully built, shallow-copy so the node is expandable
+        PdfNode cached = ctx.cache.get(key);
+        if (cached != null) {
+            String suffix = "-ref-" + Math.abs(idPrefix.hashCode());
+            PdfNode copy = cached.deepCopy(suffix, 4);
+            copy.setName(objLabel);
+            copy.setKeyPath(keyPathToJson(currentKeyPath));
+            return copy;
+        }
+
+        // True cycle: object is currently being built in this branch — cannot expand
         if (visited.contains(key)) {
             PdfNode ref = makeLeafNode(idPrefix, objLabel + " [circular ref]",
                     "COSObject", "-> obj " + key.getNumber(), "fa-link", "#ffffff");
@@ -242,14 +267,7 @@ public class CosNodeBuilder {
             ref.setKeyPath(keyPathToJson(currentKeyPath));
             return ref;
         }
-        PdfNode cached = ctx.cache.get(key);
-        if (cached != null) {
-            PdfNode ref = makeLeafNode(idPrefix, objLabel + " [see obj " + key.getNumber() + "]",
-                    "COSObject", "-> obj " + key.getNumber(), "fa-link", "#ffffff");
-            ref.setObjectNumber((int) key.getNumber());
-            ref.setGenerationNumber(key.getGeneration());
-            return ref;
-        }
+
         visited.add(key);
         PdfNode node = buildCosNode(cosObj.getObject(), objLabel, idPrefix,
                 visited, depth + 1, currentKeyPath, ctx);

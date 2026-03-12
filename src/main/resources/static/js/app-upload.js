@@ -21,15 +21,13 @@ PDFalyzer.Upload = (function ($, P) {
     }
 
     function renderIdleButton() {
-        $('#uploadBtn').html(
-            '<i class="fas fa-upload me-1"></i> Upload PDF' +
-            '<input type="file" id="fileInput" accept=".pdf" hidden />');
+        $('#uploadBtn').html('<i class="fas fa-upload me-1"></i> Upload PDF')
+            .removeClass('disabled').removeAttr('aria-disabled');
     }
 
     function renderUploadingButton() {
-        $('#uploadBtn').html(
-            '<span class="spinner-border spinner-border-sm"></span> Uploading...' +
-            '<input type="file" id="fileInput" accept=".pdf" hidden disabled />');
+        $('#uploadBtn').html('<span class="spinner-border spinner-border-sm"></span> Uploading...')
+            .addClass('disabled').attr('aria-disabled', 'true');
     }
 
     function updateEncryptionStatus(encInfo) {
@@ -206,8 +204,6 @@ PDFalyzer.Upload = (function ($, P) {
         _inFlight = true;
         var formData = new FormData();
         formData.append('file', file);
-        var $btn = $('#uploadBtn');
-        $btn.addClass('disabled').attr('aria-disabled', 'true');
         renderUploadingButton();
 
         P.Utils.apiFetch('/api/upload', {
@@ -215,29 +211,28 @@ PDFalyzer.Upload = (function ($, P) {
             processData: false, contentType: false, dataType: 'json'
         })
         .done(function (data) {
-            if (data.encryptionInfo && data.encryptionInfo.requiresPassword) {
-                // Tree is absent; show password prompt, keep _inFlight=true
-                renderIdleButton();
-                $btn.removeClass('disabled').removeAttr('aria-disabled');
-                showPasswordPrompt(data.sessionId, data.filename, file.size);
-                $('#fileInput').val('');
-                return;
+            try {
+                if (data.encryptionInfo && data.encryptionInfo.requiresPassword) {
+                    renderIdleButton();
+                    showPasswordPrompt(data.sessionId, data.filename, file.size);
+                    return;
+                }
+                applyUploadSuccess(data, file && file.size ? file.size : 0, {
+                    restoreDraft: false, resetPending: true
+                });
+                P.Utils.toast('PDF loaded: ' + data.filename + ' (' + data.pageCount + ' pages)', 'success');
+            } catch (err) {
+                console.error('[PDFalyzer] Error in upload success handler:', err);
+                P.Utils.toast('PDF uploaded but rendering failed: ' + err.message, 'danger');
             }
-            applyUploadSuccess(data, file && file.size ? file.size : 0, {
-                restoreDraft: false, resetPending: true
-            });
-            P.Utils.toast('PDF loaded: ' + data.filename + ' (' + data.pageCount + ' pages)', 'success');
-            _inFlight = false;
-            $btn.removeClass('disabled').removeAttr('aria-disabled');
-            renderIdleButton();
-            $('#fileInput').val('');
         })
         .fail(function (xhr) {
             var msg = 'Upload failed';
             try { msg += ': ' + JSON.parse(xhr.responseText).error; } catch (e) {}
             P.Utils.toast(msg, 'danger');
+        })
+        .always(function () {
             _inFlight = false;
-            $btn.removeClass('disabled').removeAttr('aria-disabled');
             renderIdleButton();
             $('#fileInput').val('');
         });
@@ -250,14 +245,19 @@ PDFalyzer.Upload = (function ($, P) {
 
         P.Utils.apiFetch('/api/sample/load/' + encodeURIComponent(filename), { method: 'POST', dataType: 'json' })
             .done(function (data) {
-                if (data.encryptionInfo && data.encryptionInfo.requiresPassword) {
-                    renderIdleButton();
-                    showPasswordPrompt(data.sessionId, data.filename, data.fileSize || 0);
-                    return;
+                try {
+                    if (data.encryptionInfo && data.encryptionInfo.requiresPassword) {
+                        renderIdleButton();
+                        showPasswordPrompt(data.sessionId, data.filename, data.fileSize || 0);
+                        return;
+                    }
+                    var sampleSize = typeof data.fileSize === 'number' ? data.fileSize : 0;
+                    applyUploadSuccess(data, sampleSize, { restoreDraft: false, resetPending: true });
+                    P.Utils.toast('PDF loaded: ' + data.filename + ' (' + data.pageCount + ' pages)', 'success');
+                } catch (err) {
+                    console.error('[PDFalyzer] Error in sample load handler:', err);
+                    P.Utils.toast('Sample loaded but rendering failed: ' + err.message, 'danger');
                 }
-                var sampleSize = typeof data.fileSize === 'number' ? data.fileSize : 0;
-                applyUploadSuccess(data, sampleSize, { restoreDraft: false, resetPending: true });
-                P.Utils.toast('PDF loaded: ' + data.filename + ' (' + data.pageCount + ' pages)', 'success');
             })
             .fail(function (xhr) {
                 var msg = 'Failed to load sample';
@@ -295,10 +295,14 @@ PDFalyzer.Upload = (function ($, P) {
 
         P.Utils.apiFetch('/api/sample/load', { method: 'POST', dataType: 'json' })
             .done(function (data) {
-                if (P.state.sessionId) return;
-                var sampleSize = typeof data.fileSize === 'number' ? data.fileSize : 0;
-                applyUploadSuccess(data, sampleSize, { restoreDraft: false, resetPending: true });
-                P.Utils.toast('PDF loaded: ' + data.filename + ' (' + data.pageCount + ' pages)', 'success');
+                try {
+                    if (P.state.sessionId) return;
+                    var sampleSize = typeof data.fileSize === 'number' ? data.fileSize : 0;
+                    applyUploadSuccess(data, sampleSize, { restoreDraft: false, resetPending: true });
+                    P.Utils.toast('PDF loaded: ' + data.filename + ' (' + data.pageCount + ' pages)', 'success');
+                } catch (err) {
+                    console.error('[PDFalyzer] Error in auto-load handler:', err);
+                }
             })
             .always(function () {
                 _inFlight = false;
@@ -322,10 +326,19 @@ PDFalyzer.Upload = (function ($, P) {
             method: 'GET', dataType: 'json'
         })
         .done(function (data) {
-            var size = typeof data.fileSize === 'number' ? data.fileSize : 0;
-            applyUploadSuccess(data, size, { restoreDraft: true, resetPending: false });
-            P.Utils.toast('Restored previous session', 'success');
-            deferred.resolve(true);
+            try {
+                var size = typeof data.fileSize === 'number' ? data.fileSize : 0;
+                applyUploadSuccess(data, size, { restoreDraft: true, resetPending: false });
+                P.Utils.toast('Restored previous session', 'success');
+                deferred.resolve(true);
+            } catch (err) {
+                console.error('[PDFalyzer] Error in session restore handler:', err);
+                if (P.Storage) {
+                    P.Storage.clearDraft(storedSessionId);
+                    P.Storage.clearCurrentSessionId();
+                }
+                deferred.resolve(false);
+            }
         })
         .fail(function () {
             if (P.Storage) {
@@ -343,8 +356,20 @@ PDFalyzer.Upload = (function ($, P) {
     }
 
     function init() {
-        $(document).on('change', '#fileInput', function () {
-            if (this.files.length > 0) upload(this.files[0]);
+        // Direct binding — delegated 'change' on hidden file inputs is unreliable in some browsers
+        var fileInput = document.getElementById('fileInput');
+        if (fileInput) {
+            fileInput.addEventListener('change', function () {
+                if (this.files.length > 0) upload(this.files[0]);
+            });
+        }
+        // Programmatic click — avoids <label for> + disabled input browser quirks
+        $(document).on('click', '#uploadBtn, .mobile-upload-btn', function (e) {
+            e.preventDefault();
+            if (_inFlight) return;
+            // Reset value so 'change' fires even when re-selecting the same file
+            $('#fileInput').val('');
+            document.getElementById('fileInput').click();
         });
         $(document).on('click', '.sample-item', function () {
             loadSample($(this).data('name'));
