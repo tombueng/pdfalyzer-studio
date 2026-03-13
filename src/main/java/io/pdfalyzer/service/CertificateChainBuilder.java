@@ -130,7 +130,7 @@ public class CertificateChainBuilder {
             Collection<X509CertificateHolder> tsaSignerCerts = tsaCertStore.getMatches(tsaSigner.getSID());
             if (tsaSignerCerts.isEmpty()) {
                 log.debug("No TSA signer certificate found in timestamp token");
-                return new TsaChainResult(tsaTime, List.of());
+                return new TsaChainResult(tsaTime, List.of(), List.of());
             }
 
             X509Certificate tsaSignerCert = new JcaX509CertificateConverter()
@@ -156,7 +156,7 @@ public class CertificateChainBuilder {
             }
 
             log.debug("Extracted TSA chain with {} entries, signing time: {}", entries.size(), tsaTime);
-            return new TsaChainResult(tsaTime, entries);
+            return new TsaChainResult(tsaTime, entries, allTsaCerts);
 
         } catch (Exception e) {
             log.debug("Error extracting TSA chain: {}", e.getMessage());
@@ -167,9 +167,10 @@ public class CertificateChainBuilder {
     /**
      * Result of TSA chain extraction, containing the signing time and chain entries.
      */
-    public record TsaChainResult(String tsaSigningTime, List<CertificateChainEntry> chain) {
+    public record TsaChainResult(String tsaSigningTime, List<CertificateChainEntry> chain,
+                                  List<X509Certificate> rawCerts) {
         public boolean hasTsa() { return chain != null && !chain.isEmpty(); }
-        public static TsaChainResult empty() { return new TsaChainResult(null, List.of()); }
+        public static TsaChainResult empty() { return new TsaChainResult(null, List.of(), List.of()); }
     }
 
     /**

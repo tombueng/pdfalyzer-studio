@@ -297,6 +297,16 @@ PDFalyzer.SignaturesTab = (function ($, P) {
             html += '</table>';
         }
 
+        // TSA Certificate Chain
+        if (sig.hasTsa && sig.tsaCertificateChain && sig.tsaCertificateChain.length) {
+            html += '<div class="sig-section-title"><i class="fas fa-clock me-1"></i>Timestamp Authority Chain';
+            if (sig.tsaSigningTime) {
+                html += ' <span class="sig-tsa-time">(' + formatTime(sig.tsaSigningTime) + ')</span>';
+            }
+            html += '</div>';
+            html += buildCertificateChain(sig.tsaCertificateChain);
+        }
+
         // Signature type & DocMDP
         if (sig.signatureType === 'certification') {
             html += '<div class="sig-section-title">Certification</div>';
@@ -418,6 +428,15 @@ PDFalyzer.SignaturesTab = (function ($, P) {
         if (entry.isTrustAnchor || entry.trustAnchor) {
             html += '<span class="sig-trust-badge trusted" title="Trusted: ' + P.Utils.escapeHtml(entry.trustListSource || '') + '">';
             html += '<i class="fas fa-shield-alt"></i> ' + P.Utils.escapeHtml(entry.trustListSource || 'Trusted') + '</span>';
+        }
+
+        // DSS coverage badge
+        if (entry.presentInDss !== undefined) {
+            if (entry.presentInDss) {
+                html += '<span class="sig-dss-badge in-dss" title="Certificate present in Document Security Store"><i class="fas fa-database"></i> DSS</span>';
+            } else {
+                html += '<span class="sig-dss-badge missing-dss" title="Certificate NOT in Document Security Store"><i class="fas fa-database"></i> Not in DSS</span>';
+            }
         }
 
         // Revocation badge
@@ -571,6 +590,10 @@ PDFalyzer.SignaturesTab = (function ($, P) {
             'CHAIN_COMPLETE': 'Chain Completeness',
             'TRUST_ANCHOR': 'Trust Anchor',
             'REVOCATION': 'Revocation Status',
+            'TSA_CERT_VALIDITY': 'TSA Certificate Validity',
+            'TSA_TRUST_ANCHOR': 'TSA Trust Anchor',
+            'TSA_REVOCATION': 'TSA Revocation Status',
+            'DSS_CERT_COVERAGE': 'DSS Certificate Coverage',
             'BYTE_RANGE': 'Byte Range Coverage',
             'DSS_PRESENT': 'Document Security Store',
             'DOCMDP': 'DocMDP Permissions'

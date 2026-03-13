@@ -42,6 +42,9 @@ import eu.europa.esig.dss.pades.signature.PAdESService;
 import eu.europa.esig.dss.pdf.pdfbox.PdfBoxNativeObjectFactory;
 import eu.europa.esig.dss.service.tsp.OnlineTSPSource;
 import eu.europa.esig.dss.spi.validation.CommonCertificateVerifier;
+import eu.europa.esig.dss.spi.x509.CommonTrustedCertificateSource;
+import eu.europa.esig.dss.service.ocsp.OnlineOCSPSource;
+import eu.europa.esig.dss.service.crl.OnlineCRLSource;
 import eu.europa.esig.dss.model.x509.CertificateToken;
 import io.pdfalyzer.model.PendingSignatureData;
 import io.pdfalyzer.model.SigningKeyMaterial;
@@ -55,7 +58,8 @@ public class PdfSigningService {
 
     /**
      * Apply a digital signature to the given PDF bytes using the EU DSS library.
-     * Supports PAdES B-B (basic) and B-T (with timestamp) profiles.
+     * Supports PAdES B-B, B-T (timestamp), B-LT (long-term with DSS dict), and B-LTA.
+     * For B-LT/B-LTA, configures online OCSP/CRL sources so the DSS dictionary is populated.
      * Returns the new (incrementally saved) PDF bytes.
      */
     public byte[] signDocument(byte[] pdfBytes, PendingSignatureData pending, SigningKeyMaterial keyMaterial) {
@@ -68,7 +72,7 @@ public class PdfSigningService {
             PAdESSignatureParameters parameters = buildParameters(pending, keyMaterial);
 
             // 3. Create the PAdES service with PDFBox backend
-            CommonCertificateVerifier verifier = new CommonCertificateVerifier();
+            CommonCertificateVerifier verifier = buildCertificateVerifier(pending, keyMaterial);
             PAdESService service = new PAdESService(verifier);
             service.setPdfObjFactory(new PdfBoxNativeObjectFactory());
 
@@ -364,6 +368,41 @@ public class PdfSigningService {
                 return json.getBytes(StandardCharsets.UTF_8);
             }
         }
+    }
+
+    // ── Certificate verifier (needed for DSS dictionary population) ──────────
+
+    /**
+     * Builds a CommonCertificateVerifier configured with online OCSP and CRL sources.
+     * For B-LT and B-LTA profiles, DSS uses these to fetch revocation data and embed
+     * it into the PDF's DSS dictionary alongside the certificate chain.
+     */
+    private CommonCertificateVerifier buildCertificateVerifier(PendingSignatureData pending,
+                                                                SigningKeyMaterial keyMaterial) {
+        CommonCertificateVerifier verifier = new CommonCertificateVerifier();
+
+        String profile = pending.getPadesProfile();
+        boolean needsRevocationData = "B-LT".equals(profile) || "B-LTA".equals(profile);
+
+        if (needsRevocationData) {
+            // Online OCSP source — DSS will query OCSP responders from AIA extensions
+            verifier.setOcspSource(new OnlineOCSPSource());
+
+            // Online CRL source — DSS will download CRLs from CDP extensions
+            verifier.setCrlSource(new OnlineCRLSource());
+
+            // Add signing chain certificates as trusted so DSS can build the chain
+            // and embed all certificates + revocation data into the DSS dictionary
+            CommonTrustedCertificateSource trustedSource = new CommonTrustedCertificateSource();
+            for (X509Certificate chainCert : keyMaterial.getChain()) {
+                trustedSource.addCertificate(new CertificateToken(chainCert));
+            }
+            verifier.addTrustedCertSources(trustedSource);
+
+            log.info("Certificate verifier configured with online OCSP/CRL sources for {} profile", profile);
+        }
+
+        return verifier;
     }
 
     // ── Cryptographic signing ─────────────────────────────────────────────────

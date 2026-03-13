@@ -317,7 +317,151 @@ public class TrustValidationService {
             }
         }
 
-        // Check 5: Byte range coverage
+        // Check 5: TSA chain validation (if timestamp present)
+        if (sig.isHasTsa() && sig.getTsaCertificateChain() != null && !sig.getTsaCertificateChain().isEmpty()) {
+            // TSA certificate validity
+            for (CertificateChainEntry tsaEntry : sig.getTsaCertificateChain()) {
+                if (tsaEntry.getNotBefore() != null && tsaEntry.getNotAfter() != null) {
+                    try {
+                        Instant now = Instant.now();
+                        Instant notBefore = Instant.parse(tsaEntry.getNotBefore());
+                        Instant notAfter = Instant.parse(tsaEntry.getNotAfter());
+                        String status;
+                        String message;
+                        if (now.isBefore(notBefore)) {
+                            status = "FAIL";
+                            message = "TSA certificate not yet valid: " + tsaEntry.getSubjectDN();
+                        } else if (now.isAfter(notAfter)) {
+                            status = "WARNING";
+                            message = "TSA certificate expired: " + tsaEntry.getSubjectDN();
+                        } else {
+                            status = "PASS";
+                            message = "TSA certificate valid: " + tsaEntry.getSubjectDN();
+                        }
+                        checks.add(TrustValidationCheck.builder()
+                                .checkName("TSA_CERT_VALIDITY")
+                                .status(status)
+                                .message(message)
+                                .signatureIndex(sigIdx)
+                                .build());
+                    } catch (Exception e) {
+                        // Skip parse errors
+                    }
+                }
+            }
+
+            // TSA trust anchor resolution
+            if (trustListService.hasLoadedTrustAnchors()) {
+                boolean foundTsaTrustAnchor = false;
+                for (int i = sig.getTsaCertificateChain().size() - 1; i >= 0; i--) {
+                    CertificateChainEntry tsaEntry = sig.getTsaCertificateChain().get(i);
+                    X509Certificate rawCert = findMatchingRawCert(tsaEntry, rawCerts);
+                    TrustListService.TrustAnchorMatch match = rawCert != null
+                            ? trustListService.findTrustAnchor(rawCert)
+                            : trustListService.findTrustAnchorByDn(tsaEntry.getSubjectDN(), tsaEntry.getSerialNumber());
+                    if (match.isFound()) {
+                        tsaEntry.setTrustAnchor(true);
+                        tsaEntry.setTrustListSource(match.getListSource());
+                        tsaEntry.setTrustServiceName(match.getServiceName());
+                        tsaEntry.setTrustServiceStatus(match.getServiceStatus());
+                        foundTsaTrustAnchor = true;
+                        checks.add(TrustValidationCheck.builder()
+                                .checkName("TSA_TRUST_ANCHOR")
+                                .status("PASS")
+                                .message("TSA trust anchor found in " + match.getListSource() + ": " + tsaEntry.getSubjectDN())
+                                .signatureIndex(sigIdx)
+                                .build());
+                        break;
+                    }
+                }
+                if (!foundTsaTrustAnchor) {
+                    checks.add(TrustValidationCheck.builder()
+                            .checkName("TSA_TRUST_ANCHOR")
+                            .status("WARNING")
+                            .message("No TSA trust anchor found in EUTL or AATL")
+                            .signatureIndex(sigIdx)
+                            .build());
+                }
+            }
+
+            // TSA revocation checks
+            for (CertificateChainEntry tsaEntry : sig.getTsaCertificateChain()) {
+                if ("ROOT".equals(tsaEntry.getRole())) continue;
+                X509Certificate rawCert = findMatchingRawCert(tsaEntry, rawCerts);
+                X509Certificate rawIssuer = findIssuerCert(tsaEntry, sig.getTsaCertificateChain(), rawCerts);
+                if (rawCert != null && rawIssuer != null) {
+                    RevocationStatus revStatus = revocationCheckService.checkWithDssFallback(
+                            rawCert, rawIssuer,
+                            tsaEntry.getOcspResponderUrls(), tsaEntry.getCrlDistributionPoints(),
+                            dss);
+                    tsaEntry.setRevocationStatus(revStatus);
+                    String checkStatus = switch (revStatus.getStatus()) {
+                        case "GOOD" -> "PASS";
+                        case "REVOKED" -> "FAIL";
+                        case "ERROR", "NOT_CHECKED" -> "SKIP";
+                        default -> "WARNING";
+                    };
+                    checks.add(TrustValidationCheck.builder()
+                            .checkName("TSA_REVOCATION")
+                            .status(checkStatus)
+                            .message("TSA " + tsaEntry.getRole() + " cert revocation: " + revStatus.getStatus()
+                                    + (revStatus.getCheckedVia() != null ? " (via " + revStatus.getCheckedVia() + ")" : ""))
+                            .signatureIndex(sigIdx)
+                            .build());
+                }
+            }
+        }
+
+        // Check 6: DSS certificate coverage
+        if (dss != null && dss.isHasDss() && dss.getDssCerts() != null && !dss.getDssCerts().isEmpty()) {
+            List<String> inDss = new ArrayList<>();
+            List<String> missingFromDss = new ArrayList<>();
+
+            // Check signer chain certificates
+            for (CertificateChainEntry entry : sig.getCertificateChain()) {
+                boolean found = isCertInDss(entry, rawCerts, dss.getDssCerts());
+                entry.setPresentInDss(found);
+                String label = extractCN(entry.getSubjectDN());
+                if (found) {
+                    inDss.add(label + " [" + entry.getRole() + "]");
+                } else {
+                    missingFromDss.add(label + " [" + entry.getRole() + "]");
+                }
+            }
+
+            // Check TSA chain certificates
+            if (sig.isHasTsa() && sig.getTsaCertificateChain() != null) {
+                for (CertificateChainEntry tsaEntry : sig.getTsaCertificateChain()) {
+                    boolean found = isCertInDss(tsaEntry, rawCerts, dss.getDssCerts());
+                    tsaEntry.setPresentInDss(found);
+                    String label = extractCN(tsaEntry.getSubjectDN()) + " [TSA/" + tsaEntry.getRole() + "]";
+                    if (found) {
+                        inDss.add(label);
+                    } else {
+                        missingFromDss.add(label);
+                    }
+                }
+            }
+
+            String statusStr;
+            String messageStr;
+            if (missingFromDss.isEmpty()) {
+                statusStr = "PASS";
+                messageStr = "All " + inDss.size() + " chain certificates are present in DSS";
+            } else {
+                statusStr = "WARNING";
+                messageStr = inDss.size() + " cert(s) in DSS, " + missingFromDss.size()
+                        + " missing: " + String.join(", ", missingFromDss);
+            }
+            checks.add(TrustValidationCheck.builder()
+                    .checkName("DSS_CERT_COVERAGE")
+                    .status(statusStr)
+                    .message(messageStr)
+                    .signatureIndex(sigIdx)
+                    .build());
+        }
+
+        // Check 7: Byte range coverage
         checks.add(TrustValidationCheck.builder()
                 .checkName("BYTE_RANGE")
                 .status(sig.isCoversEntireFile() ? "PASS" : "WARNING")
@@ -326,7 +470,7 @@ public class TrustValidationService {
                 .signatureIndex(sigIdx)
                 .build());
 
-        // Check 6: DSS present
+        // Check 8: DSS present
         checks.add(TrustValidationCheck.builder()
                 .checkName("DSS_PRESENT")
                 .status(dss != null && dss.isHasDss() ? "PASS" : "SKIP")
@@ -410,6 +554,14 @@ public class TrustValidationService {
                         for (X509CertificateHolder holder : (java.util.Collection<X509CertificateHolder>) certStore.getMatches(null)) {
                             certs.add(converter.getCertificate(holder));
                         }
+
+                        // Also extract TSA certificates from timestamp token
+                        for (SignerInformation signer : cmsData.getSignerInfos().getSigners()) {
+                            CertificateChainBuilder.TsaChainResult tsaResult = chainBuilder.extractTsaChain(cmsData, signer);
+                            if (tsaResult.hasTsa() && tsaResult.rawCerts() != null) {
+                                certs.addAll(tsaResult.rawCerts());
+                            }
+                        }
                     } catch (Exception e) {
                         log.debug("Failed to extract certs from signature {}: {}", sf.getPartialName(), e.getMessage());
                     }
@@ -419,6 +571,27 @@ public class TrustValidationService {
             log.error("Failed to collect raw certificates", e);
         }
         return certs;
+    }
+
+    private boolean isCertInDss(CertificateChainEntry entry, List<X509Certificate> rawCerts,
+                                List<X509Certificate> dssCerts) {
+        X509Certificate rawCert = findMatchingRawCert(entry, rawCerts);
+        if (rawCert == null) return false;
+
+        for (X509Certificate dssCert : dssCerts) {
+            if (rawCert.getSerialNumber().equals(dssCert.getSerialNumber())
+                    && rawCert.getSubjectX500Principal().equals(dssCert.getSubjectX500Principal())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private String extractCN(String dn) {
+        if (dn == null) return "unknown";
+        var match = java.util.regex.Pattern.compile("CN=([^,]+)",
+                java.util.regex.Pattern.CASE_INSENSITIVE).matcher(dn);
+        return match.find() ? match.group(1).trim() : dn;
     }
 
     private SignatureAnalysisResult cloneResult(SignatureAnalysisResult original) {
