@@ -278,6 +278,15 @@ public class SignatureAnalysisService {
             List<CertificateChainEntry> chain = certificateChainBuilder.buildChainFromCms(cmsData, signer);
             info.certificateChain(chain);
 
+            // Extract TSA certificate chain from timestamp token (if present)
+            CertificateChainBuilder.TsaChainResult tsaResult = certificateChainBuilder.extractTsaChain(cmsData, signer);
+            if (tsaResult.hasTsa()) {
+                info.hasTsa(true);
+                info.tsaSigningTime(tsaResult.tsaSigningTime());
+                info.tsaCertificateChain(tsaResult.chain());
+                log.debug("Found TSA chain with {} certs, time: {}", tsaResult.chain().size(), tsaResult.tsaSigningTime());
+            }
+
         } catch (Exception e) {
             log.debug("Error parsing CMS signature: {}", e.getMessage());
         }

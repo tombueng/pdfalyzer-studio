@@ -65,6 +65,12 @@ public class SignatureInfo {
     @Builder.Default
     private List<CertificateChainEntry> certificateChain = new ArrayList<>();
 
+    // TSA (Timestamp Authority) chain from embedded RFC 3161 timestamp token
+    private boolean hasTsa;
+    private String tsaSigningTime;
+    @Builder.Default
+    private List<CertificateChainEntry> tsaCertificateChain = new ArrayList<>();
+
     // Revisions covered by this signature's byte range
     @Builder.Default
     private List<PdfRevision> coveredRevisions = new ArrayList<>();
