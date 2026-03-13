@@ -160,6 +160,8 @@ PDFalyzer.ValidationTab = (function ($, P) {
             '<i class="fas fa-play me-1"></i>Run Standard Validation</button>' +
             '<button class="btn btn-outline-accent btn-sm me-2" id="runVeraPdfBtn">' +
             '<i class="fas fa-file me-1"></i>Run veraPDF</button>' +
+            '<button class="btn btn-outline-accent btn-sm me-2" id="runDssBtn">' +
+            '<i class="fas fa-shield-alt me-1"></i>Run EU DSS</button>' +
             '<button class="btn btn-outline-accent btn-sm" id="exportValidateBtn"' + (disableExport ? ' disabled' : '') + '>' +
             '<i class="fas fa-download me-1"></i>Export Report</button></div>';
     }
@@ -182,12 +184,22 @@ PDFalyzer.ValidationTab = (function ($, P) {
             .fail(function () { P.Utils.toast('veraPDF validation error', 'danger'); });
     }
 
+    function runDssValidation() {
+        var $c = $('#treeContent');
+        $c.html(getValidationControlsHtml(true) + P.Utils.tabSkeleton('validation'));
+        bindValidationControls();
+        P.Utils.apiFetch('/api/validate/' + P.state.sessionId + '/dss')
+            .done(function (result) { renderDss(result || {}); })
+            .fail(function () { P.Utils.toast('EU DSS validation error', 'danger'); });
+    }
+
     function bindValidationControls() {
         $('#runValidateBtn').off('click').on('click', function () { runStandardValidation(); });
         $('#exportValidateBtn').off('click').on('click', function () {
             window.open('/api/validate/' + P.state.sessionId + '/export', '_blank');
         });
         $('#runVeraPdfBtn').off('click').on('click', function () { runVeraPdfValidation(); });
+        $('#runDssBtn').off('click').on('click', function () { runDssValidation(); });
     }
 
     function loadValidation() {
@@ -234,6 +246,138 @@ PDFalyzer.ValidationTab = (function ($, P) {
         $c.html(html);
         bindValidationControls();
         bindExplainerLinks($c);
+    }
+
+    // ======================== EU DSS ========================
+
+    function renderDss(result) {
+        var available = !!result.available;
+        var success = !!result.success;
+        var error = result.error || '';
+
+        var header = '<div class="mb-2 d-flex justify-content-between align-items-center gap-2" style="padding:8px;">' +
+            '<div>' +
+            '<span class="badge ' + (success ? 'bg-success' : 'bg-secondary') + ' me-2">' + (success ? 'COMPLETED' : 'ERROR') + '</span>' +
+            '<span class="text-muted">EU DSS Signature Validation' + (available ? '' : ' (not available)') + '</span>' +
+            '</div>' +
+            '<div>' +
+            '<button class="btn btn-outline-accent btn-sm me-1 dss-view-toggle" data-view="simple-html"><i class="fas fa-file-alt me-1"></i>Simple Report</button>' +
+            '<button class="btn btn-outline-accent btn-sm me-1 dss-view-toggle" data-view="detailed-html"><i class="fas fa-list-alt me-1"></i>Detailed Report</button>' +
+            '<button class="btn btn-outline-accent btn-sm me-1 dss-view-toggle" data-view="simple-xml"><i class="fas fa-code me-1"></i>Simple XML</button>' +
+            '<button class="btn btn-outline-accent btn-sm me-1 dss-view-toggle" data-view="detailed-xml"><i class="fas fa-code me-1"></i>Detailed XML</button>' +
+            '<button class="btn btn-outline-accent btn-sm" id="exportDssHtmlBtn"><i class="fas fa-download me-1"></i>Export HTML</button>' +
+            '</div></div>';
+
+        if (!success) {
+            $('#treeContent').html(header + '<div style="padding:8px;"><div class="text-danger"><i class="fas fa-exclamation-circle me-1"></i>' + P.Utils.escapeHtml(error || 'Validation failed') + '</div></div>');
+            bindDssViewToggle(result);
+            return;
+        }
+
+        // Default to simple HTML view
+        var html = header + '<div id="dssReportContainer" style="padding:8px;"></div>';
+        $('#treeContent').html(html);
+        showDssView('simple-html', result);
+        bindDssViewToggle(result);
+    }
+
+    function showDssView(view, result) {
+        var $container = $('#dssReportContainer');
+        switch (view) {
+            case 'simple-html':
+                renderDssHtmlInIframe($container, result.simpleReportHtml || '', 'EU DSS Simple Report');
+                _p.dssExportHtml = result.simpleReportHtml || '';
+                break;
+            case 'detailed-html':
+                renderDssHtmlInIframe($container, result.detailedReportHtml || '', 'EU DSS Detailed Report');
+                _p.dssExportHtml = result.detailedReportHtml || '';
+                break;
+            case 'simple-xml':
+                renderDssXml($container, result.simpleReportXml || '', 'Simple Report XML');
+                _p.dssExportHtml = wrapHtmlDocument('EU DSS Simple Report XML', '<pre>' + P.Utils.escapeHtml(result.simpleReportXml || '') + '</pre>');
+                break;
+            case 'detailed-xml':
+                renderDssXml($container, result.detailedReportXml || '', 'Detailed Report XML');
+                _p.dssExportHtml = wrapHtmlDocument('EU DSS Detailed Report XML', '<pre>' + P.Utils.escapeHtml(result.detailedReportXml || '') + '</pre>');
+                break;
+        }
+        // Update active button state
+        $('.dss-view-toggle').removeClass('btn-accent').addClass('btn-outline-accent');
+        $('.dss-view-toggle[data-view="' + view + '"]').removeClass('btn-outline-accent').addClass('btn-accent');
+    }
+
+    function renderDssHtmlInIframe($container, html, title) {
+        if (!html) {
+            $container.html('<div class="text-muted">No report available</div>');
+            return;
+        }
+        // Inject dark-mode overrides into the DSS Bootstrap4 HTML report
+        var styledHtml = injectDssReportStyles(html);
+        $container.html('<iframe title="' + P.Utils.escapeHtml(title) + '" ' +
+            'style="width:100%;height:520px;border:1px solid var(--border);border-radius:4px;background:#1a1d21;"></iframe>');
+        $container.find('iframe')[0].srcdoc = styledHtml;
+    }
+
+    function renderDssXml($container, xml, title) {
+        if (!xml) {
+            $container.html('<div class="text-muted">No report available</div>');
+            return;
+        }
+        $container.html(
+            '<div class="dss-xml-header" style="font-size:12px;color:var(--muted);margin-bottom:6px;">' +
+            '<i class="fas fa-code me-1"></i>' + P.Utils.escapeHtml(title) + '</div>' +
+            '<pre class="dss-xml-report" style="white-space:pre-wrap;max-height:520px;overflow:auto;' +
+            'background:#0f1115;color:#e9ecef;padding:12px;border-radius:6px;border:1px solid var(--border);font-size:11px;">' +
+            P.Utils.escapeHtml(xml) + '</pre>'
+        );
+    }
+
+    function injectDssReportStyles(html) {
+        // The DSS library generates Bootstrap 4 HTML with light-theme assumptions.
+        // Inject our dark-mode overrides before </head> or at end of <style>.
+        var darkCss = '<style>' +
+            'body{background:#1a1d21 !important;color:#e9ecef !important;font-family:Segoe UI,Arial,sans-serif !important;}' +
+            '.table{color:#e9ecef !important;}' +
+            '.table-bordered{border-color:#3a3f44 !important;}' +
+            '.table-bordered td,.table-bordered th{border-color:#3a3f44 !important;}' +
+            '.table-striped tbody tr:nth-of-type(odd){background-color:rgba(255,255,255,0.03) !important;}' +
+            '.card{background:#22262b !important;border-color:#3a3f44 !important;color:#e9ecef !important;}' +
+            '.card-header{background:#2a2e33 !important;border-color:#3a3f44 !important;color:#e9ecef !important;}' +
+            '.card-body{background:#22262b !important;color:#e9ecef !important;}' +
+            '.badge-success,.bg-success{background-color:#146c43 !important;}' +
+            '.badge-danger,.bg-danger{background-color:#b02a37 !important;}' +
+            '.badge-warning,.bg-warning{background-color:#997404 !important;color:#fff !important;}' +
+            '.badge-info,.bg-info{background-color:#0a7d8c !important;}' +
+            '.badge-secondary,.bg-secondary{background-color:#495057 !important;}' +
+            '.text-muted{color:#9ca3af !important;}' +
+            'a{color:#6ea8fe !important;}' +
+            'h1,h2,h3,h4,h5,h6{color:#e9ecef !important;}' +
+            '.list-group-item{background:#22262b !important;border-color:#3a3f44 !important;color:#e9ecef !important;}' +
+            '.container,.container-fluid{max-width:100% !important;padding:8px !important;}' +
+            '.collapse.show,.collapsing{background:transparent !important;}' +
+            'pre,code{background:#0f1115 !important;color:#e9ecef !important;border-radius:4px;padding:2px 4px;}' +
+            '</style>';
+
+        if (html.indexOf('</head>') !== -1) {
+            return html.replace('</head>', darkCss + '</head>');
+        }
+        return darkCss + html;
+    }
+
+    function bindDssViewToggle(result) {
+        $('#treeContent').find('.dss-view-toggle').off('click').on('click', function () {
+            var view = $(this).data('view');
+            showDssView(view, result);
+        });
+        $('#exportDssHtmlBtn').off('click').on('click', function () {
+            if (!_p.dssExportHtml) { P.Utils.toast('No DSS report available to export', 'warning'); return; }
+            var blob = new Blob([_p.dssExportHtml], { type: 'text/html;charset=utf-8' });
+            var url = URL.createObjectURL(blob);
+            var a = document.createElement('a');
+            a.href = url; a.download = 'dss-validation-report.html';
+            document.body.appendChild(a); a.click(); a.remove();
+            setTimeout(function () { URL.revokeObjectURL(url); }, 0);
+        });
     }
 
     // ======================== VERA PDF ========================

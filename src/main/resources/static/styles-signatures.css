@@ -282,6 +282,33 @@
 .sig-revocation-badge.not-checked { color: #6c757d; }
 .sig-revocation-badge.error      { color: #fd7e14; }
 
+/* DSS coverage badge */
+.sig-dss-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-left: 4px;
+}
+.sig-dss-badge.in-dss {
+    background: rgba(25, 135, 84, 0.2);
+    color: #28a745;
+}
+.sig-dss-badge.missing-dss {
+    background: rgba(255, 193, 7, 0.2);
+    color: #ffc107;
+}
+
+/* TSA signing time in section title */
+.sig-tsa-time {
+    font-weight: 400;
+    font-size: 11px;
+    color: var(--muted);
+}
+
 /* ── Trust Validation Report ─────────────────────────────────────────── */
 
 .sig-trust-validation-report {

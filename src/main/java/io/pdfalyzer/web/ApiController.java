@@ -54,6 +54,7 @@ public class ApiController {
     private final VeraPdfService veraPdfService;
     private final FieldSchemaService fieldSchemaService;
     private final SignatureAnalysisService signatureAnalysisService;
+    private final DssValidationService dssValidationService;
 
     public ApiController(PdfService pdfService,
                          FontInspectorService fontInspectorService,
@@ -61,7 +62,8 @@ public class ApiController {
                          PdfStructureParser structureParser,
                          VeraPdfService veraPdfService,
                          FieldSchemaService fieldSchemaService,
-                         SignatureAnalysisService signatureAnalysisService) {
+                         SignatureAnalysisService signatureAnalysisService,
+                         DssValidationService dssValidationService) {
         this.pdfService = pdfService;
         this.fontInspectorService = fontInspectorService;
         this.validationService = validationService;
@@ -69,6 +71,7 @@ public class ApiController {
         this.veraPdfService = veraPdfService;
         this.fieldSchemaService = fieldSchemaService;
         this.signatureAnalysisService = signatureAnalysisService;
+        this.dssValidationService = dssValidationService;
     }
 
     @GetMapping("/fields/schema")
@@ -415,6 +418,12 @@ public class ApiController {
     public ResponseEntity<Map<String, Object>> validateWithVeraPdf(@PathVariable("sessionId") String sessionId)
             throws IOException {
         return ResponseEntity.ok(veraPdfService.validate(pdfService.getSessionPdfBytes(sessionId)));
+    }
+
+    @GetMapping("/validate/{sessionId}/dss")
+    public ResponseEntity<Map<String, Object>> validateWithDss(@PathVariable("sessionId") String sessionId)
+            throws IOException {
+        return ResponseEntity.ok(dssValidationService.validate(pdfService.getSessionPdfBytes(sessionId)));
     }
 
     @GetMapping("/validate/{sessionId}/export")
