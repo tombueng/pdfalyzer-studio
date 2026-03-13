@@ -1,7 +1,5 @@
 /.claude
 /.github/java-upgrade/
-!/.github/workflows/
-!/.github/dependabot.yml
 /.vscode
 /aimaking.txt
 /requirements.md
@@ -13,3 +11,4 @@
 /installer/linux/bundle/
 bugs-todo.txt
 pdf-signatures/target/
+CLAUDE.md

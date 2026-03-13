@@ -24,8 +24,12 @@ import org.bouncycastle.asn1.x509.GeneralNames;
 import org.bouncycastle.asn1.x509.SubjectKeyIdentifier;
 import org.bouncycastle.cert.X509CertificateHolder;
 import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
+import org.bouncycastle.asn1.cms.Attribute;
+import org.bouncycastle.asn1.cms.AttributeTable;
+import org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers;
 import org.bouncycastle.cms.CMSSignedData;
 import org.bouncycastle.cms.SignerInformation;
+import org.bouncycastle.tsp.TimeStampToken;
 import org.bouncycastle.util.Store;
 import org.bouncycastle.util.encoders.Hex;
 import org.springframework.stereotype.Service;
@@ -89,6 +93,83 @@ public class CertificateChainBuilder {
             log.debug("Error building certificate chain from CMS: {}", e.getMessage());
             return List.of();
         }
+    }
+
+    /**
+     * Extract the TSA certificate chain from a CMS signature's timestamp token (unsigned attribute).
+     * Returns an empty list if no timestamp token is present.
+     */
+    @SuppressWarnings("unchecked")
+    public TsaChainResult extractTsaChain(CMSSignedData cmsData, SignerInformation signer) {
+        try {
+            AttributeTable unsignedAttrs = signer.getUnsignedAttributes();
+            if (unsignedAttrs == null) {
+                return TsaChainResult.empty();
+            }
+
+            Attribute tsAttr = unsignedAttrs.get(PKCSObjectIdentifiers.id_aa_signatureTimeStampToken);
+            if (tsAttr == null) {
+                return TsaChainResult.empty();
+            }
+
+            // Parse the timestamp token
+            byte[] tsTokenBytes = tsAttr.getAttrValues().getObjectAt(0).toASN1Primitive().getEncoded();
+            TimeStampToken tsToken = new TimeStampToken(
+                    new org.bouncycastle.cms.CMSSignedData(tsTokenBytes));
+
+            // Get TSA signing time
+            String tsaTime = tsToken.getTimeStampInfo().getGenTime().toInstant()
+                    .atOffset(java.time.ZoneOffset.UTC)
+                    .format(java.time.format.DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+
+            // Extract TSA signer certificate
+            Store<X509CertificateHolder> tsaCertStore = tsToken.getCertificates();
+            SignerInformation tsaSigner = tsToken.toCMSSignedData().getSignerInfos()
+                    .getSigners().iterator().next();
+
+            Collection<X509CertificateHolder> tsaSignerCerts = tsaCertStore.getMatches(tsaSigner.getSID());
+            if (tsaSignerCerts.isEmpty()) {
+                log.debug("No TSA signer certificate found in timestamp token");
+                return new TsaChainResult(tsaTime, List.of());
+            }
+
+            X509Certificate tsaSignerCert = new JcaX509CertificateConverter()
+                    .getCertificate(tsaSignerCerts.iterator().next());
+
+            // Get all certs from TSA token
+            Collection<X509CertificateHolder> allTsaHolders = tsaCertStore.getMatches(null);
+            List<X509Certificate> allTsaCerts = new ArrayList<>();
+            JcaX509CertificateConverter converter = new JcaX509CertificateConverter();
+            for (X509CertificateHolder holder : allTsaHolders) {
+                allTsaCerts.add(converter.getCertificate(holder));
+            }
+
+            // Order into chain
+            List<X509Certificate> orderedChain = orderChain(tsaSignerCert, allTsaCerts);
+
+            // Convert to entries
+            List<CertificateChainEntry> entries = new ArrayList<>();
+            for (int i = 0; i < orderedChain.size(); i++) {
+                X509Certificate cert = orderedChain.get(i);
+                String role = determineRole(cert, i, orderedChain.size());
+                entries.add(toCertificateChainEntry(cert, i, role));
+            }
+
+            log.debug("Extracted TSA chain with {} entries, signing time: {}", entries.size(), tsaTime);
+            return new TsaChainResult(tsaTime, entries);
+
+        } catch (Exception e) {
+            log.debug("Error extracting TSA chain: {}", e.getMessage());
+            return TsaChainResult.empty();
+        }
+    }
+
+    /**
+     * Result of TSA chain extraction, containing the signing time and chain entries.
+     */
+    public record TsaChainResult(String tsaSigningTime, List<CertificateChainEntry> chain) {
+        public boolean hasTsa() { return chain != null && !chain.isEmpty(); }
+        public static TsaChainResult empty() { return new TsaChainResult(null, List.of()); }
     }
 
     /**
