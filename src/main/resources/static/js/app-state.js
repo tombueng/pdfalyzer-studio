@@ -211,6 +211,9 @@ var PDFalyzer = (function () {
             basePageSize: { width: 0, height: 0 },
             signatureData: null,
             signatureTabState: null,
+            trustValidationResult: null,
+            trustValidationInProgress: false,
+            trustListStatus: null,
             pendingSignatures: [],
             nextOrderIndex: 0
         },

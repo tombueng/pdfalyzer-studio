@@ -31,23 +31,35 @@ import org.bouncycastle.cms.SignerInformation;
 import org.bouncycastle.util.Store;
 import org.springframework.stereotype.Service;
 
+import io.pdfalyzer.model.CertificateChainEntry;
+import io.pdfalyzer.model.PdfRevision;
 import io.pdfalyzer.model.SignatureAnalysisResult;
 import io.pdfalyzer.model.SignatureInfo;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 @Service
 @Slf4j
+@RequiredArgsConstructor
 public class SignatureAnalysisService {
+
+    private final CertificateChainBuilder certificateChainBuilder;
+    private final PdfRevisionParser pdfRevisionParser;
 
     public SignatureAnalysisResult analyzeSignatures(byte[] pdfBytes) throws IOException {
         List<SignatureInfo> signatures = new ArrayList<>();
         boolean hasCertification = false;
+
+        // Parse revisions first (fast, local-only)
+        List<PdfRevision> revisions = pdfRevisionParser.parseRevisions(pdfBytes);
+        log.debug("Parsed {} PDF revisions", revisions.size());
 
         try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
             PDAcroForm acroForm = doc.getDocumentCatalog().getAcroForm();
             if (acroForm == null) {
                 return SignatureAnalysisResult.builder()
                         .signatures(signatures)
+                        .revisions(revisions)
                         .build();
             }
 
@@ -87,6 +99,21 @@ public class SignatureAnalysisService {
                     analyzeByteRange(sig, pdfBytes.length, info);
                     parseCmsSignature(sig, pdfBytes, info);
 
+                    // Map byte range to covered revisions
+                    int[] byteRange = sig.getByteRange();
+                    if (byteRange != null && byteRange.length >= 4) {
+                        List<PdfRevision> coveredRevs = pdfRevisionParser.mapSignatureToRevisions(byteRange, revisions);
+                        info.coveredRevisions(coveredRevs);
+
+                        // Associate this signature field with its covered revisions
+                        String fieldName = sigField.getPartialName();
+                        for (PdfRevision rev : coveredRevs) {
+                            if (!rev.getAssociatedSignatureFields().contains(fieldName)) {
+                                rev.getAssociatedSignatureFields().add(fieldName);
+                            }
+                        }
+                    }
+
                     if (detectCertificationSignature(sigField, doc)) {
                         info.signatureType("certification");
                         hasCertification = true;
@@ -122,6 +149,7 @@ public class SignatureAnalysisService {
                 .indeterminateCount(indeterminateCount)
                 .hasCertificationSignature(hasCertification)
                 .signatures(signatures)
+                .revisions(revisions)
                 .build();
     }
 
@@ -245,6 +273,11 @@ public class SignatureAnalysisService {
                         .format(DateTimeFormatter.ISO_OFFSET_DATE_TIME));
                 info.signatureAlgorithm(cert.getSigAlgName());
             }
+
+            // Build full certificate chain from all certs in the CMS store
+            List<CertificateChainEntry> chain = certificateChainBuilder.buildChainFromCms(cmsData, signer);
+            info.certificateChain(chain);
+
         } catch (Exception e) {
             log.debug("Error parsing CMS signature: {}", e.getMessage());
         }

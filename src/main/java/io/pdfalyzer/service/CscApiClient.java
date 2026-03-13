@@ -256,6 +256,9 @@ public class CscApiClient {
     // ── HTTP Helpers ──────────────────────────────────────────────────────
 
     private JsonNode postJson(String url, ObjectNode body, String accessToken) {
+        if (url == null || url.isBlank() || url.startsWith("null/")) {
+            throw new IllegalStateException("CSC provider has no base URL configured");
+        }
         try {
             String jsonBody = objectMapper.writeValueAsString(body);
 
