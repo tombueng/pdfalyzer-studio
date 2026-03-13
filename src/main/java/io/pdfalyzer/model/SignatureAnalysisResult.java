@@ -22,4 +22,12 @@ public class SignatureAnalysisResult {
     private boolean hasCertificationSignature;
     @Builder.Default
     private List<SignatureInfo> signatures = new ArrayList<>();
+
+    // PDF revision boundaries
+    @Builder.Default
+    private List<PdfRevision> revisions = new ArrayList<>();
+
+    // Trust list status (populated by on-demand validation)
+    private TrustListStatus eutlStatus;
+    private TrustListStatus aatlStatus;
 }

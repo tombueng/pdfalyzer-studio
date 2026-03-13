@@ -330,6 +330,8 @@ public class SigningApiController {
         String otp = (String) body.get("otp");
         String reason = (String) body.get("reason");
         String location = (String) body.get("location");
+        String padesProfile = (String) body.getOrDefault("padesProfile", "B-B");
+        String tsaUrl = (String) body.get("tsaUrl");
 
         // Get credential info for cert chain
         CscCredential cred = cscApiClient.getCredentialInfo(provider, token, credentialId);
@@ -350,7 +352,8 @@ public class SigningApiController {
         byte[] signed = cscSigningService.signWithCsc(
                 session.getPdfBytes(), fieldName,
                 provider, token, credentialId, sad, signAlgoOid,
-                cred.getCertificates(), reason, location);
+                cred.getCertificates(), reason, location,
+                padesProfile, tsaUrl);
 
         try {
             pdfService.updateSessionPdf(sessionId, signed);

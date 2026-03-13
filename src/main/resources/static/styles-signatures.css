@@ -134,7 +134,373 @@
     width: 130px;
 }
 
-/* ── Byte range visualization ──────────────────────────────────────── */
+.sig-cert-url {
+    font-size: 11px;
+    word-break: break-all;
+    color: var(--accent);
+    opacity: 0.8;
+}
+
+.sig-cert-ski, .sig-cert-aki {
+    font-size: 10px;
+    word-break: break-all;
+}
+
+/* ── Certificate Chain Visualization ─────────────────────────────────── */
+
+.sig-cert-chain {
+    margin: 4px 0 8px;
+    padding-left: 8px;
+}
+
+.sig-cert-chain-node {
+    position: relative;
+    margin-left: 12px;
+    padding: 4px 0;
+}
+
+.sig-cert-chain-connector {
+    position: absolute;
+    left: -12px;
+    top: 24px;
+    bottom: -4px;
+    width: 2px;
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.sig-cert-chain-node::before {
+    content: '';
+    position: absolute;
+    left: -12px;
+    top: 12px;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #495057;
+    border: 2px solid var(--border);
+    z-index: 1;
+}
+
+.sig-cert-chain-node.end-entity::before {
+    background: var(--accent, #0dcaf0);
+}
+
+.sig-cert-chain-node-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 12px;
+    user-select: none;
+}
+
+.sig-cert-chain-node-header:hover {
+    background: rgba(255, 255, 255, 0.04);
+}
+
+.sig-chain-expand-icon {
+    font-size: 9px;
+    transition: transform 0.15s ease;
+    color: var(--text-muted);
+    min-width: 9px;
+}
+
+.sig-cert-chain-node.expanded .sig-chain-expand-icon {
+    transform: rotate(90deg);
+}
+
+.sig-cert-chain-node-body {
+    display: none;
+    padding: 4px 8px 8px 24px;
+}
+
+.sig-cert-chain-node.expanded .sig-cert-chain-node-body {
+    display: block;
+}
+
+.sig-cert-chain-cn {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 500;
+}
+
+.sig-cert-chain-key-info {
+    font-size: 10px;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+/* ── Certificate Role Badges ─────────────────────────────────────────── */
+
+.sig-cert-role-badge {
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    white-space: nowrap;
+}
+
+.sig-cert-role-badge.root         { background: rgba(111, 66, 193, 0.2); color: #a78bfa; }
+.sig-cert-role-badge.intermediate { background: rgba(13, 202, 240, 0.15); color: #0dcaf0; }
+.sig-cert-role-badge.end-entity   { background: rgba(25, 135, 84, 0.2); color: #28a745; }
+
+/* ── Trust & Revocation Badges ───────────────────────────────────────── */
+
+.sig-trust-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 9px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.sig-trust-badge.trusted {
+    background: rgba(25, 135, 84, 0.2);
+    color: #28a745;
+}
+
+.sig-revocation-badge {
+    display: inline-flex;
+    align-items: center;
+    font-size: 12px;
+    cursor: help;
+}
+
+.sig-revocation-badge.good       { color: #28a745; }
+.sig-revocation-badge.revoked    { color: #dc3545; }
+.sig-revocation-badge.unknown    { color: #ffc107; }
+.sig-revocation-badge.not-checked { color: #6c757d; }
+.sig-revocation-badge.error      { color: #fd7e14; }
+
+/* ── Trust Validation Report ─────────────────────────────────────────── */
+
+.sig-trust-validation-report {
+    margin-top: 8px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.sig-trust-checks {
+    margin-top: 4px;
+}
+
+.sig-trust-check {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    padding: 2px 0;
+    font-size: 11px;
+}
+
+.sig-trust-check.pass    { color: #28a745; }
+.sig-trust-check.fail    { color: #dc3545; }
+.sig-trust-check.warning { color: #ffc107; }
+.sig-trust-check.skip    { color: #6c757d; }
+
+.sig-trust-check-name {
+    font-weight: 600;
+    min-width: 140px;
+}
+
+.sig-trust-check-message {
+    color: var(--text-muted);
+    font-weight: 400;
+}
+
+/* ── Revision Graph ──────────────────────────────────────────────────── */
+
+.sig-revision-graph {
+    margin: 8px 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.sig-revision-graph-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 6px;
+}
+
+.sig-revision-labels-row {
+    position: relative;
+    height: 16px;
+    margin-bottom: 2px;
+    margin-left: 120px; /* align with lane bars */
+}
+
+.sig-revision-label {
+    position: absolute;
+    transform: translateX(-50%);
+    font-size: 9px;
+    font-weight: 700;
+    color: var(--text-muted);
+    background: var(--bg-card, #161a1f);
+    padding: 0 3px;
+    z-index: 1;
+}
+
+.sig-revision-lanes {
+    position: relative;
+}
+
+.sig-revision-boundary {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: rgba(255, 255, 255, 0.12);
+    z-index: 0;
+    pointer-events: none;
+}
+
+.sig-revision-lane {
+    display: flex;
+    align-items: center;
+    height: 24px;
+    margin-bottom: 2px;
+    cursor: pointer;
+}
+
+.sig-revision-lane:hover {
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: 3px;
+}
+
+.sig-revision-lane-label {
+    width: 120px;
+    min-width: 120px;
+    font-size: 11px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding-right: 8px;
+    color: var(--text-muted);
+}
+
+.sig-revision-lane-bar {
+    flex: 1;
+    position: relative;
+    height: 14px;
+    background: rgba(255, 255, 255, 0.04);
+    border-radius: 2px;
+    overflow: visible;
+}
+
+.sig-revision-coverage {
+    height: 100%;
+    border-radius: 2px;
+    opacity: 0.5;
+    transition: opacity 0.2s;
+}
+
+.sig-revision-coverage.valid       { background: #28a745; }
+.sig-revision-coverage.indeterminate { background: #ffc107; }
+.sig-revision-coverage.invalid     { background: #dc3545; }
+.sig-revision-coverage.not-validated { background: #6c757d; }
+
+.sig-revision-lane:hover .sig-revision-coverage {
+    opacity: 0.75;
+}
+
+.sig-revision-marker {
+    position: absolute;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 2px solid #fff;
+    cursor: pointer;
+    z-index: 2;
+    transition: transform 0.15s ease;
+}
+
+.sig-revision-marker:hover {
+    transform: translate(-50%, -50%) scale(1.4);
+}
+
+.sig-revision-marker.valid       { background: #28a745; }
+.sig-revision-marker.indeterminate { background: #ffc107; }
+.sig-revision-marker.invalid     { background: #dc3545; }
+.sig-revision-marker.not-validated { background: #6c757d; }
+
+.sig-revision-graph-legend {
+    display: flex;
+    gap: 16px;
+    margin-top: 6px;
+    font-size: 10px;
+    color: var(--text-muted);
+}
+
+.sig-legend-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 3px;
+    vertical-align: middle;
+}
+
+.sig-legend-dot.valid       { background: #28a745; }
+.sig-legend-dot.indeterminate { background: #ffc107; }
+
+.sig-legend-line {
+    display: inline-block;
+    width: 10px;
+    height: 1px;
+    background: rgba(255, 255, 255, 0.15);
+    margin-right: 3px;
+    vertical-align: middle;
+}
+
+/* ── Byte Range Revision Markers ─────────────────────────────────────── */
+
+.sig-byte-range-container {
+    position: relative;
+}
+
+.sig-byte-range-revisions {
+    position: relative;
+    height: 14px;
+    margin-bottom: 0;
+}
+
+.sig-byte-range-revision-marker {
+    position: absolute;
+    transform: translateX(-50%);
+    font-size: 8px;
+    font-weight: 700;
+    color: var(--text-muted);
+    top: 0;
+}
+
+.sig-byte-range-revision-marker::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 12px;
+    width: 1px;
+    height: 22px;
+    background: rgba(255, 255, 255, 0.15);
+    pointer-events: none;
+}
+
+/* ── Byte range visualization (base) ──────────────────────────────────── */
 
 .sig-byte-range-bar {
     display: flex;
@@ -297,3 +663,101 @@
 .sig-docmdp-badge.level-1 { background: rgba(220, 53, 69, 0.15); color: #dc3545; }
 .sig-docmdp-badge.level-2 { background: rgba(255, 193, 7, 0.15); color: #ffc107; }
 .sig-docmdp-badge.level-3 { background: rgba(25, 135, 84, 0.15); color: #28a745; }
+
+/* ── Trust Progress Section ──────────────────────────────────────────── */
+
+.sig-trust-progress-section {
+    border-bottom: 1px solid var(--border);
+}
+
+.sig-trust-progress-inner {
+    padding: 8px 10px;
+    font-size: 12px;
+}
+
+.sig-trust-progress-header {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.sig-trust-progress-label {
+    flex: 1;
+}
+
+.sig-trust-spinner {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border: 2px solid rgba(13, 202, 240, 0.3);
+    border-top-color: #0dcaf0;
+    border-radius: 50%;
+    animation: sig-spin 0.8s linear infinite;
+}
+
+@keyframes sig-spin {
+    to { transform: rotate(360deg); }
+}
+
+.sig-trust-progress-line {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    padding: 2px 0;
+}
+
+.sig-trust-progress-tl-label {
+    font-weight: 600;
+    min-width: 40px;
+}
+
+.sig-trust-progress-bar {
+    display: inline-block;
+    width: 80px;
+    height: 6px;
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+    overflow: hidden;
+    vertical-align: middle;
+}
+
+.sig-trust-progress-fill {
+    height: 100%;
+    background: #0dcaf0;
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+
+/* ── Trust Status Bar (bottom) ───────────────────────────────────────── */
+
+.sig-trust-status-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 12px;
+    padding: 6px 10px;
+    border-top: 1px solid var(--border);
+    font-size: 11px;
+    background: rgba(0, 0, 0, 0.15);
+    margin-top: 8px;
+}
+
+.sig-trust-status-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+}
+
+.sig-trust-refresh-btn {
+    font-size: 10px;
+    padding: 1px 6px;
+}
+
+.sig-validate-trust-btn {
+    font-size: 11px;
+    padding: 2px 8px;
+    flex-shrink: 0;
+}

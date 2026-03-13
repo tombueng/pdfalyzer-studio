@@ -985,6 +985,12 @@ PDFalyzer.Signing = (function ($, P) {
             html += '<div>';
             html += '<div class="key-subject">' + P.Utils.escapeHtml(formatDN(k.subjectDN)) + '</div>';
             if (k.issuerDN && k.issuerDN !== k.subjectDN) html += '<div class="key-issuer">Issued by: ' + P.Utils.escapeHtml(formatDN(k.issuerDN)) + '</div>';
+            var meta = [];
+            if (k.keyAlgorithm) { var kd = k.keyAlgorithm; if (k.keySize) kd += ' ' + k.keySize + '-bit'; meta.push(kd); }
+            if (k.notBefore && k.notAfter) meta.push(k.notBefore + ' \u2014 ' + k.notAfter);
+            if (k.chainLength > 1) meta.push('Chain: ' + k.chainLength);
+            if (k.serialNumber) meta.push('S/N: ' + k.serialNumber);
+            if (meta.length) html += '<div class="key-meta">' + P.Utils.escapeHtml(meta.join(' \u00b7 ')) + '</div>';
             html += '<div style="font-size:10px;color:' + (k.readyToSign ? 'var(--c-ok)' : 'var(--c-err)') + ';">';
             html += k.readyToSign ? '<i class="fas fa-check-circle me-1"></i>Ready to sign' : '<i class="fas fa-exclamation-circle me-1"></i>' + (k.missingElements || []).join(', ');
             html += '</div></div>';

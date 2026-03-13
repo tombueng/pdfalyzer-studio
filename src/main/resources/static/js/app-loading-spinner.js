@@ -26,10 +26,10 @@ PDFalyzer.LoadingSpinner = (function ($, P) {
         var t = 0;
         var stamps = [];
         var layers = [
-            { ci: 0, R: 40, r: 15, p: 25, speed: 0.07, hue: 180, angle: 0 },
-            { ci: 50, R: 60, r: 22, p: 36, speed: 0.055, hue: 210, angle: 0 },
-            { ci: 100, R: 80, r: 29, p: 50, speed: 0.043, hue: 250, angle: 0 },
-            { ci: 150, R: 100, r: 37, p: 62, speed: 0.034, hue: 290, angle: 0 }
+            { ci: 0, R: 40, r: 15, p: 25, speed: 0.21, hue: 180, angle: 0 },
+            { ci: 50, R: 60, r: 22, p: 36, speed: 0.165, hue: 210, angle: 0 },
+            { ci: 100, R: 80, r: 29, p: 50, speed: 0.129, hue: 250, angle: 0 },
+            { ci: 150, R: 100, r: 37, p: 62, speed: 0.102, hue: 290, angle: 0 }
         ];
 
         function resetState() {
@@ -46,9 +46,9 @@ PDFalyzer.LoadingSpinner = (function ($, P) {
             var W = canvas.width;
             var C = W / 2;
 
-            ctx.fillStyle = 'rgba(27,25,62,0.04)';
+            ctx.fillStyle = 'rgba(27,25,62,0.12)';
             ctx.fillRect(0, 0, W, W);
-            t += 0.016;
+            t += 0.05;
 
             for (var li = 0; li < layers.length; li++) {
                 var L = layers[li];
@@ -85,7 +85,7 @@ PDFalyzer.LoadingSpinner = (function ($, P) {
 
             for (var j = stamps.length - 1; j >= 0; j--) {
                 var s = stamps[j];
-                s.age += 0.0025;
+                s.age += 0.008;
                 if (s.age > 1) { stamps.splice(j, 1); continue; }
                 ctx.font = (9 + s.age * 2) + 'px monospace';
                 ctx.fillStyle = 'hsla(' + s.hue + ',50%,67%,' + ((1 - s.age) * 0.6) + ')';
