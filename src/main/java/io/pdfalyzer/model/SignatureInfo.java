@@ -61,6 +61,17 @@ public class SignatureInfo {
     private double[] boundingBox; // [x, y, width, height]
     private boolean hasAppearance;
 
+    // Certificate chain (full chain extracted from CMS)
+    @Builder.Default
+    private List<CertificateChainEntry> certificateChain = new ArrayList<>();
+
+    // Revisions covered by this signature's byte range
+    @Builder.Default
+    private List<PdfRevision> coveredRevisions = new ArrayList<>();
+
+    // Trust validation report (populated by on-demand validation)
+    private TrustValidationReport trustValidation;
+
     // Signer name from signature dictionary (fallback when cert not parseable)
     private String signerName;
 

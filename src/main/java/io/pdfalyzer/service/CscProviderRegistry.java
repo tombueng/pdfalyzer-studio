@@ -181,38 +181,40 @@ public class CscProviderRegistry {
                 .builtIn(true)
                 .build());
 
-        // InfoCert
+        // InfoCert — base URL requires registration; set via custom provider entry
         register(CscProvider.builder()
                 .id("infocert")
                 .name("InfoCert")
                 .headquarters("Italy")
                 .scalLevels("SCAL1,SCAL2")
                 .apiVersion("v2")
-                .description("Largest EU QTSP by volume. SPID integration for Italian digital identity.")
+                .description("Largest EU QTSP by volume. SPID integration for Italian digital identity. Base URL requires registration — configure via custom provider.")
                 .docsUrl("https://developers.infocert.digital/e-signature-and-e-sealing/csc-api/")
                 .builtIn(true)
                 .build());
 
-        // Namirial
+        // Namirial — base URL requires registration; set via custom provider entry
         register(CscProvider.builder()
                 .id("namirial")
                 .name("Namirial")
                 .headquarters("Italy")
                 .scalLevels("SCAL1,SCAL2")
                 .apiVersion("v2")
-                .description("Document workflow + remote signing platform. EU qualified.")
+                .description("Document workflow + remote signing platform. EU qualified. Base URL requires registration — configure via custom provider.")
                 .docsUrl("https://confluence.namirial.com/display/eSign/API+Documentation")
                 .builtIn(true)
                 .build());
 
-        // D-Trust (Bundesdruckerei)
+        // D-Trust (Bundesdruckerei) — sign-me service
         register(CscProvider.builder()
                 .id("dtrust")
                 .name("D-Trust (Bundesdruckerei)")
                 .headquarters("Germany")
+                .baseUrl("https://www.sign-me.de/csc/v1")
+                .tokenUrl("https://www.sign-me.de/oauth2/token")
                 .scalLevels("SCAL1,SCAL2")
-                .apiVersion("v2")
-                .description("German Federal Printing Office. Strong in government and healthcare.")
+                .apiVersion("v1")
+                .description("German Federal Printing Office sign-me service. Strong in government and healthcare.")
                 .builtIn(true)
                 .build());
 

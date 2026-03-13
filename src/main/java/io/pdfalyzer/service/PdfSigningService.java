@@ -7,59 +7,42 @@ import java.io.InputStream;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
+import java.security.PrivateKey;
+import java.security.Signature;
 import java.security.cert.X509Certificate;
-import java.util.ArrayList;
 import java.util.Base64;
 import java.util.Calendar;
 import java.util.List;
 import java.util.zip.Deflater;
 import java.util.zip.DeflaterOutputStream;
 
-import javax.imageio.ImageIO;
-
 import org.apache.pdfbox.Loader;
-import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSDictionary;
-import org.apache.pdfbox.cos.COSInteger;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.cos.COSString;
 import org.apache.pdfbox.pdmodel.PDDocument;
-import org.apache.pdfbox.pdmodel.PDResources;
-import org.apache.pdfbox.pdmodel.common.PDRectangle;
-import org.apache.pdfbox.pdmodel.font.PDFont;
-import org.apache.pdfbox.pdmodel.font.PDType1Font;
-import org.apache.pdfbox.pdmodel.font.Standard14Fonts;
-import org.apache.pdfbox.pdmodel.graphics.form.PDFormXObject;
-import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
-import org.apache.pdfbox.pdmodel.interactive.digitalsignature.PDSignature;
-import org.apache.pdfbox.pdmodel.interactive.digitalsignature.SignatureInterface;
-import org.apache.pdfbox.pdmodel.interactive.digitalsignature.SignatureOptions;
-import org.apache.pdfbox.pdmodel.interactive.form.PDAcroForm;
-import org.apache.pdfbox.pdmodel.interactive.form.PDField;
-import org.apache.pdfbox.pdmodel.interactive.form.PDSignatureField;
-import org.bouncycastle.asn1.ASN1EncodableVector;
-import org.bouncycastle.asn1.DERSet;
-import org.bouncycastle.asn1.cms.Attribute;
-import org.bouncycastle.asn1.cms.AttributeTable;
-import org.bouncycastle.asn1.ess.ESSCertIDv2;
-import org.bouncycastle.asn1.ess.SigningCertificateV2;
-import org.bouncycastle.asn1.nist.NISTObjectIdentifiers;
-import org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers;
-import org.bouncycastle.asn1.x509.AlgorithmIdentifier;
-import org.bouncycastle.cert.jcajce.JcaCertStore;
-import org.bouncycastle.cms.CMSProcessableByteArray;
-import org.bouncycastle.cms.CMSSignedData;
-import org.bouncycastle.cms.CMSSignedDataGenerator;
-import org.bouncycastle.cms.DefaultSignedAttributeTableGenerator;
-import org.bouncycastle.cms.SignerInfoGenerator;
-import org.bouncycastle.cms.jcajce.JcaSignerInfoGeneratorBuilder;
-import org.bouncycastle.operator.ContentSigner;
-import org.bouncycastle.operator.DigestCalculatorProvider;
-import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
-import org.bouncycastle.operator.jcajce.JcaDigestCalculatorProviderBuilder;
 import org.springframework.stereotype.Service;
 
+import eu.europa.esig.dss.enumerations.CertificationPermission;
+import eu.europa.esig.dss.enumerations.DigestAlgorithm;
+import eu.europa.esig.dss.enumerations.EncryptionAlgorithm;
+import eu.europa.esig.dss.enumerations.SignatureAlgorithm;
+import eu.europa.esig.dss.enumerations.SignatureLevel;
+import eu.europa.esig.dss.enumerations.SignerTextPosition;
+import eu.europa.esig.dss.model.DSSDocument;
+import eu.europa.esig.dss.model.InMemoryDocument;
+import eu.europa.esig.dss.model.SignatureValue;
+import eu.europa.esig.dss.model.ToBeSigned;
+import eu.europa.esig.dss.pades.DSSFileFont;
+import eu.europa.esig.dss.pades.PAdESSignatureParameters;
+import eu.europa.esig.dss.pades.SignatureFieldParameters;
+import eu.europa.esig.dss.pades.SignatureImageParameters;
+import eu.europa.esig.dss.pades.SignatureImageTextParameters;
+import eu.europa.esig.dss.pades.signature.PAdESService;
+import eu.europa.esig.dss.pdf.pdfbox.PdfBoxNativeObjectFactory;
+import eu.europa.esig.dss.service.tsp.OnlineTSPSource;
+import eu.europa.esig.dss.spi.validation.CommonCertificateVerifier;
+import eu.europa.esig.dss.spi.x509.CertificateToken;
 import io.pdfalyzer.model.PendingSignatureData;
 import io.pdfalyzer.model.SigningKeyMaterial;
 import lombok.RequiredArgsConstructor;
@@ -70,208 +53,182 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class PdfSigningService {
 
-    private static final int SIGNATURE_CONTAINER_SIZE = 32768;
-    private static final int SIGNATURE_CONTAINER_SIZE_WITH_TSA = 65536;
-
-    private final TsaClientService tsaClientService;
-
     /**
-     * Apply a digital signature to the given PDF bytes.
+     * Apply a digital signature to the given PDF bytes using the EU DSS library.
+     * Supports PAdES B-B (basic) and B-T (with timestamp) profiles.
      * Returns the new (incrementally saved) PDF bytes.
      */
     public byte[] signDocument(byte[] pdfBytes, PendingSignatureData pending, SigningKeyMaterial keyMaterial) {
-        try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
-            PDAcroForm acroForm = doc.getDocumentCatalog().getAcroForm();
-            if (acroForm == null) {
-                throw new IllegalStateException("PDF has no AcroForm — cannot sign");
+        try {
+            // 1. Pre-process: embed biometric data into the PDF catalog before signing
+            //    so that it is covered by the signature's byte range
+            byte[] preparedPdf = embedBiometricIfNeeded(pdfBytes, pending);
+
+            // 2. Configure PAdES signature parameters
+            PAdESSignatureParameters parameters = buildParameters(pending, keyMaterial);
+
+            // 3. Create the PAdES service with PDFBox backend
+            CommonCertificateVerifier verifier = new CommonCertificateVerifier();
+            PAdESService service = new PAdESService(verifier);
+            service.setPdfObjFactory(new PdfBoxNativeObjectFactory());
+
+            // 4. Configure TSP source for B-T profile
+            boolean useTsa = isTimestampProfile(pending);
+            if (useTsa) {
+                OnlineTSPSource tspSource = new OnlineTSPSource(pending.getTsaUrl());
+                service.setTspSource(tspSource);
+                log.info("TSA configured for PAdES B-T: {}", pending.getTsaUrl());
             }
 
-            PDSignatureField sigField = findSignatureField(acroForm, pending.getFieldName());
-            if (sigField == null) {
-                throw new IllegalStateException("Signature field not found: " + pending.getFieldName());
-            }
+            // 5. Get data to sign
+            DSSDocument toSign = new InMemoryDocument(preparedPdf, "document.pdf");
+            ToBeSigned dataToSign = service.getDataToSign(toSign, parameters);
 
-            PDSignature signature = new PDSignature();
-            signature.setFilter(PDSignature.FILTER_ADOBE_PPKLITE);
-            signature.setSubFilter(COSName.getPDFName("ETSI.CAdES.detached"));
-            signature.setSignDate(Calendar.getInstance());
+            // 6. Sign the data using our in-memory private key
+            SignatureAlgorithm sigAlgo = resolveSignatureAlgorithm(keyMaterial.getPrivateKey());
+            byte[] signedBytes = computeSignature(dataToSign.getBytes(), keyMaterial.getPrivateKey(), sigAlgo);
+            SignatureValue signatureValue = new SignatureValue(sigAlgo, signedBytes);
 
-            if (pending.getReason() != null && !pending.getReason().isBlank()) {
-                signature.setReason(pending.getReason());
-            }
-            if (pending.getLocation() != null && !pending.getLocation().isBlank()) {
-                signature.setLocation(pending.getLocation());
-            }
-            if (pending.getContactInfo() != null && !pending.getContactInfo().isBlank()) {
-                signature.setContactInfo(pending.getContactInfo());
-            }
+            // 7. Finalize the signed document (DSS handles CMS, timestamp, DSS dict)
+            DSSDocument signedDoc = service.signDocument(toSign, parameters, signatureValue);
 
-            String cn = extractCN(keyMaterial.getCertificate());
-            if (cn != null) {
-                signature.setName(cn);
-            }
+            byte[] result = toByteArray(signedDoc);
+            log.info("Signed field '{}' with PAdES {} ({} bytes)",
+                    pending.getFieldName(), pending.getPadesProfile(), result.length);
+            return result;
 
-            // Certification signature (DocMDP)
-            if ("certification".equals(pending.getSignMode())) {
-                applyCertificationTransform(doc, signature, sigField, pending.getDocMdpLevel());
-            }
-
-            sigField.setValue(signature);
-
-            boolean useTsa = "B-T".equals(pending.getPadesProfile())
-                    && pending.getTsaUrl() != null && !pending.getTsaUrl().isBlank();
-
-            SignatureOptions sigOptions = new SignatureOptions();
-            sigOptions.setPreferredSignatureSize(useTsa ? SIGNATURE_CONTAINER_SIZE_WITH_TSA : SIGNATURE_CONTAINER_SIZE);
-
-            // Visual appearance
-            if (!"invisible".equals(pending.getVisualMode())) {
-                buildVisualAppearance(doc, sigField, pending);
-            }
-
-            // Embed biometric data in custom signature dictionary entry
-            if (pending.getBiometricData() != null && !pending.getBiometricData().isBlank()) {
-                embedBiometricData(signature, pending.getBiometricData(), pending.getBiometricFormat());
-            }
-
-            CmsSignatureInterface cmsInterface = new CmsSignatureInterface(
-                    keyMaterial, pending.getPadesProfile(),
-                    useTsa ? tsaClientService : null,
-                    useTsa ? pending.getTsaUrl() : null);
-            doc.addSignature(signature, cmsInterface, sigOptions);
-
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            doc.saveIncremental(baos);
-            log.info("Signed field '{}' in session (result {} bytes)", pending.getFieldName(), baos.size());
-            return baos.toByteArray();
         } catch (Exception e) {
             throw new IllegalStateException("Signing failed: " + e.getMessage(), e);
         }
     }
 
-    // ── Field lookup ──────────────────────────────────────────────────────────
+    // ── Parameter building ────────────────────────────────────────────────────
 
-    private PDSignatureField findSignatureField(PDAcroForm acroForm, String fieldName) {
-        for (PDField field : acroForm.getFieldTree()) {
-            if (field instanceof PDSignatureField sf) {
-                String fqn = sf.getFullyQualifiedName();
-                String partial = sf.getPartialName();
-                if (fieldName.equals(fqn) || fieldName.equals(partial)) {
-                    return sf;
-                }
-            }
+    private PAdESSignatureParameters buildParameters(PendingSignatureData pending, SigningKeyMaterial keyMaterial) {
+        PAdESSignatureParameters parameters = new PAdESSignatureParameters();
+
+        // Signature level (B-B, B-T, B-LT, B-LTA)
+        parameters.setSignatureLevel(resolveSignatureLevel(pending.getPadesProfile(), pending));
+        parameters.setDigestAlgorithm(DigestAlgorithm.SHA256);
+
+        // Signing certificate and chain
+        CertificateToken sigCert = new CertificateToken(keyMaterial.getCertificate());
+        parameters.setSigningCertificate(sigCert);
+        List<CertificateToken> chainTokens = keyMaterial.getChain().stream()
+                .map(CertificateToken::new)
+                .toList();
+        parameters.setCertificateChain(chainTokens);
+
+        // Metadata
+        if (pending.getReason() != null && !pending.getReason().isBlank()) {
+            parameters.setReason(pending.getReason());
         }
-        return null;
+        if (pending.getLocation() != null && !pending.getLocation().isBlank()) {
+            parameters.setLocation(pending.getLocation());
+        }
+        if (pending.getContactInfo() != null && !pending.getContactInfo().isBlank()) {
+            parameters.setContactInfo(pending.getContactInfo());
+        }
+
+        String cn = extractCN(keyMaterial.getCertificate());
+        if (cn != null) {
+            parameters.setSignerName(cn);
+        }
+
+        // DocMDP / certification permission
+        if ("certification".equals(pending.getSignMode())) {
+            parameters.setPermission(mapCertificationPermission(pending.getDocMdpLevel()));
+        }
+
+        // Visual appearance (uses existing signature field)
+        configureVisualAppearance(parameters, pending);
+
+        return parameters;
     }
 
-    // ── Certification (DocMDP) ────────────────────────────────────────────────
+    private SignatureLevel resolveSignatureLevel(String profile, PendingSignatureData pending) {
+        if (profile == null) return SignatureLevel.PAdES_BASELINE_B;
+        return switch (profile) {
+            case "B-T" -> {
+                if (pending.getTsaUrl() != null && !pending.getTsaUrl().isBlank()) {
+                    yield SignatureLevel.PAdES_BASELINE_T;
+                }
+                log.warn("B-T profile requested but no TSA URL provided, falling back to B-B");
+                yield SignatureLevel.PAdES_BASELINE_B;
+            }
+            case "B-LT" -> SignatureLevel.PAdES_BASELINE_LT;
+            case "B-LTA" -> SignatureLevel.PAdES_BASELINE_LTA;
+            default -> SignatureLevel.PAdES_BASELINE_B;
+        };
+    }
 
-    private void applyCertificationTransform(PDDocument doc, PDSignature signature,
-                                              PDSignatureField sigField, int docMdpLevel) {
-        int level = (docMdpLevel >= 1 && docMdpLevel <= 3) ? docMdpLevel : 2;
+    private boolean isTimestampProfile(PendingSignatureData pending) {
+        String profile = pending.getPadesProfile();
+        return ("B-T".equals(profile) || "B-LT".equals(profile) || "B-LTA".equals(profile))
+                && pending.getTsaUrl() != null && !pending.getTsaUrl().isBlank();
+    }
 
-        COSDictionary sigRef = new COSDictionary();
-        sigRef.setItem(COSName.TYPE, COSName.getPDFName("SigRef"));
-        sigRef.setItem(COSName.getPDFName("TransformMethod"), COSName.getPDFName("DocMDP"));
-
-        COSDictionary transformParams = new COSDictionary();
-        transformParams.setItem(COSName.TYPE, COSName.getPDFName("TransformParams"));
-        transformParams.setItem(COSName.getPDFName("P"), COSInteger.get(level));
-        transformParams.setItem(COSName.getPDFName("V"), COSName.getPDFName("1.2"));
-        sigRef.setItem(COSName.getPDFName("TransformParams"), transformParams);
-
-        COSArray refArray = new COSArray();
-        refArray.add(sigRef);
-        signature.getCOSObject().setItem(COSName.getPDFName("Reference"), refArray);
-
-        // Set /Perms /DocMDP in the document catalog
-        COSDictionary perms = new COSDictionary();
-        perms.setItem(COSName.getPDFName("DocMDP"), signature.getCOSObject());
-        doc.getDocumentCatalog().getCOSObject().setItem(COSName.getPDFName("Perms"), perms);
+    private CertificationPermission mapCertificationPermission(int docMdpLevel) {
+        return switch (docMdpLevel) {
+            case 1 -> CertificationPermission.NO_CHANGE_PERMITTED;
+            case 3 -> CertificationPermission.CHANGES_PERMITTED;
+            default -> CertificationPermission.MINIMAL_CHANGES_PERMITTED;
+        };
     }
 
     // ── Visual appearance ─────────────────────────────────────────────────────
 
-    private void buildVisualAppearance(PDDocument doc, PDSignatureField sigField,
-                                        PendingSignatureData pending) throws IOException {
-        PDRectangle rect = getWidgetRect(sigField);
-        if (rect == null || rect.getWidth() < 1 || rect.getHeight() < 1) return;
+    private void configureVisualAppearance(PAdESSignatureParameters parameters, PendingSignatureData pending) {
+        SignatureImageParameters imageParams = new SignatureImageParameters();
 
-        float w = rect.getWidth();
-        float h = rect.getHeight();
+        // Always reference the existing signature field by name
+        SignatureFieldParameters fieldParams = new SignatureFieldParameters();
+        fieldParams.setFieldId(pending.getFieldName());
+        imageParams.setFieldParameters(fieldParams);
 
-        PDResources resources = new PDResources();
-        byte[] streamContent;
-
-        switch (pending.getVisualMode()) {
-            case "text":
-                streamContent = buildTextStream(doc, resources, w, h, pending.getDisplayName(), pending.getFontName());
-                break;
-            case "image":
-                streamContent = buildImageStream(doc, resources, w, h, pending.getImageDataBase64());
-                break;
-            case "draw":
-                streamContent = buildImageStream(doc, resources, w, h, pending.getDrawnImageBase64());
-                break;
-            default:
-                return;
+        String mode = pending.getVisualMode();
+        if (mode == null || "invisible".equals(mode)) {
+            parameters.setImageParameters(imageParams);
+            return;
         }
 
-        if (streamContent == null || streamContent.length == 0) return;
-
-        PDFormXObject form = new PDFormXObject(doc);
-        form.setBBox(new PDRectangle(w, h));
-        form.setResources(resources);
-        try (java.io.OutputStream os = form.getStream().createOutputStream()) {
-            os.write(streamContent);
+        switch (mode) {
+            case "text" -> configureTextVisual(imageParams, pending);
+            case "image" -> configureImageVisual(imageParams, pending.getImageDataBase64());
+            case "draw" -> configureImageVisual(imageParams, pending.getDrawnImageBase64());
         }
 
-        COSDictionary apDict = new COSDictionary();
-        apDict.setItem(COSName.N, form);
-        sigField.getWidgets().get(0).getCOSObject().setItem(COSName.AP, apDict);
+        parameters.setImageParameters(imageParams);
     }
 
-    private byte[] buildTextStream(PDDocument doc, PDResources resources, float w, float h,
-                                    String displayName, String fontId) throws IOException {
-        String text = displayName != null && !displayName.isBlank() ? displayName : "Digitally signed";
-        float fontSize = Math.min(12, Math.min(w / (text.length() * 0.5f), h * 0.6f));
-        fontSize = Math.max(6, fontSize);
-
-        PDFont font = loadSigningFont(doc, fontId);
-        COSName cosName = resources.add(font);
-
-        // For embedded TrueType fonts, encode text as hex using the font's encoding
-        byte[] encoded = font.encode(text);
-        StringBuilder hex = new StringBuilder();
-        for (byte b : encoded) {
-            hex.append(String.format("%02X", b & 0xFF));
+    private void configureTextVisual(SignatureImageParameters imageParams, PendingSignatureData pending) {
+        String text = pending.getDisplayName();
+        if (text == null || text.isBlank()) {
+            text = "Digitally signed";
         }
 
-        String ops = "BT\n"
-                + "/" + cosName.getName() + " " + fontSize + " Tf\n"
-                + "0 0 0 rg\n"
-                + "2 " + (h - fontSize - 2) + " Td\n"
-                + "<" + hex + "> Tj\n"
-                + "ET\n";
-        return ops.getBytes(java.nio.charset.StandardCharsets.US_ASCII);
-    }
+        SignatureImageTextParameters textParams = new SignatureImageTextParameters();
+        textParams.setText(text);
+        textParams.setSignerTextPosition(SignerTextPosition.TOP);
 
-    private PDFont loadSigningFont(PDDocument doc, String fontId) throws IOException {
+        // Load custom font if specified
+        String fontId = pending.getFontName();
         if (fontId != null && !fontId.isBlank()) {
             String resourcePath = "fonts/signing/" + fontId + ".ttf";
             try (InputStream is = getClass().getClassLoader().getResourceAsStream(resourcePath)) {
                 if (is != null) {
-                    return org.apache.pdfbox.pdmodel.font.PDType0Font.load(doc, is);
+                    textParams.setFont(new DSSFileFont(is));
                 }
+            } catch (IOException e) {
+                log.warn("Failed to load signing font {}, using default", fontId);
             }
-            log.warn("Signing font not found: {}, falling back to Helvetica", fontId);
         }
-        return new PDType1Font(Standard14Fonts.FontName.HELVETICA);
+
+        imageParams.setTextParameters(textParams);
     }
 
-    private byte[] buildImageStream(PDDocument doc, PDResources resources,
-                                     float w, float h, String base64Data) throws IOException {
-        if (base64Data == null || base64Data.isBlank()) return null;
+    private void configureImageVisual(SignatureImageParameters imageParams, String base64Data) {
+        if (base64Data == null || base64Data.isBlank()) return;
 
         String data = base64Data;
         if (data.contains(",")) {
@@ -279,47 +236,25 @@ public class PdfSigningService {
         }
 
         byte[] imageBytes = Base64.getDecoder().decode(data);
-        java.awt.image.BufferedImage bimg = ImageIO.read(new ByteArrayInputStream(imageBytes));
-        if (bimg == null) return null;
-
-        PDImageXObject pdImage = PDImageXObject.createFromByteArray(doc, imageBytes, "sig-visual");
-        COSName imgName = resources.add(pdImage);
-
-        float imgW = bimg.getWidth();
-        float imgH = bimg.getHeight();
-        float scale = Math.min(w / imgW, h / imgH);
-        float drawW = imgW * scale;
-        float drawH = imgH * scale;
-        float xOff = (w - drawW) / 2;
-        float yOff = (h - drawH) / 2;
-
-        String ops = "q\n"
-                + drawW + " 0 0 " + drawH + " " + xOff + " " + yOff + " cm\n"
-                + "/" + imgName.getName() + " Do\n"
-                + "Q\n";
-        return ops.getBytes(java.nio.charset.StandardCharsets.US_ASCII);
-    }
-
-    private PDRectangle getWidgetRect(PDSignatureField sigField) {
-        if (sigField.getWidgets().isEmpty()) return null;
-        return sigField.getWidgets().get(0).getRectangle();
+        imageParams.setImage(new InMemoryDocument(imageBytes, "signature-visual.png"));
     }
 
     // ── Biometric data embedding ──────────────────────────────────────────────
 
     /**
-     * Embeds biometric signature data (x, y, pressure, tilt, timing) into a custom
-     * dictionary entry within the PDF signature dictionary. The data is stored under
-     * the key /PDFalyzerBiometric as a sub-dictionary containing:
-     *   /Format  - storage format name (json, json-zip, binary)
-     *   /Data    - the encoded biometric payload
-     *   /Version - schema version for future compatibility
+     * Embeds biometric signature data into the PDF document catalog BEFORE signing,
+     * so that it is covered by the signature's byte range and is tamper-evident.
+     * Stored under /PDFalyzerBiometric keyed by field name.
      */
-    private void embedBiometricData(PDSignature signature, String biometricJson, String format) {
-        if (biometricJson == null || biometricJson.isBlank()) return;
-        String fmt = (format != null) ? format : "json-zip";
+    private byte[] embedBiometricIfNeeded(byte[] pdfBytes, PendingSignatureData pending) {
+        if (pending.getBiometricData() == null || pending.getBiometricData().isBlank()) {
+            return pdfBytes;
+        }
 
-        try {
+        try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+            String biometricJson = pending.getBiometricData();
+            String fmt = (pending.getBiometricFormat() != null) ? pending.getBiometricFormat() : "json-zip";
+
             byte[] payload;
             switch (fmt) {
                 case "json":
@@ -339,12 +274,32 @@ public class PdfSigningService {
             bioDict.setName(COSName.getPDFName("Format"), fmt);
             bioDict.setInt(COSName.getPDFName("Version"), 1);
             bioDict.setItem(COSName.getPDFName("Data"), new COSString(payload));
-            bioDict.setInt(COSName.getPDFName("UncompressedSize"), biometricJson.getBytes(StandardCharsets.UTF_8).length);
+            bioDict.setInt(COSName.getPDFName("UncompressedSize"),
+                    biometricJson.getBytes(StandardCharsets.UTF_8).length);
+            bioDict.setName(COSName.getPDFName("FieldName"), pending.getFieldName());
+            bioDict.setString(COSName.getPDFName("Timestamp"),
+                    Calendar.getInstance().toInstant().toString());
 
-            signature.getCOSObject().setItem(COSName.getPDFName("PDFalyzerBiometric"), bioDict);
-            log.info("Embedded biometric data: format={}, payload={} bytes", fmt, payload.length);
+            // Store in document catalog (covered by signature byte range)
+            COSDictionary catalog = doc.getDocumentCatalog().getCOSObject();
+
+            // Support multiple biometric entries via a parent dictionary
+            COSDictionary biometricRoot;
+            if (catalog.containsKey(COSName.getPDFName("PDFalyzerBiometric"))) {
+                biometricRoot = catalog.getCOSDictionary(COSName.getPDFName("PDFalyzerBiometric"));
+            } else {
+                biometricRoot = new COSDictionary();
+                catalog.setItem(COSName.getPDFName("PDFalyzerBiometric"), biometricRoot);
+            }
+            biometricRoot.setItem(COSName.getPDFName(pending.getFieldName()), bioDict);
+
+            ByteArrayOutputStream baos = new ByteArrayOutputStream();
+            doc.save(baos);
+            log.info("Embedded biometric data in catalog: format={}, payload={} bytes", fmt, payload.length);
+            return baos.toByteArray();
         } catch (Exception e) {
-            log.warn("Failed to embed biometric data: {}", e.getMessage());
+            log.warn("Failed to embed biometric data, signing without it: {}", e.getMessage());
+            return pdfBytes;
         }
     }
 
@@ -357,20 +312,16 @@ public class PdfSigningService {
     }
 
     /**
-     * Compact binary encoding: each point is 14 bytes
-     * (float32 x, float32 y, float32 pressure, uint16 tiltX+tiltY packed, float32 time).
-     * Stroke boundaries encoded as a prefix array of point counts per stroke.
+     * Compact binary encoding: each point is stored as
+     * (float32 x, float32 y, float32 pressure, int16 tiltX, int16 tiltY, float32 time).
      */
     private byte[] encodeBiometricBinary(String json) {
-        // Parse the JSON to extract strokes array
-        // The biometric JSON has structure: { strokes: [[{x,y,p,t,tiltX,tiltY},...], ...], ... }
-        // Use a simple parse approach since we don't want a JSON library dependency here
         try {
             var mapper = new com.fasterxml.jackson.databind.ObjectMapper();
             var root = mapper.readTree(json);
             var strokesNode = root.get("strokes");
             if (strokesNode == null || !strokesNode.isArray()) {
-                return json.getBytes(StandardCharsets.UTF_8); // fallback
+                return json.getBytes(StandardCharsets.UTF_8);
             }
 
             int totalPoints = 0;
@@ -378,23 +329,18 @@ public class PdfSigningService {
                 totalPoints += stroke.size();
             }
 
-            // Header: 4 bytes magic + 4 bytes numStrokes + 4 bytes per stroke (point count)
-            // Points: 20 bytes each (4*float32 + 2*int16)
             int headerSize = 8 + strokesNode.size() * 4;
             int pointSize = 20;
             ByteBuffer buf = ByteBuffer.allocate(headerSize + totalPoints * pointSize);
             buf.order(ByteOrder.LITTLE_ENDIAN);
 
-            // Magic "BIO1"
             buf.put((byte) 'B').put((byte) 'I').put((byte) 'O').put((byte) '1');
             buf.putInt(strokesNode.size());
 
-            // Stroke lengths
             for (var stroke : strokesNode) {
                 buf.putInt(stroke.size());
             }
 
-            // Points
             for (var stroke : strokesNode) {
                 for (var pt : stroke) {
                     buf.putFloat((float) pt.get("x").asDouble());
@@ -420,123 +366,35 @@ public class PdfSigningService {
         }
     }
 
-    // ── CMS/PKCS#7 signing ───────────────────────────────────────────────────
+    // ── Cryptographic signing ─────────────────────────────────────────────────
 
-    private static class CmsSignatureInterface implements SignatureInterface {
+    private SignatureAlgorithm resolveSignatureAlgorithm(PrivateKey privateKey) {
+        EncryptionAlgorithm encAlgo = EncryptionAlgorithm.forKey(privateKey);
+        return SignatureAlgorithm.getAlgorithm(encAlgo, DigestAlgorithm.SHA256);
+    }
 
-        private final SigningKeyMaterial keyMaterial;
-        private final String padesProfile;
-        private final TsaClientService tsaClient;
-        private final String tsaUrl;
-
-        CmsSignatureInterface(SigningKeyMaterial keyMaterial, String padesProfile,
-                              TsaClientService tsaClient, String tsaUrl) {
-            this.keyMaterial = keyMaterial;
-            this.padesProfile = padesProfile;
-            this.tsaClient = tsaClient;
-            this.tsaUrl = tsaUrl;
-        }
-
-        @Override
-        public byte[] sign(InputStream content) throws IOException {
-            try {
-                String algo = keyMaterial.getPrivateKey().getAlgorithm();
-                String sigAlgo = "EC".equals(algo) ? "SHA256withECDSA" : "SHA256withRSA";
-
-                // Read content for signing
-                byte[] contentBytes = content.readAllBytes();
-
-                // Build certificate store
-                List<X509Certificate> certList = new ArrayList<>(keyMaterial.getChain());
-                JcaCertStore certStore = new JcaCertStore(certList);
-
-                // Content signer
-                ContentSigner signer = new JcaContentSignerBuilder(sigAlgo)
-                        .setProvider("BC")
-                        .build(keyMaterial.getPrivateKey());
-
-                // Digest calculator
-                DigestCalculatorProvider dcProvider = new JcaDigestCalculatorProviderBuilder()
-                        .setProvider("BC").build();
-
-                // Build signer info with ESS signing-certificate-v2 for PAdES-B-B
-                JcaSignerInfoGeneratorBuilder signerBuilder = new JcaSignerInfoGeneratorBuilder(dcProvider);
-
-                // Add ESS signing-certificate-v2 attribute
-                AttributeTable signedAttrs = buildSignedAttributes(keyMaterial.getCertificate());
-                signerBuilder.setSignedAttributeGenerator(new DefaultSignedAttributeTableGenerator(signedAttrs));
-
-                SignerInfoGenerator signerInfoGen = signerBuilder.build(signer, keyMaterial.getCertificate());
-
-                CMSSignedDataGenerator gen = new CMSSignedDataGenerator();
-                gen.addSignerInfoGenerator(signerInfoGen);
-                gen.addCertificates(certStore);
-
-                CMSProcessableByteArray cmsContent = new CMSProcessableByteArray(contentBytes);
-                CMSSignedData signedData = gen.generate(cmsContent, false);
-
-                // PAdES-B-T: embed RFC 3161 timestamp token as unsigned attribute
-                if ("B-T".equals(padesProfile) && tsaClient != null && tsaUrl != null) {
-                    signedData = embedTimestampToken(signedData);
-                }
-
-                return signedData.getEncoded();
-            } catch (Exception e) {
-                throw new IOException("CMS signing failed: " + e.getMessage(), e);
-            }
-        }
-
-        private CMSSignedData embedTimestampToken(CMSSignedData signedData) throws Exception {
-            // Get the signature value from the first (only) signer
-            var signerInfo = signedData.getSignerInfos().getSigners().iterator().next();
-            byte[] signatureBytes = signerInfo.getSignature();
-
-            // Request timestamp token from TSA
-            byte[] tsTokenBytes = tsaClient.getTimestampToken(tsaUrl, signatureBytes);
-
-            // Build unsigned attribute with the timestamp token
-            var tsToken = org.bouncycastle.asn1.ASN1Primitive.fromByteArray(tsTokenBytes);
-            ASN1EncodableVector unsignedAttrsVec = new ASN1EncodableVector();
-            unsignedAttrsVec.add(new Attribute(
-                    PKCSObjectIdentifiers.id_aa_signatureTimeStampToken,
-                    new DERSet(tsToken)));
-            AttributeTable unsignedAttrs = new AttributeTable(unsignedAttrsVec);
-
-            // Replace the signer info with one that includes the unsigned attributes
-            var newSignerInfo = org.bouncycastle.cms.SignerInformation.addCounterSigners(
-                    signerInfo, new org.bouncycastle.cms.SignerInformationStore(new ArrayList<>()));
-            newSignerInfo = org.bouncycastle.cms.SignerInformation.replaceUnsignedAttributes(
-                    signerInfo, unsignedAttrs);
-
-            var newSignerInfos = new org.bouncycastle.cms.SignerInformationStore(
-                    java.util.Collections.singletonList(newSignerInfo));
-            return CMSSignedData.replaceSigners(signedData, newSignerInfos);
-        }
-
-        private AttributeTable buildSignedAttributes(X509Certificate cert) throws Exception {
-            // ESS signing-certificate-v2 (RFC 5035) — required for PAdES-B-B
-            MessageDigest md = MessageDigest.getInstance("SHA-256");
-            byte[] certHash = md.digest(cert.getEncoded());
-
-            AlgorithmIdentifier hashAlgo = new AlgorithmIdentifier(NISTObjectIdentifiers.id_sha256);
-            ESSCertIDv2 essCertId = new ESSCertIDv2(hashAlgo, certHash);
-            SigningCertificateV2 sigCertV2 = new SigningCertificateV2(new ESSCertIDv2[]{essCertId});
-
-            ASN1EncodableVector v = new ASN1EncodableVector();
-            v.add(new Attribute(
-                    PKCSObjectIdentifiers.id_aa_signingCertificateV2,
-                    new DERSet(sigCertV2)));
-
-            return new AttributeTable(v);
-        }
+    private byte[] computeSignature(byte[] dataToSign, PrivateKey privateKey,
+                                     SignatureAlgorithm sigAlgo) throws Exception {
+        Signature sig = Signature.getInstance(sigAlgo.getJCEId());
+        sig.initSign(privateKey);
+        sig.update(dataToSign);
+        return sig.sign();
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    private byte[] toByteArray(DSSDocument document) throws IOException {
+        try (ByteArrayOutputStream baos = new ByteArrayOutputStream()) {
+            document.writeTo(baos);
+            return baos.toByteArray();
+        }
+    }
+
     private String extractCN(X509Certificate cert) {
         if (cert == null) return null;
         String dn = cert.getSubjectX500Principal().getName();
-        var match = java.util.regex.Pattern.compile("CN=([^,]+)", java.util.regex.Pattern.CASE_INSENSITIVE).matcher(dn);
+        var match = java.util.regex.Pattern.compile("CN=([^,]+)",
+                java.util.regex.Pattern.CASE_INSENSITIVE).matcher(dn);
         return match.find() ? match.group(1).trim() : null;
     }
 }

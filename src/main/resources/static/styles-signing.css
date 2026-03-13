@@ -84,7 +84,12 @@
     min-height: 280px;
 }
 
-.signing-panel.active { display: block; }
+.signing-panel.active {
+    display: block;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+}
 
 .signing-panel[data-panel="visual"].active {
     display: flex;
@@ -115,6 +120,15 @@
     font-size: 13px;
     background: var(--c-input-bg, #12121a);
     color: var(--c-text, #eee);
+    border-color: var(--border, #333);
+}
+
+.signing-panel .form-control:-webkit-autofill,
+.signing-panel .form-control:-webkit-autofill:hover,
+.signing-panel .form-control:-webkit-autofill:focus {
+    -webkit-box-shadow: 0 0 0 1000px #12121a inset !important;
+    -webkit-text-fill-color: #eee !important;
+    caret-color: #eee;
     border-color: var(--border, #333);
 }
 
@@ -983,6 +997,7 @@
 
 .signing-key-item .key-subject { font-weight: 600; }
 .signing-key-item .key-issuer { font-size: 11px; color: var(--text-muted, #888); }
+.signing-key-item .key-meta  { font-size: 10px; color: var(--text-muted, #888); margin-top: 2px; }
 .signing-key-item .key-actions { display: flex; gap: 4px; }
 
 /* ── Smoothing progress overlay ────────────────────────────────────── */

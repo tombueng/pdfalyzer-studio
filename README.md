@@ -166,12 +166,22 @@ When downloading a PDF that was originally encrypted, an **Export Protection** d
 
 For non-encrypted PDFs the dialog is skipped and the file downloads directly.
 
-### Signature analysis
+### Signature analysis and trust validation
 
 - Lists all signature fields (signed and unsigned) in an expandable card UI.
-- Extracts certificate details (subject/issuer DN, serial, validity period, algorithms) from signed fields via BouncyCastle CMS parsing.
-- Visualizes byte-range coverage with a segmented bar showing signed regions, signature value gaps, and uncovered trailing bytes.
-- Basic validation checks certificate validity period and byte-range file coverage.
+- **Full certificate chain extraction**: Extracts all certificates from CMS/PKCS#7 signatures, orders them (end-entity → intermediates → root) using issuer/subject DN and AKI/SKI matching. Each cert shows key usage, basic constraints, CRL distribution points, OCSP responder URLs, AIA URLs, and key identifiers.
+- **Certificate chain visualization**: Vertical connected nodes (root at top → end-entity at bottom) with expandable detail panels, role badges (End Entity/Intermediate/Root), trust anchor badges, and per-cert revocation status indicators.
+- **PDF revision parsing**: Scans %%EOF markers to identify incremental update boundaries, extracts startxref values, and maps each signature's byte range to covered revisions.
+- **Revision timeline graph**: Multi-lane horizontal timeline above all signature cards showing revision boundaries on the X axis, with per-signature coverage bars and clickable marker dots that scroll to the corresponding signature card.
+- **EUTL/AATL trust validation** (on-demand):
+  - Fetches EU Trusted List (LOTL → country TSLs) and Adobe Approved Trust List at runtime.
+  - Only fetches country TSLs needed based on certificate issuer DN `C=` attribute (not the entire EUTL).
+  - Global cache with configurable TTL (default: 6h EUTL, 24h AATL).
+  - Real-time progress display showing which country TSLs are being fetched.
+  - Trust status bar at bottom showing loaded lists, anchor counts, and cache age.
+- **Revocation checking**: OCSP (via BouncyCastle OCSPReqBuilder) and CRL checking, with DSS (Document Security Store) extraction from PDF catalog as fallback.
+- **Comprehensive validation report**: Per-signature checks for certificate validity, chain completeness, trust anchor resolution, revocation status, byte range coverage, DSS presence, and DocMDP compliance.
+- Visualizes byte-range coverage with a segmented bar showing signed regions, signature value gaps, uncovered trailing bytes, and revision boundary markers.
 - Detects post-signature modifications (trailing bytes, multiple %%EOF markers, DocMDP permission violations).
 - Shows field lock information and certification (DocMDP) permission levels.
 - "Locate in PDF" button scrolls the viewer to the signature field's visual position.
@@ -431,7 +441,10 @@ All API endpoints are under `/api/`. Responses are JSON unless otherwise noted.
 | GET | `/api/validate/{sessionId}` | Run validation | -- | `ValidationIssue[]` |
 | GET | `/api/validate/{sessionId}/verapdf` | Run embedded veraPDF validation | -- | `{available, success, report, reportFormat, ...}` |
 | GET | `/api/validate/{sessionId}/export` | Download validation report | -- | `text/plain` (attachment) |
-| GET | `/api/signatures/{sessionId}` | Analyze signature fields | -- | `SignatureAnalysisResult` |
+| GET | `/api/signatures/{sessionId}` | Analyze signature fields (includes cert chains + revisions) | -- | `SignatureAnalysisResult` |
+| POST | `/api/trust/{sessionId}/validate` | Trigger async trust validation (EUTL/AATL + revocation) | -- | `{status, message}` |
+| GET | `/api/trust/{sessionId}/status` | Poll trust validation progress | -- | `{eutlStatus, aatlStatus, overallProgress, completed}` |
+| GET | `/api/trust/{sessionId}/result` | Get enhanced result after validation completes | -- | `SignatureAnalysisResult` (with trust data) |
 | POST | `/api/signing/{sid}/upload-key` | Upload certificate/key material | `multipart/form-data` with `file` + optional `password` | `KeyMaterialUploadResult` |
 | GET | `/api/signing/{sid}/keys` | List stored key materials | -- | `KeyMaterialUploadResult[]` |
 | POST | `/api/signing/{sid}/generate-self-signed` | Generate self-signed cert | `SelfSignedCertRequest` (JSON) | `KeyMaterialUploadResult` |
@@ -481,6 +494,16 @@ spring.servlet.multipart.max-request-size=100MB
 pdfalyzer.session.timeout-minutes=30
 logging.level.root=INFO
 logging.level.io.pdfalyzer=DEBUG
+
+# Trust validation (EUTL/AATL)
+pdfalyzer.trust.eutl.lotl-url=https://ec.europa.eu/tools/lotl/eu-lotl.xml
+pdfalyzer.trust.eutl.cache-ttl-minutes=360
+pdfalyzer.trust.aatl.url=https://trustlist.adobe.com/tl12.acrobatsecuritysettings
+pdfalyzer.trust.aatl.cache-ttl-minutes=1440
+pdfalyzer.trust.download-timeout-ms=15000
+pdfalyzer.trust.ocsp-timeout-ms=10000
+pdfalyzer.trust.crl-timeout-ms=15000
+pdfalyzer.trust.enable-online-revocation=true
 ```
 
 ---
@@ -504,7 +527,13 @@ src/main/java/io/pdfalyzer/
 │   ├── KeyMaterialUploadResult.java     # JSON-safe key material status DTO
 │   ├── SelfSignedCertRequest.java       # Self-signed certificate generation request
 │   ├── SigningRequest.java              # Signing preparation request DTO
-│   └── PendingSignatureData.java        # Pending signature operation data
+│   ├── PendingSignatureData.java        # Pending signature operation data
+│   ├── CertificateChainEntry.java      # Certificate chain entry with extensions
+│   ├── RevocationStatus.java           # OCSP/CRL check result
+│   ├── PdfRevision.java                # PDF revision boundary model
+│   ├── TrustListStatus.java            # Trust list download progress
+│   ├── TrustValidationReport.java      # Combined validation report
+│   └── TrustValidationCheck.java       # Individual validation check
 ├── service/
 │   ├── SessionService.java              # In-memory session store with eviction
 │   ├── PdfService.java                  # Upload, parse, unlock, download with re-encryption
@@ -522,6 +551,11 @@ src/main/java/io/pdfalyzer/
 │   ├── PdfFormFieldBuilder.java
 │   ├── PdfFieldOptionApplier.java
 │   ├── SignatureAnalysisService.java    # Signature field parsing + BouncyCastle CMS validation
+│   ├── CertificateChainBuilder.java     # Full cert chain extraction + ordering from CMS
+│   ├── PdfRevisionParser.java           # %%EOF revision boundary parsing
+│   ├── TrustListService.java            # EUTL/AATL download, parse, and cache
+│   ├── RevocationCheckService.java      # OCSP/CRL checking + DSS extraction
+│   ├── TrustValidationService.java      # Trust validation orchestrator (async)
 │   ├── CertificateService.java          # Certificate/key material parsing (PKCS12, PEM, DER, JKS)
 │   ├── SelfSignedCertService.java       # Self-signed cert generation + PKCS12 export
 │   └── PdfSigningService.java           # CMS/PKCS#7 signing with PDFBox incremental save
@@ -531,6 +565,7 @@ src/main/java/io/pdfalyzer/
     ├── EditApiController.java           # Edit-specific REST endpoints
     ├── ResourceApiController.java       # Resource/attachment endpoints
     ├── SigningApiController.java         # Signing & certificate management REST endpoints
+    ├── TrustValidationApiController.java # Trust validation API (EUTL/AATL, revocation)
     └── GlobalExceptionHandler.java      # Centralized error handling
 
 src/main/resources/

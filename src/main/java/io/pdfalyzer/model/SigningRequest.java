@@ -30,7 +30,7 @@ public class SigningRequest {
     @Builder.Default
     private int docMdpLevel = 2; // 1=no changes, 2=form fill+sign, 3=form+annot+sign
     @Builder.Default
-    private String padesProfile = "B-B"; // "B-B", "B-T"
+    private String padesProfile = "B-B"; // "B-B", "B-T", "B-LT", "B-LTA"
     @Builder.Default
     private List<String> excludedFields = new ArrayList<>();
 
