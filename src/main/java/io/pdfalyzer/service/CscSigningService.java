@@ -24,7 +24,7 @@ import eu.europa.esig.dss.pades.signature.PAdESService;
 import eu.europa.esig.dss.pdf.pdfbox.PdfBoxNativeObjectFactory;
 import eu.europa.esig.dss.service.tsp.OnlineTSPSource;
 import eu.europa.esig.dss.spi.validation.CommonCertificateVerifier;
-import eu.europa.esig.dss.spi.x509.CertificateToken;
+import eu.europa.esig.dss.model.x509.CertificateToken;
 import io.pdfalyzer.model.CscProvider;
 import io.pdfalyzer.model.CscSignResult;
 import lombok.RequiredArgsConstructor;
