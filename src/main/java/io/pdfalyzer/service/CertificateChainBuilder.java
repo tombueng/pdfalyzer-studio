@@ -4,6 +4,7 @@ import java.security.cert.X509Certificate;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Collection;
 import java.util.List;
 
@@ -11,7 +12,6 @@ import javax.security.auth.x500.X500Principal;
 
 import org.bouncycastle.asn1.ASN1OctetString;
 import org.bouncycastle.asn1.ASN1Primitive;
-import org.bouncycastle.asn1.DEROctetString;
 import org.bouncycastle.asn1.x509.AccessDescription;
 import org.bouncycastle.asn1.x509.AuthorityInformationAccess;
 import org.bouncycastle.asn1.x509.AuthorityKeyIdentifier;
@@ -418,5 +418,85 @@ public class CertificateChainBuilder {
             log.debug("Error extracting AKI: {}", e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * Format a list of X509Certificates as a PEM bundle with descriptive comments.
+     * Certificates are ordered end-entity first, root last (full chain).
+     */
+    public String formatChainAsPem(List<X509Certificate> chain) {
+        var sb = new StringBuilder();
+        for (int i = 0; i < chain.size(); i++) {
+            X509Certificate cert = chain.get(i);
+            String role = determineRole(cert, i, chain.size());
+
+            // Comment block with certificate metadata
+            sb.append("# ").append(roleLabel(role)).append(" (").append(i + 1)
+              .append(" of ").append(chain.size()).append(")\n");
+            sb.append("# Subject: ").append(cert.getSubjectX500Principal().getName()).append('\n');
+            sb.append("# Issuer:  ").append(cert.getIssuerX500Principal().getName()).append('\n');
+            sb.append("# Serial:  ").append(cert.getSerialNumber().toString(16)).append('\n');
+            sb.append("# Valid:   ").append(cert.getNotBefore().toInstant()
+                    .atOffset(ZoneOffset.UTC).format(DateTimeFormatter.ISO_LOCAL_DATE))
+              .append(" to ").append(cert.getNotAfter().toInstant()
+                    .atOffset(ZoneOffset.UTC).format(DateTimeFormatter.ISO_LOCAL_DATE))
+              .append('\n');
+
+            String ski = extractSubjectKeyIdentifier(cert);
+            if (ski != null) {
+                sb.append("# SKI:     ").append(ski).append('\n');
+            }
+
+            try {
+                byte[] encoded = cert.getEncoded();
+                String base64 = Base64.getMimeEncoder(64, new byte[]{'\n'}).encodeToString(encoded);
+                sb.append("-----BEGIN CERTIFICATE-----\n");
+                sb.append(base64).append('\n');
+                sb.append("-----END CERTIFICATE-----\n");
+            } catch (Exception e) {
+                log.debug("Error encoding certificate to PEM: {}", e.getMessage());
+                sb.append("# ERROR: Could not encode certificate\n");
+            }
+
+            if (i < chain.size() - 1) {
+                sb.append('\n');
+            }
+        }
+        return sb.toString();
+    }
+
+    /**
+     * Extract raw X509Certificate chain from CMS signed data (ordered end-entity to root).
+     */
+    @SuppressWarnings("unchecked")
+    public List<X509Certificate> extractRawChainFromCms(CMSSignedData cmsData, SignerInformation signer) {
+        try {
+            Store<X509CertificateHolder> certStore = cmsData.getCertificates();
+            JcaX509CertificateConverter converter = new JcaX509CertificateConverter();
+
+            Collection<X509CertificateHolder> signerCerts = certStore.getMatches(signer.getSID());
+            if (signerCerts.isEmpty()) return List.of();
+
+            X509Certificate signerCert = converter.getCertificate(signerCerts.iterator().next());
+            Collection<X509CertificateHolder> allHolders = certStore.getMatches(null);
+            List<X509Certificate> allCerts = new ArrayList<>();
+            for (X509CertificateHolder holder : allHolders) {
+                allCerts.add(converter.getCertificate(holder));
+            }
+
+            return orderChain(signerCert, allCerts);
+        } catch (Exception e) {
+            log.debug("Error extracting raw chain from CMS: {}", e.getMessage());
+            return List.of();
+        }
+    }
+
+    private String roleLabel(String role) {
+        return switch (role) {
+            case "END_ENTITY" -> "End Entity Certificate";
+            case "INTERMEDIATE" -> "Intermediate CA Certificate";
+            case "ROOT" -> "Root CA Certificate";
+            default -> "Certificate";
+        };
     }
 }

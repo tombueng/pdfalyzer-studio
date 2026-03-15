@@ -440,6 +440,12 @@ body.draggable-modal-dragging .modal .modal-header.draggable-modal-handle {
     cursor: grabbing;
 }
 
+.status-clear-cache-btn {
+    cursor: pointer;
+    user-select: none;
+}
+.status-clear-cache-btn:hover { color: var(--accent); }
+
 /* === Theme Picker (status-bar panel) === */
 .status-theme-btn {
     cursor: pointer;

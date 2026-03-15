@@ -163,7 +163,7 @@ PDFalyzer.ValidationTab = (function ($, P) {
             '<button class="btn btn-outline-accent btn-sm me-2" id="runDssBtn">' +
             '<i class="fas fa-shield-alt me-1"></i>Run EU DSS</button>' +
             '<button class="btn btn-outline-accent btn-sm" id="exportValidateBtn"' + (disableExport ? ' disabled' : '') + '>' +
-            '<i class="fas fa-download me-1"></i>Export Report</button></div>';
+            '<i class="fas fa-download"></i><span class="dl-filetype">HTML</span> Export Report</button></div>';
     }
 
     function runStandardValidation() {
@@ -265,7 +265,7 @@ PDFalyzer.ValidationTab = (function ($, P) {
             '<button class="btn btn-outline-accent btn-sm me-1 dss-view-toggle" data-view="detailed-html"><i class="fas fa-list-alt me-1"></i>Detailed Report</button>' +
             '<button class="btn btn-outline-accent btn-sm me-1 dss-view-toggle" data-view="simple-xml"><i class="fas fa-code me-1"></i>Simple XML</button>' +
             '<button class="btn btn-outline-accent btn-sm me-1 dss-view-toggle" data-view="detailed-xml"><i class="fas fa-code me-1"></i>Detailed XML</button>' +
-            '<button class="btn btn-outline-accent btn-sm" id="exportDssHtmlBtn"><i class="fas fa-download me-1"></i>Export HTML</button>' +
+            '<button class="btn btn-outline-accent btn-sm" id="exportDssHtmlBtn"><i class="fas fa-download"></i><span class="dl-filetype">HTML</span> Export</button>' +
             '</div></div>';
 
         if (!success) {

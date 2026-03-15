@@ -54,12 +54,18 @@ public class SignatureAnalysisService {
         List<PdfRevision> revisions = pdfRevisionParser.parseRevisions(pdfBytes);
         log.debug("Parsed {} PDF revisions", revisions.size());
 
+        boolean hasDss = false;
         try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+            // Quick DSS existence check (COSName lookup, no parsing)
+            hasDss = doc.getDocumentCatalog().getCOSObject()
+                    .containsKey(org.apache.pdfbox.cos.COSName.getPDFName("DSS"));
+
             PDAcroForm acroForm = doc.getDocumentCatalog().getAcroForm();
             if (acroForm == null) {
                 return SignatureAnalysisResult.builder()
                         .signatures(signatures)
                         .revisions(revisions)
+                        .hasDss(hasDss)
                         .build();
             }
 
@@ -148,6 +154,7 @@ public class SignatureAnalysisService {
                 .invalidCount(invalidCount)
                 .indeterminateCount(indeterminateCount)
                 .hasCertificationSignature(hasCertification)
+                .hasDss(hasDss)
                 .signatures(signatures)
                 .revisions(revisions)
                 .build();

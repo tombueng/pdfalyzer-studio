@@ -24,6 +24,7 @@ import org.springframework.stereotype.Service;
 import io.pdfalyzer.model.TsaServer;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -38,12 +39,11 @@ public class TsaProbeService {
     private final ConcurrentHashMap<String, TsaServer> probeResults = new ConcurrentHashMap<>();
     private final ExecutorService executor = Executors.newFixedThreadPool(8);
     private final HttpClient httpClient;
+    @Getter
+    private volatile boolean probeStarted = false;
 
     @Value("${pdfalyzer.tsa.probe-timeout-ms:8000}")
     private int probeTimeoutMs;
-
-    @Value("${pdfalyzer.tsa.auto-probe-on-startup:true}")
-    private boolean autoProbeOnStartup;
 
     public TsaProbeService(TsaServerRegistry registry) {
         this.registry = registry;
@@ -55,7 +55,7 @@ public class TsaProbeService {
 
     @PostConstruct
     public void init() {
-        // Initialize probe results from registry
+        // Initialize probe results from registry with "unknown" status (no probing yet)
         for (TsaServer server : registry.getAllServers()) {
             probeResults.put(server.getId(), TsaServer.builder()
                     .id(server.getId())
@@ -70,11 +70,20 @@ public class TsaProbeService {
                     .status("unknown")
                     .build());
         }
+        log.info("TSA registry initialised with {} servers (probing deferred until UI request)", registry.size());
+    }
 
-        if (autoProbeOnStartup) {
-            log.info("Starting background TSA probe for {} servers", registry.size());
-            probeAllAsync();
-        }
+    /**
+     * Starts probing if it hasn't been triggered yet. Called lazily from the API layer
+     * when the user first visits the signing page. Returns true if probing was started,
+     * false if it was already in progress.
+     */
+    public boolean probeAllIfNotStarted() {
+        if (probeStarted) return false;
+        probeStarted = true;
+        log.info("Starting background TSA probe for {} servers (triggered by UI)", registry.size());
+        probeAllAsync();
+        return true;
     }
 
     @PreDestroy

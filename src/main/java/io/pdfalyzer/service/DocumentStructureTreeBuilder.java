@@ -252,7 +252,8 @@ public class DocumentStructureTreeBuilder {
         dss.setNodeCategory("catalog-entry");
 
         // ── Step 1: parse all certificates ──────────────────────────────
-        COSArray certsArray = (COSArray) dssDict.getDictionaryObject(COSName.getPDFName("Certs"));
+        COSBase certsBase = dssDict.getDictionaryObject(COSName.getPDFName("Certs"));
+        COSArray certsArray = certsBase instanceof COSArray ca ? ca : null;
         List<DssCert> parsedCerts = new ArrayList<>();
         if (certsArray != null) {
             CertificateFactory cf;
@@ -360,7 +361,8 @@ public class DocumentStructureTreeBuilder {
         if (totalRaw > 0) dss.addChild(certsNode);
 
         // ── Step 4: build OCSP nodes with badge matching ────────────────
-        COSArray ocsps = (COSArray) dssDict.getDictionaryObject(COSName.getPDFName("OCSPs"));
+        COSBase ocspsBase = dssDict.getDictionaryObject(COSName.getPDFName("OCSPs"));
+        COSArray ocsps = ocspsBase instanceof COSArray oa ? oa : null;
         if (ocsps != null) {
             PdfNode ocspsNode = new PdfNode("dss-ocsps",
                     "OCSP Responses (" + ocsps.size() + ")", "folder", "fa-check-circle", "#17a2b8");
@@ -372,7 +374,8 @@ public class DocumentStructureTreeBuilder {
         }
 
         // ── Step 5: build CRL nodes with badge matching ─────────────────
-        COSArray crls = (COSArray) dssDict.getDictionaryObject(COSName.getPDFName("CRLs"));
+        COSBase crlsBase = dssDict.getDictionaryObject(COSName.getPDFName("CRLs"));
+        COSArray crls = crlsBase instanceof COSArray cra ? cra : null;
         if (crls != null) {
             PdfNode crlsNode = new PdfNode("dss-crls",
                     "CRLs (" + crls.size() + ")", "folder", "fa-ban", "#dc3545");

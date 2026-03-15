@@ -322,21 +322,68 @@ public class CosNodeBuilder {
                     idPrefix + "-" + key, visited, depth + 1, childPath, ctx));
         }
         if (ctx.readStreamData) {
-            addStreamDataPreview(node, stream, idPrefix);
+            addStreamDataPreview(node, stream, idPrefix, ctx);
         }
         return node;
     }
 
-    private void addStreamDataPreview(PdfNode parent, COSStream stream, String idPrefix) {
+    private void addStreamDataPreview(PdfNode parent, COSStream stream, String idPrefix,
+                                       ParseContext ctx) {
         try {
-            PdfNode dataNode = new PdfNode(idPrefix + "-data",
-                    "Stream Data", "COSStream", "fa-database", "#e74c3c");
-            dataNode.setCosType("COSStream");
-            dataNode.setNodeCategory("cos-stream-data");
             byte[] data;
             try (java.io.InputStream is = stream.createInputStream()) {
                 data = is.readAllBytes();
             }
+            if (data.length == 0) return;
+
+            // Try to parse as content stream (operators + operands)
+            if (isContentStream(stream) && isTextContent(data)) {
+                try {
+                    PDFStreamParser parser = new PDFStreamParser(data);
+                    List<Object> tokens = parser.parse();
+                    if (hasOperators(tokens)) {
+                        PdfNode decoded = new PdfNode(idPrefix + "-decoded",
+                                "Decoded Stream Content", "content-stream", "fa-code", "#ff6b6b");
+                        decoded.setNodeCategory("cos-stream-decoded");
+                        decoded.addProperty("Decoded Length", String.valueOf(data.length));
+                        List<COSBase> operands = new ArrayList<>();
+                        int opIndex = 0;
+                        for (Object token : tokens) {
+                            if (token instanceof Operator) {
+                                String opName = ((Operator) token).getName();
+                                PdfNode opNode = new PdfNode(
+                                        idPrefix + "-op-" + opIndex,
+                                        opName + " (" + getOperatorDescription(opName) + ")",
+                                        "Operator", "fa-cog", "#ff69b4");
+                                opNode.setCosType("Operator");
+                                opNode.setNodeCategory("cos");
+                                opNode.setRawValue(opName);
+                                for (int i = 0; i < operands.size(); i++) {
+                                    opNode.addChild(buildCosNode(operands.get(i), "operand[" + i + "]",
+                                            idPrefix + "-op-" + opIndex + "-arg-" + i,
+                                            new HashSet<>(), 0, new ArrayList<>(), ctx));
+                                }
+                                operands.clear();
+                                decoded.addChild(opNode);
+                                opIndex++;
+                            } else if (token instanceof COSBase) {
+                                operands.add((COSBase) token);
+                            }
+                        }
+                        decoded.setName("Decoded Stream Content (" + opIndex + " operators)");
+                        parent.addChild(decoded);
+                        return;
+                    }
+                } catch (Exception e) {
+                    log.debug("Stream {} not parseable as content stream, falling back to preview", idPrefix);
+                }
+            }
+
+            // Fallback: hex/text preview for non-content streams
+            PdfNode dataNode = new PdfNode(idPrefix + "-data",
+                    "Stream Data", "COSStream", "fa-database", "#e74c3c");
+            dataNode.setCosType("COSStream");
+            dataNode.setNodeCategory("cos-stream-data");
             dataNode.addProperty("Length", String.valueOf(data.length));
             int previewLen = Math.min(data.length, MAX_STREAM_PREVIEW);
             dataNode.addProperty("Preview (hex)", bytesToHex(data, previewLen));
@@ -348,6 +395,35 @@ public class CosNodeBuilder {
         } catch (Exception e) {
             log.debug("Could not read stream data for {}", idPrefix, e);
         }
+    }
+
+    /**
+     * Determines whether a COSStream is likely a content stream (page, form XObject,
+     * Type1 charproc, tiling pattern) whose decoded bytes contain PDF operators.
+     */
+    private boolean isContentStream(COSStream stream) {
+        String type = stream.getNameAsString(COSName.TYPE);
+        String subtype = stream.getNameAsString(COSName.SUBTYPE);
+        // Form XObjects and tiling patterns contain operators
+        if ("XObject".equals(type) && "Form".equals(subtype)) return true;
+        if ("Pattern".equals(type)) return true;
+        // Page content streams have no /Type — they are direct stream objects
+        // referenced from /Contents. Detect by absence of image/font/metadata markers.
+        if (type == null && subtype == null) {
+            // Exclude streams that have /Width+/Height (images) or /Length1 (fonts)
+            if (stream.containsKey(COSName.WIDTH)
+                    && stream.containsKey(COSName.HEIGHT)) return false;
+            if (stream.containsKey(COSName.getPDFName("Length1"))) return false;
+            return true;
+        }
+        return false;
+    }
+
+    private boolean hasOperators(List<Object> tokens) {
+        for (Object token : tokens) {
+            if (token instanceof Operator) return true;
+        }
+        return false;
     }
 
     private PdfNode handleCosDictionary(COSDictionary dict, String label, String idPrefix,

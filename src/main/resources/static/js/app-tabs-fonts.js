@@ -179,10 +179,11 @@ PDFalyzer.FontsTab = (function ($, P) {
                     'data-obj="' + f.objectNumber + '" data-gen="' + (f.generationNumber || 0) + '" ' +
                     'title="Draw usage overlays in the PDF viewer for this font object."><i class="fas fa-highlighter"></i></button>';
                 if (f.embedded) {
+                    var fontFt = (f.fontType || '').replace(/\s+/g, '').toUpperCase() || 'BIN';
                     actions += '<a class="btn btn-xs btn-outline-accent" target="_blank" ' +
                         'href="/api/fonts/' + P.state.sessionId + '/extract/' +
                         f.objectNumber + '/' + (f.generationNumber || 0) +
-                        '" title="Download the embedded font program stream."><i class="fas fa-download"></i></a>';
+                        '" title="Download the embedded font program stream."><i class="fas fa-download"></i><span class="dl-filetype">' + P.Utils.escapeHtml(fontFt) + '</span></a>';
                 }
             }
             var issueDetail = buildIssueDetail(f);
@@ -344,7 +345,8 @@ PDFalyzer.FontsTab = (function ($, P) {
         if (fontRow.objectNumber >= 0) {
             actions += '<button class="btn btn-xs btn-outline-accent me-1 font-usage-btn" data-obj="' + fontRow.objectNumber + '" data-gen="' + (fontRow.generationNumber || 0) + '" title="Draw usage overlays in the PDF viewer for this font object."><i class="fas fa-highlighter"></i></button>';
             if (fontRow.embedded) {
-                actions += '<a class="btn btn-xs btn-outline-accent" target="_blank" href="/api/fonts/' + P.state.sessionId + '/extract/' + fontRow.objectNumber + '/' + (fontRow.generationNumber || 0) + '" title="Download the embedded font program stream."><i class="fas fa-download"></i></a>';
+                var fontFt2 = (fontRow.fontType || '').replace(/\s+/g, '').toUpperCase() || 'BIN';
+                actions += '<a class="btn btn-xs btn-outline-accent" target="_blank" href="/api/fonts/' + P.state.sessionId + '/extract/' + fontRow.objectNumber + '/' + (fontRow.generationNumber || 0) + '" title="Download the embedded font program stream."><i class="fas fa-download"></i><span class="dl-filetype">' + P.Utils.escapeHtml(fontFt2) + '</span></a>';
             }
         }
         return '<div class="font-focus-card">' +

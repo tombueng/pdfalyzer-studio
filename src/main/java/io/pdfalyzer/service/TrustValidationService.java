@@ -117,6 +117,8 @@ public class TrustValidationService {
         log.info("Resolved countries for trust validation: {}", countries);
 
         // Fetch EUTL and AATL in parallel
+        // TrustListService will auto-expand to all LOTL countries if any resolved country
+        // is not in the EUTL (e.g. BM for QuoVadis — trust anchor could be in any EU TSL)
         CountDownLatch trustListLatch = new CountDownLatch(2);
 
         trustListService.fetchCountryTslsAsync(countries, status -> {
@@ -136,9 +138,9 @@ public class TrustValidationService {
 
         // Wait for trust lists (with timeout)
         try {
-            boolean completed = trustListLatch.await(120, TimeUnit.SECONDS);
+            boolean completed = trustListLatch.await(300, TimeUnit.SECONDS);
             if (!completed) {
-                log.warn("Trust list fetch timed out after 120s for session {}", sessionId);
+                log.warn("Trust list fetch timed out after 300s for session {}", sessionId);
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -252,19 +254,25 @@ public class TrustValidationService {
                 CertificateChainEntry entry = sig.getCertificateChain().get(i);
                 // Find matching raw certificate; fall back to DN+serial string match if not embedded in CMS
                 X509Certificate rawCert = findMatchingRawCert(entry, rawCerts);
+                log.info("Trust anchor check [{}]: role={}, serial={}, rawCertFound={}, subject={}",
+                        i, entry.getRole(), entry.getSerialNumber(), rawCert != null, entry.getSubjectDN());
                 TrustListService.TrustAnchorMatch match = rawCert != null
                         ? trustListService.findTrustAnchor(rawCert)
                         : trustListService.findTrustAnchorByDn(entry.getSubjectDN(), entry.getSerialNumber());
+                log.info("Trust anchor result [{}]: found={}, strategy={}, source={}",
+                        i, match.isFound(), match.getMatchStrategy(), match.getListSource());
                 if (match.isFound()) {
                     entry.setTrustAnchor(true);
                     entry.setTrustListSource(match.getListSource());
                     entry.setTrustServiceName(match.getServiceName());
                     entry.setTrustServiceStatus(match.getServiceStatus());
                     foundTrustAnchor = true;
+                    String matchDetail = match.getMatchStrategy() != null
+                            ? " (via " + match.getMatchStrategy() + ")" : "";
                     checks.add(TrustValidationCheck.builder()
                             .checkName("TRUST_ANCHOR")
                             .status("PASS")
-                            .message("Trust anchor found in " + match.getListSource() + ": " + entry.getSubjectDN())
+                            .message("Trust anchor found in " + match.getListSource() + matchDetail + ": " + extractCN(entry.getSubjectDN()))
                             .signatureIndex(sigIdx)
                             .build());
                     break;
@@ -365,10 +373,12 @@ public class TrustValidationService {
                         tsaEntry.setTrustServiceName(match.getServiceName());
                         tsaEntry.setTrustServiceStatus(match.getServiceStatus());
                         foundTsaTrustAnchor = true;
+                        String tsaMatchDetail = match.getMatchStrategy() != null
+                                ? " (via " + match.getMatchStrategy() + ")" : "";
                         checks.add(TrustValidationCheck.builder()
                                 .checkName("TSA_TRUST_ANCHOR")
                                 .status("PASS")
-                                .message("TSA trust anchor found in " + match.getListSource() + ": " + tsaEntry.getSubjectDN())
+                                .message("TSA trust anchor found in " + match.getListSource() + tsaMatchDetail + ": " + extractCN(tsaEntry.getSubjectDN()))
                                 .signatureIndex(sigIdx)
                                 .build());
                         break;
@@ -518,6 +528,8 @@ public class TrustValidationService {
                 return cert;
             }
         }
+        log.debug("No raw cert match for chain entry: serial={}, subject={} (searched {} raw certs)",
+                entry.getSerialNumber(), entry.getSubjectDN(), rawCerts.size());
         return null;
     }
 
