@@ -2,7 +2,6 @@ package io.pdfalyzer.service;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -80,7 +79,7 @@ public class SemanticTreeBuilder {
         root.addChild(buildPagesTree(doc, ctx));
 
         // Build DSS first to get serialToBadge map for cross-referencing sig fields
-        Map<String, String> serialToBadge = Collections.emptyMap();
+        Map<String, String> serialToBadge = null;
         try {
             COSDictionary catalogDict = doc.getDocumentCatalog().getCOSObject();
             COSBase dssValue = catalogDict.getDictionaryObject(COSName.getPDFName("DSS"));
@@ -91,7 +90,7 @@ public class SemanticTreeBuilder {
                 serialToBadge = dssResult.serialToBadge();
             }
         } catch (Exception e) {
-            log.debug("Error building DSS node", e);
+            log.warn("Error building DSS node", e);
         }
 
         try {

@@ -26,4 +26,10 @@ public class TrustListStatus {
     private String currentlyFetching;    // e.g. "AT - Austria"
     private int fetchedCount;
     private int totalToFetch;
+
+    // Per-country detail for UI
+    @Builder.Default
+    private List<String> failedCountries = new ArrayList<>();   // countries whose TSL fetch failed
+    @Builder.Default
+    private List<String> skippedCountries = new ArrayList<>();  // countries not in LOTL
 }

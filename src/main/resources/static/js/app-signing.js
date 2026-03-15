@@ -70,7 +70,6 @@ PDFalyzer.Signing = (function ($, P) {
         renderWizard();
         _bsModal.show();
         refreshKeysInBackground();
-        loadTsaServers();
     }
 
     // ── Modal skeleton ──────────────────────────────────────────────────
@@ -995,7 +994,7 @@ PDFalyzer.Signing = (function ($, P) {
             html += k.readyToSign ? '<i class="fas fa-check-circle me-1"></i>Ready to sign' : '<i class="fas fa-exclamation-circle me-1"></i>' + (k.missingElements || []).join(', ');
             html += '</div></div>';
             html += '<div class="key-actions">';
-            html += '<button class="btn btn-outline-secondary btn-sm signing-key-export" title="Download as PKCS12"><i class="fas fa-download"></i></button>';
+            html += '<button class="btn btn-outline-secondary btn-sm signing-key-export" title="Download as PKCS12"><i class="fas fa-download"></i><span class="dl-filetype">P12</span></button>';
             html += '<button class="btn btn-outline-danger btn-sm signing-key-delete" title="Remove"><i class="fas fa-trash"></i></button>';
             html += '</div></div>';
         }

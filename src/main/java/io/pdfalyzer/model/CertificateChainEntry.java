@@ -45,6 +45,6 @@ public class CertificateChainEntry {
     // Revocation status (filled by RevocationCheckService)
     private RevocationStatus revocationStatus;
 
-    // DSS coverage (filled by TrustValidationService)
-    private boolean presentInDss;
+    // DSS coverage (filled by TrustValidationService; null = not checked)
+    private Boolean presentInDss;
 }

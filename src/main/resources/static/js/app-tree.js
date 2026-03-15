@@ -12,6 +12,7 @@ PDFalyzer.Tree = (function ($, P) {
         var $nodes = $container.find('.tree-node');
         if (!$nodes.length) return null;
         var expandedNodeIds = [];
+        var collapsedInfoNodeIds = [];
         $nodes.each(function () {
             var $node = $(this);
             var $children = $node.children('.tree-children');
@@ -19,9 +20,15 @@ PDFalyzer.Tree = (function ($, P) {
             if ($children.css('display') !== 'none') {
                 expandedNodeIds.push(String($node.data('node-id')));
             }
+            // Track nodes where user explicitly collapsed the info block
+            var $props = $node.children('.node-properties');
+            if ($props.length && $props.find('.node-props-body').css('display') === 'none') {
+                collapsedInfoNodeIds.push(String($node.data('node-id')));
+            }
         });
         return {
             expandedNodeIds: expandedNodeIds,
+            collapsedInfoNodeIds: collapsedInfoNodeIds,
             scrollTop: $container.scrollTop()
         };
     }
@@ -80,6 +87,7 @@ PDFalyzer.Tree = (function ($, P) {
         appendPendingFieldPanel($container);
         applySelectionClasses();
         restoreViewState(viewState);
+        showPropertiesForExpandedNodes(viewState ? viewState.collapsedInfoNodeIds : null);
     }
 
     function renderSubtree(rootData, category, options) {
@@ -104,6 +112,7 @@ PDFalyzer.Tree = (function ($, P) {
         appendPendingFieldPanel($container);
         applySelectionClasses();
         restoreViewState(viewState);
+        showPropertiesForExpandedNodes(viewState ? viewState.collapsedInfoNodeIds : null);
     }
 
     function renderSearchResults(results, options) {
@@ -120,6 +129,7 @@ PDFalyzer.Tree = (function ($, P) {
         appendPendingFieldPanel($container);
         applySelectionClasses();
         restoreViewState(viewState);
+        showPropertiesForExpandedNodes(viewState ? viewState.collapsedInfoNodeIds : null);
     }
 
     function appendPendingFieldPanel($container) {
@@ -281,31 +291,110 @@ PDFalyzer.Tree = (function ($, P) {
         }
     }
 
-    function showPropertiesPanel(node, $headerEl) {
+    function showPropertiesPanel(node, $headerEl, collapsed) {
         $headerEl.siblings('.node-properties').remove();
         var displayProps = collectDisplayProperties(node);
         if (Object.keys(displayProps).length === 0) return;
+
+        var groups = groupProperties(displayProps);
+        var groupKeys = Object.keys(groups);
         var $props = $('<div>', { 'class': 'node-properties' });
-        Object.entries(displayProps).forEach(function (kv) {
-            var $row = $('<div>', { 'class': 'prop-row' });
-            $row.append($('<span>', { 'class': 'prop-key', text: kv[0] + ':' }));
-            var $val = $('<span>', { 'class': 'prop-val' });
-            if (kv[0] === 'refTarget') {
-                var objNum = parseInt(kv[1], 10);
-                $val.append(
-                    $('<a>', { href: '#', text: 'obj ' + kv[1] })
-                        .on('click', function (e) {
-                            e.preventDefault();
-                            navigateToObject(objNum, 0);
-                        })
-                );
-            } else {
-                $val.text(kv[1]);
-            }
-            $row.append($val);
-            $props.append($row);
+        var isCollapsed = !!collapsed;
+
+        // Collapsible header bar
+        var $toggleBar = $('<div>', { 'class': 'node-props-header' });
+        var $toggleIcon = $('<i>', { 'class': 'fas ' + (isCollapsed ? 'fa-chevron-right' : 'fa-chevron-down') + ' node-props-toggle-icon' });
+        $toggleBar.append($toggleIcon);
+        $toggleBar.append($('<span>', { 'class': 'node-props-title', text: 'Properties' }));
+        $toggleBar.on('click', function (e) {
+            e.stopPropagation();
+            var $body = $props.find('.node-props-body');
+            $body.toggle();
+            $toggleIcon.toggleClass('fa-chevron-right fa-chevron-down');
         });
+        $props.append($toggleBar);
+
+        // Body (collapsible)
+        var $body = $('<div>', { 'class': 'node-props-body', css: { display: isCollapsed ? 'none' : '' } });
+        var showGroupTitles = groupKeys.length > 1;
+
+        for (var gi = 0; gi < groupKeys.length; gi++) {
+            var groupName = groupKeys[gi];
+            var items = groups[groupName];
+            if (!items.length) continue;
+
+            if (showGroupTitles) {
+                $body.append($('<div>', { 'class': 'prop-group-title', text: groupName }));
+            }
+
+            var $grid = $('<div>', { 'class': 'prop-grid' });
+            for (var pi = 0; pi < items.length; pi++) {
+                var key = items[pi][0];
+                var val = items[pi][1];
+                var $row = $('<div>', { 'class': 'prop-row' });
+                $row.append($('<span>', { 'class': 'prop-key', text: key + ':' }));
+                var $val = $('<span>', { 'class': 'prop-val' });
+                if (key === 'refTarget') {
+                    var objNum = parseInt(val, 10);
+                    $val.append(
+                        $('<a>', { href: '#', text: 'obj ' + val })
+                            .on('click', function (e) {
+                                e.preventDefault();
+                                navigateToObject(parseInt($(this).text().replace('obj ', ''), 10), 0);
+                            })
+                    );
+                } else {
+                    $val.text(val);
+                }
+                $row.append($val);
+                $grid.append($row);
+            }
+            $body.append($grid);
+        }
+
+        $props.append($body);
         $headerEl.after($props);
+    }
+
+    function groupProperties(props) {
+        var generalKeys = ['Type', 'Category', 'Children'];
+        var objectKeys = ['Object', 'refTarget'];
+        var locationKeys = ['Page', 'BoundingBox'];
+
+        var groups = { 'General': [], 'Object': [], 'Location': [], 'Details': [] };
+        Object.entries(props).forEach(function (kv) {
+            if (generalKeys.indexOf(kv[0]) >= 0) groups['General'].push(kv);
+            else if (objectKeys.indexOf(kv[0]) >= 0) groups['Object'].push(kv);
+            else if (locationKeys.indexOf(kv[0]) >= 0) groups['Location'].push(kv);
+            else groups['Details'].push(kv);
+        });
+
+        // Remove empty groups
+        var result = {};
+        Object.keys(groups).forEach(function (k) {
+            if (groups[k].length) result[k] = groups[k];
+        });
+        return result;
+    }
+
+    function showPropertiesForExpandedNodes(collapsedInfoIds) {
+        var collapsedSet = Object.create(null);
+        (collapsedInfoIds || []).forEach(function (id) { collapsedSet[String(id)] = true; });
+
+        $('#treeContent .tree-node').each(function () {
+            var $node = $(this);
+            var $children = $node.children('.tree-children');
+            if (!$children.length || $children.css('display') === 'none') return;
+
+            var nodeModel = $node.data('node-model');
+            if (!nodeModel || !nodeModel.properties) return;
+
+            var $header = $node.find('> .tree-node-header');
+            if ($header.siblings('.node-properties').length) return; // already shown
+
+            var isCollapsed = !!collapsedSet[String(nodeModel.id)];
+            showPropertiesPanel(nodeModel, $header, isCollapsed);
+        });
     }
 
     function collectDisplayProperties(node) {

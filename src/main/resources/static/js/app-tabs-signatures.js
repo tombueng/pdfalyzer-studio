@@ -76,6 +76,11 @@ PDFalyzer.SignaturesTab = (function ($, P) {
         if (data.invalidCount) html += '<span class="sig-summary-badge invalid"><i class="fas fa-times-circle"></i> ' + data.invalidCount + ' invalid</span>';
         if (data.indeterminateCount) html += '<span class="sig-summary-badge indeterminate"><i class="fas fa-question-circle"></i> ' + data.indeterminateCount + ' indeterminate</span>';
         if (data.hasCertificationSignature) html += '<span class="sig-summary-badge total"><i class="fas fa-certificate"></i> Certification</span>';
+        if (data.hasDss) {
+            html += '<span class="sig-summary-badge dss-present"><i class="fas fa-database"></i> DSS</span>';
+        } else if (data.signedCount) {
+            html += '<span class="sig-summary-badge dss-absent"><i class="fas fa-database"></i> No DSS</span>';
+        }
         html += '<button class="btn btn-outline-accent btn-sm sig-validate-trust-btn ms-auto" title="Validate against EUTL and AATL trust lists">';
         html += '<i class="fas fa-shield-alt me-1"></i>Validate Trust</button>';
         html += '</div>';
@@ -145,15 +150,45 @@ PDFalyzer.SignaturesTab = (function ($, P) {
                 html += ' <div class="sig-trust-progress-bar"><div class="sig-trust-progress-fill" style="width:' + pct + '%"></div></div>';
                 html += ' <span class="text-muted" style="font-size:10px;">' + tlStatus.fetchedCount + '/' + tlStatus.totalToFetch + '</span>';
             }
-        } else if (tlStatus.status === 'LOADED') {
+        } else if (tlStatus.status === 'LOADED' || tlStatus.status === 'PARTIAL') {
             var hasAnchors = tlStatus.totalTrustAnchors > 0;
-            html += '<span class="' + (hasAnchors ? 'text-success' : 'text-warning') + '">';
-            html += '<i class="fas fa-' + (hasAnchors ? 'check' : 'exclamation-triangle') + ' me-1"></i>';
+            var isPartial = tlStatus.status === 'PARTIAL';
+            var colorClass = isPartial ? 'text-warning' : (hasAnchors ? 'text-success' : 'text-warning');
+            var iconName = isPartial ? 'exclamation-triangle' : (hasAnchors ? 'check' : 'exclamation-triangle');
+            html += '<span class="' + colorClass + '">';
+            html += '<i class="fas fa-' + iconName + ' me-1"></i>';
             html += tlStatus.totalTrustAnchors + ' anchors';
             if (hasAnchors && tlStatus.loadedCountries && tlStatus.loadedCountries.length) {
-                html += ' (' + tlStatus.loadedCountries.join(', ') + ')';
+                html += ' from ' + tlStatus.loadedCountries.length + ' countries';
+            }
+            if (isPartial) {
+                html += ' (incomplete)';
             }
             html += '</span>';
+
+            // Failed/skipped countries warnings
+            if (tlStatus.failedCountries && tlStatus.failedCountries.length) {
+                html += ' <span class="text-danger" style="font-size:10px;"><i class="fas fa-exclamation-triangle me-1"></i>'
+                    + tlStatus.failedCountries.length + ' country TSLs failed: ' + tlStatus.failedCountries.join(', ') + '</span>';
+            }
+
+            // Expandable country detail
+            if (tlStatus.loadedCountries && tlStatus.loadedCountries.length) {
+                html += '<div class="sig-trust-countries-toggle" title="Show loaded countries">';
+                html += '<i class="fas fa-globe me-1"></i><span class="sig-trust-countries-toggle-label">Show countries</span>';
+                html += '</div>';
+                html += '<div class="sig-trust-countries-detail" style="display:none;">';
+                html += '<div class="sig-trust-countries-list">';
+                for (var ci = 0; ci < tlStatus.loadedCountries.length; ci++) {
+                    html += '<span class="sig-trust-country-tag">' + P.Utils.escapeHtml(tlStatus.loadedCountries[ci]) + '</span>';
+                }
+                html += '</div>';
+                if (tlStatus.failedCountries && tlStatus.failedCountries.length) {
+                    html += '<div class="sig-trust-countries-failed"><span class="text-danger" style="font-size:10px;">Failed: '
+                        + tlStatus.failedCountries.map(function (c) { return P.Utils.escapeHtml(c); }).join(', ') + '</span></div>';
+                }
+                html += '</div>';
+            }
         } else if (tlStatus.status === 'ERROR') {
             html += '<span class="text-danger"><i class="fas fa-exclamation-circle me-1"></i>' + P.Utils.escapeHtml(tlStatus.statusMessage || 'Error') + '</span>';
         } else {
@@ -179,21 +214,14 @@ PDFalyzer.SignaturesTab = (function ($, P) {
         var html = '<div class="sig-revision-graph">';
         html += '<div class="sig-revision-graph-title"><i class="fas fa-layer-group me-1"></i>Revision & Signature Coverage</div>';
 
-        // Revision labels row
-        html += '<div class="sig-revision-labels-row">';
-        for (var r = 0; r < revisions.length; r++) {
-            var leftPct = (revisions[r].endOffset / totalSize) * 100;
-            html += '<span class="sig-revision-label" style="left:' + leftPct + '%">R' + revisions[r].revisionIndex + '</span>';
-        }
-        html += '</div>';
-
         // Lanes (one per signed signature)
         html += '<div class="sig-revision-lanes">';
 
-        // Revision boundary lines (vertical)
+        // Revision boundary lines (vertical) with labels
         for (var r2 = 0; r2 < revisions.length; r2++) {
             var leftPct2 = (revisions[r2].endOffset / totalSize) * 100;
-            html += '<div class="sig-revision-boundary" style="left:' + leftPct2 + '%" title="Revision ' + revisions[r2].revisionIndex + ' ends at ' + formatBytes(revisions[r2].endOffset) + '"></div>';
+            html += '<div class="sig-revision-boundary" style="left:' + leftPct2 + '%" title="Revision R' + revisions[r2].revisionIndex + ' ends at ' + formatBytes(revisions[r2].endOffset) + '">' +
+                '<span class="sig-revision-boundary-label">R' + revisions[r2].revisionIndex + '</span></div>';
         }
 
         for (var s = 0; s < signedSigs.length; s++) {
@@ -206,12 +234,16 @@ PDFalyzer.SignaturesTab = (function ($, P) {
             html += '<span class="sig-revision-lane-label" title="' + P.Utils.escapeHtml(displayName) + '">' + P.Utils.escapeHtml(displayName) + '</span>';
             html += '<div class="sig-revision-lane-bar">';
 
-            // Coverage bar
+            // Coverage bar: blue for covered, orange for uncovered
             if (sig.byteRange && sig.byteRange.length >= 2) {
                 var coverEnd = sig.byteRange[1].offset + sig.byteRange[1].length;
                 var coverPct = (coverEnd / totalSize) * 100;
-                html += '<div class="sig-revision-coverage ' + statusClass + '" style="width:' + coverPct + '%"' +
+                html += '<div class="sig-revision-coverage covered" style="width:' + coverPct + '%"' +
                     ' title="' + P.Utils.escapeHtml(displayName) + ': covers ' + formatBytes(coverEnd) + ' of ' + formatBytes(totalSize) + '"></div>';
+                if (coverPct < 100) {
+                    html += '<div class="sig-revision-coverage uncovered" style="width:' + (100 - coverPct) + '%"' +
+                        ' title="Uncovered: ' + formatBytes(totalSize - coverEnd) + '"></div>';
+                }
             }
 
             // Signature marker dot
@@ -228,12 +260,14 @@ PDFalyzer.SignaturesTab = (function ($, P) {
 
         html += '</div>';
 
-        // Legend
+        // Legend with revision markers
         html += '<div class="sig-revision-graph-legend">';
-        html += '<span><span class="sig-legend-dot valid"></span> Signed coverage</span>';
-        html += '<span><span class="sig-legend-line"></span> Revision boundary</span>';
+        html += '<span><span class="sig-legend-dot covered"></span> Covered</span>';
         if (signedSigs.some(function (s) { return !s.sig.coversEntireFile; })) {
-            html += '<span><span class="sig-legend-dot indeterminate"></span> Partial coverage</span>';
+            html += '<span><span class="sig-legend-dot uncovered"></span> Uncovered</span>';
+        }
+        for (var rl = 0; rl < revisions.length; rl++) {
+            html += '<span class="sig-legend-revision"><span class="sig-legend-line"></span> R' + revisions[rl].revisionIndex + '</span>';
         }
         html += '</div>';
 
@@ -280,7 +314,10 @@ PDFalyzer.SignaturesTab = (function ($, P) {
 
         // Certificate chain (replaces flat cert table)
         if (sig.certificateChain && sig.certificateChain.length) {
-            html += '<div class="sig-section-title"><i class="fas fa-link me-1"></i>Certificate Chain</div>';
+            html += '<div class="sig-section-title"><i class="fas fa-link me-1"></i>Certificate Chain';
+            html += ' <button class="sig-download-pem-btn" data-field="' + P.Utils.escapeHtml(sig.fieldName) + '" data-chain-type="signer" title="Download full chain as PEM">';
+            html += '<i class="fas fa-download"></i><span class="dl-filetype">PEM</span></button>';
+            html += '</div>';
             html += buildCertificateChain(sig.certificateChain);
         } else if (sig.subjectDN || sig.issuerDN) {
             // Fallback to flat cert table if no chain available
@@ -303,6 +340,8 @@ PDFalyzer.SignaturesTab = (function ($, P) {
             if (sig.tsaSigningTime) {
                 html += ' <span class="sig-tsa-time">(' + formatTime(sig.tsaSigningTime) + ')</span>';
             }
+            html += ' <button class="sig-download-pem-btn" data-field="' + P.Utils.escapeHtml(sig.fieldName) + '" data-chain-type="tsa" title="Download TSA chain as PEM">';
+            html += '<i class="fas fa-download"></i><span class="dl-filetype">PEM</span></button>';
             html += '</div>';
             html += buildCertificateChain(sig.tsaCertificateChain);
         }
@@ -424,14 +463,17 @@ PDFalyzer.SignaturesTab = (function ($, P) {
         html += '<i class="fas fa-chevron-right sig-chain-expand-icon"></i>';
         html += roleBadge;
 
-        // Trust anchor badge
+        // Trust anchor badge or skeleton while loading
         if (entry.isTrustAnchor || entry.trustAnchor) {
             html += '<span class="sig-trust-badge trusted" title="Trusted: ' + P.Utils.escapeHtml(entry.trustListSource || '') + '">';
             html += '<i class="fas fa-shield-alt"></i> ' + P.Utils.escapeHtml(entry.trustListSource || 'Trusted') + '</span>';
+        } else if (!P.state.trustValidationResult) {
+            // Trust lists still loading — show skeleton placeholder
+            html += '<span class="sig-trust-badge skeleton" title="Checking trust lists\u2026"><i class="fas fa-shield-alt"></i> <span class="sig-skeleton-text"></span></span>';
         }
 
-        // DSS coverage badge
-        if (entry.presentInDss !== undefined) {
+        // DSS coverage badge (null when DSS not checked — only show when explicitly set)
+        if (entry.presentInDss != null) {
             if (entry.presentInDss) {
                 html += '<span class="sig-dss-badge in-dss" title="Certificate present in Document Security Store"><i class="fas fa-database"></i> DSS</span>';
             } else {
@@ -609,17 +651,15 @@ PDFalyzer.SignaturesTab = (function ($, P) {
 
         var html = '<div class="sig-byte-range-container">';
 
-        // Revision markers (if available)
-        var data = P.state.signatureData;
-        if (data && data.revisions && data.revisions.length > 1) {
-            html += '<div class="sig-byte-range-revisions">';
-            for (var r = 0; r < data.revisions.length; r++) {
-                var leftPct = (data.revisions[r].endOffset / total) * 100;
-                html += '<span class="sig-byte-range-revision-marker" style="left:' + leftPct + '%"' +
-                    ' title="Revision R' + data.revisions[r].revisionIndex + ' ends at ' + formatBytes(data.revisions[r].endOffset) + '">' +
-                    'R' + data.revisions[r].revisionIndex + '</span>';
+        // Revision boundary lines on byte range bar
+        var brRevData = P.state.signatureData;
+        if (brRevData && brRevData.revisions && brRevData.revisions.length > 1) {
+            for (var rv = 0; rv < brRevData.revisions.length; rv++) {
+                var rvLeftPct = (brRevData.revisions[rv].endOffset / total) * 100;
+                html += '<div class="sig-revision-boundary" style="left:' + rvLeftPct + '%" title="Revision R' + brRevData.revisions[rv].revisionIndex +
+                    ' ends at ' + formatBytes(brRevData.revisions[rv].endOffset) + '">' +
+                    '<span class="sig-revision-boundary-label">R' + brRevData.revisions[rv].revisionIndex + '</span></div>';
             }
-            html += '</div>';
         }
 
         html += '<div class="sig-byte-range-bar" title="Total file size: ' + formatBytes(total) + '">';
@@ -652,6 +692,13 @@ PDFalyzer.SignaturesTab = (function ($, P) {
         if (sig.coverageGaps && sig.coverageGaps.some(function (g) { return g.description && g.description.indexOf('Uncovered') >= 0; })) {
             html += '<span class="uncovered">Uncovered trailing</span>';
         }
+        var brData = P.state.signatureData;
+        if (brData && brData.revisions && brData.revisions.length > 1) {
+            for (var br = 0; br < brData.revisions.length; br++) {
+                html += '<span class="sig-byte-range-legend-rev" title="Revision R' + brData.revisions[br].revisionIndex +
+                    ' ends at ' + formatBytes(brData.revisions[br].endOffset) + '"><span class="sig-legend-line"></span> R' + brData.revisions[br].revisionIndex + '</span>';
+            }
+        }
         html += '</div>';
         html += '</div>';
         return html;
@@ -664,10 +711,14 @@ PDFalyzer.SignaturesTab = (function ($, P) {
         html += '<span class="sig-trust-status-item">';
         html += '<i class="fas fa-shield-alt me-1"></i>';
 
-        if (data.eutlStatus && data.eutlStatus.status === 'LOADED') {
-            html += '<span class="text-success">EUTL: ' + data.eutlStatus.totalTrustAnchors + ' anchors';
+        if (data.eutlStatus && (data.eutlStatus.status === 'LOADED' || data.eutlStatus.status === 'PARTIAL')) {
+            var eutlPartial = data.eutlStatus.status === 'PARTIAL';
+            html += '<span class="' + (eutlPartial ? 'text-warning' : 'text-success') + '">EUTL: ' + data.eutlStatus.totalTrustAnchors + ' anchors';
             if (data.eutlStatus.loadedCountries && data.eutlStatus.loadedCountries.length) {
                 html += ' (' + data.eutlStatus.loadedCountries.join(', ') + ')';
+            }
+            if (eutlPartial && data.eutlStatus.failedCountries && data.eutlStatus.failedCountries.length) {
+                html += ' — ' + data.eutlStatus.failedCountries.length + ' failed';
             }
             html += '</span>';
             if (data.eutlStatus.ageMinutes > 0) {
@@ -764,6 +815,24 @@ PDFalyzer.SignaturesTab = (function ($, P) {
             if (P.Viewer && P.Viewer.highlight) {
                 P.Viewer.highlight(sig.pageIndex, sig.boundingBox, { locator: true });
             }
+        });
+
+        // Certificate chain PEM download
+        $c.find('.sig-download-pem-btn').off('click').on('click', function (e) {
+            e.stopPropagation();
+            var field = $(this).data('field');
+            var chainType = $(this).data('chain-type') || 'signer';
+            var url = '/api/signatures/' + P.state.sessionId + '/' +
+                encodeURIComponent(field) + '/chain.pem?type=' + chainType;
+            window.open(url, '_blank');
+        });
+
+        // Trust countries toggle
+        $c.find('.sig-trust-countries-toggle').off('click').on('click', function () {
+            var $detail = $(this).next('.sig-trust-countries-detail');
+            $detail.slideToggle(150);
+            var $label = $(this).find('.sig-trust-countries-toggle-label');
+            $label.text($detail.is(':visible') ? 'Hide countries' : 'Show countries');
         });
 
         // Certificate chain node expansion

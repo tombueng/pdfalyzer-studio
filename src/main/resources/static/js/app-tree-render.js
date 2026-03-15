@@ -59,10 +59,11 @@ PDFalyzer.TreeRender = (function ($, P) {
         if (node.badge) {
             var badges = node.badge.split(',');
             for (var bi = 0; bi < badges.length; bi++) {
+                var isNumeric = /^\d+$/.test(badges[bi]);
                 var $badge = $('<span>', {
                     'class': 'dss-ref-badge',
                     text: badges[bi],
-                    title: 'Cross-reference #' + badges[bi]
+                    title: isNumeric ? 'DSS cross-reference #' + badges[bi] : badges[bi]
                 });
                 if (node.badgeColor) {
                     $badge.css({ 'background-color': node.badgeColor, color: '#fff' });
@@ -116,6 +117,29 @@ PDFalyzer.TreeRender = (function ($, P) {
         }
 
         return $wrapper;
+    }
+
+    // ======================== FILETYPE LABEL HELPER ========================
+
+    function microFiletype(label) {
+        return '<span class="dl-filetype">' + label + '</span>';
+    }
+
+    function guessResourceFiletype(node) {
+        if (node.nodeCategory === 'image') {
+            var filter = (node.properties && (node.properties.Filter || node.properties.filter)) || '';
+            filter = String(filter).replace(/^\//, '').toLowerCase();
+            var map = { dctdecode: 'JPG', jpxdecode: 'JPX', jbig2decode: 'JBIG2', flatedecode: 'PNG', ccittfaxdecode: 'TIFF' };
+            return map[filter] || 'IMG';
+        }
+        if (node.cosType === 'COSStream') return 'BIN';
+        return '';
+    }
+
+    function guessAttachmentFiletype(fileName) {
+        if (!fileName) return '';
+        var ext = String(fileName).match(/\.([a-z0-9]+)$/i);
+        return ext ? ext[1].toUpperCase() : '';
     }
 
     // ======================== IMAGE TOOLTIP HELPERS ========================
@@ -369,8 +393,9 @@ PDFalyzer.TreeRender = (function ($, P) {
                 });
             }
 
+            var resourceFt = guessResourceFiletype(node);
             $('<button>', { 'class': 'resource-download-btn', title: 'Download resource',
-                             html: '<i class="fas fa-download"></i>' })
+                             html: '<i class="fas fa-download"></i>' + (resourceFt ? microFiletype(resourceFt) : '') })
                 .on('click', function (e) {
                     e.stopPropagation();
                     window.open(resourceUrl + (node.keyPath ? '&inline=false' : '?inline=false'), '_blank');
@@ -398,8 +423,9 @@ PDFalyzer.TreeRender = (function ($, P) {
                     window.open(attachUrl + '?inline=true', '_blank');
                 })
                 .appendTo($header);
+            var attachFt = guessAttachmentFiletype(node.properties.FileName);
             $('<button>', { 'class': 'resource-download-btn', title: 'Download attachment',
-                             html: '<i class="fas fa-download"></i>' })
+                             html: '<i class="fas fa-download"></i>' + (attachFt ? microFiletype(attachFt) : '') })
                 .on('click', function (e) {
                     e.stopPropagation();
                     P.Resource.downloadAttachment(P.state.sessionId, node.properties.FileName);

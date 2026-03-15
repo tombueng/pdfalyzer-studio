@@ -1,6 +1,7 @@
 package io.pdfalyzer.web;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.springframework.http.ResponseEntity;
@@ -8,6 +9,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 import io.pdfalyzer.model.SignatureAnalysisResult;
@@ -116,5 +118,29 @@ public class TrustValidationApiController {
             return ResponseEntity.notFound().build();
         }
         return ResponseEntity.ok(result);
+    }
+
+    /**
+     * Diagnostic endpoint: list loaded EUTL trust anchors, optionally filtered by keyword.
+     * Example: GET /api/trust/anchors?filter=d-trust
+     */
+    @GetMapping("/anchors")
+    public ResponseEntity<Map<String, Object>> listAnchors(
+            @RequestParam(required = false, defaultValue = "") String filter) {
+        Map<String, Object> response = new HashMap<>();
+        List<Map<String, String>> anchors = trustListService.listEutlAnchors(filter);
+        response.put("totalLoaded", trustListService.listEutlAnchors(null).size());
+        response.put("matchCount", anchors.size());
+        response.put("filter", filter);
+        response.put("anchors", anchors);
+        return ResponseEntity.ok(response);
+    }
+
+    /**
+     * Diagnostic endpoint: show LOTL country→TSL URL map.
+     */
+    @GetMapping("/lotl-countries")
+    public ResponseEntity<Map<String, String>> lotlCountries() {
+        return ResponseEntity.ok(trustListService.getLotlCountries());
     }
 }

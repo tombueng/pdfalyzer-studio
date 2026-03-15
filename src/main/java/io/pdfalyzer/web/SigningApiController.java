@@ -199,6 +199,7 @@ public class SigningApiController {
 
     @GetMapping("/tsa/servers")
     public ResponseEntity<List<TsaServer>> listTsaServers() {
+        tsaProbeService.probeAllIfNotStarted();
         return ResponseEntity.ok(tsaProbeService.getAllWithStatus());
     }
 

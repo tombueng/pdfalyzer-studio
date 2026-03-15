@@ -8,7 +8,12 @@ import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.cos.COSName;
 import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.interactive.digitalsignature.PDSignature;
 import org.apache.pdfbox.pdmodel.interactive.form.PDAcroForm;
+import org.apache.pdfbox.pdmodel.interactive.form.PDField;
+import org.apache.pdfbox.pdmodel.interactive.form.PDSignatureField;
+import org.bouncycastle.cms.CMSSignedData;
+import org.bouncycastle.cms.SignerInformation;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.ContentDisposition;
@@ -55,6 +60,7 @@ public class ApiController {
     private final FieldSchemaService fieldSchemaService;
     private final SignatureAnalysisService signatureAnalysisService;
     private final DssValidationService dssValidationService;
+    private final CertificateChainBuilder certificateChainBuilder;
 
     public ApiController(PdfService pdfService,
                          FontInspectorService fontInspectorService,
@@ -63,7 +69,8 @@ public class ApiController {
                          VeraPdfService veraPdfService,
                          FieldSchemaService fieldSchemaService,
                          SignatureAnalysisService signatureAnalysisService,
-                         DssValidationService dssValidationService) {
+                         DssValidationService dssValidationService,
+                         CertificateChainBuilder certificateChainBuilder) {
         this.pdfService = pdfService;
         this.fontInspectorService = fontInspectorService;
         this.validationService = validationService;
@@ -72,6 +79,7 @@ public class ApiController {
         this.fieldSchemaService = fieldSchemaService;
         this.signatureAnalysisService = signatureAnalysisService;
         this.dssValidationService = dssValidationService;
+        this.certificateChainBuilder = certificateChainBuilder;
     }
 
     @GetMapping("/fields/schema")
@@ -359,6 +367,73 @@ public class ApiController {
             @PathVariable("sessionId") String sessionId) throws IOException {
         return ResponseEntity.ok(signatureAnalysisService.analyzeSignatures(
                 pdfService.getSessionPdfBytes(sessionId)));
+    }
+
+    @GetMapping("/signatures/{sessionId}/{fieldName}/chain.pem")
+    public ResponseEntity<byte[]> downloadCertificateChainPem(
+            @PathVariable("sessionId") String sessionId,
+            @PathVariable("fieldName") String fieldName,
+            @RequestParam(value = "type", defaultValue = "signer") String chainType) throws IOException {
+        byte[] pdfBytes = pdfService.getSessionPdfBytes(sessionId);
+
+        try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
+            PDAcroForm acroForm = doc.getDocumentCatalog().getAcroForm();
+            if (acroForm == null) {
+                return ResponseEntity.notFound().build();
+            }
+
+            PDSignatureField sigField = null;
+            for (PDField field : acroForm.getFieldTree()) {
+                if (field instanceof PDSignatureField sf &&
+                        fieldName.equals(sf.getPartialName())) {
+                    sigField = sf;
+                    break;
+                }
+            }
+            if (sigField == null || sigField.getSignature() == null) {
+                return ResponseEntity.notFound().build();
+            }
+
+            PDSignature sig = sigField.getSignature();
+            byte[] contents = sig.getContents(pdfBytes);
+            if (contents == null || contents.length == 0) {
+                return ResponseEntity.notFound().build();
+            }
+
+            CMSSignedData cmsData = new CMSSignedData(contents);
+            SignerInformation signer = cmsData.getSignerInfos().getSigners().iterator().next();
+
+            List<java.security.cert.X509Certificate> rawChain;
+            String filenamePrefix;
+
+            if ("tsa".equals(chainType)) {
+                CertificateChainBuilder.TsaChainResult tsaResult =
+                        certificateChainBuilder.extractTsaChain(cmsData, signer);
+                if (!tsaResult.hasTsa()) {
+                    return ResponseEntity.notFound().build();
+                }
+                rawChain = tsaResult.rawCerts();
+                filenamePrefix = fieldName + "-tsa-chain";
+            } else {
+                rawChain = certificateChainBuilder.extractRawChainFromCms(cmsData, signer);
+                filenamePrefix = fieldName + "-chain";
+            }
+
+            if (rawChain.isEmpty()) {
+                return ResponseEntity.notFound().build();
+            }
+
+            String pem = certificateChainBuilder.formatChainAsPem(rawChain);
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.parseMediaType("application/x-pem-file"));
+            headers.setContentDisposition(ContentDisposition.attachment()
+                    .filename(filenamePrefix + ".pem").build());
+            return ResponseEntity.ok().headers(headers).body(pem.getBytes(StandardCharsets.UTF_8));
+
+        } catch (Exception e) {
+            log.debug("Error exporting certificate chain PEM for field {}: {}", fieldName, e.getMessage());
+            return ResponseEntity.internalServerError().build();
+        }
     }
 
     @GetMapping("/validate/{sessionId}")

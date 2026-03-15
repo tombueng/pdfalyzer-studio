@@ -20,6 +20,7 @@ public class SignatureAnalysisResult {
     private int invalidCount;
     private int indeterminateCount;
     private boolean hasCertificationSignature;
+    private boolean hasDss;
     @Builder.Default
     private List<SignatureInfo> signatures = new ArrayList<>();
 

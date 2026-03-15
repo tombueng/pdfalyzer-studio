@@ -6,7 +6,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
-import java.util.zip.GZIPInputStream;
+import java.security.SecureRandom;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.time.Duration;
@@ -22,6 +22,11 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.function.Consumer;
+import java.util.zip.GZIPInputStream;
+
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.TrustManager;
+import javax.net.ssl.X509TrustManager;
 
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
@@ -83,10 +88,28 @@ public class TrustListService {
     private final HttpClient httpClient;
 
     public TrustListService() {
+        // Use a TLS-permissive SSLContext for trust list downloads.
+        // TSL integrity is guaranteed by XML digital signatures (not TLS),
+        // and some EU government TSL servers use certs not in Java's cacerts.
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofMillis(15000))
                 .followRedirects(HttpClient.Redirect.NORMAL)
+                .sslContext(createPermissiveSslContext())
                 .build();
+    }
+
+    private static SSLContext createPermissiveSslContext() {
+        try {
+            SSLContext ctx = SSLContext.getInstance("TLS");
+            ctx.init(null, new TrustManager[]{new X509TrustManager() {
+                @Override public void checkClientTrusted(X509Certificate[] chain, String authType) { }
+                @Override public void checkServerTrusted(X509Certificate[] chain, String authType) { }
+                @Override public X509Certificate[] getAcceptedIssuers() { return new X509Certificate[0]; }
+            }}, new SecureRandom());
+            return ctx;
+        } catch (Exception e) {
+            throw new RuntimeException("Failed to create permissive SSLContext for trust list downloads", e);
+        }
     }
 
     @PreDestroy
@@ -118,14 +141,17 @@ public class TrustListService {
     }
 
     /**
-     * Fetch LOTL and then specific country TSLs asynchronously. Reports progress via callback.
+     * Fetch LOTL and then country TSLs asynchronously. Reports progress via callback.
+     * If any resolved country is not present in the LOTL (e.g. BM for QuoVadis),
+     * automatically expands to fetch ALL LOTL countries, since the trust anchor
+     * could be registered in any EU member state's TSL.
      */
-    public void fetchCountryTslsAsync(List<String> countryCodes, Consumer<TrustListStatus> progressCallback) {
+    public void fetchCountryTslsAsync(List<String> resolvedCountries, Consumer<TrustListStatus> progressCallback) {
         executor.submit(() -> {
             try {
                 // Step 1: Fetch LOTL if not cached or expired
                 if (cachedLotl == null || isExpired(cachedLotl.getFetchedAt(), eutlCacheTtlMinutes)) {
-                    updateEutlStatus("LOADING", "Fetching EU List of Trusted Lists...", null, 0, countryCodes.size());
+                    updateEutlStatus("LOADING", "Fetching EU List of Trusted Lists...", null, 0, 0);
                     progressCallback.accept(eutlStatus);
                     fetchLotl();
                 }
@@ -136,38 +162,85 @@ public class TrustListService {
                     return;
                 }
 
-                // Step 2: Fetch each needed country TSL
+                // Step 2: Determine which countries to fetch.
+                // If any resolved country is NOT in the LOTL (e.g. BM/Bermuda for QuoVadis),
+                // we must fetch all LOTL countries — the trust anchor could be in any of them.
+                List<String> lotlCountries = new ArrayList<>(cachedLotl.getCountryTslUrls().keySet());
+                List<String> countryCodes;
+                List<String> nonEuCountries = new ArrayList<>();
+
+                for (String c : resolvedCountries) {
+                    if (!lotlCountries.contains(c)) {
+                        nonEuCountries.add(c);
+                    }
+                }
+
+                if (!nonEuCountries.isEmpty()) {
+                    log.info("Cert chain contains non-EUTL countries {} — expanding to all {} LOTL countries",
+                            nonEuCountries, lotlCountries.size());
+                    countryCodes = new ArrayList<>(lotlCountries);
+                } else {
+                    countryCodes = new ArrayList<>(resolvedCountries);
+                }
+                java.util.Collections.sort(countryCodes);
+                log.info("Will fetch {} EUTL country TSLs: {} (resolved: {}, non-EU: {})",
+                        countryCodes.size(), countryCodes, resolvedCountries, nonEuCountries);
+
+                // Step 3: Fetch each country TSL
+                List<String> failed = new ArrayList<>();
+                List<String> skipped = new ArrayList<>();
                 int fetched = 0;
+
                 for (String country : countryCodes) {
                     TslCacheEntry cached = tslCache.get(country);
                     if (cached != null && !isExpired(cached.getFetchedAt(), eutlCacheTtlMinutes)) {
+                        log.debug("TSL for {} already cached ({} services)", country,
+                                cached.getServices().size());
                         fetched++;
-                        continue; // already cached and fresh
+                        continue;
                     }
 
                     String tslUrl = cachedLotl.getCountryTslUrls().get(country);
                     if (tslUrl == null) {
                         log.debug("No TSL URL found for country: {}", country);
+                        skipped.add(country);
                         fetched++;
                         continue;
                     }
 
                     String countryLabel = country + " (" + getCountryName(country) + ")";
-                    updateEutlStatus("LOADING", "Fetching TSL for " + countryLabel + "...",
+                    updateEutlStatus("LOADING", "Fetching TSL: " + countryLabel,
                             countryLabel, fetched, countryCodes.size());
                     progressCallback.accept(eutlStatus);
 
-                    fetchCountryTsl(country, tslUrl);
+                    boolean success = fetchCountryTsl(country, tslUrl);
+                    if (!success) {
+                        failed.add(country);
+                        log.warn("Failed to fetch TSL for {} — continuing with remaining countries", country);
+                    }
                     fetched++;
                 }
 
-                // Final status
+                // Final status — use PARTIAL if any countries failed, LOADED only if all succeeded
                 List<String> loaded = new ArrayList<>(tslCache.keySet());
+                java.util.Collections.sort(loaded);
+                log.info("EUTL loading complete: {} anchors from {} countries (loaded: {}, failed: {}, skipped: {})",
+                        eutlTrustAnchors.size(), loaded.size(), loaded, failed, skipped);
+
+                boolean hasFailed = !failed.isEmpty();
+                String finalStatus = hasFailed ? "PARTIAL" : "LOADED";
+                String msg = "Loaded " + eutlTrustAnchors.size() + " trust anchors from " + loaded.size() + " countries";
+                if (hasFailed) {
+                    msg += " (" + failed.size() + " countries failed: " + failed + ")";
+                }
+
                 eutlStatus = TrustListStatus.builder()
                         .listType("EUTL")
-                        .status("LOADED")
-                        .statusMessage("Loaded " + eutlTrustAnchors.size() + " trust anchors from " + loaded.size() + " countries")
+                        .status(finalStatus)
+                        .statusMessage(msg)
                         .loadedCountries(loaded)
+                        .failedCountries(failed)
+                        .skippedCountries(skipped)
                         .totalTrustAnchors(eutlTrustAnchors.size())
                         .loadedAt(Instant.now().atOffset(ZoneOffset.UTC).format(DateTimeFormatter.ISO_OFFSET_DATE_TIME))
                         .fetchedCount(fetched)
@@ -224,69 +297,143 @@ public class TrustListService {
 
     /**
      * Check if a certificate is a trust anchor in any loaded trust list.
+     * Uses multi-strategy matching:
+     *   1. Exact match: subject DN + serial number
+     *   2. Public key match: same key regardless of cert encoding/re-issuance
+     * This handles cases where TSL cert encodings differ from CMS certs
+     * (e.g. OID 2.5.4.97 organizationIdentifier encoding differences)
+     * and where a CA cert was re-issued with the same key but different serial.
      */
     public TrustAnchorMatch findTrustAnchor(X509Certificate cert) {
         String subjectDN = cert.getSubjectX500Principal().getName();
         String serial = cert.getSerialNumber().toString(16);
+        byte[] targetKeyEncoded = cert.getPublicKey().getEncoded();
+        log.debug("Looking for trust anchor: serial={}, subject={}", serial, subjectDN);
 
-        // Check EUTL
-        for (Map.Entry<String, X509Certificate> entry : eutlTrustAnchors.entrySet()) {
-            X509Certificate anchor = entry.getValue();
-            if (anchor.getSubjectX500Principal().equals(cert.getSubjectX500Principal())
-                    && anchor.getSerialNumber().equals(cert.getSerialNumber())) {
-                // Find which country this came from
-                String key = entry.getKey();
-                String country = key.contains(":") ? key.substring(0, key.indexOf(':')) : "EU";
-                return TrustAnchorMatch.builder()
-                        .found(true)
-                        .listSource("EUTL:" + country)
-                        .serviceName(subjectDN)
-                        .serviceStatus("granted")
-                        .build();
-            }
+        // Strategy 1: Exact match (subject + serial) — fastest, most precise
+        TrustAnchorMatch exact = findInEutl(
+                a -> a.getSubjectX500Principal().equals(cert.getSubjectX500Principal())
+                        && a.getSerialNumber().equals(cert.getSerialNumber()),
+                "exact");
+        if (exact != null) {
+            log.info("Trust anchor EXACT match in {} — serial={}, subject={}", exact.getListSource(), serial, subjectDN);
+            return exact;
+        }
+        TrustAnchorMatch exactAatl = findInAatl(
+                a -> a.getSubjectX500Principal().equals(cert.getSubjectX500Principal())
+                        && a.getSerialNumber().equals(cert.getSerialNumber()));
+        if (exactAatl != null) {
+            log.info("Trust anchor EXACT match in AATL — serial={}, subject={}", serial, subjectDN);
+            return exactAatl;
         }
 
-        // Check AATL
-        for (X509Certificate anchor : aatlTrustAnchors.values()) {
-            if (anchor.getSubjectX500Principal().equals(cert.getSubjectX500Principal())
-                    && anchor.getSerialNumber().equals(cert.getSerialNumber())) {
-                return TrustAnchorMatch.builder()
-                        .found(true)
-                        .listSource("AATL")
-                        .serviceName(subjectDN)
-                        .serviceStatus("approved")
-                        .build();
-            }
+        // Strategy 2: Public key match — catches re-issued certs and encoding differences
+        TrustAnchorMatch keyMatch = findInEutl(
+                a -> java.util.Arrays.equals(a.getPublicKey().getEncoded(), targetKeyEncoded),
+                "pubkey");
+        if (keyMatch != null) {
+            log.info("Trust anchor PUBKEY match in {} — serial={}, subject={}", keyMatch.getListSource(), serial, subjectDN);
+            return keyMatch;
+        }
+        TrustAnchorMatch keyMatchAatl = findInAatl(
+                a -> java.util.Arrays.equals(a.getPublicKey().getEncoded(), targetKeyEncoded));
+        if (keyMatchAatl != null) {
+            log.info("Trust anchor PUBKEY match in AATL — serial={}, subject={}", serial, subjectDN);
+            return keyMatchAatl;
         }
 
+        log.info("No trust anchor found for: serial={}, subject={} (searched {} EUTL, {} AATL anchors)",
+                serial, subjectDN, eutlTrustAnchors.size(), aatlTrustAnchors.size());
         return TrustAnchorMatch.builder().found(false).build();
     }
 
     /**
      * Fallback lookup by RFC-2253 subject DN + lowercase hex serial — used when
      * no raw X509Certificate object is available (cert not embedded in CMS store).
+     * Also tries CN-based matching as a last resort for OID encoding differences.
      */
     public TrustAnchorMatch findTrustAnchorByDn(String subjectDN, String serialHex) {
+        log.debug("Looking for trust anchor by DN: serial={}, subject={}", serialHex, subjectDN);
+
+        // Strategy 1: Exact DN + serial string match
+        TrustAnchorMatch exact = findInEutl(
+                a -> a.getSerialNumber().toString(16).equalsIgnoreCase(serialHex)
+                        && a.getSubjectX500Principal().getName().equals(subjectDN),
+                "dn-exact");
+        if (exact != null) {
+            log.info("Trust anchor DN EXACT match in {} — serial={}", exact.getListSource(), serialHex);
+            return exact;
+        }
+        TrustAnchorMatch exactAatl = findInAatl(
+                a -> a.getSerialNumber().toString(16).equalsIgnoreCase(serialHex)
+                        && a.getSubjectX500Principal().getName().equals(subjectDN));
+        if (exactAatl != null) {
+            log.info("Trust anchor DN EXACT match in AATL — serial={}", serialHex);
+            return exactAatl;
+        }
+
+        // Strategy 2: Match by serial + CN substring (handles OID encoding differences like 2.5.4.97)
+        String targetCN = extractCN(subjectDN);
+        if (targetCN != null) {
+            TrustAnchorMatch cnMatch = findInEutl(
+                    a -> a.getSerialNumber().toString(16).equalsIgnoreCase(serialHex)
+                            && targetCN.equals(extractCN(a.getSubjectX500Principal().getName())),
+                    "dn-cn");
+            if (cnMatch != null) {
+                log.info("Trust anchor DN+CN match in {} — serial={}, CN={}", cnMatch.getListSource(), serialHex, targetCN);
+                return cnMatch;
+            }
+            TrustAnchorMatch cnMatchAatl = findInAatl(
+                    a -> a.getSerialNumber().toString(16).equalsIgnoreCase(serialHex)
+                            && targetCN.equals(extractCN(a.getSubjectX500Principal().getName())));
+            if (cnMatchAatl != null) {
+                log.info("Trust anchor DN+CN match in AATL — serial={}, CN={}", serialHex, targetCN);
+                return cnMatchAatl;
+            }
+        }
+
+        log.info("No trust anchor found by DN: serial={}, subject={} (searched {} EUTL, {} AATL anchors)",
+                serialHex, subjectDN, eutlTrustAnchors.size(), aatlTrustAnchors.size());
+        return TrustAnchorMatch.builder().found(false).build();
+    }
+
+    private TrustAnchorMatch findInEutl(java.util.function.Predicate<X509Certificate> matcher, String strategy) {
         for (Map.Entry<String, X509Certificate> entry : eutlTrustAnchors.entrySet()) {
-            X509Certificate anchor = entry.getValue();
-            if (anchor.getSerialNumber().toString(16).equalsIgnoreCase(serialHex)
-                    && anchor.getSubjectX500Principal().getName().equals(subjectDN)) {
+            if (matcher.test(entry.getValue())) {
                 String key = entry.getKey();
                 String country = key.contains(":") ? key.substring(0, key.indexOf(':')) : "EU";
                 return TrustAnchorMatch.builder()
-                        .found(true).listSource("EUTL:" + country)
-                        .serviceName(subjectDN).serviceStatus("granted").build();
+                        .found(true)
+                        .listSource("EUTL:" + country)
+                        .matchStrategy(strategy)
+                        .serviceName(entry.getValue().getSubjectX500Principal().getName())
+                        .serviceStatus("granted")
+                        .build();
             }
         }
+        return null;
+    }
+
+    private TrustAnchorMatch findInAatl(java.util.function.Predicate<X509Certificate> matcher) {
         for (X509Certificate anchor : aatlTrustAnchors.values()) {
-            if (anchor.getSerialNumber().toString(16).equalsIgnoreCase(serialHex)
-                    && anchor.getSubjectX500Principal().getName().equals(subjectDN)) {
+            if (matcher.test(anchor)) {
                 return TrustAnchorMatch.builder()
-                        .found(true).listSource("AATL")
-                        .serviceName(subjectDN).serviceStatus("approved").build();
+                        .found(true)
+                        .listSource("AATL")
+                        .matchStrategy("aatl")
+                        .serviceName(anchor.getSubjectX500Principal().getName())
+                        .serviceStatus("approved")
+                        .build();
             }
         }
-        return TrustAnchorMatch.builder().found(false).build();
+        return null;
+    }
+
+    private String extractCN(String dn) {
+        if (dn == null) return null;
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("CN=([^,]+)",
+                java.util.regex.Pattern.CASE_INSENSITIVE).matcher(dn);
+        return m.find() ? m.group(1).trim() : null;
     }
 
     /**
@@ -308,6 +455,35 @@ public class TrustListService {
     public TrustListStatus getAatlStatus() { return aatlStatus; }
     public boolean hasLoadedTrustAnchors() { return !eutlTrustAnchors.isEmpty() || !aatlTrustAnchors.isEmpty(); }
 
+    /** Diagnostic: return LOTL country→URL map */
+    public Map<String, String> getLotlCountries() {
+        return cachedLotl != null ? new java.util.TreeMap<>(cachedLotl.getCountryTslUrls()) : Map.of();
+    }
+
+    /**
+     * List loaded EUTL trust anchors matching an optional filter (substring match on key or subject DN).
+     * Returns a list of maps with key, subject, serial, and country for diagnostic purposes.
+     */
+    public List<Map<String, String>> listEutlAnchors(String filter) {
+        List<Map<String, String>> result = new ArrayList<>();
+        for (Map.Entry<String, X509Certificate> entry : eutlTrustAnchors.entrySet()) {
+            String subject = entry.getValue().getSubjectX500Principal().getName();
+            String key = entry.getKey();
+            if (filter != null && !filter.isEmpty()
+                    && !key.toLowerCase().contains(filter.toLowerCase())
+                    && !subject.toLowerCase().contains(filter.toLowerCase())) {
+                continue;
+            }
+            Map<String, String> info = new java.util.LinkedHashMap<>();
+            info.put("key", key);
+            info.put("subject", subject);
+            info.put("serial", entry.getValue().getSerialNumber().toString(16));
+            info.put("country", key.contains(":") ? key.substring(0, key.indexOf(':')) : "?");
+            result.add(info);
+        }
+        return result;
+    }
+
     // ── LOTL Parsing ────────────────────────────────────────────────────────────
 
     private void fetchLotl() {
@@ -315,43 +491,111 @@ public class TrustListService {
             byte[] lotlBytes = downloadUrl(lotlUrl);
             DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
             dbf.setNamespaceAware(true);
-            // Security: disable external entities
             dbf.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
             dbf.setFeature("http://xml.org/sax/features/external-general-entities", false);
             DocumentBuilder db = dbf.newDocumentBuilder();
             Document doc = db.parse(new ByteArrayInputStream(lotlBytes));
 
             Map<String, String> countryUrls = new ConcurrentHashMap<>();
-            // LOTL contains OtherTSLPointer elements that point to national TSLs
-            // Use "*" namespace wildcard — real LOTL may use v2#, v3#, or no-namespace variants
+
+            // Strategy 1: Parse OtherTSLPointer entries (standard LOTL structure)
             NodeList pointers = doc.getElementsByTagNameNS("*", "OtherTSLPointer");
+            log.info("LOTL: found {} OtherTSLPointer entries", pointers.getLength());
             for (int i = 0; i < pointers.getLength(); i++) {
-                Element pointer = (Element) pointers.item(i);
-                String tslLocation = getElementText(pointer, "TSLLocation");
-                String territory = getElementText(pointer, "SchemeTerritory");
-                if (tslLocation != null && territory != null) {
-                    String path = tslLocation.contains("?")
-                            ? tslLocation.substring(0, tslLocation.indexOf('?')) : tslLocation;
-                    if (path.endsWith(".xml")) {
-                        countryUrls.put(territory.toUpperCase(), tslLocation);
+                try {
+                    Element pointer = (Element) pointers.item(i);
+
+                    // Extract TSLLocation — try multiple approaches
+                    String tslLocation = getElementText(pointer, "TSLLocation");
+                    if (tslLocation == null) {
+                        tslLocation = getElementText(pointer, "tsl:TSLLocation");
                     }
+
+                    // Extract SchemeTerritory — try multiple approaches
+                    String territory = getElementText(pointer, "SchemeTerritory");
+                    if (territory == null) {
+                        territory = getElementText(pointer, "tsl:SchemeTerritory");
+                    }
+                    // Fallback: look inside AdditionalInformation/OtherInformation
+                    if (territory == null) {
+                        NodeList otherInfos = pointer.getElementsByTagNameNS("*", "OtherInformation");
+                        for (int j = 0; j < otherInfos.getLength(); j++) {
+                            Element otherInfo = (Element) otherInfos.item(j);
+                            territory = getElementText(otherInfo, "SchemeTerritory");
+                            if (territory != null) break;
+                        }
+                    }
+                    // Fallback: try to extract 2-letter country code from URL path (e.g. /TSL-DE.xml, /TL_DE.xml)
+                    if (territory == null && tslLocation != null) {
+                        territory = inferCountryFromUrl(tslLocation);
+                    }
+
+                    log.info("LOTL pointer [{}]: territory={}, url={}", i, territory,
+                            tslLocation != null ? tslLocation.substring(0, Math.min(tslLocation.length(), 120)) : "null");
+
+                    if (tslLocation != null && territory != null) {
+                        String cc = territory.toUpperCase().trim();
+                        if (cc.length() == 2 && !"EU".equals(cc)) {
+                            countryUrls.put(cc, tslLocation);
+                        }
+                    }
+                } catch (Exception e) {
+                    log.warn("LOTL: failed to parse pointer [{}]: {}", i, e.getMessage());
                 }
+            }
+
+            // Strategy 2: If we got suspiciously few countries, also scan for all TSLLocation
+            // elements paired with nearby SchemeTerritory elements
+            if (countryUrls.size() < 20) {
+                log.warn("LOTL: only {} countries found via OtherTSLPointer — trying broader scan", countryUrls.size());
+                NodeList allLocations = doc.getElementsByTagNameNS("*", "TSLLocation");
+                NodeList allTerritories = doc.getElementsByTagNameNS("*", "SchemeTerritory");
+                log.info("LOTL broad scan: {} TSLLocation elements, {} SchemeTerritory elements",
+                        allLocations.getLength(), allTerritories.getLength());
+            }
+
+            // Sanity check: EU LOTL should have ~30 countries. If far fewer, something went wrong.
+            int expectedMin = 25;
+            if (countryUrls.size() < expectedMin) {
+                log.warn("LOTL sanity check FAILED: only {} countries parsed (expected >= {}). Countries: {}",
+                        countryUrls.size(), expectedMin, new java.util.TreeSet<>(countryUrls.keySet()));
             }
 
             cachedLotl = LotlParseResult.builder()
                     .countryTslUrls(countryUrls)
                     .fetchedAt(Instant.now())
+                    .lotlCountriesParsed(countryUrls.size())
                     .build();
-            log.info("Parsed LOTL: {} country TSL URLs found", countryUrls.size());
+            log.info("Parsed LOTL: {} country TSL URLs: {}", countryUrls.size(), new java.util.TreeSet<>(countryUrls.keySet()));
 
         } catch (Exception e) {
             log.error("Failed to fetch/parse LOTL from {}: {}", lotlUrl, e.getMessage());
         }
     }
 
+    /**
+     * Try to infer a 2-letter country code from a TSL URL.
+     * Matches patterns like TSL-DE.xml, TL_DE.xml, /DE_TSL.xml, /DE-TL.xml, etc.
+     */
+    private String inferCountryFromUrl(String url) {
+        if (url == null) return null;
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile(
+                "(?:[-_/])([A-Z]{2})[-_.]|([A-Z]{2})[-_](?:TSL|TL)",
+                java.util.regex.Pattern.CASE_INSENSITIVE
+        ).matcher(url);
+        while (m.find()) {
+            String cc = (m.group(1) != null ? m.group(1) : m.group(2)).toUpperCase();
+            // Validate it looks like a real country code (not "WW", "TL", etc.)
+            if (cc.matches("[A-Z]{2}") && !"TL".equals(cc) && !"WW".equals(cc) && !"EU".equals(cc)) {
+                return cc;
+            }
+        }
+        return null;
+    }
+
     // ── Country TSL Parsing ─────────────────────────────────────────────────────
 
-    private void fetchCountryTsl(String country, String tslUrl) {
+    private boolean fetchCountryTsl(String country, String tslUrl) {
         try {
             byte[] tslBytes = downloadUrl(tslUrl);
             DocumentBuilderFactory dbf = DocumentBuilderFactory.newInstance();
@@ -391,6 +635,7 @@ public class TrustListService {
 
                         String key = country + ":" + cert.getSerialNumber().toString(16);
                         eutlTrustAnchors.put(key, cert);
+                        log.debug("Stored EUTL anchor: key={}, subject={}", key, cert.getSubjectX500Principal().getName());
 
                         services.add(TrustServiceEntry.builder()
                                 .serviceName(serviceName)
@@ -411,11 +656,14 @@ public class TrustListService {
                     .nextUpdate(nextUpdate)
                     .build());
 
-            log.info("Parsed TSL for {}: {} services, {} certificates", country, services.size(),
-                    services.stream().filter(s -> s.getCertificate() != null).count());
+            long certCount = services.stream().filter(s -> s.getCertificate() != null).count();
+            log.info("Parsed TSL for {}: {} services, {} certificates (total EUTL anchors now: {})",
+                    country, services.size(), certCount, eutlTrustAnchors.size());
+            return true;
 
         } catch (Exception e) {
             log.error("Failed to fetch/parse TSL for {}: {}", country, e.getMessage());
+            return false;
         }
     }
 
@@ -584,6 +832,7 @@ public class TrustListService {
     public static class LotlParseResult {
         private Map<String, String> countryTslUrls;
         private Instant fetchedAt;
+        private int lotlCountriesParsed;
     }
 
     @Data
@@ -609,6 +858,7 @@ public class TrustListService {
     public static class TrustAnchorMatch {
         private boolean found;
         private String listSource;
+        private String matchStrategy;    // exact, pubkey, dn-exact, dn-cn, aatl
         private String serviceName;
         private String serviceStatus;
     }

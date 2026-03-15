@@ -217,6 +217,38 @@
 .resource-delete-btn { color: var(--danger) !important; }
 .resource-delete-btn:hover { color: #ff4d4d !important; }
 
+/* Micro filetype label next to download buttons */
+.dl-filetype {
+    font-size: 8px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    opacity: 0.7;
+    margin-left: 2px;
+    vertical-align: middle;
+}
+
+.sig-download-pem-btn {
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--text-muted);
+    opacity: 0.85;
+    font-size: 11px;
+    padding: 2px 4px;
+    line-height: 1;
+    border-radius: 3px;
+    transition: opacity 0.2s, color 0.2s, background 0.2s;
+    margin-left: 6px;
+    vertical-align: middle;
+}
+
+.sig-download-pem-btn:hover {
+    opacity: 1;
+    color: var(--accent);
+    background: rgba(255, 255, 255, 0.05);
+}
+
 /* === COS Inline Editor === */
 .cos-inline-editor,
 .cos-add-editor {
