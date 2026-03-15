@@ -147,26 +147,86 @@
     margin: 2px 0 4px 38px;
     font-size: 11px;
     background: rgba(0,0,0,0.2);
-    border-radius: 4px;
+    border-radius: 6px;
     padding: 6px 10px;
     border-left: 2px solid var(--accent);
+}
+
+/* Collapsible header */
+.node-props-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    padding-bottom: 4px;
+    border-bottom: 1px solid rgba(255,255,255,0.06);
+    margin-bottom: 4px;
+    user-select: none;
+}
+
+.node-props-header:hover {
+    color: var(--accent);
+}
+
+.node-props-toggle-icon {
+    font-size: 9px;
+    width: 12px;
+    color: var(--text-muted);
+    transition: color 0.15s;
+}
+
+.node-props-header:hover .node-props-toggle-icon {
+    color: var(--accent);
+}
+
+.node-props-title {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+}
+
+/* Property group titles */
+.prop-group-title {
+    font-size: 9px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--accent);
+    margin: 6px 0 2px;
+    opacity: 0.8;
+}
+
+.prop-group-title:first-child {
+    margin-top: 0;
+}
+
+/* Multi-column responsive grid */
+.prop-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 1px 16px;
 }
 
 .node-properties .prop-row {
     display: flex;
     gap: 8px;
     padding: 1px 0;
+    min-width: 0;
 }
 
 .node-properties .prop-key {
     color: var(--accent);
-    min-width: 80px;
+    min-width: 70px;
     flex-shrink: 0;
+    white-space: nowrap;
 }
 
 .node-properties .prop-val {
     color: var(--text);
     word-break: break-all;
+    min-width: 0;
 }
 
 /* === Validation Results === */

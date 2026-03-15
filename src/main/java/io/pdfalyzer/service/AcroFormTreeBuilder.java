@@ -253,7 +253,7 @@ public class AcroFormTreeBuilder {
             node.addProperty("JavaScript", jsValidation);
         }
         // For signature fields: extract signer cert serial and apply DSS badge
-        if (field instanceof PDSignatureField sigField && serialToBadge != null && !serialToBadge.isEmpty()) {
+        if (field instanceof PDSignatureField sigField) {
             applySignatureBadge(sigField, node, ctx, serialToBadge);
         }
 
@@ -612,19 +612,27 @@ public class AcroFormTreeBuilder {
             log.debug("Signature field {} signer cert serial={}, serialToBadge keys={}",
                     sigField.getFullyQualifiedName(), serial, serialToBadge.keySet());
 
-            // Look up the badge assigned during DSS tree building
-            String badge = serialToBadge.get(serial);
-            if (badge != null) {
-                node.setBadge(badge);
-                try {
-                    int idx = (Integer.parseInt(badge) - 1) % BADGE_COLORS.length;
-                    node.setBadgeColor(BADGE_COLORS[idx]);
-                } catch (NumberFormatException e) {
-                    node.setBadgeColor(BADGE_COLORS[0]);
-                }
-                log.debug("Applied badge {} to signature field {}", badge, sigField.getFullyQualifiedName());
+            if (serialToBadge == null) {
+                // No DSS in document at all
+                node.setBadge("No DSS");
+                node.setBadgeColor("#6c757d");
+                log.debug("No DSS in document — applied 'No DSS' badge to signature field {}",
+                        sigField.getFullyQualifiedName());
             } else {
-                log.debug("No badge match for serial {} in serialToBadge map", serial);
+                // Look up the badge assigned during DSS tree building
+                String badge = serialToBadge.get(serial);
+                if (badge != null) {
+                    node.setBadge(badge);
+                    try {
+                        int idx = (Integer.parseInt(badge) - 1) % BADGE_COLORS.length;
+                        node.setBadgeColor(BADGE_COLORS[idx]);
+                    } catch (NumberFormatException e) {
+                        node.setBadgeColor(BADGE_COLORS[0]);
+                    }
+                    log.debug("Applied badge {} to signature field {}", badge, sigField.getFullyQualifiedName());
+                } else {
+                    log.debug("No badge match for serial {} in serialToBadge map", serial);
+                }
             }
         } catch (Exception e) {
             log.debug("Could not extract signer cert from signature field {}: {}",

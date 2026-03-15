@@ -25,6 +25,8 @@
 .sig-summary-badge.indeterminate { background: rgba(255, 193, 7, 0.2); color: #ffc107; }
 .sig-summary-badge.unsigned { background: rgba(108, 117, 125, 0.2); color: #c8cdd2; }
 .sig-summary-badge.total   { background: rgba(13, 202, 240, 0.15); color: #0dcaf0; }
+.sig-summary-badge.dss-present { background: rgba(25, 135, 84, 0.2); color: #28a745; }
+.sig-summary-badge.dss-absent  { background: rgba(204, 163, 0, 0.2); color: #cca300; }
 
 /* ── Signature cards ───────────────────────────────────────────────── */
 
@@ -269,6 +271,28 @@
     color: #28a745;
 }
 
+.sig-trust-badge.skeleton {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-muted);
+    min-width: 60px;
+}
+
+.sig-skeleton-text {
+    display: inline-block;
+    width: 40px;
+    height: 10px;
+    background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.1) 50%, rgba(255,255,255,0.04) 75%);
+    background-size: 200% 100%;
+    animation: sig-skeleton-shimmer 1.5s ease infinite;
+    border-radius: 2px;
+    vertical-align: middle;
+}
+
+@keyframes sig-skeleton-shimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+}
+
 .sig-revocation-badge {
     display: inline-flex;
     align-items: center;
@@ -363,43 +387,39 @@
     margin-bottom: 6px;
 }
 
-.sig-revision-labels-row {
-    position: relative;
-    height: 16px;
-    margin-bottom: 2px;
-    margin-left: 120px; /* align with lane bars */
-}
-
-.sig-revision-label {
-    position: absolute;
-    transform: translateX(-50%);
-    font-size: 9px;
-    font-weight: 700;
-    color: var(--text-muted);
-    background: var(--bg-card, #161a1f);
-    padding: 0 3px;
-    z-index: 1;
-}
+/* Revision labels moved to legend */
 
 .sig-revision-lanes {
     position: relative;
+    padding-top: 16px;
 }
 
 .sig-revision-boundary {
     position: absolute;
     top: 0;
     bottom: 0;
-    width: 1px;
-    background: rgba(255, 255, 255, 0.12);
-    z-index: 0;
+    width: 0;
+    border-left: 1px dashed rgba(255, 255, 255, 0.45);
+    z-index: 1;
+    pointer-events: none;
+}
+
+.sig-revision-boundary-label {
+    position: absolute;
+    top: -14px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 9px;
+    color: rgba(255, 255, 255, 0.55);
+    white-space: nowrap;
     pointer-events: none;
 }
 
 .sig-revision-lane {
     display: flex;
     align-items: center;
-    height: 24px;
-    margin-bottom: 2px;
+    height: 32px;
+    margin-bottom: 3px;
     cursor: pointer;
 }
 
@@ -422,23 +442,30 @@
 .sig-revision-lane-bar {
     flex: 1;
     position: relative;
-    height: 14px;
+    height: 24px;
     background: rgba(255, 255, 255, 0.04);
-    border-radius: 2px;
+    border-radius: 3px;
     overflow: visible;
+    display: flex;
 }
 
 .sig-revision-coverage {
     height: 100%;
-    border-radius: 2px;
+    border-radius: 0;
     opacity: 0.5;
     transition: opacity 0.2s;
 }
 
-.sig-revision-coverage.valid       { background: #28a745; }
-.sig-revision-coverage.indeterminate { background: #ffc107; }
-.sig-revision-coverage.invalid     { background: #dc3545; }
-.sig-revision-coverage.not-validated { background: #6c757d; }
+.sig-revision-coverage:first-child { border-radius: 3px 0 0 3px; }
+.sig-revision-coverage:last-child  { border-radius: 0 3px 3px 0; }
+.sig-revision-coverage:only-child  { border-radius: 3px; }
+
+.sig-revision-coverage.covered     { background: #4a90d9; }
+.sig-revision-coverage.uncovered   { background: #e8872a; }
+.sig-revision-coverage.valid       { background: #4a90d9; }
+.sig-revision-coverage.indeterminate { background: #4a90d9; }
+.sig-revision-coverage.invalid     { background: #4a90d9; }
+.sig-revision-coverage.not-validated { background: #4a90d9; }
 
 .sig-revision-lane:hover .sig-revision-coverage {
     opacity: 0.75;
@@ -483,49 +510,34 @@
     vertical-align: middle;
 }
 
-.sig-legend-dot.valid       { background: #28a745; }
+.sig-legend-dot.covered     { background: #4a90d9; }
+.sig-legend-dot.uncovered   { background: #e8872a; }
+.sig-legend-dot.valid       { background: #4a90d9; }
 .sig-legend-dot.indeterminate { background: #ffc107; }
 
 .sig-legend-line {
     display: inline-block;
-    width: 10px;
-    height: 1px;
-    background: rgba(255, 255, 255, 0.15);
-    margin-right: 3px;
+    width: 12px;
+    height: 0;
+    border-top: 1px dashed rgba(255, 255, 255, 0.55);
+    margin-right: 4px;
     vertical-align: middle;
+}
+
+.sig-legend-revision,
+.sig-byte-range-legend-rev {
+    font-size: 10px;
+    color: var(--text-muted);
 }
 
 /* ── Byte Range Revision Markers ─────────────────────────────────────── */
 
 .sig-byte-range-container {
     position: relative;
+    padding-top: 16px;
 }
 
-.sig-byte-range-revisions {
-    position: relative;
-    height: 14px;
-    margin-bottom: 0;
-}
-
-.sig-byte-range-revision-marker {
-    position: absolute;
-    transform: translateX(-50%);
-    font-size: 8px;
-    font-weight: 700;
-    color: var(--text-muted);
-    top: 0;
-}
-
-.sig-byte-range-revision-marker::after {
-    content: '';
-    position: absolute;
-    left: 50%;
-    top: 12px;
-    width: 1px;
-    height: 22px;
-    background: rgba(255, 255, 255, 0.15);
-    pointer-events: none;
-}
+/* Byte range revision markers moved to legend */
 
 /* ── Byte range visualization (base) ──────────────────────────────────── */
 
@@ -550,7 +562,7 @@
 }
 
 .sig-byte-range-segment.covered {
-    background: rgba(25, 135, 84, 0.6);
+    background: rgba(74, 144, 217, 0.6);
 }
 
 .sig-byte-range-segment.gap {
@@ -579,9 +591,11 @@
     vertical-align: middle;
 }
 
-.sig-byte-range-legend .covered::before { background: rgba(25, 135, 84, 0.6); }
+.sig-byte-range-legend .covered::before { background: rgba(74, 144, 217, 0.6); }
 .sig-byte-range-legend .gap::before { background: rgba(220, 53, 69, 0.4); }
 .sig-byte-range-legend .uncovered::before { background: rgba(255, 152, 0, 0.5); }
+
+.sig-byte-range-legend .sig-byte-range-legend-rev::before { display: none; }
 
 /* ── Modification warnings ─────────────────────────────────────────── */
 
@@ -756,6 +770,54 @@
     background: #0dcaf0;
     border-radius: 3px;
     transition: width 0.3s ease;
+}
+
+/* ── Trust Countries Detail ────────────────────────────────────────── */
+
+.sig-trust-countries-toggle {
+    display: inline-flex;
+    align-items: center;
+    cursor: pointer;
+    font-size: 10px;
+    color: var(--accent);
+    margin-left: 8px;
+    padding: 1px 4px;
+    border-radius: 3px;
+    transition: background 0.15s;
+}
+.sig-trust-countries-toggle:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.sig-trust-countries-detail {
+    margin-top: 4px;
+    padding: 4px 6px;
+    background: rgba(0, 0, 0, 0.15);
+    border-radius: 4px;
+    border: 1px solid var(--border);
+}
+
+.sig-trust-countries-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px;
+}
+
+.sig-trust-country-tag {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 600;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: rgba(13, 202, 240, 0.15);
+    color: #0dcaf0;
+    border: 1px solid rgba(13, 202, 240, 0.25);
+}
+
+.sig-trust-countries-failed {
+    margin-top: 3px;
+    padding-top: 3px;
+    border-top: 1px solid var(--border);
 }
 
 /* ── Trust Status Bar (bottom) ───────────────────────────────────────── */
