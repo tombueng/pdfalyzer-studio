@@ -19,8 +19,8 @@
         <openpdf.version>1.3.30</openpdf.version>
         <pdfbox.version>3.0.0</pdfbox.version>
         <verapdf.version>1.26.1</verapdf.version>
-        <bouncycastle.version>1.80</bouncycastle.version>
-        <dss.version>6.2</dss.version>
+        <bouncycastle.version>1.83</bouncycastle.version>
+        <dss.version>6.4</dss.version>
         <licenses.dir>${project.basedir}/licenses</licenses.dir>
     </properties>
 
@@ -166,13 +166,13 @@
         <dependency>
             <groupId>org.seleniumhq.selenium</groupId>
             <artifactId>selenium-java</artifactId>
-            <version>4.21.0</version>
+            <version>4.41.0</version>
             <scope>test</scope>
         </dependency>
         <dependency>
             <groupId>io.github.bonigarcia</groupId>
             <artifactId>webdrivermanager</artifactId>
-            <version>6.1.0</version>
+            <version>6.3.3</version>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -191,7 +191,7 @@
                     <plugin>
                         <groupId>org.codehaus.mojo</groupId>
                         <artifactId>license-maven-plugin</artifactId>
-                        <version>2.4.0</version>
+                        <version>2.7.1</version>
                         <executions>
                             <execution>
                                 <id>download-third-party-license-texts</id>
@@ -216,12 +216,12 @@
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>license-maven-plugin</artifactId>
-                <version>2.4.0</version>
+                <version>2.7.1</version>
                 <dependencies>
                     <dependency>
                         <groupId>org.apache.logging.log4j</groupId>
                         <artifactId>log4j-to-slf4j</artifactId>
-                        <version>2.24.3</version>
+                        <version>2.25.3</version>
                     </dependency>
                     <dependency>
                         <groupId>org.slf4j</groupId>
@@ -258,7 +258,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-resources-plugin</artifactId>
-                <version>3.3.1</version>
+                <version>3.5.0</version>
                 <executions>
                     <execution>
                         <id>copy-license-folder-to-meta-inf</id>
@@ -333,7 +333,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.13.0</version>
+                <version>3.15.0</version>
                 <configuration>
                     <release>${java.version}</release>
                     <parameters>true</parameters>
@@ -341,7 +341,7 @@
                         <path>
                             <groupId>org.projectlombok</groupId>
                             <artifactId>lombok</artifactId>
-                            <version>1.18.42</version>
+                            <version>1.18.44</version>
                         </path>
                     </annotationProcessorPaths>
                 </configuration>
@@ -349,7 +349,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.5.2</version>
+                <version>3.5.5</version>
                 <configuration>
                     <shutdown>kill</shutdown>
                     <forkedProcessExitTimeoutInSeconds>10</forkedProcessExitTimeoutInSeconds>
@@ -363,7 +363,7 @@
             <plugin>
                 <groupId>org.openrewrite.maven</groupId>
                 <artifactId>rewrite-maven-plugin</artifactId>
-                <version>6.30.0</version>
+                <version>6.33.0</version>
                 <configuration>
                     <activeRecipes>
                         <recipe>org.openrewrite.java.migrate.lombok.LombokBestPractices</recipe>
@@ -373,7 +373,7 @@
                     <dependency>
                         <groupId>org.openrewrite.recipe</groupId>
                         <artifactId>rewrite-migrate-java</artifactId>
-                        <version>3.28.0</version>
+                        <version>3.30.0</version>
                     </dependency>
                 </dependencies>
             </plugin>
