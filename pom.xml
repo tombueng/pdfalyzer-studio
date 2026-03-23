@@ -183,6 +183,14 @@
         </dependency>
     </dependencies>
 
+    <distributionManagement>
+        <repository>
+            <id>github</id>
+            <name>GitHub Packages</name>
+            <url>https://maven.pkg.github.com/tombueng/pdfalyzer-ui</url>
+        </repository>
+    </distributionManagement>
+
     <profiles>
         <profile>
             <id>license-download</id>
