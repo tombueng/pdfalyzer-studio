@@ -36,6 +36,15 @@ Open `http://localhost:8080`.
 mvn clean verify
 ```
 
+### Run with Docker
+
+```bash
+docker build -t pdfalyzer-studio .
+docker run -p 8080:8080 pdfalyzer-studio
+```
+
+Open `http://localhost:8080`.
+
 ## Licensing and Release Compliance
 
 - Project license: [LICENSE](LICENSE) (Apache-2.0).

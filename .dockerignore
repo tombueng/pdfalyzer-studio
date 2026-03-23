@@ -1,0 +1,17 @@
+target/
+.git/
+.github/
+.claude/
+.vscode/
+installer/
+pdf-signatures/
+manual/
+tools/
+*.md
+*.txt
+*.svg
+*.jpg
+logo.*
+ideas.md
+dependency-license-audit.md
+requirements.md
