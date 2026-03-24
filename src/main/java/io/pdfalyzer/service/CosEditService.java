@@ -27,6 +27,10 @@ import lombok.extern.slf4j.Slf4j;
 public class CosEditService {
 
     public byte[] updateCosValue(byte[] pdfBytes, CosUpdateRequest request) throws IOException {
+        log.debug("COS update request: obj={} gen={} scope={} op={} path={} value={} type={}",
+                request.getObjectNumber(), request.getGenerationNumber(),
+                request.getTargetScope(), request.getOperation(),
+                request.getKeyPath(), request.getNewValue(), request.getValueType());
         try (PDDocument doc = Loader.loadPDF(pdfBytes)) {
             COSBase target;
             String targetScope = request.getTargetScope();
