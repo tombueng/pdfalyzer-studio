@@ -147,6 +147,16 @@ public class ValidationService {
             }
         }
 
+        // FORM-003: NeedAppearances is true
+        // Read directly from COS dictionary BEFORE getAcroForm() — PDFBox 3.x
+        // generates appearances in getAcroForm() which resets NeedAppearances.
+        COSDictionary catalogDict = doc.getDocumentCatalog().getCOSObject();
+        COSBase acroFormBase = catalogDict.getDictionaryObject(COSName.getPDFName("AcroForm"));
+        boolean needAppearancesTrue = false;
+        if (acroFormBase instanceof COSDictionary acroFormDict) {
+            needAppearancesTrue = acroFormDict.getBoolean(COSName.getPDFName("NeedAppearances"), false);
+        }
+
         PDAcroForm acroForm = doc.getDocumentCatalog().getAcroForm();
 
         // FORM-001: Widgets exist but no AcroForm at all
@@ -162,6 +172,15 @@ public class ValidationService {
 
         if (acroForm == null) return;
 
+        if (needAppearancesTrue) {
+            issues.add(new ValidationIssue(
+                    "WARNING", "FORM-003",
+                    "/NeedAppearances is true — viewers will regenerate appearance streams on open, which can destroy existing signature visuals and cause rendering inconsistencies across viewers",
+                    "PDF 2.0, Section 12.7.2 Table 225",
+                    "AcroForm",
+                    "form"));
+        }
+
         boolean hasFields = !acroForm.getFields().isEmpty();
 
         // FORM-002: AcroForm /Fields empty but widgets on pages
@@ -170,16 +189,6 @@ public class ValidationService {
                     "WARNING", "FORM-002",
                     "AcroForm exists but declares no fields, yet " + widgetCount + " widget annotation(s) were found — fields are orphaned",
                     "PDF 2.0, Section 12.7.3",
-                    "AcroForm",
-                    "form"));
-        }
-
-        // FORM-003: NeedAppearances is true
-        if (acroForm.getNeedAppearances()) {
-            issues.add(new ValidationIssue(
-                    "WARNING", "FORM-003",
-                    "/NeedAppearances is true — viewers will regenerate appearance streams on open, which can destroy existing signature visuals and cause rendering inconsistencies across viewers",
-                    "PDF 2.0, Section 12.7.2 Table 225",
                     "AcroForm",
                     "form"));
         }

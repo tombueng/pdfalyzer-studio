@@ -190,14 +190,35 @@ class ValidationServiceTest {
 
     @Test
     void needAppearancesTrueReportsForm003() throws IOException {
-        // PDFBox forces NeedAppearances=false during save (it generates appearances).
-        // Build a normal PDF with AcroForm, then patch the raw bytes to flip the flag.
-        byte[] pdfBytes = createPdfWithTextField();
-        String raw = new String(pdfBytes, java.nio.charset.StandardCharsets.ISO_8859_1);
-        // Replace "/NeedAppearances false" with "/NeedAppearances true " (trailing space keeps byte count)
-        String patched = raw.replace("/NeedAppearances false", "/NeedAppearances true ");
-        assertNotEquals(raw, patched, "PDF should contain /NeedAppearances false to patch");
-        pdfBytes = patched.getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
+        // Construct a minimal valid PDF by hand with /NeedAppearances true in the
+        // AcroForm dictionary.  PDFBox's save() always strips this flag, so we must
+        // build the bytes ourselves with correct xref offsets.
+        StringBuilder sb = new StringBuilder();
+        sb.append("%PDF-1.4\n");
+
+        int obj1Off = sb.length();
+        sb.append("1 0 obj\n<< /Type /Catalog /Pages 2 0 R /AcroForm 4 0 R >>\nendobj\n");
+
+        int obj2Off = sb.length();
+        sb.append("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
+
+        int obj3Off = sb.length();
+        sb.append("3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] >>\nendobj\n");
+
+        int obj4Off = sb.length();
+        sb.append("4 0 obj\n<< /NeedAppearances true /Fields [] >>\nendobj\n");
+
+        int xrefOff = sb.length();
+        sb.append("xref\n0 5\n");
+        sb.append("0000000000 65535 f \n");
+        sb.append(String.format("%010d 00000 n \n", obj1Off));
+        sb.append(String.format("%010d 00000 n \n", obj2Off));
+        sb.append(String.format("%010d 00000 n \n", obj3Off));
+        sb.append(String.format("%010d 00000 n \n", obj4Off));
+        sb.append("trailer\n<< /Size 5 /Root 1 0 R >>\n");
+        sb.append("startxref\n").append(xrefOff).append("\n%%EOF\n");
+
+        byte[] pdfBytes = sb.toString().getBytes(java.nio.charset.StandardCharsets.ISO_8859_1);
         List<ValidationIssue> issues = validationService.validate(pdfBytes);
         assertTrue(hasRule(issues, "FORM-003"), "should detect NeedAppearances=true");
     }

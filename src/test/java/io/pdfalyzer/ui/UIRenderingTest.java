@@ -419,11 +419,8 @@ public class UIRenderingTest {
         }
 
         driver.get(baseUrl);
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(30));
-        wait.until(ExpectedConditions.or(
-            ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
-            ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
-        ));
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(60));
+        ensureTestPdfReady(wait, true);
 
         driver.manage().timeouts().scriptTimeout(Duration.ofSeconds(30));
         Object result = ((JavascriptExecutor) driver).executeAsyncScript(
@@ -469,11 +466,8 @@ public class UIRenderingTest {
         }
 
         driver.get(baseUrl);
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
-        wait.until(ExpectedConditions.or(
-            ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
-            ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
-        ));
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(60));
+        ensureTestPdfReady(wait, true);
 
         activateSelectEditMode();
         wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(".form-field-handle")));
@@ -1045,11 +1039,8 @@ public class UIRenderingTest {
         }
 
         driver.get(baseUrl);
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
-        wait.until(ExpectedConditions.or(
-            ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
-            ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
-        ));
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(60));
+        ensureTestPdfReady(wait, true);
         activateSelectEditMode();
         wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(".form-field-handle[data-field-name]")));
 
@@ -1128,11 +1119,8 @@ public class UIRenderingTest {
     public void testFieldOptionsApplyEnablesSaveButton() {
      
         driver.get(baseUrl);
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
-        wait.until(ExpectedConditions.or(
-            ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
-            ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
-        ));
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(60));
+        ensureTestPdfReady(wait, true);
         activateSelectEditMode();
         wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(".form-field-handle[data-field-name]")));
 
@@ -1270,11 +1258,8 @@ public class UIRenderingTest {
         public void testMultiselectTriStateFieldOptionsWorkflow() {
       
         driver.get(baseUrl);
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
-        wait.until(ExpectedConditions.or(
-            ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
-            ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
-        ));
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(60));
+        ensureTestPdfReady(wait, true);
 
         activateSelectEditMode();
         wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(".form-field-handle")));
