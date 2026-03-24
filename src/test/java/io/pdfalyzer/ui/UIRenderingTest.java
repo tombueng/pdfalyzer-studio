@@ -415,6 +415,7 @@ public class UIRenderingTest {
         driver.manage().timeouts().scriptTimeout(Duration.ofSeconds(30));
         Object result = ((JavascriptExecutor) driver).executeAsyncScript(
                 "const done = arguments[arguments.length - 1];" +
+                "if(typeof $ === 'undefined' || !$.ajax){ done({ok:false, msg:'jquery-not-loaded'}); return; }" +
                 "const P = window.PDFalyzer;" +
                 "if(!P || !P.state || !P.state.sessionId){ done({ok:false, msg:'no-session'}); return; }" +
                 "function findDict(n){" +
@@ -436,7 +437,11 @@ public class UIRenderingTest {
                 "  return $.ajax({ url:'/api/cos/'+sid+'/update', method:'POST', contentType:'application/json', data: JSON.stringify(Object.assign({}, payloadBase, { keyPath: keyPath.concat(['UITestKey']), operation:'remove' })) });" +
                 "})" +
                 ".then(function(){ done({ok:true}); })" +
-                ".catch(function(err){ done({ok:false, msg: (err && err.statusText) ? err.statusText : 'ajax-failed'}); });"
+                ".catch(function(err){" +
+                "  var info = 'unknown';" +
+                "  try { info = 'status=' + (err&&err.status) + ' text=' + (err&&err.statusText) + ' body=' + (err&&err.responseText); } catch(e2){}" +
+                "  done({ok:false, msg:info, obj:dict.objectNumber, gen:dict.generationNumber||0, keyPath:dict.keyPath});" +
+                "});"
         );
 
         assertTrue(result instanceof Map, "Expected script result to be a map");
