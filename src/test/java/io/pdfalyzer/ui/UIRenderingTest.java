@@ -265,10 +265,7 @@ public class UIRenderingTest {
 
         driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(300));
-        wait.until(ExpectedConditions.or(
-            ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
-            ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
-        ));
+        ensureTestPdfReady(wait, true);
 
         ((JavascriptExecutor) driver).executeScript(
             "window.__promptCalls=0;" +
@@ -322,10 +319,7 @@ public class UIRenderingTest {
 
         driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
-        wait.until(ExpectedConditions.or(
-                ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
-                ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
-        ));
+        ensureTestPdfReady(wait, true);
 
         expandNode(wait, "pages");
         By nodeBy = By.cssSelector(".tree-node[data-node-id='page-0']");
@@ -354,12 +348,8 @@ public class UIRenderingTest {
         }
 
         driver.get(baseUrl);
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(30));
-
-        wait.until(ExpectedConditions.or(
-                ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
-                ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
-        ));
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
+        ensureTestPdfReady(wait, true);
 
         expandNode(wait, "pages");
         expandNode(wait, "page-0");
@@ -551,10 +541,7 @@ public class UIRenderingTest {
 
         driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
-        wait.until(ExpectedConditions.or(
-            ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
-            ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
-        ));
+        ensureTestPdfReady(wait, true);
         activateSelectEditMode();
         wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(".form-field-handle[data-field-name]")));
 
@@ -639,10 +626,7 @@ public class UIRenderingTest {
 
         driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
-        wait.until(ExpectedConditions.or(
-            ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
-            ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
-        ));
+        ensureTestPdfReady(wait, true);
         activateSelectEditMode();
         wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector(".form-field-handle[data-field-name]")));
 
@@ -714,10 +698,7 @@ public class UIRenderingTest {
 
         driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
-        wait.until(ExpectedConditions.or(
-            ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
-            ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
-        ));
+        ensureTestPdfReady(wait, true);
         wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector("#pdfViewer .pdf-page-wrapper canvas")));
         expandAllPageImageBranches(wait);
 
@@ -816,10 +797,7 @@ public class UIRenderingTest {
 
         driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
-        wait.until(ExpectedConditions.or(
-            ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
-            ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
-        ));
+        ensureTestPdfReady(wait, true);
         wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector("#pdfViewer .pdf-page-wrapper canvas")));
 
         WebElement structureTab = wait.until(ExpectedConditions.elementToBeClickable(
@@ -933,10 +911,7 @@ public class UIRenderingTest {
 
         driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
-        wait.until(ExpectedConditions.or(
-            ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
-            ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
-        ));
+        ensureTestPdfReady(wait, true);
 
         WebElement fontsTab = wait.until(ExpectedConditions.elementToBeClickable(
             By.cssSelector(".tab-btn[data-tab='fonts']")
@@ -986,10 +961,7 @@ public class UIRenderingTest {
 
         driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
-        wait.until(ExpectedConditions.or(
-            ExpectedConditions.textToBePresentInElementLocated(By.id("statusFilename"), "test.pdf"),
-            ExpectedConditions.presenceOfElementLocated(By.cssSelector(".toast-msg.text-success"))
-        ));
+        ensureTestPdfReady(wait, true);
 
         WebElement fontsTab = wait.until(ExpectedConditions.elementToBeClickable(
             By.cssSelector(".tab-btn[data-tab='fonts']")
