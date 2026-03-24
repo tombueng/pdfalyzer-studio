@@ -25,6 +25,7 @@ import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
 import org.bouncycastle.cert.jcajce.JcaX509v3CertificateBuilder;
 import org.bouncycastle.operator.ContentSigner;
 import org.bouncycastle.operator.jcajce.JcaContentSignerBuilder;
+import org.junit.jupiter.api.Assumptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -249,6 +250,11 @@ class TrustAnchorMatchingTest {
     // ── Real PEM certificate tests ───────────────────────────────────────────
 
     private static List<X509Certificate> loadPemCerts(String resourcePath) throws Exception {
+        InputStream probe = TrustAnchorMatchingTest.class.getResourceAsStream(resourcePath);
+        Assumptions.assumeTrue(probe != null,
+                "PEM resource not available on classpath: " + resourcePath);
+        probe.close();
+
         List<X509Certificate> certs = new ArrayList<>();
         CertificateFactory cf = CertificateFactory.getInstance("X.509");
         StringBuilder base64 = new StringBuilder();
