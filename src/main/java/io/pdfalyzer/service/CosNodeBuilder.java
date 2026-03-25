@@ -269,8 +269,9 @@ public class CosNodeBuilder {
         }
 
         visited.add(key);
+        // Reset keyPath for children: they are relative to this object, not the parent
         PdfNode node = buildCosNode(cosObj.getObject(), objLabel, idPrefix,
-                visited, depth + 1, currentKeyPath, ctx);
+                visited, depth + 1, new ArrayList<>(), ctx);
         node.setObjectNumber((int) key.getNumber());
         node.setGenerationNumber(key.getGeneration());
         node.setKeyPath(keyPathToJson(currentKeyPath));

@@ -36,6 +36,18 @@ Open `http://localhost:8080`.
 mvn clean verify
 ```
 
+### Build and test with Docker (no local JDK or Chrome needed)
+
+```bash
+docker compose run test
+```
+
+Run a specific test class:
+
+```bash
+docker compose run test clean test -Dtest=UIRenderingTest --batch-mode
+```
+
 ### Run with Docker
 
 ```bash
