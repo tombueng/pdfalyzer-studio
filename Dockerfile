@@ -1,5 +1,5 @@
 # ── Test stage (docker compose run test) ──────────────────────────────────────
-FROM azul/zulu-openjdk:25 AS test
+FROM azul/zulu-openjdk:26 AS test
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
         maven wget gnupg2 ca-certificates fonts-liberation && \
@@ -25,7 +25,7 @@ ENTRYPOINT ["mvn"]
 CMD ["clean", "verify", "--batch-mode", "--no-transfer-progress"]
 
 # ── Build stage ────────────────────────────────────────────────────────────────
-FROM azul/zulu-openjdk:25 AS build
+FROM azul/zulu-openjdk:26 AS build
 
 WORKDIR /app
 COPY pom.xml .
@@ -38,7 +38,7 @@ RUN --mount=type=cache,target=/root/.m2 \
     mvn clean package -DskipTests --batch-mode --no-transfer-progress
 
 # ── Runtime stage ─────────────────────────────────────────────────────────────
-FROM azul/zulu-openjdk:25-jre
+FROM azul/zulu-openjdk:26-jre
 
 LABEL org.opencontainers.image.source="https://github.com/tombueng/pdfalyzer-ui"
 LABEL org.opencontainers.image.description="PDFalyzer Studio — PDF inspection web application"
