@@ -1,0 +1,11 @@
+services:
+  test:
+    build:
+      context: .
+      target: test
+    volumes:
+      - maven-cache:/root/.m2
+    shm_size: '2g'
+
+volumes:
+  maven-cache:
