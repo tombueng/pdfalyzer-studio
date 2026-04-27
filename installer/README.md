@@ -56,12 +56,6 @@ installer/
 │   └── output/                        ← (gitignored) build artifacts
 │       ├── PdfalyzerUi.exe            ← Launch4j EXE wrapper
 │       └── PdfalyzerUiInstaller.msi   ← final installer
-└── linux/
-    ├── scripts/
-    │   ├── build-uber-jar.sh
-    │   └── package-appimage.sh
-    ├── assets/app-icon.png
-    └── README.md
 ```
 
 ## Windows Installer Details
@@ -171,18 +165,6 @@ To sign the EXE and MSI with a code signing certificate:
 signtool sign /f cert.pfx /p password /tr http://timestamp.digicert.com /td sha256 /fd sha256 output\PdfalyzerUi.exe
 signtool sign /f cert.pfx /p password /tr http://timestamp.digicert.com /td sha256 /fd sha256 output\PdfalyzerUiInstaller.msi
 ```
-
-## Linux (AppImage)
-
-Linux packaging uses AppImage format. See `linux/README.md` for details.
-
-```bash
-cd installer/linux
-./scripts/build-uber-jar.sh
-./scripts/package-appimage.sh
-```
-
-Requires `appimagetool` in PATH.
 
 ## Troubleshooting
 
