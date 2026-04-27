@@ -13,22 +13,27 @@
 
 </p>
 
-PDFalyzer Studio is a Spring Boot web application for inspecting, validating, and editing PDF internals through an interactive browser UI.
+## How to run
 
-## Quick Start
-
-### Prerequisites
-
-- Java 21+
-- Maven 3.8+
-
-### Run locally
+Requires **Java 21+** and **Maven 3.8+**, then:
 
 ```bash
 mvn spring-boot:run
 ```
 
-Open `http://localhost:8080`.
+Open <http://localhost:8080>.
+
+Or with Docker (no local JDK needed):
+
+```bash
+docker build -t pdfalyzer-studio . && docker run -p 8080:8080 pdfalyzer-studio
+```
+
+---
+
+PDFalyzer Studio is a Spring Boot web application for inspecting, validating, and editing PDF internals through an interactive browser UI.
+
+## Quick Start
 
 ### Build and test
 
@@ -47,15 +52,6 @@ Run a specific test class:
 ```bash
 docker compose run test clean test -Dtest=UIRenderingTest --batch-mode
 ```
-
-### Run with Docker
-
-```bash
-docker build -t pdfalyzer-studio .
-docker run -p 8080:8080 pdfalyzer-studio
-```
-
-Open `http://localhost:8080`.
 
 ## Licensing and Release Compliance
 
