@@ -63,7 +63,7 @@ installer/
 ### Prerequisites
 
 - **PowerShell 5.1+** (included with Windows 10/11)
-- **Maven 3.x** and **Java 21+** on PATH (for building the app JAR)
+- **Maven 3.x** and **Java 25+** on PATH (for building the app JAR)
 - Internet connection (for downloading components)
 
 No other tools need to be pre-installed. Launch4j, WiX, JRE, and Chromium are all downloaded automatically by `update-components.ps1`.
@@ -171,7 +171,7 @@ signtool sign /f cert.pfx /p password /tr http://timestamp.digicert.com /td sha2
 | Problem | Solution |
 |---------|----------|
 | `update-components.ps1` blocked by execution policy | Run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` |
-| Maven build fails | Ensure `mvn` and Java 21+ are on PATH |
+| Maven build fails | Ensure `mvn` and Java 25+ are on PATH |
 | Launch4j fails | Check `bundle/launch4j/launch4j.exe` exists; re-run with `-Force` |
 | MSI build fails with "undefined variable" | Run `update-components.ps1` first to populate `bundle/` |
 | App doesn't start after install | Check port 8080 isn't in use; check `jre/bin/java.exe` exists |
