@@ -5,7 +5,8 @@
 <p align="center">
 
 [![CI](https://github.com/tombueng/pdfalyzer-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/tombueng/pdfalyzer-studio/actions/workflows/ci.yml)
-[![CodeQL](https://github.com/tombueng/pdfalyzer-studio/actions/workflows/codeql.yml/badge.svg)](https://github.com/tombueng/pdfalyzer-studio/actions/workflows/codeql.yml)
+[![Coverage](https://codecov.io/gh/tombueng/pdfalyzer-studio/branch/main/graph/badge.svg)](https://codecov.io/gh/tombueng/pdfalyzer-studio)
+[![Code Quality](https://github.com/tombueng/pdfalyzer-studio/actions/workflows/code-quality.yml/badge.svg)](https://github.com/tombueng/pdfalyzer-studio/actions/workflows/code-quality.yml)
 [![Java 21](https://img.shields.io/badge/Java-21-blue?logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/21/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
 [![PDFBox](https://img.shields.io/badge/PDFBox-3.0-red?logo=apache&logoColor=white)](https://pdfbox.apache.org/)
@@ -335,7 +336,7 @@ Light / pastel themes additionally override `--text-muted` explicitly so popup a
 
 | Group | Original 10 | New 10 |
 |-------|-------------|--------|
-| **Cyberpunk / Neon** | Void Blue *(default)*, Neon Tokyo, Acid Rain, Synthwave, Cyberpunk Gold, Matrix, Plasma, Outrun, Ultraviolet, Electra | Hot Wire, Laser Lime, Quantum Blue, Ghost Signal, Neon Coral, Techno Cyan, Danger Zone, Hologram, Static Discharge, Plasma Storm |
+| **Cyberpunk / Neon** | Void Blue *(default)*, Neon Tokyo, Acid Rain, Synthwave, Cyberpunk Gold, Matrix, Plasma, Outrun, Blacklight, Electra | Hot Wire, Laser Lime, Quantum Blue, Ghost Signal, Neon Coral, Techno Cyan, Danger Zone, Hologram, Static Discharge, Plasma Storm |
 | **Dark Elegant** | Midnight Rose, Obsidian, Onyx, Stealth, Abyss, Carbon, Eclipse, Nightshade, Dark Matter, Phantom | Bordeaux, Slate Blue, Tungsten, Charcoal, Velvet Void, Iron Forge, Dusk Embers, Deep Burgundy, Graphite, Onyx Gold |
 | **Nature / Organic** | Forest, Ocean Deep, Volcanic, Autumn, Aurora, Tundra, Jungle, Lagoon, Amber Cave, Storm | Desert Bloom, Coral Reef, Monsoon, Redwood, Wildfire, Ice Field, Savanna, Canyon, Peatland, Estuary |
 | **Pastel / Light** | Rose Quartz, Cotton Candy, Mint Dream, Cloud Day, Lavender Fields, Peach Cream, Arctic, Parchment, Sakura, Fog | Butter, Powder Pink, Seafoam, Lilac Dream, Apricot, Morning Mist, Vanilla, Pistachio, Cornflower, Almond |

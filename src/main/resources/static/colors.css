@@ -90,8 +90,8 @@
     --c-bg:#08000f; --c-surface:#140018; --c-card:#200030;
     --c-accent:#ff6ec7; --c-err:#ff2244; --c-warn:#ff9900; --c-ok:#00ff88; --c-text:#ffd6ff;
 }
-/* 9 – Ultraviolet */
-[data-theme="ultraviolet"] {
+/* 9 – Blacklight */
+[data-theme="blacklight"] {
     --c-bg:#050010; --c-surface:#0a0025; --c-card:#120040;
     --c-accent:#4400ff; --c-err:#ff0040; --c-warn:#ffee00; --c-ok:#00ff80; --c-text:#d0c0ff;
 }

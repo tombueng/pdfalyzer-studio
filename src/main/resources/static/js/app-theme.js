@@ -24,7 +24,7 @@
                 ['matrix',           'Matrix',            '#000800','#001800','#00ff41','#00ffcc'],
                 ['plasma',           'Plasma',            '#06000f','#140040','#7b00ff','#00ffc8'],
                 ['outrun',           'Outrun',            '#08000f','#200030','#ff6ec7','#00ff88'],
-                ['ultraviolet',      'Ultraviolet',       '#050010','#120040','#4400ff','#00ff80'],
+                ['blacklight',       'Blacklight',        '#050010','#120040','#4400ff','#00ff80'],
                 ['electra',          'Electra',           '#001414','#003035','#00ffe5','#00ff99'],
                 ['hot-wire',         'Hot Wire',          '#0f0000','#2e0a00','#ff3300','#00ff88'],
                 ['laser-lime',       'Laser Lime',        '#020f00','#082500','#ccff00','#00ffaa'],
