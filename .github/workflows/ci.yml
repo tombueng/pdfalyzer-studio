@@ -32,8 +32,65 @@ jobs:
           distribution: oracle
           cache: maven
 
-      - name: Build & Test
-        run: mvn clean verify --batch-mode --no-transfer-progress
+      - name: Install Chromium for Selenium e2e tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y chromium-browser
+          echo "CHROME_BIN=$(command -v chromium-browser)" >> "$GITHUB_ENV"
+
+      - name: Build, Test & Coverage
+        run: mvn clean verify --batch-mode --no-transfer-progress -Djs.coverage=true -Dchrome.binary=${CHROME_BIN}
+
+      - name: Set up Node for JS coverage report
+        if: always()
+        uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+
+      - name: Convert V8 coverage to LCOV
+        if: always()
+        run: |
+          if [ -d target/js-coverage/raw ]; then
+            npm i --no-save monocart-coverage-reports
+            node tools/jscov-report.cjs || echo "JS coverage report skipped"
+          else
+            echo "No raw V8 coverage to convert"
+          fi
+
+      - name: Upload coverage to Codecov (Java)
+        if: always()
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./target/site/jacoco/jacoco.xml
+          flags: backend
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload coverage to Codecov (Frontend)
+        if: always()
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./target/js-coverage/lcov.info
+          flags: frontend
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+      - name: Upload JaCoCo HTML report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: jacoco-report
+          path: target/site/jacoco/
+          retention-days: 30
+
+      - name: Upload JS coverage HTML report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: js-coverage-report
+          path: target/js-coverage/report/
+          retention-days: 30
+          if-no-files-found: ignore
 
       - name: Test Report
         uses: dorny/test-reporter@v3

@@ -100,7 +100,20 @@
             <version>2.3.9</version>
         </dependency>
 
-        <!-- BouncyCastle – CMS/PKCS#7 signature parsing -->
+        <!-- BouncyCastle – CMS/PKCS#7 signature parsing.
+             Pin bcprov + bcutil to the same version as bcpkix so DSS's older
+             transitive bcprov doesn't downgrade them (causes NoSuchMethodError
+             on ASN1Integer.valueOf(int) at runtime). -->
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcprov-jdk18on</artifactId>
+            <version>${bouncycastle.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcutil-jdk18on</artifactId>
+            <version>${bouncycastle.version}</version>
+        </dependency>
         <dependency>
             <groupId>org.bouncycastle</groupId>
             <artifactId>bcpkix-jdk18on</artifactId>
@@ -111,6 +124,11 @@
         <dependency>
             <groupId>eu.europa.ec.joinup.sd-dss</groupId>
             <artifactId>dss-pades-pdfbox</artifactId>
+        </dependency>
+        <!-- DSS CMS implementation – required at runtime by CMSGenerator -->
+        <dependency>
+            <groupId>eu.europa.ec.joinup.sd-dss</groupId>
+            <artifactId>dss-cms-object</artifactId>
         </dependency>
         <dependency>
             <groupId>eu.europa.ec.joinup.sd-dss</groupId>
@@ -361,7 +379,52 @@
                 <configuration>
                     <shutdown>kill</shutdown>
                     <forkedProcessExitTimeoutInSeconds>10</forkedProcessExitTimeoutInSeconds>
+                    <argLine>@{argLine}</argLine>
                 </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.jacoco</groupId>
+                <artifactId>jacoco-maven-plugin</artifactId>
+                <version>0.8.13</version>
+                <executions>
+                    <execution>
+                        <id>prepare-agent</id>
+                        <goals><goal>prepare-agent</goal></goals>
+                    </execution>
+                    <execution>
+                        <id>report</id>
+                        <phase>verify</phase>
+                        <goals><goal>report</goal></goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
+                <groupId>com.github.spotbugs</groupId>
+                <artifactId>spotbugs-maven-plugin</artifactId>
+                <version>4.9.7.0</version>
+                <configuration>
+                    <effort>Max</effort>
+                    <threshold>Medium</threshold>
+                    <failOnError>false</failOnError>
+                    <xmlOutput>true</xmlOutput>
+                    <htmlOutput>true</htmlOutput>
+                    <includeFilterFile>${project.basedir}/spotbugs-include.xml</includeFilterFile>
+                    <excludeFilterFile>${project.basedir}/spotbugs-exclude.xml</excludeFilterFile>
+                    <plugins>
+                        <plugin>
+                            <groupId>com.h3xstream.findsecbugs</groupId>
+                            <artifactId>findsecbugs-plugin</artifactId>
+                            <version>1.14.0</version>
+                        </plugin>
+                    </plugins>
+                </configuration>
+                <executions>
+                    <execution>
+                        <id>spotbugs-check</id>
+                        <phase>verify</phase>
+                        <goals><goal>check</goal></goals>
+                    </execution>
+                </executions>
             </plugin>
             <plugin>
                 <groupId>org.springframework.boot</groupId>

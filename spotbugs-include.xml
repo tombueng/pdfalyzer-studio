@@ -1,0 +1,5 @@
+<FindBugsFilter>
+    <Match>
+        <Class name="~io\.pdfalyzer\..*"/>
+    </Match>
+</FindBugsFilter>

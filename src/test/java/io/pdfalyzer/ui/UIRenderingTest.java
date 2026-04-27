@@ -54,9 +54,10 @@ public class UIRenderingTest {
     
     private WebDriver driver;
     private String baseUrl;
-    
+    private JsCoverageCollector jsCoverage;
+
     @BeforeEach
-    public void setUp() {
+    public void setUp(org.junit.jupiter.api.TestInfo testInfo) {
         // Setup WebDriverManager for Chrome/Chromium (will download chromedriver if needed)
         try {
             String chromeBinary = System.getProperty("chrome.binary");
@@ -90,6 +91,10 @@ public class UIRenderingTest {
             driver = new ChromeDriver(options);
             driver.manage().timeouts().implicitlyWait(Duration.ofSeconds(5));
             baseUrl = "http://localhost:" + port;
+            if (JsCoverageCollector.isEnabled()) {
+                jsCoverage = new JsCoverageCollector((ChromeDriver) driver, testInfo.getDisplayName());
+                jsCoverage.start();
+            }
         } catch (Exception e) {
             System.err.println("Warning: Could not initialize ChromeDriver with WebDriverManager: " + e.getMessage());
             e.printStackTrace();
@@ -115,6 +120,10 @@ public class UIRenderingTest {
                 assertNoClientJsErrors("after test execution");
             } catch (RuntimeException ex) {
                 captureFailure = ex;
+            }
+            if (jsCoverage != null) {
+                jsCoverage.stopAndDump();
+                jsCoverage = null;
             }
             try {
                 driver.quit();
@@ -1482,7 +1491,7 @@ public class UIRenderingTest {
         }
     }
 
-    private boolean hasUsablePdfSession() {
+    private boolean hasUsablePdfSession() {
 
         try {
             Object loaded = ((JavascriptExecutor) driver).executeScript(
@@ -1543,7 +1552,7 @@ public class UIRenderingTest {
         }
     }
 
-    private void assertNoClientJsErrors(String context) {
+    private void assertNoClientJsErrors(String context) {
         Object raw = ((JavascriptExecutor) driver).executeScript(
                 "return Array.isArray(window.__pdfalyzerJsErrors) ? window.__pdfalyzerJsErrors : [];"
         );
