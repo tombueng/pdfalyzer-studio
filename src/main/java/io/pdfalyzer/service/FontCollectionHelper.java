@@ -95,9 +95,15 @@ public class FontCollectionHelper {
                         info.setEncoding(
                                 font.getCOSObject().getDictionaryObject(COSName.ENCODING).toString());
                     }
-                } catch (Exception ignored) {}
+                } catch (Exception e) {
+                    log.trace("Could not read encoding for font {}", fontName.getName(), e);
+                }
                 COSObjectKey key = null;
-                try { key = font.getCOSObject().getKey(); } catch (Exception ignored) {}
+                try {
+                    key = font.getCOSObject().getKey();
+                } catch (Exception e) {
+                    log.trace("Could not read object key for font {}", fontName.getName(), e);
+                }
                 if (key != null) {
                     info.setObjectNumber((int) key.getNumber());
                     info.setGenerationNumber((int) key.getGeneration());
@@ -186,7 +192,11 @@ public class FontCollectionHelper {
             try {
                 PDFont font = resources.getFont(fontName);
                 COSObjectKey key = null;
-                try { key = font.getCOSObject().getKey(); } catch (Exception ignored) {}
+                try {
+                    key = font.getCOSObject().getKey();
+                } catch (Exception e) {
+                    log.trace("Could not read object key for font {}", fontName.getName(), e);
+                }
                 if (key == null && font.getCOSObject() != null) {
                     key = objectKeyIndex.get(font.getCOSObject());
                 }
@@ -224,7 +234,11 @@ public class FontCollectionHelper {
                 if (font == null) { super.processTextPosition(text); return; }
 
                 COSObjectKey key = null;
-                try { key = font.getCOSObject().getKey(); } catch (Exception ignored) {}
+                try {
+                    key = font.getCOSObject().getKey();
+                } catch (Exception e) {
+                    log.trace("Could not read object key for font during text positioning", e);
+                }
                 if (key == null && font.getCOSObject() != null) {
                     key = objectKeyIndex.get(font.getCOSObject());
                 }

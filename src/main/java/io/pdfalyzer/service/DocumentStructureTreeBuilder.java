@@ -744,7 +744,11 @@ public class DocumentStructureTreeBuilder {
                 resolved = ((org.apache.pdfbox.cos.COSObject) resolved).getObject();
             if (resolved instanceof COSStream stream) {
                 COSObjectKey key = null;
-                try { key = stream.getKey(); } catch (Exception ignored) {}
+                try {
+                    key = stream.getKey();
+                } catch (Exception e) {
+                    log.trace("stream.getKey() threw, falling back to document index", e);
+                }
                 if (key == null) key = cosBuilder.findObjectKeyInDocument(stream, ctx.doc);
                 if (key != null) {
                     node.setObjectNumber((int) key.getNumber());

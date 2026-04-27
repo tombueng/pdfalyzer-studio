@@ -324,7 +324,11 @@ public class FontInspectorService {
 
     private COSObjectKey resolveKey(PDFont font, Map<COSBase, COSObjectKey> objectKeyIndex) {
         COSObjectKey key = null;
-        try { key = font.getCOSObject().getKey(); } catch (Exception ignored) {}
+        try {
+            key = font.getCOSObject().getKey();
+        } catch (Exception e) {
+            log.trace("Could not read object key for font", e);
+        }
         if (key == null && font.getCOSObject() != null) key = objectKeyIndex.get(font.getCOSObject());
         return key;
     }
@@ -337,7 +341,9 @@ public class FontInspectorService {
                 disp.put("x", displacement.getX()); disp.put("y", displacement.getY());
                 glyph.put("displacement", disp);
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            log.trace("Could not read displacement for glyph {}", glyphCode, e);
+        }
         try {
             org.apache.pdfbox.util.Vector positionVector = font.getPositionVector(glyphCode);
             if (positionVector != null) {
@@ -345,7 +351,9 @@ public class FontInspectorService {
                 pos.put("x", positionVector.getX()); pos.put("y", positionVector.getY());
                 glyph.put("positionVector", pos);
             }
-        } catch (Exception ignored) {}
+        } catch (Exception e) {
+            log.trace("Could not read positionVector for glyph {}", glyphCode, e);
+        }
     }
 
     private Map<String, Object> buildDescriptorMap(PDFontDescriptor descriptor) {

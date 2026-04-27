@@ -217,7 +217,7 @@ public class TsaProbeService {
      */
     private byte[] buildTimestampRequest() throws Exception {
         MessageDigest md = MessageDigest.getInstance("SHA-256");
-        byte[] hash = md.digest("pdfalyzer-tsa-probe".getBytes());
+        byte[] hash = md.digest("pdfalyzer-tsa-probe".getBytes(java.nio.charset.StandardCharsets.UTF_8));
 
         TimeStampRequestGenerator gen = new TimeStampRequestGenerator();
         gen.setCertReq(false); // don't request certificate in response (smaller)

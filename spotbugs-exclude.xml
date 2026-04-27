@@ -1,0 +1,14 @@
+<FindBugsFilter>
+    <Match>
+        <Class name="~.*\.generated\..*"/>
+    </Match>
+    <Match>
+        <Source name="~.*Test\.java"/>
+    </Match>
+    <Match>
+        <Bug pattern="EI_EXPOSE_REP,EI_EXPOSE_REP2"/>
+    </Match>
+    <Match>
+        <Bug pattern="SE_BAD_FIELD,SE_NO_SERIALVERSIONID"/>
+    </Match>
+</FindBugsFilter>
