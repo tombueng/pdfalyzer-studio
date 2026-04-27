@@ -7,7 +7,7 @@
 [![CI](https://github.com/tombueng/pdfalyzer-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/tombueng/pdfalyzer-studio/actions/workflows/ci.yml)
 [![Coverage](https://codecov.io/gh/tombueng/pdfalyzer-studio/branch/main/graph/badge.svg)](https://codecov.io/gh/tombueng/pdfalyzer-studio)
 [![Code Quality](https://github.com/tombueng/pdfalyzer-studio/actions/workflows/code-quality.yml/badge.svg)](https://github.com/tombueng/pdfalyzer-studio/actions/workflows/code-quality.yml)
-[![Java 21](https://img.shields.io/badge/Java-21-blue?logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/21/)
+[![Java 25](https://img.shields.io/badge/Java-25-blue?logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/25/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
 [![PDFBox](https://img.shields.io/badge/PDFBox-3.0-red?logo=apache&logoColor=white)](https://pdfbox.apache.org/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue?logo=apache&logoColor=white)](LICENSE)
@@ -16,7 +16,7 @@
 
 ## How to run
 
-Requires **Java 21+** and **Maven 3.8+**, then:
+Requires **Java 25+** and **Maven 3.8+**, then:
 
 ```bash
 mvn spring-boot:run
@@ -91,7 +91,7 @@ This regenerates third-party notices and license texts from the current dependen
 | Area | Technology |
 |------|------------|
 | Backend | Spring Boot 3.5.11, Spring MVC |
-| Java | Java 21 |
+| Java | Java 25 |
 | PDF parsing/editing | Apache PDFBox 3.0.0, OpenPDF 1.3.30, BouncyCastle 1.80 |
 | PDF/A validation | veraPDF libraries 1.26.1 |
 | UI shell | Thymeleaf |
