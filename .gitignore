@@ -4,6 +4,7 @@
 /aimaking.txt
 /requirements.md
 /target
+/bin
 
 # Installer bundles (downloaded by update-components.ps1)
 /installer/windows/bundle/
