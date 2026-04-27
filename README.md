@@ -29,6 +29,8 @@ Or with Docker (no local JDK needed):
 docker build -t pdfalyzer-studio . && docker run -p 8080:8080 pdfalyzer-studio
 ```
 
+Or deploy to Railway: see [docs/railway-deploy.md](docs/railway-deploy.md).
+
 ---
 
 PDFalyzer Studio is a Spring Boot web application for inspecting, validating, and editing PDF internals through an interactive browser UI.
