@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 COPY pom.xml .
-RUN --mount=type=cache,target=/root/.m2 \
+RUN --mount=type=cache,id=pdfalyzer-m2,target=/root/.m2 \
     mvn dependency:go-offline --batch-mode --no-transfer-progress || true
 
 COPY src src/
@@ -33,7 +33,7 @@ COPY src src/
 COPY licenses licenses/
 COPY LICENSE NOTICE ./
 
-RUN --mount=type=cache,target=/root/.m2 \
+RUN --mount=type=cache,id=pdfalyzer-m2,target=/root/.m2 \
     apt-get update && apt-get install -y --no-install-recommends maven && \
     mvn clean package -DskipTests --batch-mode --no-transfer-progress
 
