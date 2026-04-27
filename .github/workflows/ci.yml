@@ -20,6 +20,7 @@ jobs:
   build:
     name: Build & Test
     runs-on: ubuntu-latest
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -32,14 +33,15 @@ jobs:
           distribution: oracle
           cache: maven
 
-      - name: Install Chromium for Selenium e2e tests
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y chromium-browser
-          echo "CHROME_BIN=$(command -v chromium-browser)" >> "$GITHUB_ENV"
+      - name: Set up Chrome for Selenium e2e tests
+        uses: browser-actions/setup-chrome@v1
+        id: setup-chrome
+        with:
+          chrome-version: stable
 
       - name: Build, Test & Coverage
-        run: mvn clean verify --batch-mode --no-transfer-progress -Djs.coverage=true -Dchrome.binary=${CHROME_BIN}
+        timeout-minutes: 20
+        run: mvn clean verify --batch-mode --no-transfer-progress -Djs.coverage=true -Dchrome.binary=${{ steps.setup-chrome.outputs.chrome-path }}
 
       - name: Set up Node for JS coverage report
         if: always()
