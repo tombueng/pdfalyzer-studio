@@ -1,6 +1,8 @@
 # ── Test stage (docker compose run test) ──────────────────────────────────────
 FROM azul/zulu-openjdk:26 AS test
 
+ARG RAILWAY_SERVICE_ID=local
+
 RUN apt-get update && apt-get install -y --no-install-recommends \
         maven wget gnupg2 ca-certificates fonts-liberation && \
     wget -q -O - https://dl.google.com/linux/linux_signing_key.pub \
@@ -14,7 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 COPY pom.xml .
-RUN --mount=type=cache,id=pdfalyzer-m2,target=/root/.m2 \
+RUN --mount=type=cache,id=s/${RAILWAY_SERVICE_ID}-pdfalyzer-m2,target=/root/.m2 \
     mvn dependency:go-offline --batch-mode --no-transfer-progress || true
 
 COPY src src/
@@ -27,13 +29,15 @@ CMD ["clean", "verify", "--batch-mode", "--no-transfer-progress"]
 # ── Build stage ────────────────────────────────────────────────────────────────
 FROM azul/zulu-openjdk:26 AS build
 
+ARG RAILWAY_SERVICE_ID=local
+
 WORKDIR /app
 COPY pom.xml .
 COPY src src/
 COPY licenses licenses/
 COPY LICENSE NOTICE ./
 
-RUN --mount=type=cache,id=pdfalyzer-m2,target=/root/.m2 \
+RUN --mount=type=cache,id=s/${RAILWAY_SERVICE_ID}-pdfalyzer-m2,target=/root/.m2 \
     apt-get update && apt-get install -y --no-install-recommends maven && \
     mvn clean package -DskipTests --batch-mode --no-transfer-progress
 
