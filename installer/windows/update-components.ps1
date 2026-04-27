@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Downloads / updates all bundled components for the PDFalyzer UI Windows installer.
+    Downloads / updates all bundled components for the PDFalyzer Studio Windows installer.
 
 .DESCRIPTION
     Fetches the latest versions of:
@@ -281,9 +281,9 @@ function Update-AppJar {
             return
         }
 
-        $dest = Join-Path $AppDir 'pdfalyzer-ui.jar'
+        $dest = Join-Path $AppDir 'pdfalyzer-studio.jar'
         Copy-Item $jar.FullName $dest -Force
-        Write-Host "  Built: $($jar.Name) -> bundle\app\pdfalyzer-ui.jar ($([math]::Round($jar.Length / 1MB, 1)) MB)" -ForegroundColor Green
+        Write-Host "  Built: $($jar.Name) -> bundle\app\pdfalyzer-studio.jar ($([math]::Round($jar.Length / 1MB, 1)) MB)" -ForegroundColor Green
     }
     finally {
         Pop-Location
@@ -312,7 +312,7 @@ Set shell = CreateObject("WScript.Shell")
 baseDir    = fso.GetParentFolderName(WScript.ScriptFullName) & "\"
 java       = baseDir & "jre\bin\javaw.exe"
 chrome     = baseDir & "chromium\chrome.exe"
-jar        = baseDir & "app\pdfalyzer-ui.jar"
+jar        = baseDir & "app\pdfalyzer-studio.jar"
 port       = "8080"
 
 ' Use %LOCALAPPDATA%\PDFalyzer Studio for writable data (not Program Files)
@@ -506,7 +506,7 @@ End Sub
     $batPath = Join-Path $BundleDir 'pdfalyzer.bat'
     $batContent = @'
 @echo off
-REM PDFalyzer UI Launcher (console mode, for debugging)
+REM PDFalyzer Studio Launcher (console mode, for debugging)
 REM For normal use, run pdfalyzer.vbs instead (no console window).
 cscript //nologo "%~dp0pdfalyzer.vbs"
 '@
@@ -540,8 +540,8 @@ function Write-Manifest {
     if (Test-Path "$WixDir\candle.exe") {
         $manifest.wix = $WIX_VERSION
     }
-    if (Test-Path "$AppDir\pdfalyzer-ui.jar") {
-        $manifest.app_jar = "$([math]::Round((Get-Item "$AppDir\pdfalyzer-ui.jar").Length / 1MB, 1)) MB"
+    if (Test-Path "$AppDir\pdfalyzer-studio.jar") {
+        $manifest.app_jar = "$([math]::Round((Get-Item "$AppDir\pdfalyzer-studio.jar").Length / 1MB, 1)) MB"
     }
 
     $manifestPath = Join-Path $BundleDir 'versions.json'
@@ -553,7 +553,7 @@ function Write-Manifest {
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 Write-Host ""
-Write-Host "  PDFalyzer UI - Component Updater" -ForegroundColor White
+Write-Host "  PDFalyzer Studio - Component Updater" -ForegroundColor White
 Write-Host "  Project root: $ProjectRoot"
 Write-Host "  Bundle dir:   $BundleDir"
 Write-Host ""

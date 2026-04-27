@@ -4,8 +4,8 @@
 
 <p align="center">
 
-[![CI](https://github.com/tombueng/pdfalyzer-ui/actions/workflows/ci.yml/badge.svg)](https://github.com/tombueng/pdfalyzer-ui/actions/workflows/ci.yml)
-[![CodeQL](https://github.com/tombueng/pdfalyzer-ui/actions/workflows/codeql.yml/badge.svg)](https://github.com/tombueng/pdfalyzer-ui/actions/workflows/codeql.yml)
+[![CI](https://github.com/tombueng/pdfalyzer-studio/actions/workflows/ci.yml/badge.svg)](https://github.com/tombueng/pdfalyzer-studio/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/tombueng/pdfalyzer-studio/actions/workflows/codeql.yml/badge.svg)](https://github.com/tombueng/pdfalyzer-studio/actions/workflows/codeql.yml)
 [![Java 21](https://img.shields.io/badge/Java-21-blue?logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/21/)
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
 [![PDFBox](https://img.shields.io/badge/PDFBox-3.0-red?logo=apache&logoColor=white)](https://pdfbox.apache.org/)
@@ -531,7 +531,7 @@ pdfalyzer.trust.enable-online-revocation=true
 
 ```
 src/main/java/io/pdfalyzer/
-├── PdfalyzerUiApplication.java          # Entry point (@EnableScheduling)
+├── PdfalyzerStudioApplication.java          # Entry point (@EnableScheduling)
 ├── model/
 │   ├── PdfNode.java                     # Tree node with id, icon, color, properties, bbox
 │   ├── PdfSession.java                  # Session state (id, filename, bytes, tree, encryption)

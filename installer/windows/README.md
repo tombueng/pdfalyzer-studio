@@ -14,7 +14,7 @@ See the [parent README](../README.md) for full documentation.
 .\build-installer.bat
 ```
 
-Output: `output\PdfalyzerUiInstaller.msi` (~236 MB)
+Output: `output\PdfalyzerStudioInstaller.msi` (~236 MB)
 
 ## Files
 

@@ -6,8 +6,8 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication
 @EnableScheduling
-public class PdfalyzerUiApplication {
+public class PdfalyzerStudioApplication {
     public static void main(String[] args) {
-        SpringApplication.run(PdfalyzerUiApplication.class, args);
+        SpringApplication.run(PdfalyzerStudioApplication.class, args);
     }
 }

@@ -6,7 +6,7 @@ The installer bundles everything needed to run PDFalyzer Studio as a standalone 
 
 | Component | Purpose | Size |
 |-----------|---------|------|
-| Application JAR | Spring Boot fat JAR (`pdfalyzer-ui.jar`) | ~63 MB |
+| Application JAR | Spring Boot fat JAR (`pdfalyzer-studio.jar`) | ~63 MB |
 | Adoptium Temurin JRE 21 | Java runtime (x64) | ~47 MB |
 | Chrome for Testing | Chromium browser in `--app` mode (no address bar) | ~183 MB |
 | Launch4j | Wraps JAR as Windows EXE | build tool only |
@@ -26,7 +26,7 @@ cd installer\windows
 .\build-installer.bat
 ```
 
-Output: `installer\windows\output\PdfalyzerUiInstaller.msi`
+Output: `installer\windows\output\PdfalyzerStudioInstaller.msi`
 
 ## Directory Structure
 
@@ -46,7 +46,7 @@ installer/
 │   │   ├── build-uber-jar.bat         ← (legacy)
 │   │   └── package-exe.bat            ← (legacy)
 │   ├── bundle/                        ← (gitignored) downloaded components
-│   │   ├── app/pdfalyzer-ui.jar
+│   │   ├── app/pdfalyzer-studio.jar
 │   │   ├── jre/                       ← Adoptium Temurin JRE 21
 │   │   ├── chromium/                  ← Chrome for Testing
 │   │   ├── launch4j/                  ← Launch4j build tool
@@ -54,8 +54,8 @@ installer/
 │   │   ├── pdfalyzer.bat              ← generated launcher script
 │   │   └── versions.json              ← component version manifest
 │   └── output/                        ← (gitignored) build artifacts
-│       ├── PdfalyzerUi.exe            ← Launch4j EXE wrapper
-│       └── PdfalyzerUiInstaller.msi   ← final installer
+│       ├── PdfalyzerStudio.exe            ← Launch4j EXE wrapper
+│       └── PdfalyzerStudioInstaller.msi   ← final installer
 ```
 
 ## Windows Installer Details
@@ -105,10 +105,10 @@ Builds the MSI installer using the components in `bundle/`.
 
 **What it does:**
 
-1. **Launch4j** – wraps `pdfalyzer-ui.jar` as `PdfalyzerUi.exe` (uses bundled JRE at `jre/` relative path)
+1. **Launch4j** – wraps `pdfalyzer-studio.jar` as `PdfalyzerStudio.exe` (uses bundled JRE at `jre/` relative path)
 2. **WiX heat.exe** – harvests JRE and Chromium directories into WiX fragments (auto-generates file lists)
 3. **WiX candle.exe** – compiles all `.wxs` sources
-4. **WiX light.exe** – links into final `PdfalyzerUiInstaller.msi`
+4. **WiX light.exe** – links into final `PdfalyzerStudioInstaller.msi`
 
 ### What the Installer Creates
 
@@ -123,9 +123,9 @@ When a user runs the MSI:
 ```
 C:\Program Files\PDFalyzer Studio\
 ├── pdfalyzer.bat          ← launcher (starts app + opens browser)
-├── PdfalyzerUi.exe        ← alternative launcher (Launch4j wrapper)
+├── PdfalyzerStudio.exe        ← alternative launcher (Launch4j wrapper)
 ├── app\
-│   └── pdfalyzer-ui.jar   ← Spring Boot application
+│   └── pdfalyzer-studio.jar   ← Spring Boot application
 ├── jre\                   ← bundled JRE 21
 │   └── bin\java.exe
 └── chromium\              ← bundled Chromium
@@ -135,7 +135,7 @@ C:\Program Files\PDFalyzer Studio\
 ### How the Launcher Works
 
 `pdfalyzer.bat`:
-1. Starts `javaw.exe -jar pdfalyzer-ui.jar` in the background
+1. Starts `javaw.exe -jar pdfalyzer-studio.jar` in the background
 2. Polls `http://localhost:8080/actuator/health` until the server is ready
 3. Opens Chromium in `--app` mode (no address bar, looks like a native app)
 4. Uses a dedicated `chromium-profile/` directory (no interference with user's browser)
@@ -162,8 +162,8 @@ The MSI uses `MajorUpgrade` so installing a new version automatically removes th
 
 To sign the EXE and MSI with a code signing certificate:
 ```cmd
-signtool sign /f cert.pfx /p password /tr http://timestamp.digicert.com /td sha256 /fd sha256 output\PdfalyzerUi.exe
-signtool sign /f cert.pfx /p password /tr http://timestamp.digicert.com /td sha256 /fd sha256 output\PdfalyzerUiInstaller.msi
+signtool sign /f cert.pfx /p password /tr http://timestamp.digicert.com /td sha256 /fd sha256 output\PdfalyzerStudio.exe
+signtool sign /f cert.pfx /p password /tr http://timestamp.digicert.com /td sha256 /fd sha256 output\PdfalyzerStudioInstaller.msi
 ```
 
 ## Troubleshooting

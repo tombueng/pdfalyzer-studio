@@ -13,6 +13,6 @@ if not defined JAR (
 )
 
 REM Copy to installer\windows\scripts for packaging
-copy "%JAR%" installer\windows\scripts\PdfalyzerUi-standalone.jar
+copy "%JAR%" installer\windows\scripts\PdfalyzerStudio-standalone.jar
 
-echo Uber-jar built and copied to installer\windows\scripts\PdfalyzerUi-standalone.jar
+echo Uber-jar built and copied to installer\windows\scripts\PdfalyzerStudio-standalone.jar

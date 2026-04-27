@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- PDFalyzer UI – WiX 3 Installer
+<!-- PDFalyzer Studio – WiX 3 Installer
      Bundles: Application JAR, JRE, Chromium, launcher scripts
      Creates: Desktop shortcut, Start Menu folder, uninstaller entry -->
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi"
@@ -74,14 +74,14 @@
 
       <!-- Launch4j EXE wrapper -->
       <Component Id="AppExeComponent" Guid="666CE839-7C92-49E5-BF66-C98AD4DD5B65" Win64="yes">
-        <File Id="PdfalyzerExe" Source="$(var.AppExe)" Name="PdfalyzerUi.exe" KeyPath="yes" />
+        <File Id="PdfalyzerExe" Source="$(var.AppExe)" Name="PdfalyzerStudio.exe" KeyPath="yes" />
       </Component>
     </DirectoryRef>
 
     <!-- Application JAR -->
     <DirectoryRef Id="AppDir">
       <Component Id="AppJarComponent" Guid="14F98BCF-9DAE-4100-99EE-56855075E088" Win64="yes">
-        <File Id="AppJar" Source="$(var.AppJar)" Name="pdfalyzer-ui.jar" KeyPath="yes" />
+        <File Id="AppJar" Source="$(var.AppJar)" Name="pdfalyzer-studio.jar" KeyPath="yes" />
       </Component>
     </DirectoryRef>
 

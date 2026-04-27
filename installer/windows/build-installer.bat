@@ -1,8 +1,8 @@
 @echo off
 REM ============================================================================
-REM  PDFalyzer UI - Windows Installer Builder
+REM  PDFalyzer Studio - Windows Installer Builder
 REM  Uses components from bundle\ (downloaded by update-components.ps1)
-REM  Produces: PdfalyzerUiInstaller.msi
+REM  Produces: PdfalyzerStudioInstaller.msi
 REM ============================================================================
 setlocal enabledelayedexpansion
 
@@ -15,11 +15,11 @@ set "OUTPUT_DIR=%SCRIPT_DIR%output"
 
 REM ── Preflight checks ────────────────────────────────────────────────────────
 echo.
-echo  PDFalyzer UI - Installer Builder
+echo  PDFalyzer Studio - Installer Builder
 echo  =================================
 echo.
 
-if not exist "%BUNDLE_DIR%\app\pdfalyzer-ui.jar" (
+if not exist "%BUNDLE_DIR%\app\pdfalyzer-studio.jar" (
     echo ERROR: App JAR not found. Run update-components.ps1 first.
     exit /b 1
 )
@@ -50,16 +50,16 @@ echo.
 echo [1/3] Creating EXE wrapper with Launch4j...
 
 set "L4J_CONFIG=%OUTPUT_DIR%\launch4j-config.xml"
-set "APP_EXE=%OUTPUT_DIR%\PdfalyzerUi.exe"
+set "APP_EXE=%OUTPUT_DIR%\PdfalyzerStudio.exe"
 
 (
   echo ^<?xml version="1.0" encoding="UTF-8"?^>
   echo ^<launch4jConfig^>
   echo   ^<dontWrapJar^>true^</dontWrapJar^>
   echo   ^<headerType^>gui^</headerType^>
-  echo   ^<jar^>app\pdfalyzer-ui.jar^</jar^>
+  echo   ^<jar^>app\pdfalyzer-studio.jar^</jar^>
   echo   ^<outfile^>%APP_EXE%^</outfile^>
-  echo   ^<errTitle^>PDFalyzer UI^</errTitle^>
+  echo   ^<errTitle^>PDFalyzer Studio^</errTitle^>
   echo   ^<cmdLine^>--server.port=8080^</cmdLine^>
   echo   ^<chdir^>^</chdir^>
   echo   ^<priority^>normal^</priority^>
@@ -113,7 +113,7 @@ echo   Compiling WiX sources...
 "%CANDLE%" -nologo -arch x64 ^
     -dJreSource="%BUNDLE_DIR%\jre" ^
     -dChromiumSource="%BUNDLE_DIR%\chromium" ^
-    -dAppJar="%BUNDLE_DIR%\app\pdfalyzer-ui.jar" ^
+    -dAppJar="%BUNDLE_DIR%\app\pdfalyzer-studio.jar" ^
     -dAppExe="%APP_EXE%" ^
     -dAppIcon="%SCRIPT_DIR%assets\app-icon.ico" ^
     -dLauncherVbs="%BUNDLE_DIR%\pdfalyzer.vbs" ^
@@ -131,7 +131,7 @@ echo.
 echo [3/3] Linking MSI installer...
 
 "%LIGHT%" -nologo -ext WixUIExtension -ext WixUtilExtension ^
-    -out "%OUTPUT_DIR%\PdfalyzerUiInstaller.msi" ^
+    -out "%OUTPUT_DIR%\PdfalyzerStudioInstaller.msi" ^
     "%OUTPUT_DIR%\PdfalyzerInstaller.wixobj" "%OUTPUT_DIR%\jre-fragment.wixobj" "%OUTPUT_DIR%\chromium-fragment.wixobj"
 if errorlevel 1 (
     echo ERROR: light.exe failed.
@@ -143,6 +143,6 @@ popd
 
 echo.
 echo ============================================================================
-echo  SUCCESS: %OUTPUT_DIR%\PdfalyzerUiInstaller.msi
+echo  SUCCESS: %OUTPUT_DIR%\PdfalyzerStudioInstaller.msi
 echo ============================================================================
 echo.

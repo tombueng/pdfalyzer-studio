@@ -4,7 +4,7 @@
     <modelVersion>4.0.0</modelVersion>
 
     <groupId>io.pdfalyzer</groupId>
-    <artifactId>pdfalyzer-ui</artifactId>
+    <artifactId>pdfalyzer-studio</artifactId>
     <version>0.1.0-SNAPSHOT</version>
     <packaging>jar</packaging>
 
@@ -187,7 +187,7 @@
         <repository>
             <id>github</id>
             <name>GitHub Packages</name>
-            <url>https://maven.pkg.github.com/tombueng/pdfalyzer-ui</url>
+            <url>https://maven.pkg.github.com/tombueng/pdfalyzer-studio</url>
         </repository>
     </distributionManagement>
 

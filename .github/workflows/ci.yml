@@ -57,7 +57,7 @@ jobs:
         if: success()
         with:
           name: pdfalyzer-studio-jar
-          path: target/pdfalyzer-ui-*.jar
+          path: target/pdfalyzer-studio-*.jar
           retention-days: 30
 
   publish-maven:

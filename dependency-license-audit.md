@@ -1,7 +1,7 @@
 # Dependency License Audit (March 1, 2026)
 
 ## Scope and data source
-- Project: `io.pdfalyzer:pdfalyzer-ui`
+- Project: `io.pdfalyzer:pdfalyzer-studio`
 - Source of truth for dependency licenses: Maven generated report at `licenses/generated/THIRD-PARTY.txt`
 - Runtime/test scope inventory from:
   - `target/runtime-deps.txt`

@@ -40,13 +40,13 @@ RUN --mount=type=cache,target=/root/.m2 \
 # ── Runtime stage ─────────────────────────────────────────────────────────────
 FROM azul/zulu-openjdk:25-jre
 
-LABEL org.opencontainers.image.source="https://github.com/tombueng/pdfalyzer-ui"
+LABEL org.opencontainers.image.source="https://github.com/tombueng/pdfalyzer-studio"
 LABEL org.opencontainers.image.description="PDFalyzer Studio — PDF inspection web application"
 
 RUN groupadd --system app && useradd --system --gid app app
 
 WORKDIR /app
-COPY --from=build /app/target/pdfalyzer-ui-*.jar app.jar
+COPY --from=build /app/target/pdfalyzer-studio-*.jar app.jar
 
 EXPOSE 8080
 

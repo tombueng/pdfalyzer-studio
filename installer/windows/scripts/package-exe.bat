@@ -1,11 +1,11 @@
 @echo off
 REM Windows packaging script for Pdfalyzer UI
-REM Assumes PdfalyzerUi-standalone.jar is built and available
+REM Assumes PdfalyzerStudio-standalone.jar is built and available
 cd /d %~dp0
 
 REM Use Launch4j to wrap jar as exe (requires launch4j installed)
-set JAR=PdfalyzerUi-standalone.jar
-set EXE=PdfalyzerUi.exe
+set JAR=PdfalyzerStudio-standalone.jar
+set EXE=PdfalyzerStudio.exe
 set ICON=..\assets\app-icon.ico
 
 if not exist %JAR% (

@@ -62,7 +62,7 @@ jobs:
           Copy-Item -Recurse installer/windows/bundle/jre       "$stage/jre"
           Copy-Item -Recurse installer/windows/bundle/chromium  "$stage/chromium"
           Copy-Item        installer/windows/bundle/pdfalyzer.bat "$stage/pdfalyzer.bat"
-          ./warp-packer.exe --arch windows-x64 --input_dir $stage --exec pdfalyzer.bat --output installer/windows/output/PdfalyzerUi-portable.exe
+          ./warp-packer.exe --arch windows-x64 --input_dir $stage --exec pdfalyzer.bat --output installer/windows/output/PdfalyzerStudio-portable.exe
 
       - name: Upload artifacts (workflow_dispatch only)
         if: github.event_name == 'workflow_dispatch'
@@ -70,8 +70,8 @@ jobs:
         with:
           name: pdfalyzer-windows-installer
           path: |
-            installer/windows/output/PdfalyzerUiInstaller.msi
-            installer/windows/output/PdfalyzerUi-portable.exe
+            installer/windows/output/PdfalyzerStudioInstaller.msi
+            installer/windows/output/PdfalyzerStudio-portable.exe
           retention-days: 30
 
       - name: Attach to GitHub Release (tag push only)
@@ -79,6 +79,6 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            installer/windows/output/PdfalyzerUiInstaller.msi
-            installer/windows/output/PdfalyzerUi-portable.exe
+            installer/windows/output/PdfalyzerStudioInstaller.msi
+            installer/windows/output/PdfalyzerStudio-portable.exe
           generate_release_notes: true

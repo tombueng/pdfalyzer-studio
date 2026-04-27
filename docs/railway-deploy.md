@@ -11,7 +11,7 @@ PDFalyzer Studio is configured to deploy on [Railway](https://railway.com) using
 ## One-time setup in Railway
 
 1. **Sign in** at <https://railway.com> and open your project (or create one).
-2. **New service → Deploy from GitHub repo → `tombueng/pdfalyzer-ui`**.
+2. **New service → Deploy from GitHub repo → `tombueng/pdfalyzer-studio`**.
    - Railway requests GitHub access; grant it for this repo.
    - Auto-detects `railway.toml` and builds from `Dockerfile`.
 3. **Generate a public domain** under the service's **Settings → Networking → Generate Domain**. Railway issues a `*.up.railway.app` URL and routes external traffic to `$PORT`.
@@ -45,7 +45,7 @@ The Railway dashboard shows build logs, runtime logs, and metrics under the serv
 If you prefer Railway to pull the prebuilt image from GHCR (which CI publishes on every main push) instead of rebuilding:
 
 1. In Railway: **New service → Deploy a Docker image**.
-2. Image: `ghcr.io/tombueng/pdfalyzer-ui:latest`.
+2. Image: `ghcr.io/tombueng/pdfalyzer-studio:latest`.
 3. If the GitHub package is private, add a registry credential under **Settings → Image Registry**.
 4. Railway redeploys when you push the same tag — trigger via the dashboard or use a Railway redeploy webhook from CI.
 
