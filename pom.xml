@@ -378,6 +378,7 @@
                 <version>3.5.5</version>
                 <configuration>
                     <shutdown>kill</shutdown>
+                    <forkedProcessTimeoutInSeconds>300</forkedProcessTimeoutInSeconds>
                     <forkedProcessExitTimeoutInSeconds>10</forkedProcessExitTimeoutInSeconds>
                     <argLine>@{argLine}</argLine>
                 </configuration>

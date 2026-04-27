@@ -64,12 +64,7 @@ public class UIRenderingTest {
             if (chromeBinary == null || chromeBinary.isBlank()) {
                 chromeBinary = findChromeBinary();
             }
-            try {
-                WebDriverManager.chromedriver().clearDriverCache().setup();
-            } catch (Exception cacheEx) {
-                System.err.println("Warning: Could not clear ChromeDriver cache, proceeding with setup: " + cacheEx.getMessage());
-                WebDriverManager.chromedriver().setup();
-            }
+            WebDriverManager.chromedriver().setup();
 
             ChromeOptions options = new ChromeOptions();
             if (chromeBinary != null) {
@@ -82,7 +77,6 @@ public class UIRenderingTest {
             options.addArguments("--disable-gpu");
             options.addArguments("--disable-blink-features=AutomationControlled");
             options.addArguments("--disable-extensions");
-            options.addArguments("--remote-debugging-port=0");
             LoggingPreferences loggingPrefs = new LoggingPreferences();
             loggingPrefs.enable(LogType.BROWSER, Level.ALL);
             loggingPrefs.enable(LogType.PERFORMANCE, Level.INFO);
@@ -181,7 +175,7 @@ public class UIRenderingTest {
         }
 
         driver.get(baseUrl);
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(300));
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(60));
 
         ensureTestPdfReady(wait, false);
 
@@ -293,7 +287,7 @@ public class UIRenderingTest {
         }
 
         driver.get(baseUrl);
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(300));
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(60));
         ensureTestPdfReady(wait, true);
 
         ((JavascriptExecutor) driver).executeScript(
@@ -1189,7 +1183,7 @@ public class UIRenderingTest {
         }
 
         driver.get(baseUrl);
-        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(300));
+        WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(60));
         ensureTestPdfReady(wait, false);
 
         String expectedAuthor = "UI Test Author " + System.currentTimeMillis();
