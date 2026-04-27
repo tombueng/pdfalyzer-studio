@@ -609,10 +609,10 @@ public class AcroFormTreeBuilder {
             X509CertificateHolder certHolder = certs.iterator().next();
             X509Certificate cert = new JcaX509CertificateConverter().getCertificate(certHolder);
             String serial = cert.getSerialNumber().toString(16).toUpperCase();
-            log.debug("Signature field {} signer cert serial={}, serialToBadge keys={}",
-                    sigField.getFullyQualifiedName(), serial, serialToBadge.keySet());
 
             if (serialToBadge == null) {
+                log.debug("Signature field {} signer cert serial={}, serialToBadge=null",
+                        sigField.getFullyQualifiedName(), serial);
                 // No DSS in document at all
                 node.setBadge("No DSS");
                 node.setBadgeColor("#6c757d");

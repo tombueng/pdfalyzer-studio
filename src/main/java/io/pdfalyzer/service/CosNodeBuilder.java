@@ -109,7 +109,11 @@ public class CosNodeBuilder {
                                    String idPrefix, ParseContext ctx, int depth,
                                    Set<String> excludeKeys) {
         COSObjectKey objKey = null;
-        try { objKey = dict.getKey(); } catch (Exception ignored) {}
+        try {
+            objKey = dict.getKey();
+        } catch (Exception e) {
+            log.trace("dict.getKey() threw, falling back to document index", e);
+        }
         if (objKey == null) objKey = findObjectKeyInDocument(dict, ctx.doc);
 
         for (Map.Entry<COSName, COSBase> entry : dict.entrySet()) {
@@ -250,7 +254,7 @@ public class CosNodeBuilder {
         // Check cache first — if already fully built, shallow-copy so the node is expandable
         PdfNode cached = ctx.cache.get(key);
         if (cached != null) {
-            String suffix = "-ref-" + Math.abs(idPrefix.hashCode());
+            String suffix = "-ref-" + (idPrefix.hashCode() & 0x7fffffff);
             PdfNode copy = cached.deepCopy(suffix, 4);
             copy.setName(objLabel);
             copy.setKeyPath(keyPathToJson(currentKeyPath));
