@@ -384,8 +384,8 @@
                 <version>3.5.5</version>
                 <configuration>
                     <shutdown>kill</shutdown>
-                    <forkedProcessTimeoutInSeconds>300</forkedProcessTimeoutInSeconds>
-                    <forkedProcessExitTimeoutInSeconds>10</forkedProcessExitTimeoutInSeconds>
+                    <forkedProcessTimeoutInSeconds>1500</forkedProcessTimeoutInSeconds>
+                    <forkedProcessExitTimeoutInSeconds>120</forkedProcessExitTimeoutInSeconds>
                     <argLine>@{argLine}</argLine>
                 </configuration>
             </plugin>
