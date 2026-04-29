@@ -387,6 +387,14 @@
                     <forkedProcessTimeoutInSeconds>1500</forkedProcessTimeoutInSeconds>
                     <forkedProcessExitTimeoutInSeconds>120</forkedProcessExitTimeoutInSeconds>
                     <argLine>@{argLine}</argLine>
+                    <!--
+                        *GeneratorTest classes are manual fixture-regeneration tools, not
+                        tests. Exclude from auto-run so they don't appear in the skipped
+                        count. Invoke directly with: mvn test -Dtest=NameOfGeneratorTest
+                    -->
+                    <excludes>
+                        <exclude>**/*GeneratorTest.java</exclude>
+                    </excludes>
                 </configuration>
             </plugin>
             <plugin>

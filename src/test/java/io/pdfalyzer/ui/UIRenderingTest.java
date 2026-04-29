@@ -90,9 +90,11 @@ public class UIRenderingTest {
                 jsCoverage.start();
             }
         } catch (Exception e) {
-            System.err.println("Warning: Could not initialize ChromeDriver with WebDriverManager: " + e.getMessage());
-            e.printStackTrace();
-            driver = null;
+            log.error("ChromeDriver could not start; failing the test class loudly instead of silently passing", e);
+            throw new IllegalStateException(
+                "ChromeDriver could not start: " + e.getMessage()
+                + ". On dev machines without Chrome, exclude this class with -Dtest='!UIRenderingTest'.",
+                e);
         }
     }
     
@@ -132,12 +134,7 @@ public class UIRenderingTest {
     
     @Test
     public void testPageLoads() {
-        if (driver == null) {
-            System.out.println("Skipping testPageLoads - ChromeDriver not available");
-            return;
-        }
-        
-        driver.get(baseUrl);
+driver.get(baseUrl);
         try {
             Thread.sleep(1000);
         } catch (InterruptedException e) {
@@ -150,12 +147,7 @@ public class UIRenderingTest {
     
     @Test
     public void testPageHasContent() {
-        if (driver == null) {
-            System.out.println("Skipping testPageHasContent - ChromeDriver not available");
-            return;
-        }
-        
-        driver.get(baseUrl);
+driver.get(baseUrl);
         try {
             Thread.sleep(1000);
         } catch (InterruptedException e) {
@@ -167,14 +159,8 @@ public class UIRenderingTest {
     }
 
     @Test
-    @Disabled("Flaky Selenium test - UI timing issue")
     public void testAutoUploadLoadsTestPdfOnStartup() {
-        if (driver == null) {
-            System.out.println("Skipping testAutoUploadLoadsTestPdfOnStartup - ChromeDriver not available");
-            return;
-        }
-
-        driver.get(baseUrl);
+driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(60));
 
         ensureTestPdfReady(wait, false);
@@ -190,12 +176,7 @@ public class UIRenderingTest {
     
     @Test
     public void testTreeNodeHeaderHasFlexIfPresent() {
-        if (driver == null) {
-            System.out.println("Skipping testTreeNodeHeaderHasFlexIfPresent - ChromeDriver not available");
-            return;
-        }
-        
-        driver.get(baseUrl);
+driver.get(baseUrl);
         try {
             Thread.sleep(1000);
         } catch (InterruptedException e) {
@@ -214,12 +195,7 @@ public class UIRenderingTest {
     
     @Test
     public void testToggleElementStyle() {
-        if (driver == null) {
-            System.out.println("Skipping testToggleElementStyle - ChromeDriver not available");
-            return;
-        }
-        
-        driver.get(baseUrl);
+driver.get(baseUrl);
         try {
             Thread.sleep(1000);
         } catch (InterruptedException e) {
@@ -239,12 +215,7 @@ public class UIRenderingTest {
     
     @Test
     public void testLabelFlexIfPresent() {
-        if (driver == null) {
-            System.out.println("Skipping testLabelFlexIfPresent - ChromeDriver not available");
-            return;
-        }
-        
-        driver.get(baseUrl);
+driver.get(baseUrl);
         try {
             Thread.sleep(1000);
         } catch (InterruptedException e) {
@@ -265,12 +236,7 @@ public class UIRenderingTest {
 
     @Test
     public void testJsErrorCaptureHookIsInstalled() {
-        if (driver == null) {
-            System.out.println("Skipping testJsErrorCaptureHookIsInstalled - ChromeDriver not available");
-            return;
-        }
-
-        driver.get(baseUrl);
+driver.get(baseUrl);
         Object installed = ((JavascriptExecutor) driver).executeScript("return !!window.__pdfalyzerErrorCaptureInstalled;");
         Object errors = ((JavascriptExecutor) driver).executeScript("return Array.isArray(window.__pdfalyzerJsErrors);");
 
@@ -279,14 +245,8 @@ public class UIRenderingTest {
     }
 
         @Test
-        @Disabled("Flaky Selenium test - modal timeout")
         public void testAddFieldUsesModalDialogNotPrompt() {
-        if (driver == null) {
-            System.out.println("Skipping testAddFieldUsesModalDialogNotPrompt - ChromeDriver not available");
-            return;
-        }
-
-        driver.get(baseUrl);
+driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(60));
         ensureTestPdfReady(wait, true);
 
@@ -335,12 +295,7 @@ public class UIRenderingTest {
 
     @Test
     public void testCollapsingNodeRemovesInfoPanel() {
-        if (driver == null) {
-            System.out.println("Skipping testCollapsingNodeRemovesInfoPanel - ChromeDriver not available");
-            return;
-        }
-
-        driver.get(baseUrl);
+driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
         ensureTestPdfReady(wait, true);
 
@@ -365,12 +320,7 @@ public class UIRenderingTest {
 
     @Test
     public void testPage1ImageStreamsHaveWorkingViewAndDownloadButtons() {
-        if (driver == null) {
-            System.out.println("Skipping testPage1ImageStreamsHaveWorkingViewAndDownloadButtons - ChromeDriver not available");
-            return;
-        }
-
-        driver.get(baseUrl);
+driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
         ensureTestPdfReady(wait, true);
 
@@ -426,12 +376,7 @@ public class UIRenderingTest {
 
     @Test
     public void testAttributeModificationAndNodeDeletionWorkflow() {
-        if (driver == null) {
-            System.out.println("Skipping testAttributeModificationAndNodeDeletionWorkflow - ChromeDriver not available");
-            return;
-        }
-
-        driver.get(baseUrl);
+driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(60));
         ensureTestPdfReady(wait, true);
 
@@ -477,12 +422,7 @@ public class UIRenderingTest {
 
     @Test
     public void testFieldSelectionSyncBetweenTreeAndPdfView() {
-        if (driver == null) {
-            System.out.println("Skipping testFieldSelectionSyncBetweenTreeAndPdfView - ChromeDriver not available");
-            return;
-        }
-
-        driver.get(baseUrl);
+driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(60));
         ensureTestPdfReady(wait, true);
 
@@ -561,12 +501,7 @@ public class UIRenderingTest {
 
     @Test
     public void testPdfViewClickAndCtrlClickSelectsFieldsInTreeAndHandles() {
-        if (driver == null) {
-            System.out.println("Skipping testPdfViewClickAndCtrlClickSelectsFieldsInTreeAndHandles - ChromeDriver not available");
-            return;
-        }
-
-        driver.get(baseUrl);
+driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
         ensureTestPdfReady(wait, true);
         activateSelectEditMode();
@@ -646,12 +581,7 @@ public class UIRenderingTest {
 
     @Test
     public void testPdfViewMultiselectKeepsAllHandlesHighlighted() {
-        if (driver == null) {
-            System.out.println("Skipping testPdfViewMultiselectKeepsAllHandlesHighlighted - ChromeDriver not available");
-            return;
-        }
-
-        driver.get(baseUrl);
+driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
         ensureTestPdfReady(wait, true);
         activateSelectEditMode();
@@ -715,15 +645,9 @@ public class UIRenderingTest {
         assertEquals(Boolean.TRUE, map.get("ok"), "Multi-select PDF highlight must show all selected handles: " + map);
     }
 
-    @Disabled("Flaky Selenium test - Chrome session dies mid-test")
     @Test
     public void testPdfViewAndTreeImageSelectionSyncBothDirections() {
-        if (driver == null) {
-            System.out.println("Skipping testPdfViewAndTreeImageSelectionSyncBothDirections - ChromeDriver not available");
-            return;
-        }
-
-        driver.get(baseUrl);
+driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
         ensureTestPdfReady(wait, true);
         wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector("#pdfViewer .pdf-page-wrapper canvas")));
@@ -815,14 +739,8 @@ public class UIRenderingTest {
     }
 
     @Test
-    @Disabled("Flaky Selenium test - canvas not available")
     public void testPdfViewClickExpandsStructuralTreeForFieldAndImage() {
-        if (driver == null) {
-            System.out.println("Skipping testPdfViewClickExpandsStructuralTreeForFieldAndImage - ChromeDriver not available");
-            return;
-        }
-
-        driver.get(baseUrl);
+driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
         ensureTestPdfReady(wait, true);
         wait.until(ExpectedConditions.presenceOfElementLocated(By.cssSelector("#pdfViewer .pdf-page-wrapper canvas")));
@@ -929,14 +847,8 @@ public class UIRenderingTest {
     }
 
     @Test
-    @Disabled("Flaky Selenium test - font tab timing issue")
     public void testFontsTabRowActionsVisibleAndClickable() {
-        if (driver == null) {
-            System.out.println("Skipping testFontsTabRowActionsVisibleAndClickable - ChromeDriver not available");
-            return;
-        }
-
-        driver.get(baseUrl);
+driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
         ensureTestPdfReady(wait, true);
 
@@ -979,14 +891,8 @@ public class UIRenderingTest {
     }
 
     @Test
-    @Disabled("Flaky Selenium test - font detail button timeout")
     public void testFontDiagnosticsLazyGlyphPreviewLoads() {
-        if (driver == null) {
-            System.out.println("Skipping testFontDiagnosticsLazyGlyphPreviewLoads - ChromeDriver not available");
-            return;
-        }
-
-        driver.get(baseUrl);
+driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
         ensureTestPdfReady(wait, true);
 
@@ -1032,12 +938,7 @@ public class UIRenderingTest {
 
     @Test
     public void testMovingSelectedFieldsEnablesSaveAndAvoidsGhostHandles() {
-        if (driver == null) {
-            System.out.println("Skipping testMovingSelectedFieldsEnablesSaveAndAvoidsGhostHandles - ChromeDriver not available");
-            return;
-        }
-
-        driver.get(baseUrl);
+driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(60));
         ensureTestPdfReady(wait, true);
         activateSelectEditMode();
@@ -1116,12 +1017,7 @@ public class UIRenderingTest {
 
     @Test
     public void testFieldOptionsApplyEnablesSaveButton() {
-        if (driver == null) {
-            System.out.println("Skipping testFieldOptionsApplyEnablesSaveButton - ChromeDriver not available");
-            return;
-        }
-
-        driver.get(baseUrl);
+driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(60));
         ensureTestPdfReady(wait, true);
         activateSelectEditMode();
@@ -1177,12 +1073,7 @@ public class UIRenderingTest {
 
     @Test
     public void testDocumentInfoCosEditsPersistToPdfAfterSave() throws Exception {
-        if (driver == null) {
-            System.out.println("Skipping testDocumentInfoCosEditsPersistToPdfAfterSave - ChromeDriver not available");
-            return;
-        }
-
-        driver.get(baseUrl);
+driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(60));
         ensureTestPdfReady(wait, false);
 
@@ -1262,12 +1153,7 @@ public class UIRenderingTest {
 
         @Test
         public void testMultiselectTriStateFieldOptionsWorkflow() {
-        if (driver == null) {
-            System.out.println("Skipping testMultiselectTriStateFieldOptionsWorkflow - ChromeDriver not available");
-            return;
-        }
-
-        driver.get(baseUrl);
+driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(60));
         ensureTestPdfReady(wait, true);
 
@@ -1319,12 +1205,7 @@ public class UIRenderingTest {
 
     @Test
     public void testZoomTransitionKeepsRenderedPagesVisibleAt10msSampling() {
-        if (driver == null) {
-            System.out.println("Skipping testZoomTransitionKeepsRenderedPagesVisibleAt10msSampling - ChromeDriver not available");
-            return;
-        }
-
-        driver.get(baseUrl);
+driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
         ensureTestPdfReady(wait, false);
 
@@ -1373,12 +1254,7 @@ public class UIRenderingTest {
 
     @Test
     public void testCaptureSmoothRefreshTransitionVideoFrames() throws Exception {
-        if (driver == null) {
-            System.out.println("Skipping testCaptureSmoothRefreshTransitionVideoFrames - ChromeDriver not available");
-            return;
-        }
-
-        driver.get(baseUrl);
+driver.get(baseUrl);
         WebDriverWait wait = new WebDriverWait(driver, Duration.ofSeconds(40));
         ensureTestPdfReady(wait, false);
 

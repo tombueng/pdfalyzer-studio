@@ -3,7 +3,6 @@ package io.pdfalyzer.tools;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.interactive.form.PDAcroForm;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -12,7 +11,6 @@ import java.nio.file.Path;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-@Disabled("PDF generator tool — run manually when regenerating sample fixtures")
 class FormFieldShowcasePdfGeneratorTest {
 
     @TempDir
