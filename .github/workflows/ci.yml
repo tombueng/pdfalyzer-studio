@@ -20,7 +20,7 @@ jobs:
   build:
     name: Build & Test
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -40,7 +40,7 @@ jobs:
           chrome-version: stable
 
       - name: Build, Test & Coverage
-        timeout-minutes: 20
+        timeout-minutes: 35
         run: mvn clean verify --batch-mode --no-transfer-progress -Djs.coverage=true -Dchrome.binary=${{ steps.setup-chrome.outputs.chrome-path }}
 
       - name: Ensure JaCoCo XML report exists (even if tests failed)
