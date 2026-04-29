@@ -11,8 +11,15 @@
 [![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
 [![PDFBox](https://img.shields.io/badge/PDFBox-3.0-red?logo=apache&logoColor=white)](https://pdfbox.apache.org/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue?logo=apache&logoColor=white)](LICENSE)
+[![Live Demo](https://img.shields.io/badge/Live%20Demo-Railway-0B0D0E?logo=railway&logoColor=white)](https://pdfalyzer-studio-production.up.railway.app/)
 
 </p>
+
+## Try it live
+
+A hosted demo runs on Railway: **<https://pdfalyzer-studio-production.up.railway.app/>**
+
+(Auto-deployed from `main` on every push.)
 
 ## How to run
 
@@ -30,7 +37,7 @@ Or with Docker (no local JDK needed):
 docker build -t pdfalyzer-studio . && docker run -p 8080:8080 pdfalyzer-studio
 ```
 
-Or deploy to Railway: see [docs/railway-deploy.md](docs/railway-deploy.md).
+Or deploy to Railway yourself: see [docs/railway-deploy.md](docs/railway-deploy.md).
 
 ---
 
