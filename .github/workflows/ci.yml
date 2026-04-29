@@ -43,6 +43,10 @@ jobs:
         timeout-minutes: 20
         run: mvn clean verify --batch-mode --no-transfer-progress -Djs.coverage=true -Dchrome.binary=${{ steps.setup-chrome.outputs.chrome-path }}
 
+      - name: Ensure JaCoCo XML report exists (even if tests failed)
+        if: always()
+        run: mvn jacoco:report --batch-mode --no-transfer-progress
+
       - name: Set up Node for JS coverage report
         if: always()
         uses: actions/setup-node@v5
