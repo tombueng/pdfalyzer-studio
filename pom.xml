@@ -94,10 +94,16 @@
             <artifactId>parser</artifactId>
             <version>${verapdf.version}</version>
         </dependency>
+        <!--
+            Pinned to 2.3.x: veraPDF 1.26.x ships its releaseDetails XML
+            against the older JAXB binding model. Bumping to 4.x breaks
+            the streaming unmarshalling and pushes our veraPDF reports
+            into a degraded text fallback (see ApiFlowIntegrationTest).
+        -->
         <dependency>
             <groupId>org.glassfish.jaxb</groupId>
             <artifactId>jaxb-runtime</artifactId>
-            <version>4.0.7</version>
+            <version>2.3.9</version>
         </dependency>
 
         <!-- BouncyCastle – CMS/PKCS#7 signature parsing.
