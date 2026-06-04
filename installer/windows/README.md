@@ -1,6 +1,6 @@
 # Windows Installer
 
-Builds a standalone MSI installer for PDFalyzer Studio that bundles JRE 21, Chromium, and the application JAR.
+Builds a standalone MSI installer for PDFalyzer Studio that bundles JRE 25, Chromium, and the application JAR.
 
 See the [parent README](../README.md) for full documentation.
 

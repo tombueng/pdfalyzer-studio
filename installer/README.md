@@ -7,7 +7,7 @@ The installer bundles everything needed to run PDFalyzer Studio as a standalone 
 | Component | Purpose | Size |
 |-----------|---------|------|
 | Application JAR | Spring Boot fat JAR (`pdfalyzer-studio.jar`) | ~63 MB |
-| Adoptium Temurin JRE 21 | Java runtime (x64) | ~47 MB |
+| Adoptium Temurin JRE 25 | Java runtime (x64) | ~47 MB |
 | Chrome for Testing | Chromium browser in `--app` mode (no address bar) | ~183 MB |
 | Launch4j | Wraps JAR as Windows EXE | build tool only |
 | WiX Toolset 3.14 | Creates MSI installer | build tool only |
@@ -47,7 +47,7 @@ installer/
 │   │   └── package-exe.bat            ← (legacy)
 │   ├── bundle/                        ← (gitignored) downloaded components
 │   │   ├── app/pdfalyzer-studio.jar
-│   │   ├── jre/                       ← Adoptium Temurin JRE 21
+│   │   ├── jre/                       ← Adoptium Temurin JRE 25
 │   │   ├── chromium/                  ← Chrome for Testing
 │   │   ├── launch4j/                  ← Launch4j build tool
 │   │   ├── wix/                       ← WiX Toolset binaries
@@ -90,7 +90,7 @@ Downloads all external dependencies and builds the application JAR.
 
 | Component | Source | API/URL |
 |-----------|--------|---------|
-| JRE 21 | [Adoptium](https://adoptium.net) | `api.adoptium.net/v3/assets/latest/21/hotspot` |
+| JRE 25 | [Adoptium](https://adoptium.net) | `api.adoptium.net/v3/assets/latest/25/hotspot` |
 | Chromium | [Chrome for Testing](https://googlechromelabs.github.io/chrome-for-testing/) | `last-known-good-versions-with-downloads.json` |
 | Launch4j 3.50 | [SourceForge](https://sourceforge.net/projects/launch4j/) | Direct download |
 | WiX 3.14.1 | [GitHub](https://github.com/wixtoolset/wix3/releases) | Direct download |
@@ -126,7 +126,7 @@ C:\Program Files\PDFalyzer Studio\
 ├── PdfalyzerStudio.exe        ← alternative launcher (Launch4j wrapper)
 ├── app\
 │   └── pdfalyzer-studio.jar   ← Spring Boot application
-├── jre\                   ← bundled JRE 21
+├── jre\                   ← bundled JRE 25
 │   └── bin\java.exe
 └── chromium\              ← bundled Chromium
     └── chrome.exe

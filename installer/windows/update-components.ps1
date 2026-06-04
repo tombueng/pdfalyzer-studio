@@ -5,7 +5,7 @@
 
 .DESCRIPTION
     Fetches the latest versions of:
-      - Adoptium Temurin JRE 21 (x64, Windows, .zip)
+      - Adoptium Temurin JRE 25 (x64, Windows, .zip)
       - Chromium (portable, ungoogled-chromium via GitHub releases)
       - Launch4j  (for JAR-to-EXE wrapping)
       - WiX Toolset v3 (candle / light for MSI creation)
@@ -52,8 +52,8 @@ $WixDir      = Join-Path $BundleDir 'wix'
 $AppDir      = Join-Path $BundleDir 'app'
 
 # ── Versions / URLs ───────────────────────────────────────────────────────────
-# Adoptium Temurin JRE 21 – latest GA via API
-$JRE_MAJOR   = 21
+# Adoptium Temurin JRE 25 – latest GA via API (must match maven.compiler.release in pom.xml)
+$JRE_MAJOR   = 25
 $ADOPTIUM_API = "https://api.adoptium.net/v3/assets/latest/$JRE_MAJOR/hotspot?architecture=x64&image_type=jre&os=windows&vendor=eclipse"
 
 # Launch4j

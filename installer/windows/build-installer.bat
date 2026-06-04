@@ -70,7 +70,7 @@ set "APP_EXE=%OUTPUT_DIR%\PdfalyzerStudio.exe"
   echo     ^<path^>jre^</path^>
   echo     ^<requiresJdk^>false^</requiresJdk^>
   echo     ^<requires64Bit^>true^</requires64Bit^>
-  echo     ^<minVersion^>21^</minVersion^>
+  echo     ^<minVersion^>25^</minVersion^>
   echo     ^<initialHeapSize^>256^</initialHeapSize^>
   echo     ^<maxHeapSize^>1024^</maxHeapSize^>
   echo   ^</jre^>
