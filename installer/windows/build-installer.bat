@@ -60,8 +60,8 @@ set "APP_EXE=%OUTPUT_DIR%\PdfalyzerStudio.exe"
   echo   ^<jar^>app\pdfalyzer-studio.jar^</jar^>
   echo   ^<outfile^>%APP_EXE%^</outfile^>
   echo   ^<errTitle^>PDFalyzer Studio^</errTitle^>
-  echo   ^<cmdLine^>--server.port=8080^</cmdLine^>
-  echo   ^<chdir^>^</chdir^>
+  echo   ^<cmdLine^>--server.port=8080 --pdfalyzer.desktop.launch-browser=true^</cmdLine^>
+  echo   ^<chdir^>.^</chdir^>
   echo   ^<priority^>normal^</priority^>
   echo   ^<stayAlive^>true^</stayAlive^>
   echo   ^<restartOnCrash^>false^</restartOnCrash^>
@@ -116,8 +116,6 @@ echo   Compiling WiX sources...
     -dAppJar="%BUNDLE_DIR%\app\pdfalyzer-studio.jar" ^
     -dAppExe="%APP_EXE%" ^
     -dAppIcon="%SCRIPT_DIR%assets\app-icon.ico" ^
-    -dLauncherVbs="%BUNDLE_DIR%\pdfalyzer.vbs" ^
-    -dLauncherBat="%BUNDLE_DIR%\pdfalyzer.bat" ^
     -out "%OUTPUT_DIR%\\" ^
     PdfalyzerInstaller.wxs "%OUTPUT_DIR%\jre-fragment.wxs" "%OUTPUT_DIR%\chromium-fragment.wxs"
 if errorlevel 1 (

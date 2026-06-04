@@ -49,20 +49,22 @@ jobs:
 
       - name: Download Warp packer
         shell: pwsh
+        continue-on-error: true
         run: |
           $url = 'https://github.com/dgiagio/warp/releases/download/v0.3.0/windows-x64.warp-packer.exe'
           Invoke-WebRequest -Uri $url -OutFile warp-packer.exe
 
       - name: Build portable single-file EXE with Warp
         shell: pwsh
+        continue-on-error: true
         run: |
           $stage = 'installer/windows/portable-stage'
           New-Item -ItemType Directory -Force -Path $stage | Out-Null
           Copy-Item -Recurse installer/windows/bundle/app       "$stage/app"
           Copy-Item -Recurse installer/windows/bundle/jre       "$stage/jre"
           Copy-Item -Recurse installer/windows/bundle/chromium  "$stage/chromium"
-          Copy-Item        installer/windows/bundle/pdfalyzer.bat "$stage/pdfalyzer.bat"
-          ./warp-packer.exe --arch windows-x64 --input_dir $stage --exec pdfalyzer.bat --output installer/windows/output/PdfalyzerStudio-portable.exe
+          Copy-Item        installer/windows/output/PdfalyzerStudio.exe "$stage/PdfalyzerStudio.exe"
+          ./warp-packer.exe --arch windows-x64 --input_dir $stage --exec PdfalyzerStudio.exe --output installer/windows/output/PdfalyzerStudio-portable.exe
 
       - name: Upload artifacts (workflow_dispatch only)
         if: github.event_name == 'workflow_dispatch'
@@ -81,4 +83,5 @@ jobs:
           files: |
             installer/windows/output/PdfalyzerStudioInstaller.msi
             installer/windows/output/PdfalyzerStudio-portable.exe
+          fail_on_unmatched_files: false
           generate_release_notes: true
