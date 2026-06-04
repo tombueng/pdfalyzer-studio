@@ -440,7 +440,8 @@ PDFalyzer.EditMode = (function ($, P) {
             var x = Math.min(startX, cx), y = Math.min(startY, cy), w = Math.abs(cx - startX), h = Math.abs(cy - startY);
             if ($drawRect) $drawRect.remove();
             if (w < 10 || h < 10) return;
-            var vp = P.state.pageViewports[pageIndex], s = vp.scale;
+            var vp = P.state.pageViewports[pageIndex]; if (!vp) return;
+            var s = vp.scale;
             var sn = P.EditDesigner ? P.EditDesigner.snapV : function (v) { return v; };
             P.EditField.openCreateFieldDialog(P.state.editFieldType, pageIndex, { x: sn(x / s), y: sn((vp.height - y - h) / s), width: sn(w / s), height: sn(h / s) });
         };
