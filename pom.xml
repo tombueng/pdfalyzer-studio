@@ -190,7 +190,7 @@
         <dependency>
             <groupId>org.seleniumhq.selenium</groupId>
             <artifactId>selenium-java</artifactId>
-            <version>4.46.0</version>
+            <version>4.47.0</version>
             <scope>test</scope>
         </dependency>
         <dependency>
@@ -456,7 +456,7 @@
             <plugin>
                 <groupId>org.openrewrite.maven</groupId>
                 <artifactId>rewrite-maven-plugin</artifactId>
-                <version>6.45.0</version>
+                <version>6.46.1</version>
                 <configuration>
                     <activeRecipes>
                         <recipe>org.openrewrite.java.migrate.lombok.LombokBestPractices</recipe>
@@ -466,7 +466,7 @@
                     <dependency>
                         <groupId>org.openrewrite.recipe</groupId>
                         <artifactId>rewrite-migrate-java</artifactId>
-                        <version>3.41.0</version>
+                        <version>3.42.0</version>
                     </dependency>
                 </dependencies>
             </plugin>
