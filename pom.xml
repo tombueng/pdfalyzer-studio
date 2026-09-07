@@ -258,7 +258,7 @@
                     <dependency>
                         <groupId>org.slf4j</groupId>
                         <artifactId>slf4j-simple</artifactId>
-                        <version>2.0.18</version>
+                        <version>2.0.19</version>
                     </dependency>
                 </dependencies>
                 <executions>
@@ -365,7 +365,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.15.0</version>
+                <version>3.16.0</version>
                 <configuration>
                     <release>${java.version}</release>
                     <parameters>true</parameters>
@@ -373,7 +373,7 @@
                         <path>
                             <groupId>org.projectlombok</groupId>
                             <artifactId>lombok</artifactId>
-                            <version>1.18.46</version>
+                            <version>1.18.48</version>
                         </path>
                     </annotationProcessorPaths>
                 </configuration>
@@ -381,7 +381,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
-                <version>3.5.6</version>
+                <version>3.6.0</version>
                 <configuration>
                     <shutdown>kill</shutdown>
                     <forkedProcessTimeoutInSeconds>1500</forkedProcessTimeoutInSeconds>
