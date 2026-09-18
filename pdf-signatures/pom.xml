@@ -20,7 +20,7 @@
         <java.version>21</java.version>
         <maven.compiler.release>${java.version}</maven.compiler.release>
         <pdfbox.version>3.0.0</pdfbox.version>
-        <bouncycastle.version>1.84</bouncycastle.version>
+        <bouncycastle.version>1.85</bouncycastle.version>
         <junit.version>5.11.4</junit.version>
         <asciidoctor.version>3.1.1</asciidoctor.version>
         <asciidoctor.diagram.version>2.3.1</asciidoctor.diagram.version>
