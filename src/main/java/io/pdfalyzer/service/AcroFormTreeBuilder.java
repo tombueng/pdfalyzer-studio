@@ -39,6 +39,7 @@ import org.bouncycastle.util.Store;
 import org.springframework.stereotype.Component;
 
 import io.pdfalyzer.model.PdfNode;
+import io.pdfalyzer.util.CmsSupport;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -591,7 +592,7 @@ public class AcroFormTreeBuilder {
             }
             log.debug("Signature field {} has {} bytes of CMS data", sigField.getFullyQualifiedName(), contents.length);
 
-            CMSSignedData cmsData = new CMSSignedData(contents);
+            CMSSignedData cmsData = CmsSupport.parseSignedData(contents);
             Collection<SignerInformation> signers = cmsData.getSignerInfos().getSigners();
             if (signers.isEmpty()) {
                 log.debug("No signers found in CMS data for field {}", sigField.getFullyQualifiedName());

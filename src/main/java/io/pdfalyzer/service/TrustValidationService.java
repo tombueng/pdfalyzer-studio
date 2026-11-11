@@ -24,6 +24,7 @@ import io.pdfalyzer.model.SignatureInfo;
 import io.pdfalyzer.model.TrustListStatus;
 import io.pdfalyzer.model.TrustValidationCheck;
 import io.pdfalyzer.model.TrustValidationReport;
+import io.pdfalyzer.util.CmsSupport;
 import lombok.Builder;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -560,7 +561,7 @@ public class TrustValidationService {
                     try {
                         byte[] contents = sig.getContents(pdfBytes);
                         if (contents == null || contents.length == 0) continue;
-                        CMSSignedData cmsData = new CMSSignedData(contents);
+                        CMSSignedData cmsData = CmsSupport.parseSignedData(contents);
                         Store<X509CertificateHolder> certStore = cmsData.getCertificates();
                         JcaX509CertificateConverter converter = new JcaX509CertificateConverter();
                         for (X509CertificateHolder holder : (java.util.Collection<X509CertificateHolder>) certStore.getMatches(null)) {

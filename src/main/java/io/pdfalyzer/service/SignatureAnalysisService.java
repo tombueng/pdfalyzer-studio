@@ -35,6 +35,7 @@ import io.pdfalyzer.model.CertificateChainEntry;
 import io.pdfalyzer.model.PdfRevision;
 import io.pdfalyzer.model.SignatureAnalysisResult;
 import io.pdfalyzer.model.SignatureInfo;
+import io.pdfalyzer.util.CmsSupport;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -256,7 +257,7 @@ public class SignatureAnalysisService {
             byte[] contents = sig.getContents(pdfBytes);
             if (contents == null || contents.length == 0) return;
 
-            CMSSignedData cmsData = new CMSSignedData(contents);
+            CMSSignedData cmsData = CmsSupport.parseSignedData(contents);
             Collection<SignerInformation> signers = cmsData.getSignerInfos().getSigners();
             if (signers.isEmpty()) return;
 

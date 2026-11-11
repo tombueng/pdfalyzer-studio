@@ -8,7 +8,7 @@
 [![Coverage](https://codecov.io/gh/tombueng/pdfalyzer-studio/branch/main/graph/badge.svg)](https://codecov.io/gh/tombueng/pdfalyzer-studio)
 [![Code Quality](https://github.com/tombueng/pdfalyzer-studio/actions/workflows/code-quality.yml/badge.svg)](https://github.com/tombueng/pdfalyzer-studio/actions/workflows/code-quality.yml)
 [![Java 25](https://img.shields.io/badge/Java-25-blue?logo=openjdk&logoColor=white)](https://openjdk.org/projects/jdk/25/)
-[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-3.5-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
+[![Spring Boot](https://img.shields.io/badge/Spring%20Boot-4.1-6DB33F?logo=springboot&logoColor=white)](https://spring.io/projects/spring-boot)
 [![PDFBox](https://img.shields.io/badge/PDFBox-3.0-red?logo=apache&logoColor=white)](https://pdfbox.apache.org/)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue?logo=apache&logoColor=white)](LICENSE)
 
@@ -88,10 +88,10 @@ This regenerates third-party notices and license texts from the current dependen
 
 | Area | Technology |
 |------|------------|
-| Backend | Spring Boot 3.5.11, Spring MVC |
+| Backend | Spring Boot 4.1.2, Spring MVC |
 | Java | Java 25 |
-| PDF parsing/editing | Apache PDFBox 3.0.0, OpenPDF 1.3.30, BouncyCastle 1.80 |
-| PDF/A validation | veraPDF libraries 1.26.1 |
+| PDF parsing/editing | Apache PDFBox 3.0.8, OpenPDF 3.0.5, BouncyCastle 1.86 |
+| PDF/A validation | veraPDF libraries 1.30.4 |
 | UI shell | Thymeleaf |
 | Frontend | Vanilla JavaScript modules + jQuery |
 | Rendering | pdf.js 3.11.174 (CDN) |

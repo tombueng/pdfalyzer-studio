@@ -15,12 +15,13 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <java.version>25</java.version>
         <maven.compiler.release>${java.version}</maven.compiler.release>
-        <spring.boot.version>3.5.11</spring.boot.version>
+        <spring.boot.version>4.1.2</spring.boot.version>
         <openpdf.version>3.0.5</openpdf.version>
         <pdfbox.version>3.0.8</pdfbox.version>
-        <verapdf.version>1.26.1</verapdf.version>
+        <verapdf.version>1.30.4</verapdf.version>
         <bouncycastle.version>1.86</bouncycastle.version>
         <dss.version>6.5.1</dss.version>
+        <lombok.version>1.18.48</lombok.version>
         <licenses.dir>${project.basedir}/licenses</licenses.dir>
     </properties>
 
@@ -60,6 +61,17 @@
             <artifactId>spring-boot-starter-thymeleaf</artifactId>
         </dependency>
 
+        <!--
+            Jackson 2 (jackson-databind) explicitly: Spring Boot 4 auto-configures
+            Jackson 3 (tools.jackson) by default, but several services parse JSON
+            directly through the com.fasterxml.jackson tree/ObjectMapper API. Keep
+            Jackson 2 on the classpath so that code compiles and runs unchanged.
+        -->
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+        </dependency>
+
         <!-- PDF libraries -->
         <dependency>
             <groupId>com.github.librepdf</groupId>
@@ -95,10 +107,13 @@
             <version>${verapdf.version}</version>
         </dependency>
         <!--
-            Pinned to 2.3.x: veraPDF 1.26.x ships its releaseDetails XML
-            against the older JAXB binding model. Bumping to 4.x breaks
-            the streaming unmarshalling and pushes our veraPDF reports
-            into a degraded text fallback (see ApiFlowIntegrationTest).
+            Pinned to 2.3.x: the standard veraPDF 1.30.x artifacts (core,
+            parser, validation-model) still bind their releaseDetails XML
+            against the javax.xml.bind (JAXB 2.3) model. Bumping jaxb-runtime
+            to 4.x breaks the streaming unmarshalling and pushes our veraPDF
+            reports into a degraded text fallback (see ApiFlowIntegrationTest).
+            A full move to 4.x would require the veraPDF *-jakarta artifacts,
+            which are incomplete (no parser-jakarta as of 1.30.4).
         -->
         <dependency>
             <groupId>org.glassfish.jaxb</groupId>
@@ -223,7 +238,7 @@
                     <plugin>
                         <groupId>org.codehaus.mojo</groupId>
                         <artifactId>license-maven-plugin</artifactId>
-                        <version>2.8.0</version>
+                        <version>2.9.0</version>
                         <executions>
                             <execution>
                                 <id>download-third-party-license-texts</id>
@@ -248,7 +263,7 @@
             <plugin>
                 <groupId>org.codehaus.mojo</groupId>
                 <artifactId>license-maven-plugin</artifactId>
-                <version>2.8.0</version>
+                <version>2.9.0</version>
                 <dependencies>
                     <dependency>
                         <groupId>org.apache.logging.log4j</groupId>
@@ -373,7 +388,7 @@
                         <path>
                             <groupId>org.projectlombok</groupId>
                             <artifactId>lombok</artifactId>
-                            <version>1.18.48</version>
+                            <version>${lombok.version}</version>
                         </path>
                     </annotationProcessorPaths>
                 </configuration>

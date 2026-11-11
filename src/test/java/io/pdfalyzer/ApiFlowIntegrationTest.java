@@ -1,8 +1,6 @@
 package io.pdfalyzer;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.http.HttpEntity;
@@ -15,7 +13,6 @@ import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
 import org.springframework.util.StreamUtils;
-import org.springframework.beans.factory.annotation.Autowired;
 
 import java.io.IOException;
 import java.util.List;
@@ -24,11 +21,7 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class ApiFlowIntegrationTest {
-
-    @Autowired
-    private TestRestTemplate restTemplate;
+class ApiFlowIntegrationTest extends AbstractWebIntegrationTest {
 
     @Test
     void licenseOverviewPageReturnsOk() {

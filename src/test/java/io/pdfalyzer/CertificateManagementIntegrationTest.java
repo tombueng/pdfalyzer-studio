@@ -4,9 +4,6 @@ import java.util.List;
 import java.util.Map;
 
 import org.junit.jupiter.api.Test;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.web.client.TestRestTemplate;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.core.io.ByteArrayResource;
 import org.springframework.core.io.ClassPathResource;
@@ -22,11 +19,7 @@ import org.springframework.util.StreamUtils;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-class CertificateManagementIntegrationTest {
-
-    @Autowired
-    private TestRestTemplate restTemplate;
+class CertificateManagementIntegrationTest extends AbstractWebIntegrationTest {
 
     @Test
     void generateSelfSignedAndListKeys() throws Exception {

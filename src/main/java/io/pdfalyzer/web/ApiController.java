@@ -2,6 +2,7 @@ package io.pdfalyzer.web;
 
 import io.pdfalyzer.model.*;
 import io.pdfalyzer.service.*;
+import io.pdfalyzer.util.CmsSupport;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.pdfbox.Loader;
 import org.apache.pdfbox.cos.COSArray;
@@ -400,7 +401,7 @@ public class ApiController {
                 return ResponseEntity.notFound().build();
             }
 
-            CMSSignedData cmsData = new CMSSignedData(contents);
+            CMSSignedData cmsData = CmsSupport.parseSignedData(contents);
             SignerInformation signer = cmsData.getSignerInfos().getSigners().iterator().next();
 
             List<java.security.cert.X509Certificate> rawChain;

@@ -90,6 +90,15 @@ public class FormFieldShowcasePdfGenerator {
     // ════════════════════════════════════════════════════════════════════════════
 
     public static void main(String[] args) throws Exception {
+        // Reset one-shot static state so a second invocation in the same JVM
+        // (e.g. multiple test methods) never touches the content stream left
+        // over from a previously-saved-and-closed document. PDFBox 3.0.x makes
+        // COSStream.close() after PDDocument.close() throw an NPE instead of a
+        // silent no-op, so a stale `cs` reference must be dropped up front.
+        cs          = null;
+        currentPage = null;
+        fieldIdx    = 0;
+
         Path outPath  = resolveOutputPath(args);
         fontPath      = Paths.get("src/test/resources/fonts/FreeSans.ttf");
         Path iconPath = Paths.get("src/main/resources/static/icon.png");

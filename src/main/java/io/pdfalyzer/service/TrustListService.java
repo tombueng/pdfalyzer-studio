@@ -42,6 +42,7 @@ import org.w3c.dom.Element;
 import org.w3c.dom.NodeList;
 
 import io.pdfalyzer.model.TrustListStatus;
+import io.pdfalyzer.util.CmsSupport;
 import jakarta.annotation.PreDestroy;
 import lombok.Builder;
 import lombok.Data;
@@ -677,7 +678,7 @@ public class TrustListService {
             // AATL is typically a CMS-signed file containing certificate data
             // Try to parse as CMS first
             try {
-                CMSSignedData cmsData = new CMSSignedData(aatlBytes);
+                CMSSignedData cmsData = CmsSupport.parseSignedData(aatlBytes);
                 Store<X509CertificateHolder> certStore = cmsData.getCertificates();
                 Collection<X509CertificateHolder> allCerts = certStore.getMatches(null);
                 JcaX509CertificateConverter converter = new JcaX509CertificateConverter();

@@ -40,7 +40,7 @@ import lombok.extern.slf4j.Slf4j;
 @RequiredArgsConstructor
 public class CscApiClient {
 
-    private final ObjectMapper objectMapper;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Value("${pdfalyzer.csc.connect-timeout-ms:10000}")
     private int connectTimeoutMs;
